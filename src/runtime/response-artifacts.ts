@@ -5,6 +5,11 @@ import { promisify } from "util";
 import { gzip, gunzip } from "zlib";
 
 import { estimateTokens } from "../util/tokenize.js";
+import { NotFoundError } from "../domain/errors.js";
+import {
+  captureActiveRepoEpoch,
+  isRepoEpochCurrent,
+} from "../services/repo-lifecycle.js";
 
 import {
   RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES,
@@ -44,11 +49,26 @@ const DEFAULT_RESPONSE_SWEEP_DELETE_LIMIT = 64;
 const RESPONSE_DIR_NAME = "responses";
 const RESPONSE_HANDLE_RE = /^response-[A-Za-z0-9_-]+-\d{13}-[a-f0-9]{16}$/;
 const responseArtifactWriteLocks = new Map<string, Promise<void>>();
+let responseArtifactRm: typeof rm = rm;
+let beforeResponseArtifactPublish: (() => Promise<void>) | undefined;
+
+export function _setResponseArtifactRmForTesting(
+  implementation: typeof rm = rm,
+): void {
+  responseArtifactRm = implementation;
+}
+
+export function _setResponseArtifactBeforePublishForTesting(
+  hook?: () => Promise<void>,
+): void {
+  beforeResponseArtifactPublish = hook;
+}
 
 export interface ResponseArtifactMetadata {
   id: string;
   handle: string;
   repoId: string;
+  repoEpoch: number;
   toolName: string;
   createdAt: string;
   expiresAt: string;
@@ -64,7 +84,7 @@ export interface ResponseArtifactMetadata {
 
 export type ResponseArtifactPublicMetadata = Omit<
   ResponseArtifactMetadata,
-  "estimatedOriginalTokens"
+  "estimatedOriginalTokens" | "repoEpoch"
 >;
 
 export interface ResponseArtifactSavings {
@@ -308,7 +328,11 @@ function createSavings(
 }
 
 function createReference(metadata: ResponseArtifactMetadata): ResponseArtifactReference {
-  const { estimatedOriginalTokens: _estimatedOriginalTokens, ...publicMetadata } = metadata;
+  const {
+    estimatedOriginalTokens: _estimatedOriginalTokens,
+    repoEpoch: _repoEpoch,
+    ...publicMetadata
+  } = metadata;
   return {
     responseMode: "handle",
     kind: "responseArtifact",
@@ -340,6 +364,11 @@ export async function maybeStoreLargeResponse<T>(
     };
   }
 
+  const repoEpoch = captureActiveRepoEpoch(opts.repoId);
+  if (repoEpoch === undefined) {
+    throw new NotFoundError(`Repository is not active: ${opts.repoId}`);
+  }
+
   const now = opts.now?.() ?? new Date();
   const handle = generateResponseArtifactHandle(
     opts.repoId,
@@ -365,6 +394,7 @@ export async function maybeStoreLargeResponse<T>(
     id: handle,
     handle,
     repoId: opts.repoId,
+    repoEpoch,
     toolName: opts.toolName,
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + ttlHours * 3600_000).toISOString(),
@@ -380,7 +410,11 @@ export async function maybeStoreLargeResponse<T>(
       : {}),
   };
 
+  await beforeResponseArtifactPublish?.();
   await withResponseArtifactWriteLock(baseDir, async () => {
+    if (!isRepoEpochCurrent(opts.repoId, repoEpoch)) {
+      throw new NotFoundError(`Repository is not active: ${opts.repoId}`);
+    }
     await mkdir(baseDir, { recursive: true });
     await sweepExpiredResponseArtifacts(baseDir, now);
     await enforceResponseArtifactQuota(baseDir, opts.repoId, {
@@ -395,6 +429,10 @@ export async function maybeStoreLargeResponse<T>(
       writeFile(contentPath(baseDir, handle), compressed),
       writeFile(metadataPath(baseDir, handle), JSON.stringify(metadata, null, 2), "utf-8"),
     ]);
+    if (!isRepoEpochCurrent(opts.repoId, repoEpoch)) {
+      await responseArtifactRm(artifactDir, { recursive: true, force: true });
+      throw new NotFoundError(`Repository is not active: ${opts.repoId}`);
+    }
   });
 
   return {
@@ -449,7 +487,7 @@ export async function deleteResponseArtifactsForRepo(
     const owned = entries.filter((entry) => entry.metadata.repoId === repoId);
     await Promise.all(
       owned.map((entry) =>
-        rm(join(baseDir, entry.handle), { recursive: true, force: true }),
+        responseArtifactRm(join(baseDir, entry.handle), { recursive: true, force: true }),
       ),
     );
     return owned.length;
@@ -467,7 +505,7 @@ async function sweepExpiredResponseArtifacts(
   for (const entry of entries) {
     if (deleted >= maxDeletes) break;
     if (new Date(entry.metadata.expiresAt).getTime() > nowMs) continue;
-    await rm(join(baseDir, entry.handle), { recursive: true, force: true });
+    await responseArtifactRm(join(baseDir, entry.handle), { recursive: true, force: true });
     deleted += 1;
   }
 }
@@ -516,7 +554,7 @@ async function enforceResponseArtifactQuota(
   ) {
     const oldest = entries.shift();
     if (!oldest) break;
-    await rm(join(baseDir, oldest.handle), { recursive: true, force: true });
+    await responseArtifactRm(join(baseDir, oldest.handle), { recursive: true, force: true });
     removedHandles.add(oldest.handle);
     storedBytes -= Math.max(0, oldest.metadata.storedBytes);
     totalStoredBytes -= Math.max(0, oldest.metadata.storedBytes);
@@ -538,7 +576,7 @@ async function enforceResponseArtifactQuota(
   ) {
     const oldest = allEntries.shift();
     if (!oldest) break;
-    await rm(join(baseDir, oldest.handle), { recursive: true, force: true });
+    await responseArtifactRm(join(baseDir, oldest.handle), { recursive: true, force: true });
     totalStoredBytes -= Math.max(0, oldest.metadata.storedBytes);
   }
 
@@ -553,10 +591,20 @@ async function enforceResponseArtifactQuota(
 export async function readResponseArtifact(
   opts: ResponseArtifactReadOptions,
 ): Promise<ResponseArtifactReadResult> {
+  const repoEpoch = captureActiveRepoEpoch(opts.repoId);
+  if (repoEpoch === undefined) {
+    throw new NotFoundError(`Repository is not active: ${opts.repoId}`);
+  }
   const baseDir = getResponseArtifactBaseDir(opts.artifactBaseDir);
   const metadata = await readMetadata(opts.handle, baseDir);
   if (metadata.repoId !== opts.repoId) {
     throw new Error("Response artifact belongs to a different repository");
+  }
+  if (
+    metadata.repoEpoch !== repoEpoch ||
+    !isRepoEpochCurrent(opts.repoId, repoEpoch)
+  ) {
+    throw new NotFoundError(`Response artifact is no longer available`);
   }
   if (
     metadata.requiresSameSession === true &&
@@ -567,7 +615,7 @@ export async function readResponseArtifact(
 
   const now = opts.now?.() ?? new Date();
   if (new Date(metadata.expiresAt).getTime() <= now.getTime()) {
-    await rm(join(baseDir, opts.handle), { recursive: true, force: true });
+    await responseArtifactRm(join(baseDir, opts.handle), { recursive: true, force: true });
     throw new Error("Response artifact expired");
   }
 

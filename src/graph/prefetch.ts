@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { cpus, loadavg, platform } from "os";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import {
+  captureActiveRepoEpoch,
+  isRepoEpochCurrent,
+  withRepoMutation,
+} from "../services/repo-lifecycle.js";
 import { logger } from "../util/logger.js";
 import { estimateTokens } from "../util/tokenize.js";
 import {
@@ -44,6 +49,7 @@ interface ResolvedPrefetchContext {
 
 interface PrefetchTask {
   repoId: string;
+  repoEpoch?: number;
   key: string;
   priority: number;
   type: PrefetchTaskType;
@@ -333,32 +339,49 @@ async function runQueue(): Promise<void> {
       const task = queue.shift();
       if (!task) break;
 
-      const stats = getOrCreateStats(task.repoId);
-      stats.running = true;
-      stats.queueDepth = queue.length;
-
-      if (shouldYieldForLoad()) {
-        stats.cancelled += 1;
-        recordWastedPrefetch(task.type);
-        stats.running = false;
-        continue;
-      }
-
       try {
-        await task.run();
-        stats.completed += 1;
-        stats.lastRunAt = new Date().toISOString();
+        await withRepoMutation(
+          task.repoId,
+          async () => {
+            const stats = getOrCreateStats(task.repoId);
+            stats.running = true;
+            stats.queueDepth = queue.length;
+
+            if (shouldYieldForLoad()) {
+              stats.cancelled += 1;
+              recordWastedPrefetch(task.type);
+              stats.running = false;
+              return;
+            }
+
+            try {
+              await task.run();
+              stats.completed += 1;
+              stats.lastRunAt = new Date().toISOString();
+            } finally {
+              stats.running = false;
+            }
+          },
+          { expectedEpoch: task.repoEpoch },
+        );
       } catch (error) {
-        logger.debug("Prefetch task execution failed", {
-          repoId: task.repoId,
-          taskType: task.type,
-          key: task.key,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        stats.cancelled += 1;
-        recordWastedPrefetch(task.type);
-      } finally {
-        stats.running = false;
+        // Tombstoned tasks are simply stale; do not recreate repo-scoped stats
+        // after unregister cleanup has already removed them.
+        if (
+          task.repoEpoch !== undefined &&
+          isRepoEpochCurrent(task.repoId, task.repoEpoch)
+        ) {
+          logger.debug("Prefetch task execution failed", {
+            repoId: task.repoId,
+            taskType: task.type,
+            key: task.key,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          const stats = getOrCreateStats(task.repoId);
+          stats.cancelled += 1;
+          stats.running = false;
+          recordWastedPrefetch(task.type);
+        }
       }
     }
   } finally {
@@ -494,6 +517,10 @@ export function enqueuePrefetchTask(task: PrefetchTask): void {
   if (!enabled) {
     return;
   }
+  const repoEpoch = captureActiveRepoEpoch(task.repoId);
+  if (repoEpoch === undefined) {
+    return;
+  }
   if (!applyPolicyToTask(task)) {
     return;
   }
@@ -513,7 +540,7 @@ export function enqueuePrefetchTask(task: PrefetchTask): void {
       });
     }
   }
-  queue.push(task);
+  queue.push({ ...task, repoEpoch });
   const stats = getOrCreateStats(task.repoId);
   stats.queueDepth = queue.length;
   void runQueue();
@@ -924,4 +951,11 @@ export function _setPrefetchEntryCreatedAtForTesting(
       persist: false,
     });
   }
+}
+
+export function _hasPrefetchEntryForTesting(
+  repoId: string,
+  key: string,
+): boolean {
+  return findPrefetchEntry(prefetchedKeysByRepo.get(repoId), key) !== null;
 }

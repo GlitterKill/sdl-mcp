@@ -1,4 +1,4 @@
-import { describe, it, afterEach } from "node:test";
+import { describe, it, afterEach, beforeEach } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,7 +12,10 @@ import {
   readResponseArtifact,
 } from "../../dist/runtime/response-artifacts.js";
 import { maybeCompressToolResponse } from "../../dist/mcp/response-compression.js";
-import { handleResponseGet } from "../../dist/mcp/tools/response.js";
+import {
+  _setResponseRepoExistsForTesting,
+  handleResponseGet,
+} from "../../dist/mcp/tools/response.js";
 import { ResponseGetRequestSchema } from "../../dist/mcp/tools.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
@@ -42,7 +45,12 @@ function makeTempDir(): string {
   return dir;
 }
 
+beforeEach(() => {
+  _setResponseRepoExistsForTesting(async () => true);
+});
+
 afterEach(() => {
+  _setResponseRepoExistsForTesting();
   if (originalSdlConfig !== undefined) {
     process.env.SDL_CONFIG = originalSdlConfig;
   } else {

@@ -2,12 +2,18 @@ import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert";
 import {
   configurePrefetchPolicy,
+  _setPrefetchAggregateLoaderForTesting,
   getPrefetchPolicyAggregate,
   getPrefetchPolicyDecision,
   getTopPrefetchStrategySummaries,
+  hydratePrefetchPolicyFromDb,
   recordPrefetchOutcome,
   resetPrefetchOutcomeStateForTests,
 } from "../../dist/graph/prefetch-outcomes.js";
+import {
+  beginRepoRemoval,
+  resetRepoLifecycleForTests,
+} from "../../dist/services/repo-lifecycle.js";
 import { upsertPrefetchOutcomeAndAggregate } from "../../dist/db/ladybug-prefetch-outcomes.js";
 import type { Connection } from "kuzu";
 
@@ -30,9 +36,19 @@ function makeQueryResult(): {
   };
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe("prefetch outcome policy", () => {
   beforeEach(() => {
+    resetRepoLifecycleForTests();
     resetPrefetchOutcomeStateForTests();
+    _setPrefetchAggregateLoaderForTesting();
     configurePrefetchPolicy({
       enabled: true,
       mode: "safe",
@@ -384,5 +400,49 @@ describe("prefetch outcome policy", () => {
     assert.equal(summaries[0].clientKey, "client-a");
     assert.equal(summaries[0].samples, 3);
     assert.ok(summaries[0].score > 0);
+  });
+
+  it("does not repopulate a removed repo after deferred hydration", async () => {
+    const entered = deferred();
+    const release = deferred();
+    const now = new Date().toISOString();
+    _setPrefetchAggregateLoaderForTesting(async () => {
+      entered.resolve();
+      await release.promise;
+      return [
+        {
+          aggregateKey: "stale-aggregate",
+          repoId: BASE.repoId,
+          taskType: BASE.taskType,
+          clientKey: BASE.clientKey,
+          strategy: BASE.strategy,
+          resourceKind: BASE.resourceKind,
+          offered: 1,
+          used: 0,
+          accepted: 0,
+          wasted: 0,
+          suppressed: 0,
+          latencySavedMs: 0,
+          tokensSavedEstimate: 0,
+          score: 0,
+          scoreEwma: 0,
+          hitRateEwma: 0,
+          acceptedRateEwma: 0,
+          wasteRateEwma: 0,
+          ewmaSamples: 0,
+          lastOutcomeAt: now,
+          updatedAt: now,
+        },
+      ];
+    });
+
+    const hydration = hydratePrefetchPolicyFromDb(BASE.repoId);
+    await entered.promise;
+    const removal = await beginRepoRemoval(BASE.repoId);
+    removal.commitTombstone();
+    release.resolve();
+
+    assert.strictEqual(await hydration, 0);
+    assert.strictEqual(getPrefetchPolicyAggregate(BASE), null);
   });
 });

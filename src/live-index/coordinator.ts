@@ -20,6 +20,12 @@ import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
 
 import { logger } from "../util/logger.js";
+import { withRepoMutation } from "../services/repo-lifecycle.js";
+
+interface ScheduledParse {
+  input: BufferUpdateInput;
+  repoEpoch: number;
+}
 
 export interface InMemoryLiveIndexCoordinatorOptions {
   enabled?: boolean;
@@ -45,67 +51,76 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   constructor(options: InMemoryLiveIndexCoordinatorOptions = {}) {
     this.enabled = options.enabled ?? true;
     this.maxDraftFiles = options.maxDraftFiles ?? 200;
-    this.parseScheduler = createDebouncedJobScheduler<BufferUpdateInput>({
+    this.parseScheduler = createDebouncedJobScheduler<ScheduledParse>({
       delayMs: options.debounceMs ?? 75,
-      run: async (_key, payload) => {
-        const parsedAt = new Date().toISOString();
-        try {
-          const repoRoot = await this.loadRepoRoot(payload.repoId);
+      run: async (_key, scheduled) => {
+        const { input: payload, repoEpoch } = scheduled;
+        await withRepoMutation(
+          payload.repoId,
+          async () => {
+            const parsedAt = new Date().toISOString();
+            try {
+              const repoRoot = await this.loadRepoRoot(payload.repoId);
 
-          let derivedLanguage = "";
-          if (payload.filePath.endsWith(".d.ts")) {
-            derivedLanguage = "typescript";
-          } else {
-            const ext = payload.filePath.split(".").pop();
-            if (ext) {
-              derivedLanguage = ext;
-            } else {
-              // Handle extensionless files
-              if (payload.content.startsWith("#!")) {
-                if (payload.content.includes("node"))
-                  derivedLanguage = "javascript";
-                else if (payload.content.includes("python"))
-                  derivedLanguage = "python";
-                else if (payload.content.includes("sh"))
-                  derivedLanguage = "bash";
+              let derivedLanguage = "";
+              if (payload.filePath.endsWith(".d.ts")) {
+                derivedLanguage = "typescript";
+              } else {
+                const ext = payload.filePath.split(".").pop();
+                if (ext) {
+                  derivedLanguage = ext;
+                } else {
+                  // Handle extensionless files
+                  if (payload.content.startsWith("#!")) {
+                    if (payload.content.includes("node"))
+                      derivedLanguage = "javascript";
+                    else if (payload.content.includes("python"))
+                      derivedLanguage = "python";
+                    else if (payload.content.includes("sh"))
+                      derivedLanguage = "bash";
+                  }
+                }
               }
-            }
-          }
 
-          const parseResult = await parseDraftFile({
-            repoId: payload.repoId,
-            repoRoot,
-            filePath: payload.filePath,
-            content: payload.content,
-            languages: derivedLanguage ? [derivedLanguage] : [],
-            language: payload.language,
-            version: payload.version,
-          });
-          this.overlayStore.setParseResult(
-            payload.repoId,
-            payload.filePath,
-            payload.version,
-            parseResult,
-            parsedAt,
-          );
-          // Invalidate embedding cache for freshly-parsed symbols so stale
-          // embeddings from the previous parse version do not persist.
-          getOverlayEmbeddingCache().invalidateMany(
-            parseResult.symbols.map((s) => s.symbolId),
-          );
-        } catch (error) {
-          this.overlayStore.setParseFailure(
-            payload.repoId,
-            payload.filePath,
-            payload.version,
-            error instanceof Error ? error.message : String(error),
-            parsedAt,
-          );
-        }
+              const parseResult = await parseDraftFile({
+                repoId: payload.repoId,
+                repoRoot,
+                filePath: payload.filePath,
+                content: payload.content,
+                languages: derivedLanguage ? [derivedLanguage] : [],
+                language: payload.language,
+                version: payload.version,
+              });
+              this.overlayStore.setParseResult(
+                payload.repoId,
+                payload.filePath,
+                payload.version,
+                parseResult,
+                parsedAt,
+              );
+              // Invalidate embedding cache for freshly-parsed symbols so stale
+              // embeddings from the previous parse version do not persist.
+              getOverlayEmbeddingCache().invalidateMany(
+                parseResult.symbols.map((s) => s.symbolId),
+              );
+            } catch (error) {
+              this.overlayStore.setParseFailure(
+                payload.repoId,
+                payload.filePath,
+                payload.version,
+                error instanceof Error ? error.message : String(error),
+                parsedAt,
+              );
+            }
+          },
+          { expectedEpoch: repoEpoch },
+        );
       },
     });
 
-    const sweepMs = options.sweepIntervalMs ?? InMemoryLiveIndexCoordinator.DEFAULT_SWEEP_INTERVAL_MS;
+    const sweepMs =
+      options.sweepIntervalMs ??
+      InMemoryLiveIndexCoordinator.DEFAULT_SWEEP_INTERVAL_MS;
     if (this.enabled && sweepMs > 0) {
       this.sweepTimer = setInterval(() => {
         void this.sweepOverlay();
@@ -116,6 +131,15 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
 
   async pushBufferUpdate(
     input: BufferUpdateInput,
+  ): Promise<BufferUpdateResult> {
+    return withRepoMutation(input.repoId, ({ epoch }) =>
+      this.pushBufferUpdateActive(input, epoch),
+    );
+  }
+
+  private async pushBufferUpdateActive(
+    input: BufferUpdateInput,
+    repoEpoch: number,
   ): Promise<BufferUpdateResult> {
     if (!this.enabled) {
       return {
@@ -269,10 +293,15 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
         );
       }
     }
-    void this.parseScheduler.schedule(
-      `${input.repoId}:${input.filePath}`,
-      input,
-    );
+    void this.parseScheduler
+      .schedule(`${input.repoId}:${input.filePath}`, { input, repoEpoch })
+      .catch((error) => {
+        logger.debug("Skipped stale live-index parse job", {
+          repoId: input.repoId,
+          filePath: input.filePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
 
     return {
       accepted: true,
@@ -285,6 +314,14 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   }
 
   async checkpointRepo(input: CheckpointRequest): Promise<CheckpointResult> {
+    return withRepoMutation(input.repoId, () =>
+      this.checkpointRepoActive(input),
+    );
+  }
+
+  private async checkpointRepoActive(
+    input: CheckpointRequest,
+  ): Promise<CheckpointResult> {
     if (!this.enabled) {
       return {
         repoId: input.repoId,
@@ -332,8 +369,10 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
 
   async clearRepo(repoId: string): Promise<void> {
     const drafts = this.overlayStore.listDrafts(repoId);
-    const staleSymbolIds = drafts
-      .flatMap((draft) => draft.parseResult?.symbols.map((symbol) => symbol.symbolId) ?? []);
+    const staleSymbolIds = drafts.flatMap(
+      (draft) =>
+        draft.parseResult?.symbols.map((symbol) => symbol.symbolId) ?? [],
+    );
     getOverlayEmbeddingCache().invalidateMany(staleSymbolIds);
     for (const draft of drafts) {
       this.parseScheduler.cancel(`${repoId}:${draft.filePath}`);
@@ -367,8 +406,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
           .catch((error) => {
             logger.warn("Sweep checkpoint failed", {
               repoId,
-              error:
-                error instanceof Error ? error.message : String(error),
+              error: error instanceof Error ? error.message : String(error),
             });
           });
       }
@@ -396,8 +434,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
           logger.warn("Sweep disk recovery failed", {
             repoId,
             filePath: draft.filePath,
-            error:
-              error instanceof Error ? error.message : String(error),
+            error: error instanceof Error ? error.message : String(error),
           });
         }
       }

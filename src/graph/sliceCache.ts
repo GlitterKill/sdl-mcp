@@ -1,6 +1,10 @@
 import type { GraphSlice, CardDetailLevel } from "../domain/types.js";
 import type { RepoId, VersionId, SymbolId } from "../domain/types.js";
 import { getObservabilityTap } from "../observability/event-tap.js";
+import {
+  captureActiveRepoEpoch,
+  isRepoEpochCurrent,
+} from "../services/repo-lifecycle.js";
 
 interface SliceBuildRequest {
   repoId: RepoId;
@@ -23,6 +27,7 @@ interface SliceBuildRequest {
 
 interface SliceCacheEntry {
   slice: GraphSlice;
+  repoEpoch: number;
   expiresAt: number;
   createdAt: number;
 }
@@ -120,6 +125,15 @@ export function getCachedSlice(key: string): GraphSlice | null {
     emitCacheLookup(repoId, false, t0);
     return null;
   }
+  if (!isRepoEpochCurrent(entry.slice.repoId, entry.repoEpoch)) {
+    sliceCache.delete(key);
+    removeFromAccessOrder(key);
+    cacheStats.currentSize--;
+    cacheStats.misses++;
+    updateHitRate();
+    emitCacheLookup(entry.slice.repoId, false, t0);
+    return null;
+  }
   if (Date.now() >= entry.expiresAt) {
     sliceCache.delete(key);
     removeFromAccessOrder(key);
@@ -140,7 +154,17 @@ function removeFromAccessOrder(key: string): void {
   accessOrderMap.delete(key);
 }
 
-export function setCachedSlice(key: string, slice: GraphSlice): void {
+export function setCachedSlice(
+  key: string,
+  slice: GraphSlice,
+  expectedEpoch = captureActiveRepoEpoch(slice.repoId),
+): boolean {
+  if (
+    expectedEpoch === undefined ||
+    !isRepoEpochCurrent(slice.repoId, expectedEpoch)
+  ) {
+    return false;
+  }
   if (sliceCache.has(key)) {
     sliceCache.delete(key);
     removeFromAccessOrder(key);
@@ -158,11 +182,13 @@ export function setCachedSlice(key: string, slice: GraphSlice): void {
   const now = Date.now();
   sliceCache.set(key, {
     slice,
+    repoEpoch: expectedEpoch,
     expiresAt: now + sliceCacheTtlMs,
     createdAt: now,
   });
   accessOrderMap.set(key, true);
   cacheStats.currentSize++;
+  return true;
 }
 
 export function invalidateVersion(versionId: VersionId): void {

@@ -76,6 +76,13 @@ import { deleteResponseArtifactsForRepo } from "../../runtime/response-artifacts
 import { ensureBaselineEnforcementAssets } from "../../cli/commands/enforcement-bootstrap.js";
 import { refreshSemanticEnrichment } from "../../semantic/enrichment.js";
 import {
+  beginRepoRegistration,
+  beginRepoRemoval,
+  captureActiveRepoEpoch,
+  isRepoEpochCurrent,
+  withRepoMutation,
+} from "../../services/repo-lifecycle.js";
+import {
   getDerivedStateSummary,
   graphIntegrityIsVerifiedForVersion,
   graphIntegrityNextBestAction,
@@ -88,11 +95,15 @@ const healthSnapshotCache = new Map<
   {
     snapshot: Awaited<ReturnType<typeof getRepoHealthSnapshot>>;
     cachedAt: number;
+    repoEpoch: number;
   }
 >();
 const lastKnownHealth = new Map<
   string,
-  Awaited<ReturnType<typeof getRepoHealthSnapshot>>
+  {
+    snapshot: Awaited<ReturnType<typeof getRepoHealthSnapshot>>;
+    repoEpoch: number;
+  }
 >();
 const HEALTH_CACHE_TTL_MS = 30_000;
 let repoStatusHealthLoader = getRepoHealthSnapshot;
@@ -118,19 +129,35 @@ async function getCachedHealthSnapshot(repoId: string): Promise<{
   snapshot: Awaited<ReturnType<typeof getRepoHealthSnapshot>>;
   isStale: boolean;
 }> {
+  const repoEpoch = captureActiveRepoEpoch(repoId);
+  if (repoEpoch === undefined) {
+    throw new NotFoundError(`Repository not found: ${repoId}`);
+  }
   const cached = healthSnapshotCache.get(repoId);
-  if (cached && Date.now() - cached.cachedAt < HEALTH_CACHE_TTL_MS) {
+  if (
+    cached &&
+    cached.repoEpoch === repoEpoch &&
+    Date.now() - cached.cachedAt < HEALTH_CACHE_TTL_MS
+  ) {
     return { snapshot: cached.snapshot, isStale: false };
   }
   try {
     const snapshot = await repoStatusHealthLoader(repoId);
-    healthSnapshotCache.set(repoId, { snapshot, cachedAt: Date.now() });
-    lastKnownHealth.set(repoId, snapshot);
+    if (isRepoEpochCurrent(repoId, repoEpoch)) {
+      healthSnapshotCache.set(repoId, {
+        snapshot,
+        cachedAt: Date.now(),
+        repoEpoch,
+      });
+      lastKnownHealth.set(repoId, { snapshot, repoEpoch });
+    }
     return { snapshot, isStale: false };
   } catch (err) {
     // On failure, return last known health if available (marked stale)
     const stale = lastKnownHealth.get(repoId);
-    if (stale) return { snapshot: stale, isStale: true };
+    if (stale?.repoEpoch === repoEpoch) {
+      return { snapshot: stale.snapshot, isStale: true };
+    }
     throw err;
   }
 }
@@ -289,8 +316,11 @@ export async function handleRepoRegister(
     ? detectWorkspaces(packageJson.fullPath)
     : undefined;
 
-  const conn = await getLadybugConn();
-  const existingRepo = await ladybugDb.getRepo(conn, repoId);
+  const registration = await beginRepoRegistration(repoId);
+  let registrationCommitted = false;
+  try {
+    const conn = await getLadybugConn();
+    const existingRepo = await ladybugDb.getRepo(conn, repoId);
 
   const defaultIgnore = [
     "**/node_modules/**",
@@ -471,15 +501,20 @@ export async function handleRepoRegister(
     });
   }
 
-  return {
-    ok: true,
-    repoId,
-    changed: configChanges.length > 0,
-    configChanges,
-    message: existingRepo
-      ? "Existing repo registration updated."
-      : "Repo registered.",
-  };
+    registration.commitActive();
+    registrationCommitted = true;
+    return {
+      ok: true,
+      repoId,
+      changed: configChanges.length > 0,
+      configChanges,
+      message: existingRepo
+        ? "Existing repo registration updated."
+        : "Repo registered.",
+    };
+  } finally {
+    if (!registrationCommitted) registration.abort();
+  }
 }
 
 /**
@@ -588,32 +623,59 @@ export async function handleRepoUnregister(
   }
 
   const coordinator = liveIndex ?? getDefaultLiveIndexCoordinator();
-  const liveStatus = await coordinator.getLiveStatus(repoId);
-  if (liveStatus.dirtyBuffers > 0 && !discardDrafts) {
-    throw new ValidationError(
-      `Repository ${repoId} has ${liveStatus.dirtyBuffers} dirty live buffer(s). Re-run with discardDrafts:true to discard them.`,
-    );
+  const removal = await beginRepoRemoval(repoId);
+  let tombstoned = false;
+  try {
+    const liveStatus = await coordinator.getLiveStatus(repoId);
+    if (liveStatus.dirtyBuffers > 0 && !discardDrafts) {
+      throw new ValidationError(
+        `Repository ${repoId} has ${liveStatus.dirtyBuffers} dirty live buffer(s). Re-run with discardDrafts:true to discard them.`,
+      );
+    }
+
+    await withWriteConn(async (writeConn) => {
+      if (!(await ladybugDb.getRepo(writeConn, repoId))) {
+        throw new NotFoundError(`Repository not found: ${repoId}`);
+      }
+      await ladybugDb.deleteRepo(writeConn, repoId);
+      removal.commitTombstone();
+      tombstoned = true;
+    });
+  } finally {
+    if (!tombstoned) removal.abort();
   }
 
-  await withWriteConn(async (writeConn) => {
-    if (!(await ladybugDb.getRepo(writeConn, repoId))) {
-      throw new NotFoundError(`Repository not found: ${repoId}`);
+  // The tombstone is authoritative; cleanup is best-effort after DB commit.
+  for (const [label, cleanup] of [
+    ["live index", () => coordinator.clearRepo(repoId)],
+    ["prefetch", () => invalidateRepoPrefetch(repoId)],
+    ["graph snapshot", () => invalidateGraphSnapshot(repoId)],
+    ["overview cache", () => invalidateRepoOverviewCache(repoId)],
+    ["slice cache", () => invalidateRepoSliceCache(repoId)],
+    ["card cache", () => symbolCardCache.invalidateRepo(repoId)],
+    ["health cache", () => clearRepoHealthCache(repoId)],
+  ] as const) {
+    try {
+      await cleanup();
+    } catch (error) {
+      logger.warn("Repository unregister cleanup failed", {
+        repoId,
+        cleanup: label,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-    await ladybugDb.deleteRepo(writeConn, repoId);
-    await coordinator.clearRepo(repoId);
-    invalidateRepoPrefetch(repoId);
-  });
-
-  // Runtime state is invalidated only after the database transaction commits.
-  invalidateGraphSnapshot(repoId);
-  invalidateRepoOverviewCache(repoId);
-  invalidateRepoSliceCache(repoId);
-  symbolCardCache.invalidateRepo(repoId);
-  clearRepoHealthCache(repoId);
-  await deleteResponseArtifactsForRepo(
-    repoId,
-    appConfig.runtime?.artifactBaseDir,
-  );
+  }
+  try {
+    await deleteResponseArtifactsForRepo(
+      repoId,
+      appConfig.runtime?.artifactBaseDir,
+    );
+  } catch (error) {
+    logger.warn("Repository response artifact cleanup failed", {
+      repoId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   return { ok: true, repoId, removed: true };
 }
@@ -991,7 +1053,7 @@ export async function handleIndexRefresh(
     }
   };
 
-  const executeRefresh = async () => {
+  const executeRefresh = async () => withRepoMutation(repoId, async () => {
     const conn = await getLadybugConn();
     const repo = await ladybugDb.getRepo(conn, repoId);
     if (!repo) {
@@ -1040,21 +1102,21 @@ export async function handleIndexRefresh(
     await runPostRefresh(conn);
 
     return toResponse(result);
-  };
+  });
 
   // Async mode: return immediately, run indexing in background
   if (asyncMode) {
     const operationId = `idx-${randomUUID().slice(0, 8)}`;
     logger.info("Async index refresh started", { repoId, mode, operationId });
     // Re-bind executeRefresh without request-scoped signal (it aborts when client disconnects)
-    const bgRefresh = async () => {
+    const bgRefresh = async () => withRepoMutation(repoId, async () => {
       const conn = await getLadybugConn();
       const repo = await ladybugDb.getRepo(conn, repoId);
       if (!repo) throw new DatabaseError(`Repository ${repoId} not found`);
       const result = await indexRepo(repoId, mode, undefined, undefined);
       await runPostRefresh(conn);
       return toResponse(result);
-    };
+    });
     bgRefresh().then(
       (result) =>
         logger.info("Async index refresh completed", {

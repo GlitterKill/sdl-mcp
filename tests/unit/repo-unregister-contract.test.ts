@@ -136,6 +136,27 @@ describe("repo.unregister contract", () => {
     assert.ok(getCachedSlice(childSlice));
   });
 
+  it("uses unambiguous card-cache tuples when delimiters occur in different fields", async () => {
+    symbolCardCache.clear();
+    await symbolCardCache.set("foo", "bar:baz", "v1", {
+      repoId: "foo",
+      name: "first",
+    } as never);
+    await symbolCardCache.set("foo:bar", "baz", "v1", {
+      repoId: "foo:bar",
+      name: "second",
+    } as never);
+
+    assert.equal(
+      symbolCardCache.get("foo", "bar:baz", "v1")?.name,
+      "first",
+    );
+    assert.equal(
+      symbolCardCache.get("foo:bar", "baz", "v1")?.name,
+      "second",
+    );
+  });
+
   it("clears repository-scoped prefetch learning without touching another repo", () => {
     resetPrefetchOutcomeStateForTests();
     recordPrefetchOutcome({

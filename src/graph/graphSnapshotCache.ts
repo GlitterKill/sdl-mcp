@@ -17,6 +17,10 @@ import type { Graph } from "./buildGraph.js";
 import { computeCentralityStats } from "./score.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
+import {
+  captureActiveRepoEpoch,
+  isRepoEpochCurrent,
+} from "../services/repo-lifecycle.js";
 
 // ---------------------------------------------------------------------------
 // Legacy SymbolRow / EdgeRow shapes for the in-memory Graph interface
@@ -28,6 +32,7 @@ type FileRow = Graph extends { files?: Map<number, infer F> } ? F : never;
 
 interface GraphSnapshot {
   graph: Graph;
+  repoEpoch: number;
   createdAt: number;
   symbolCount: number;
   edgeCount: number;
@@ -46,7 +51,10 @@ let maxSnapshotSymbols = 15_000;
 
 const MAX_CACHED_REPOS = 3;
 const snapshotsByRepo = new Map<RepoId, GraphSnapshot>();
-const loadingPromises = new Map<RepoId, Promise<Graph | null>>();
+const loadingPromises = new Map<
+  RepoId,
+  { repoEpoch: number; promise: Promise<Graph | null> }
+>();
 
 /**
  * Configure cache settings.
@@ -73,6 +81,11 @@ export function configureGraphSnapshotCache(options: {
 export function getGraphSnapshot(repoId: RepoId): Graph | null {
   const entry = snapshotsByRepo.get(repoId);
   if (!entry) return null;
+
+  if (!isRepoEpochCurrent(repoId, entry.repoEpoch)) {
+    snapshotsByRepo.delete(repoId);
+    return null;
+  }
 
   if (Date.now() - entry.createdAt > snapshotTtlMs) {
     snapshotsByRepo.delete(repoId);
@@ -109,9 +122,20 @@ export function hasGraphSnapshot(repoId: RepoId): boolean {
 /**
  * Store a graph snapshot. Called after indexing or first slice build.
  */
-export function setGraphSnapshot(repoId: RepoId, graph: Graph): void {
+export function setGraphSnapshot(
+  repoId: RepoId,
+  graph: Graph,
+  expectedEpoch = captureActiveRepoEpoch(repoId),
+): boolean {
+  if (
+    expectedEpoch === undefined ||
+    !isRepoEpochCurrent(repoId, expectedEpoch)
+  ) {
+    return false;
+  }
   snapshotsByRepo.set(repoId, {
     graph,
+    repoEpoch: expectedEpoch,
     createdAt: Date.now(),
     symbolCount: graph.symbols.size,
     edgeCount: graph.edges.length,
@@ -140,6 +164,7 @@ export function setGraphSnapshot(repoId: RepoId, graph: Graph): void {
     edgeCount: graph.edges.length,
     clusterCount: graph.clusters?.size ?? 0,
   });
+  return true;
 }
 
 /**
@@ -205,23 +230,29 @@ export async function loadAndCacheGraphSnapshot(
   conn: Connection,
   repoId: RepoId,
 ): Promise<Graph | null> {
+  const repoEpoch = captureActiveRepoEpoch(repoId);
+  if (repoEpoch === undefined) return null;
   const inflight = loadingPromises.get(repoId);
-  if (inflight) {
-    return inflight;
+  if (inflight?.repoEpoch === repoEpoch) {
+    return inflight.promise;
   }
 
-  const promise = _loadGraphSnapshot(conn, repoId);
-  loadingPromises.set(repoId, promise);
+  const promise = _loadGraphSnapshot(conn, repoId, repoEpoch);
+  const loading = { repoEpoch, promise };
+  loadingPromises.set(repoId, loading);
   try {
     return await promise;
   } finally {
-    loadingPromises.delete(repoId);
+    if (loadingPromises.get(repoId) === loading) {
+      loadingPromises.delete(repoId);
+    }
   }
 }
 
 async function _loadGraphSnapshot(
   conn: Connection,
   repoId: RepoId,
+  repoEpoch: number,
 ): Promise<Graph | null> {
   // Check symbol count first to avoid loading huge repos
   const symbolCount = await ladybugDb.getSymbolCount(conn, repoId);
@@ -372,7 +403,7 @@ async function _loadGraphSnapshot(
     clusters,
   };
 
-  setGraphSnapshot(repoId, graph);
+  if (!setGraphSnapshot(repoId, graph, repoEpoch)) return null;
 
   logger.info("Graph snapshot loaded and cached", {
     repoId,

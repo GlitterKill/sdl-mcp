@@ -43,6 +43,7 @@ import {
 } from "../live-index/overlay-reader.js";
 import { logger } from "../util/logger.js";
 import { safeJsonParse, StringArraySchema } from "../util/safeJson.js";
+import { captureActiveRepoEpoch } from "./repo-lifecycle.js";
 
 /**
  * Compare an inbound `ifNoneMatch` header against the current ETag, treating
@@ -317,6 +318,7 @@ export async function buildCardForSymbol(
   ifNoneMatch: string | undefined,
   options: BuildCardOptions = {},
 ): Promise<CardWithETag | NotModifiedResponse> {
+  const repoEpoch = captureActiveRepoEpoch(repoId);
   const config = loadConfig();
   const cacheEnabled = config.cache?.enabled ?? true;
   const effectiveMinCallConfidence = getEffectiveMinCallConfidence(
@@ -343,7 +345,7 @@ export async function buildCardForSymbol(
   }
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
 
-  if (useCache && latestVersion) {
+  if (useCache && latestVersion && repoEpoch !== undefined) {
     const cachedCard = symbolCardCache.get(
       repoId,
       symbolId,
@@ -678,6 +680,7 @@ export async function buildCardForSymbol(
       symbolId,
       latestVersion.versionId,
       cacheCard,
+      repoEpoch,
     );
   }
 

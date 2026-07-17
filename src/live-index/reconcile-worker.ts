@@ -8,6 +8,10 @@ import type { DependencyFrontier } from "./dependency-frontier.js";
 import { patchSavedFile } from "./file-patcher.js";
 import { planReconcileWork } from "./reconcile-planner.js";
 import { ReconcileQueue } from "./reconcile-queue.js";
+import {
+  captureActiveRepoEpoch,
+  withRepoMutation,
+} from "../services/repo-lifecycle.js";
 
 const MAX_DRAIN_ITERATIONS = 500;
 
@@ -22,6 +26,8 @@ export class ReconcileWorker {
   };
   private readonly planReconcileWorkFn: typeof planReconcileWork;
   private readonly patchSavedFileFn: typeof patchSavedFile;
+  private readonly queuedEpochs = new Map<string, number>();
+  private readonly clusterEpochs = new Map<string, number>();
 
   constructor(
     private readonly queue: ReconcileQueue,
@@ -43,20 +49,31 @@ export class ReconcileWorker {
       createDebouncedJobScheduler({
         delayMs: 5000,
         run: async (repoId) => {
+          const repoEpoch = this.clusterEpochs.get(repoId);
+          if (repoEpoch === undefined) return;
           // Gate cluster/process recomputation through the indexing gate so
           // tool-dispatch throttles while these writes run, avoiding the
           // LadybugDB 0.15.2 native-concurrency abort.
-          await withIndexingGate(async () => {
-            const conn = await getLadybugConn();
-            const latestVersion = await ladybugDb.getLatestVersion(
-              conn,
-              repoId,
-            );
-            await computeAndStoreClustersAndProcesses({
-              conn,
-              repoId,
-              versionId: latestVersion?.versionId ?? "live-reconcile",
-            });
+          await withRepoMutation(
+            repoId,
+            () =>
+              withIndexingGate(async () => {
+                const conn = await getLadybugConn();
+                const latestVersion = await ladybugDb.getLatestVersion(
+                  conn,
+                  repoId,
+                );
+                await computeAndStoreClustersAndProcesses({
+                  conn,
+                  repoId,
+                  versionId: latestVersion?.versionId ?? "live-reconcile",
+                });
+              }),
+            { expectedEpoch: repoEpoch },
+          ).finally(() => {
+            if (this.clusterEpochs.get(repoId) === repoEpoch) {
+              this.clusterEpochs.delete(repoId);
+            }
           });
         },
       });
@@ -69,6 +86,9 @@ export class ReconcileWorker {
     frontier: DependencyFrontier,
     enqueuedAt = new Date().toISOString(),
   ): void {
+    const repoEpoch = captureActiveRepoEpoch(repoId);
+    if (repoEpoch === undefined) return;
+    this.queuedEpochs.set(repoId, repoEpoch);
     this.queue.enqueue(repoId, frontier, enqueuedAt);
     this.ensureDraining();
   }
@@ -121,6 +141,8 @@ export class ReconcileWorker {
 
   clearRepo(repoId: string): void {
     this.queue.clearRepo(repoId);
+    this.queuedEpochs.delete(repoId);
+    this.clusterEpochs.delete(repoId);
     this.clusterScheduler.cancel?.(repoId);
   }
 
@@ -147,67 +169,96 @@ export class ReconcileWorker {
         }
 
         try {
-          const plan = this.planReconcileWorkFn({
-            repoId: claimed.repoId,
-            frontier: claimed.frontier,
-          });
-          const seenFiles = new Set<string>();
-
-          for (const filePath of plan.filePaths) {
-            const fileKey = `${claimed.repoId}:${filePath}`;
-            if (seenFiles.has(fileKey)) {
-              continue;
-            }
-            seenFiles.add(fileKey);
-            iterations++;
-
-            try {
-              // Gate each file patch through the indexing gate: live-index
-              // writes mutex against tool dispatch the same way indexRepo
-              // does, narrowing native-concurrency risk during the WAL
-              // abort window in LadybugDB 0.15.2.
-              const patched = await withIndexingGate(() =>
-                this.patchSavedFileFn({
-                  repoId: claimed.repoId,
-                  filePath,
-                }),
-              );
-              if (
-                patched.frontier.dependentFilePaths.length > 0 ||
-                patched.frontier.importedFilePaths.length > 0 ||
-                patched.frontier.invalidations.length > 0
-              ) {
-                this.queue.enqueue(
-                  claimed.repoId,
-                  patched.frontier,
-                  new Date().toISOString(),
-                );
-              }
-            } catch (fileError) {
-              logger.warn(
-                "[ReconcileWorker] Failed to patch file " +
-                  filePath +
-                  " in " +
-                  claimed.repoId +
-                  ": " +
-                  (fileError instanceof Error
-                    ? fileError.message
-                    : String(fileError)),
-              );
-            }
+          const repoEpoch = this.queuedEpochs.get(claimed.repoId);
+          if (repoEpoch === undefined) {
+            this.queue.clearRepo(claimed.repoId);
+            continue;
           }
-
-          if (plan.recomputeDerivedData) {
-            void this.clusterScheduler.schedule(claimed.repoId, undefined);
-          }
-
-          this.queue.complete(claimed.repoId, new Date().toISOString());
-        } catch (error) {
-          this.queue.fail(
+          await withRepoMutation(
             claimed.repoId,
-            new Date().toISOString(),
-            error instanceof Error ? error.message : String(error),
+            async () => {
+              const plan = this.planReconcileWorkFn({
+                repoId: claimed.repoId,
+                frontier: claimed.frontier,
+              });
+              const seenFiles = new Set<string>();
+
+              for (const filePath of plan.filePaths) {
+                const fileKey = `${claimed.repoId}:${filePath}`;
+                if (seenFiles.has(fileKey)) {
+                  continue;
+                }
+                seenFiles.add(fileKey);
+                iterations++;
+
+                try {
+                  // Gate each file patch through the indexing gate: live-index
+                  // writes mutex against tool dispatch the same way indexRepo
+                  // does, narrowing native-concurrency risk during the WAL
+                  // abort window in LadybugDB 0.15.2.
+                  const patched = await withIndexingGate(() =>
+                    this.patchSavedFileFn({
+                      repoId: claimed.repoId,
+                      filePath,
+                    }),
+                  );
+                  if (
+                    patched.frontier.dependentFilePaths.length > 0 ||
+                    patched.frontier.importedFilePaths.length > 0 ||
+                    patched.frontier.invalidations.length > 0
+                  ) {
+                    this.queue.enqueue(
+                      claimed.repoId,
+                      patched.frontier,
+                      new Date().toISOString(),
+                    );
+                  }
+                } catch (fileError) {
+                  logger.warn(
+                    "[ReconcileWorker] Failed to patch file " +
+                      filePath +
+                      " in " +
+                      claimed.repoId +
+                      ": " +
+                      (fileError instanceof Error
+                        ? fileError.message
+                        : String(fileError)),
+                  );
+                }
+              }
+
+              if (plan.recomputeDerivedData) {
+                this.clusterEpochs.set(claimed.repoId, repoEpoch);
+                const scheduled = this.clusterScheduler.schedule(
+                  claimed.repoId,
+                  undefined,
+                );
+                if (scheduled && typeof scheduled.catch === "function") {
+                  void scheduled.catch((error) => {
+                    logger.debug("Skipped stale reconcile cluster job", {
+                      repoId: claimed.repoId,
+                      error:
+                        error instanceof Error ? error.message : String(error),
+                    });
+                  });
+                }
+              }
+
+              this.queue.complete(claimed.repoId, new Date().toISOString());
+            },
+            { expectedEpoch: repoEpoch },
           );
+        } catch (error) {
+          if ((error as { code?: string }).code === "NOT_FOUND") {
+            this.queue.clearRepo(claimed.repoId);
+            this.queuedEpochs.delete(claimed.repoId);
+          } else {
+            this.queue.fail(
+              claimed.repoId,
+              new Date().toISOString(),
+              error instanceof Error ? error.message : String(error),
+            );
+          }
         }
       }
     } finally {

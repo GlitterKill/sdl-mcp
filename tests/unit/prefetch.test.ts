@@ -4,13 +4,20 @@ import {
   configurePrefetch,
   consumePrefetchedKey,
   consumePrefetchedKeyWithOutcome,
+  enqueuePrefetchTask,
   getPrefetchStats,
+  invalidateRepoPrefetch,
+  _hasPrefetchEntryForTesting,
   _setPrefetchEntryCreatedAtForTesting,
   _setPrefetchLoadSheddingForTesting,
   prefetchCardsForSymbols,
   prefetchSliceFrontier,
   shutdownPrefetch,
 } from "../../dist/graph/prefetch.js";
+import {
+  beginRepoRemoval,
+  captureActiveRepoEpoch,
+} from "../../dist/services/repo-lifecycle.js";
 
 import {
   trainPrefetchModel,
@@ -28,6 +35,14 @@ function waitForPrefetchQueue(): Promise<void> {
   return new Promise((resolve) => {
     setImmediate(resolve);
   });
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 describe("prefetch pipeline", () => {
@@ -216,6 +231,48 @@ describe("prefetch pipeline", () => {
     });
     assert.ok(aggregate);
     assert.ok(aggregate.tokensSavedEstimate > 0);
+  });
+
+  it("drains an admitted prefetch publisher before removal cleanup", async () => {
+    const repoId = "prefetch-removal-race";
+    const entered = deferred();
+    const release = deferred();
+    configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
+
+    enqueuePrefetchTask({
+      repoId,
+      key: "test:delayed-publisher",
+      priority: 100,
+      type: "search-cards",
+      resourceKind: "card",
+      context: { clientKey: "test", taskType: "test" },
+      policyApplied: true,
+      run: async () => {
+        entered.resolve();
+        await release.promise;
+        _setPrefetchEntryCreatedAtForTesting(
+          repoId,
+          "card:delayed",
+          Date.now(),
+        );
+      },
+    });
+    await entered.promise;
+
+    let removalSettled = false;
+    const removalPromise = beginRepoRemoval(repoId).finally(() => {
+      removalSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(captureActiveRepoEpoch(repoId), undefined);
+    assert.strictEqual(removalSettled, false);
+
+    release.resolve();
+    const removal = await removalPromise;
+    removal.commitTombstone();
+    invalidateRepoPrefetch(repoId);
+
+    assert.strictEqual(_hasPrefetchEntryForTesting(repoId, "card:delayed"), false);
   });
 
   it("configurePrefetch defaults to enabled when config key is absent", () => {

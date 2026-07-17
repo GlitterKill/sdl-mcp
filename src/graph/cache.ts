@@ -11,9 +11,14 @@
 import type { SymbolCard } from "../domain/types.js";
 import type { VersionId, SymbolId, RepoId } from "../domain/types.js";
 import { getObservabilityTap } from "../observability/event-tap.js";
+import {
+  captureActiveRepoEpoch,
+  isRepoEpochCurrent,
+} from "../services/repo-lifecycle.js";
 
 interface CacheEntry<T> {
   repoId: RepoId;
+  repoEpoch: number;
   value: T;
   versionId: VersionId;
   lastAccessed: number;
@@ -67,7 +72,7 @@ class LRUCache<T> {
   }
 
   private makeKey(repoId: RepoId, id: string, versionId: VersionId): string {
-    return `${repoId}:${id}:${versionId}`;
+    return JSON.stringify([repoId, id, versionId]);
   }
 
   private estimateSize(value: unknown): number {
@@ -153,10 +158,9 @@ class LRUCache<T> {
   }
 
   invalidateVersion(versionId: VersionId): void {
-    const suffix = `:${versionId}`;
     const keysToDelete: string[] = [];
-    for (const key of this.cache.keys()) {
-      if (key.endsWith(suffix)) {
+    for (const [key, entry] of this.cache.entries()) {
+      if (entry.versionId === versionId) {
         keysToDelete.push(key);
       }
     }
@@ -192,12 +196,18 @@ class LRUCache<T> {
     const key = this.makeKey(repoId, id, versionId);
     const entry = this.cache.get(key);
 
-    if (entry) {
+    if (entry && isRepoEpochCurrent(repoId, entry.repoEpoch)) {
       this.promoteKey(key);
       entry.lastAccessed = Date.now();
       this.stats.hits++;
       emitCardCacheLookup(repoId, true, t0);
       return entry.value;
+    }
+
+    if (entry) {
+      this.stats.currentSize -= entry.size;
+      this.stats.entryCount--;
+      this.cache.delete(key);
     }
 
     this.stats.misses++;
@@ -210,6 +220,7 @@ class LRUCache<T> {
     id: string,
     versionId: VersionId,
     value: T,
+    expectedEpoch = captureActiveRepoEpoch(repoId),
   ): Promise<void> {
     let releaseLock: (() => void) | undefined;
     const nextLock = new Promise<void>((resolve) => {
@@ -221,6 +232,12 @@ class LRUCache<T> {
     await previousLock;
 
     try {
+      if (
+        expectedEpoch === undefined ||
+        !isRepoEpochCurrent(repoId, expectedEpoch)
+      ) {
+        return;
+      }
       const key = this.makeKey(repoId, id, versionId);
       const size = this.estimateSize(value);
       const now = Date.now();
@@ -240,6 +257,7 @@ class LRUCache<T> {
 
       this.cache.set(key, {
         repoId,
+        repoEpoch: expectedEpoch,
         value,
         versionId,
         lastAccessed: now,

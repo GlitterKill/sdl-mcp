@@ -13,9 +13,12 @@ import {
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { InMemoryLiveIndexCoordinator } from "../../dist/live-index/coordinator.js";
+import { handleBufferPush } from "../../dist/mcp/tools/buffer.js";
+import { handleResponseGet } from "../../dist/mcp/tools/response.js";
 import {
   _hasRepoStatusHealthCacheForTesting,
   _setRepoStatusHealthLoaderForTesting,
+  handleRepoRegister,
   handleRepoStatus,
   handleRepoUnregister,
 } from "../../dist/mcp/tools/repo.js";
@@ -37,6 +40,12 @@ import {
 } from "../../dist/graph/prefetch.js";
 import { recordPrefetchOutcome } from "../../dist/graph/prefetch-outcomes.js";
 import {
+  captureActiveRepoEpoch,
+  resetRepoLifecycleForTests,
+  withRepoMutation,
+} from "../../dist/services/repo-lifecycle.js";
+import {
+  _setResponseArtifactRmForTesting,
   maybeStoreLargeResponse,
   readResponseArtifact,
 } from "../../dist/runtime/response-artifacts.js";
@@ -160,6 +169,266 @@ describe("repo.unregister integration", () => {
       (rejected as PromiseRejectedResult).reason.code,
       "NOT_FOUND",
     );
+  });
+
+  it("waits for an accepted push, observes its dirty draft, and rejects later pushes", async () => {
+    writeConfig();
+    const repoId = "push-removal-race";
+    await seedRepo(repoId);
+    let dirtyBuffers = 0;
+    let releasePush!: () => void;
+    let markPushEntered!: () => void;
+    const pushEntered = new Promise<void>((resolve) => {
+      markPushEntered = resolve;
+    });
+    const pushBlocked = new Promise<void>((resolve) => {
+      releasePush = resolve;
+    });
+    const coordinator = {
+      async pushBufferUpdate(input: {
+        repoId: string;
+        filePath: string;
+        version: number;
+      }) {
+        if (input.filePath === "src/accepted.ts") {
+          markPushEntered();
+          await pushBlocked;
+        }
+        dirtyBuffers = 1;
+        return {
+          accepted: true,
+          repoId: input.repoId,
+          overlayVersion: input.version,
+          parseScheduled: true,
+          checkpointScheduled: false,
+          warnings: [],
+        };
+      },
+      async getLiveStatus() {
+        return { dirtyBuffers };
+      },
+      async clearRepo() {
+        dirtyBuffers = 0;
+      },
+    };
+
+    const acceptedPush = handleBufferPush(
+      {
+        repoId,
+        eventType: "change",
+        filePath: "src/accepted.ts",
+        content: "export const accepted = true;",
+        version: 1,
+        dirty: true,
+        timestamp: "2026-07-17T00:00:00.000Z",
+      },
+      undefined,
+      coordinator as never,
+    );
+    await pushEntered;
+
+    let removalSettled = false;
+    const removal = handleRepoUnregister(
+      { repoId, confirmRepoId: repoId },
+      undefined,
+      coordinator as never,
+    )
+      .then(
+        (value) => ({ value, error: undefined }),
+        (error: unknown) => ({ value: undefined, error }),
+      )
+      .finally(() => {
+        removalSettled = true;
+      });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (captureActiveRepoEpoch(repoId) === undefined) break;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    assert.strictEqual(captureActiveRepoEpoch(repoId), undefined);
+    assert.strictEqual(removalSettled, false);
+
+    await assert.rejects(
+      () =>
+        handleBufferPush(
+          {
+            repoId,
+            eventType: "change",
+            filePath: "src/late.ts",
+            content: "export const late = true;",
+            version: 1,
+            dirty: true,
+            timestamp: "2026-07-17T00:00:00.000Z",
+          },
+          undefined,
+          coordinator as never,
+        ),
+      (error: unknown) => (error as { code?: string }).code === "NOT_FOUND",
+    );
+
+    releasePush();
+    await acceptedPush;
+    const removalOutcome = await removal;
+    assert.strictEqual(
+      (removalOutcome.error as { code?: string }).code,
+      "VALIDATION_ERROR",
+    );
+    assert.strictEqual(dirtyBuffers, 1);
+    assert.ok(await ladybugDb.getRepo(await getLadybugConn(), repoId));
+  });
+
+  it("does not reactivate registration beneath an unsettled removal lease", async () => {
+    writeConfig();
+    const repoId = "register-removal-race";
+    await seedRepo(repoId);
+    let releaseMutation!: () => void;
+    let markMutationEntered!: () => void;
+    const mutationEntered = new Promise<void>((resolve) => {
+      markMutationEntered = resolve;
+    });
+    const mutationBlocked = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    const mutation = withRepoMutation(repoId, async () => {
+      markMutationEntered();
+      await mutationBlocked;
+    });
+    await mutationEntered;
+
+    const removal = handleRepoUnregister({ repoId, confirmRepoId: repoId });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (captureActiveRepoEpoch(repoId) === undefined) break;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    assert.strictEqual(captureActiveRepoEpoch(repoId), undefined);
+
+    await assert.rejects(
+      () =>
+        handleRepoRegister({
+          repoId,
+          rootPath: tempRoot,
+          updateExisting: true,
+        }),
+      (error: unknown) => (error as { code?: string }).code === "NOT_FOUND",
+    );
+
+    releaseMutation();
+    await mutation;
+    assert.deepStrictEqual(await removal, { ok: true, repoId, removed: true });
+    assert.strictEqual(await ladybugDb.getRepo(await getLadybugConn(), repoId), null);
+
+    const registered = await handleRepoRegister({
+      repoId,
+      rootPath: tempRoot,
+      updateExisting: true,
+    });
+    assert.strictEqual(registered.ok, true);
+    assert.ok(await ladybugDb.getRepo(await getLadybugConn(), repoId));
+    assert.equal(typeof captureActiveRepoEpoch(repoId), "number");
+  });
+
+  it("does not let an in-flight health load repopulate after removal", async () => {
+    writeConfig();
+    const repoId = "health-publication-race";
+    await seedRepo(repoId);
+    let releaseHealth!: () => void;
+    let markHealthEntered!: () => void;
+    const healthEntered = new Promise<void>((resolve) => {
+      markHealthEntered = resolve;
+    });
+    const healthBlocked = new Promise<void>((resolve) => {
+      releaseHealth = resolve;
+    });
+    _setRepoStatusHealthLoaderForTesting(async () => {
+      markHealthEntered();
+      await healthBlocked;
+      return {
+        repoId,
+        score: 100,
+        available: true,
+        components: {
+          freshness: 1,
+          coverage: 1,
+          errorRate: 1,
+          edgeQuality: 1,
+          callResolution: 1,
+          embeddingFailures: 0,
+        },
+        indexedFiles: 0,
+        indexedSymbols: 0,
+        totalEligibleFiles: 0,
+        totalCallEdges: 0,
+        resolvedCallEdges: 0,
+        minutesSinceLastIndex: 0,
+      };
+    });
+
+    const status = handleRepoStatus({ repoId, detail: "standard" }).then(
+      (value) => ({ value, error: undefined }),
+      (error: unknown) => ({ value: undefined, error }),
+    );
+    await healthEntered;
+    assert.deepStrictEqual(
+      await handleRepoUnregister({ repoId, confirmRepoId: repoId }),
+      { ok: true, repoId, removed: true },
+    );
+    releaseHealth();
+    await status;
+
+    assert.strictEqual(_hasRepoStatusHealthCacheForTesting(repoId), false);
+    _setRepoStatusHealthLoaderForTesting();
+  });
+
+  it("keeps a handle denied after restart when physical cleanup fails", async () => {
+    writeConfig();
+    const repoId = "artifact-cleanup-failure";
+    await seedRepo(repoId);
+    const artifact = await maybeStoreLargeResponse({
+      repoId,
+      toolName: "test.cleanup-failure",
+      payload: { value: "must-stay-denied" },
+      responseMode: "handle",
+      artifactBaseDir,
+    });
+    assert.strictEqual(artifact.responseMode, "handle");
+
+    _setResponseArtifactRmForTesting(
+      (async () => {
+        throw new Error("forced response artifact cleanup failure");
+      }) as never,
+    );
+    try {
+      assert.deepStrictEqual(
+        await handleRepoUnregister({ repoId, confirmRepoId: repoId }),
+        { ok: true, repoId, removed: true },
+      );
+      assert.strictEqual(await ladybugDb.getRepo(await getLadybugConn(), repoId), null);
+
+      // Simulate a fresh process: the in-memory epoch returns to zero while the
+      // deliberately undeleted manifest remains on disk.
+      resetRepoLifecycleForTests();
+      assert.deepStrictEqual(
+        (
+          await readResponseArtifact({
+            repoId,
+            handle: artifact.payload.handle,
+            artifactBaseDir,
+            full: true,
+          })
+        ).content,
+        { value: "must-stay-denied" },
+      );
+      await assert.rejects(
+        () =>
+          handleResponseGet({
+            repoId,
+            handle: artifact.payload.handle,
+            full: true,
+          }),
+        (error: unknown) => (error as { code?: string }).code === "NOT_FOUND",
+      );
+    } finally {
+      _setResponseArtifactRmForTesting();
+    }
   });
 
   it("requires dirty-buffer opt-in, then clears repo-scoped runtime state", async () => {

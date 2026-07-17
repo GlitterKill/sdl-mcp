@@ -6,10 +6,23 @@ import { fileURLToPath } from "node:url";
 
 import { ReconcileQueue } from "../../dist/live-index/reconcile-queue.js";
 import { ReconcileWorker } from "../../dist/live-index/reconcile-worker.js";
+import {
+  beginRepoRemoval,
+  captureActiveRepoEpoch,
+  resetRepoLifecycleForTests,
+} from "../../dist/services/repo-lifecycle.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "../..");
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 describe("ReconcileWorker", () => {
   it("clears queued work and cancels the exact repository cluster job", () => {
@@ -84,6 +97,79 @@ describe("ReconcileWorker", () => {
 
     assert.deepEqual(patchCalls, ["src/a.ts", "src/a.ts"]);
     assert.strictEqual(queue.getStatus("demo-repo").queueDepth, 0);
+  });
+
+  it("drains an admitted patch before removal and rejects later reconcile work", async () => {
+    resetRepoLifecycleForTests();
+    const repoId = "reconcile-removal-race";
+    const queue = new ReconcileQueue();
+    const entered = deferred();
+    const release = deferred();
+    let patchCalls = 0;
+    const worker = new ReconcileWorker(queue, {
+      clusterScheduler: {
+        schedule: async () => undefined,
+        waitForIdle: async () => undefined,
+      },
+      patchSavedFile: async () => {
+        patchCalls += 1;
+        entered.resolve();
+        await release.promise;
+        return {
+          frontier: {
+            touchedSymbolIds: [],
+            dependentSymbolIds: [],
+            dependentFilePaths: [],
+            importedFilePaths: [],
+            invalidations: [],
+          },
+        };
+      },
+      planReconcileWork: () => ({
+        filePaths: ["src/a.ts"],
+        recomputeDerivedData: false,
+      }),
+    });
+
+    worker.enqueue(
+      repoId,
+      {
+        touchedSymbolIds: [],
+        dependentSymbolIds: [],
+        dependentFilePaths: ["src/a.ts"],
+        importedFilePaths: [],
+        invalidations: [],
+      },
+      "2026-07-17T00:00:00.000Z",
+    );
+    await entered.promise;
+
+    let removalSettled = false;
+    const removalPromise = beginRepoRemoval(repoId).finally(() => {
+      removalSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(captureActiveRepoEpoch(repoId), undefined);
+    assert.strictEqual(removalSettled, false);
+
+    release.resolve();
+    const removal = await removalPromise;
+    removal.commitTombstone();
+    await worker.waitForIdle();
+
+    worker.enqueue(
+      repoId,
+      {
+        touchedSymbolIds: [],
+        dependentSymbolIds: [],
+        dependentFilePaths: ["src/late.ts"],
+        importedFilePaths: [],
+        invalidations: [],
+      },
+      "2026-07-17T00:00:01.000Z",
+    );
+    await worker.waitForIdle();
+    assert.strictEqual(patchCalls, 1);
   });
 
   it("waitForIdle timeout resolves even when no other handles keep the process alive", () => {

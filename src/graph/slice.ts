@@ -35,6 +35,7 @@ import { buildPayloadCardsAndRefs, toSliceSymbolCard, filterDepsBySliceSymbolSet
 import { type SliceResult, type SliceError, sliceOk, sliceErr } from "./slice/result.js";
 import { getOverlaySnapshot } from "../live-index/overlay-reader.js";
 import { logger } from "../util/logger.js";
+import { captureActiveRepoEpoch } from "../services/repo-lifecycle.js";
 import {
   type SliceBuildInternalResult,
   type SliceBuildRequest,
@@ -78,6 +79,7 @@ export {
 export async function buildSlice(
   request: SliceBuildRequest,
 ): Promise<SliceBuildInternalResult> {
+  const repoEpoch = captureActiveRepoEpoch(request.repoId);
   const config = loadConfig();
   const cacheConfig = config.cache;
   const cacheEnabled = cacheConfig?.enabled ?? true;
@@ -395,7 +397,7 @@ export async function buildSlice(
 
   // Cache the full slice (before ETag dedup) so that cache hits serve
   // complete data regardless of the requesting client's known ETags.
-  if (canUseCache) {
+  if (canUseCache && repoEpoch !== undefined) {
     const hasKnownEtags =
       request.knownCardEtags && Object.keys(request.knownCardEtags).length > 0;
     if (hasKnownEtags) {
@@ -411,9 +413,9 @@ export async function buildSlice(
         cards: fullCards,
         cardRefs: undefined,
       };
-      setCachedSlice(cacheKey, fullSlice);
+      setCachedSlice(cacheKey, fullSlice, repoEpoch);
     } else {
-      setCachedSlice(cacheKey, slice);
+      setCachedSlice(cacheKey, slice, repoEpoch);
     }
   }
 

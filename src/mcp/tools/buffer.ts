@@ -12,13 +12,14 @@ import {
   BufferStatusRequestSchema,
   type BufferStatusResponse,
 } from "../tools.js";
-import { ValidationError, IndexError } from "../errors.js";
+import { ValidationError, IndexError, NotFoundError } from "../errors.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import type { ToolContext } from "../../server.js";
 import { logger } from "../../util/logger.js";
+import { withRepoMutation } from "../../services/repo-lifecycle.js";
 
 function resolveLiveIndex(
   liveIndex?: LiveIndexCoordinator,
@@ -96,15 +97,19 @@ export async function handleBufferPush(
       ? { ...args as Record<string, unknown>, timestamp: new Date((args as Record<string, unknown>).timestamp as number).toISOString() }
       : args;
     const request = parseActionHandlerArgs(BufferPushRequestSchema, normalized);
-    const result = request.filePath
-      ? await runSerializedBufferPush(
-          `${request.repoId}\0${request.filePath}`,
-          async () => {
-            const pushed = await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
-            return appendMissingFileWarning(request, pushed);
-          },
-        )
-      : await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
+    const result = await withRepoMutation(request.repoId, async () =>
+      request.filePath
+        ? runSerializedBufferPush(
+            `${request.repoId}\0${request.filePath}`,
+            async () => {
+              const pushed = await resolveLiveIndex(
+                liveIndex,
+              ).pushBufferUpdate(request);
+              return appendMissingFileWarning(request, pushed);
+            },
+          )
+        : resolveLiveIndex(liveIndex).pushBufferUpdate(request),
+    );
     return result;
   } catch (error) {
     if (error instanceof ZodError) {
@@ -112,7 +117,11 @@ export async function handleBufferPush(
         `Invalid buffer push request: ${error.issues.map((e) => e.message).join(", ")}`,
       );
     }
-    if (error instanceof ValidationError || error instanceof IndexError) {
+    if (
+      error instanceof ValidationError ||
+      error instanceof IndexError ||
+      error instanceof NotFoundError
+    ) {
       throw error;
     }
     throw new IndexError("Buffer push failed");
@@ -126,7 +135,9 @@ export async function handleBufferCheckpoint(
 ): Promise<BufferCheckpointResponse> {
   try {
     const request = parseActionHandlerArgs(BufferCheckpointRequestSchema, args);
-    const result = await resolveLiveIndex(liveIndex).checkpointRepo(request);
+    const result = await withRepoMutation(request.repoId, () =>
+      resolveLiveIndex(liveIndex).checkpointRepo(request),
+    );
     // Surface a clear pending flag so callers know whether to poll buffer.status.
     const pending =
     result.pendingBuffers > 0 &&
@@ -138,7 +149,11 @@ export async function handleBufferCheckpoint(
         `Invalid buffer checkpoint request: ${error.issues.map((e) => e.message).join(", ")}`,
       );
     }
-    if (error instanceof ValidationError || error instanceof IndexError) {
+    if (
+      error instanceof ValidationError ||
+      error instanceof IndexError ||
+      error instanceof NotFoundError
+    ) {
       throw error;
     }
     throw new IndexError("Buffer checkpoint failed");

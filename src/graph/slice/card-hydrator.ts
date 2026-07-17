@@ -19,6 +19,7 @@ import { getOverlaySnapshot, getTargetNamesWithOverlay, mergeEdgeMapWithOverlay,
 import { safeJsonParse, safeJsonParseOptional, StringArraySchema, SignatureSchema } from "../../util/safeJson.js";
 import { buildCallResolution } from "./detail-level.js";
 import { buildSliceDepsBySymbol } from "./edge-projector.js";
+import { captureActiveRepoEpoch } from "../../services/repo-lifecycle.js";
 
 export async function loadSymbolCards(
   conn: Connection,
@@ -33,6 +34,7 @@ export async function loadSymbolCards(
   cards: SymbolCard[];
   sliceDepsBySymbol: Map<SymbolId, SliceSymbolDeps>;
 }> {
+  const repoEpoch = captureActiveRepoEpoch(repoId);
   if (symbolIds.length === 0) {
     return {
       cards: [],
@@ -311,12 +313,17 @@ export async function loadSymbolCards(
     const card = toCardAtDetailLevel(baseCard, effectiveLevel);
     cards.push(card);
 
-    if (canUseCache && !snapshot.symbolsById.has(symbolRow.symbolId)) {
+    if (
+      canUseCache &&
+      repoEpoch !== undefined &&
+      !snapshot.symbolsById.has(symbolRow.symbolId)
+    ) {
       await symbolCardCache.set(
         repoId,
         symbolRow.symbolId,
         versionId,
         toFullCard(baseCard),
+        repoEpoch,
       );
     }
   }

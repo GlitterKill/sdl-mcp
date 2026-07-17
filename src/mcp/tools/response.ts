@@ -7,6 +7,9 @@
  */
 
 import type { ToolContext } from "../../server.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
+import { NotFoundError } from "../../domain/errors.js";
 import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
@@ -18,6 +21,19 @@ import {
   type ResponseGetResponse,
 } from "../tools.js";
 
+async function repoExistsInDb(repoId: string): Promise<boolean> {
+  const conn = await getLadybugConn();
+  return Boolean(await ladybugDb.getRepo(conn, repoId));
+}
+
+let responseRepoExists: (repoId: string) => Promise<boolean> = repoExistsInDb;
+
+export function _setResponseRepoExistsForTesting(
+  checker: (repoId: string) => Promise<boolean> = repoExistsInDb,
+): void {
+  responseRepoExists = checker;
+}
+
 export async function handleResponseGet(
   args: unknown,
   context?: ToolContext,
@@ -27,6 +43,12 @@ export async function handleResponseGet(
   const runtimeConfig = RuntimeConfigSchema.parse(appConfig.runtime ?? {});
 
   try {
+    // Lifecycle epochs are intentionally process-local. Verify persisted repo
+    // ownership as well so a failed artifact cleanup cannot resurrect a handle
+    // after the server restarts and its in-memory tombstones are reset.
+    if (!(await responseRepoExists(request.repoId))) {
+      throw new NotFoundError(`Repository not found: ${request.repoId}`);
+    }
     const response = await readResponseArtifact({
       repoId: request.repoId,
       handle: request.handle,
@@ -43,7 +65,11 @@ export async function handleResponseGet(
       sessionId: context?.sessionId,
     });
     const { savings, metadata, range, ...rest } = response;
-    const { estimatedOriginalTokens: _estimatedOriginalTokens, ...publicMetadata } = metadata;
+    const {
+      estimatedOriginalTokens: _estimatedOriginalTokens,
+      repoEpoch: _repoEpoch,
+      ...publicMetadata
+    } = metadata;
     const { estimatedReturnedTokens: _estimatedReturnedTokens, ...publicRange } = range;
     const publicResponse = {
       ...rest,

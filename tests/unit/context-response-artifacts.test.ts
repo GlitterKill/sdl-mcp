@@ -11,7 +11,10 @@ import {
   calculateContextRawEquivalentTokens,
   handleAgentContext,
 } from "../../dist/mcp/tools/context.js";
-import { handleResponseGet } from "../../dist/mcp/tools/response.js";
+import {
+  _setResponseRepoExistsForTesting,
+  handleResponseGet,
+} from "../../dist/mcp/tools/response.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
 const originalBuildContext = contextEngine.buildContext.bind(contextEngine);
@@ -24,6 +27,7 @@ function makeTempDir(): string {
 }
 
 afterEach(() => {
+  _setResponseRepoExistsForTesting();
   contextEngine.buildContext = originalBuildContext;
   if (originalSdlConfig === undefined) {
     delete process.env.SDL_CONFIG;
@@ -39,6 +43,7 @@ afterEach(() => {
 
 describe("sdl.context response artifacts", () => {
   it("stores context responses behind response.get without storing _rawContext", async () => {
+    _setResponseRepoExistsForTesting(async () => true);
     const baseDir = makeTempDir();
     const configPath = join(baseDir, "sdlmcp.config.json");
     writeFileSync(

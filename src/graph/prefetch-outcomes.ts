@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
+import {
+  captureActiveRepoEpoch,
+  isRepoEpochCurrent,
+} from "../services/repo-lifecycle.js";
 
 export type PrefetchPolicyMode = "observe" | "safe";
 export type PrefetchOutcomeKind =
@@ -107,8 +111,16 @@ const OUTCOME_EWMA_ALPHA = 0.5;
 let policyConfig: PrefetchPolicyConfig = { ...DEFAULT_PREFETCH_POLICY_CONFIG };
 const aggregates = new Map<string, PrefetchPolicyAggregate>();
 const outcomeResourceKeys = new Set<string>();
-const repoInvalidationGenerations = new Map<string, number>();
 let lastRetentionSweepMs = 0;
+type PrefetchAggregateRows = Awaited<
+  ReturnType<typeof ladybugDb.getPrefetchPolicyAggregates>
+>;
+let loadPrefetchAggregates = async (
+  repoId?: string,
+): Promise<PrefetchAggregateRows> => {
+  const conn = await getLadybugConn();
+  return ladybugDb.getPrefetchPolicyAggregates(conn, repoId, 10000);
+};
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -303,13 +315,10 @@ function aggregateToRow(
 async function persistOutcome(
   event: PrefetchOutcomeEvent,
   aggregate: PrefetchPolicyAggregate,
-  repoGeneration: number,
+  repoEpoch: number,
 ): Promise<void> {
   await withWriteConn(async (conn) => {
-    if (
-      (repoInvalidationGenerations.get(aggregate.repoId) ?? 0) !==
-      repoGeneration
-    ) {
+    if (!isRepoEpochCurrent(aggregate.repoId, repoEpoch)) {
       return;
     }
     const nowIso = event.createdAt ?? new Date().toISOString();
@@ -339,10 +348,10 @@ async function persistOutcome(
 function maybePersistOutcome(
   event: PrefetchOutcomeEvent,
   aggregate: PrefetchPolicyAggregate,
-  repoGeneration: number,
+  repoEpoch: number,
 ): void {
   if (event.persist === false) return;
-  void persistOutcome(event, aggregate, repoGeneration).catch((error) => {
+  void persistOutcome(event, aggregate, repoEpoch).catch((error) => {
     logger.debug("[prefetch-policy] outcome persistence skipped", {
       error: error instanceof Error ? error.message : String(error),
     });
@@ -408,10 +417,17 @@ export function getPrefetchPolicyConfig(): PrefetchPolicyConfig {
 
 export function recordPrefetchOutcome(
   event: PrefetchOutcomeEvent,
+  expectedEpoch = captureActiveRepoEpoch(event.repoId),
 ): PrefetchPolicyAggregate {
   const key = normalizePrefetchOutcomeKey(event);
   const aggregateKey = buildPrefetchAggregateKey(key);
   const nowIso = event.createdAt ?? new Date().toISOString();
+  if (
+    expectedEpoch === undefined ||
+    !isRepoEpochCurrent(event.repoId, expectedEpoch)
+  ) {
+    return emptyAggregate(key, nowIso);
+  }
   const existingAggregate = aggregates.get(aggregateKey);
   const aggregate =
     existingAggregate && !isAggregateExpired(existingAggregate)
@@ -456,7 +472,7 @@ export function recordPrefetchOutcome(
     maybePersistOutcome(
       event,
       aggregate,
-      repoInvalidationGenerations.get(aggregate.repoId) ?? 0,
+      expectedEpoch,
     );
     maybeSweepRetention();
   }
@@ -585,9 +601,16 @@ export function getPrefetchOutcomeSampleCount(repoId?: string): number {
 }
 
 export async function hydratePrefetchPolicyFromDb(repoId?: string): Promise<number> {
+  const repoEpoch = repoId ? captureActiveRepoEpoch(repoId) : undefined;
+  if (repoId && repoEpoch === undefined) return 0;
   try {
-    const conn = await getLadybugConn();
-    const rows = await ladybugDb.getPrefetchPolicyAggregates(conn, repoId, 10000);
+    const rows = await loadPrefetchAggregates(repoId);
+    if (
+      repoId &&
+      (repoEpoch === undefined || !isRepoEpochCurrent(repoId, repoEpoch))
+    ) {
+      return 0;
+    }
     const cutoffIso = retentionCutoffIso();
     pruneExpiredAggregates(cutoffIso, repoId);
     let hydrated = 0;
@@ -629,20 +652,26 @@ export async function hydratePrefetchPolicyFromDb(repoId?: string): Promise<numb
   }
 }
 
+export function _setPrefetchAggregateLoaderForTesting(
+  loader?: (repoId?: string) => Promise<PrefetchAggregateRows>,
+): void {
+  loadPrefetchAggregates =
+    loader ??
+    (async (repoId?: string) => {
+      const conn = await getLadybugConn();
+      return ladybugDb.getPrefetchPolicyAggregates(conn, repoId, 10000);
+    });
+}
+
 export function resetPrefetchOutcomeStateForTests(): void {
   aggregates.clear();
   outcomeResourceKeys.clear();
-  repoInvalidationGenerations.clear();
   lastRetentionSweepMs = 0;
   policyConfig = { ...DEFAULT_PREFETCH_POLICY_CONFIG };
 }
 
 /** Remove learned and deduplication state owned by a deleted repository. */
 export function invalidateRepoPrefetchOutcomeState(repoId: string): void {
-  repoInvalidationGenerations.set(
-    repoId,
-    (repoInvalidationGenerations.get(repoId) ?? 0) + 1,
-  );
   const aggregateKeys = new Set(
     Array.from(aggregates.values())
       .filter((aggregate) => aggregate.repoId === repoId)
