@@ -1,6 +1,12 @@
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -24,7 +30,9 @@ describe("code.needWindow policy remediation", () => {
   let originalGenerateNextBestAction: typeof PolicyEngine.prototype.generateNextBestAction;
 
   before(async () => {
-    tempDir = join(tmpdir(), `sdl-mcp-code-window-${Date.now()}`);
+    tempDir = mkdtempSync(
+      join(tmpdir(), `sdl-mcp-code-window-${process.pid}-`),
+    );
     mkdirSync(join(tempDir, "src"), { recursive: true });
     writeFileSync(
       join(tempDir, "src", "example.ts"),
@@ -355,6 +363,40 @@ describe("code.needWindow policy remediation", () => {
         identifiersToFind: ["importantFlag"],
       },
       rationale: "Too broad",
+    });
+  });
+
+  it("keeps indexed source coordinates separate from skeleton resume progress", async () => {
+    PolicyEngine.prototype.evaluate = function () {
+      return {
+        decision: "downgrade-to-skeleton",
+        evidenceUsed: [],
+        auditHash: "audit-skeleton-range",
+        deniedReasons: ["Use structural context first"],
+      };
+    };
+
+    const response = await handleCodeNeedWindow({
+      repoId: "repo-test",
+      symbolId: "sym-demo",
+      reason: "inspect structure before raw code",
+      expectedLines: 1,
+      maxTokens: 120,
+      identifiersToFind: [],
+    });
+
+    assert.equal(response.approved, true);
+    if (!response.approved) throw new Error("Expected skeleton downgrade");
+    assert.deepStrictEqual(response.range, {
+      startLine: 1,
+      startCol: 0,
+      endLine: 4,
+      endCol: 1,
+    });
+    assert.deepStrictEqual(response.truncation?.howToResume, {
+      type: "cursor",
+      value: 1,
+      parameter: "skeletonOffset",
     });
   });
 

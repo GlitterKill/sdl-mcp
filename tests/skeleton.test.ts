@@ -1,23 +1,28 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
-import { writeFileSync, rmSync, existsSync, mkdirSync, mkdtempSync } from "fs";
+import { writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
   parseFile,
   extractSkeletonFromNode,
+  generateFileSkeleton,
+  generateSkeletonIR,
+  generateSymbolSkeleton,
   trimSkeletonToBounds,
 } from "../dist/code/skeleton.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../dist/db/ladybug.js";
+import * as ladybugDb from "../dist/db/ladybug-queries.js";
 
 describe("Skeleton Generator Unit Tests", () => {
-  const testDir = mkdtempSync(join(tmpdir(), "sdl-mcp-skeleton-test-"));
-
-  beforeEach(() => {
-    if (!existsSync(testDir)) {
-      mkdirSync(testDir, { recursive: true });
-    }
-
-    const functionFile = `
+  const testDir = mkdtempSync(
+    join(tmpdir(), `sdl-mcp-skeleton-test-${process.pid}-`),
+  );
+  const functionFile = `
 export function calculateSum(a: number, b: number): number {
   const result = a + b;
   console.log("Adding", a, "and", b);
@@ -50,7 +55,34 @@ export function complexLogic(items: Item[]): Item[] {
   return results;
 }
     `.trim();
+  const repoId = `skeleton-range-${process.pid}`;
+  const fileId = `${repoId}:functions`;
+  const calculateSymbolId = `${repoId}:calculateSum`;
+  const resultSymbolId = `${repoId}:result`;
+  const calculateRange = { startLine: 1, startCol: 0, endLine: 5, endCol: 1 };
+  const resultRange = { startLine: 2, startCol: 2, endLine: 2, endCol: 23 };
+  const functionLines = functionFile.split("\n");
+  const fileRange = {
+    startLine: 1,
+    startCol: 0,
+    endLine: functionLines.length,
+    endCol: functionLines.at(-1)?.length ?? 0,
+  };
+  let originalGraphDbPath: string | undefined;
 
+  function assertExactOrderedRange(
+    actual: typeof calculateRange,
+    expected: typeof calculateRange,
+  ): void {
+    assert.deepStrictEqual(actual, expected);
+    assert.ok(
+      actual.startLine < actual.endLine ||
+        (actual.startLine === actual.endLine && actual.startCol <= actual.endCol),
+      `Expected ordered range, got ${actual.startLine}:${actual.startCol}-${actual.endLine}:${actual.endCol}`,
+    );
+  }
+
+  before(async () => {
     const classFile = `
 export class UserService {
   private userRepository: UserRepository;
@@ -96,9 +128,63 @@ export enum Priority {
     writeFileSync(join(testDir, "functions.ts"), functionFile);
     writeFileSync(join(testDir, "class.ts"), classFile);
     writeFileSync(join(testDir, "types.ts"), interfaceFile);
+
+    originalGraphDbPath = process.env.SDL_GRAPH_DB_PATH;
+    const dbPath = join(testDir, "graph.lbug");
+    process.env.SDL_GRAPH_DB_PATH = dbPath;
+    await initLadybugDb(dbPath);
+
+    const conn = await getLadybugConn();
+    const now = "2026-07-17T00:00:00.000Z";
+    await ladybugDb.upsertRepo(conn, {
+      repoId,
+      rootPath: testDir,
+      configJson: "{}",
+      createdAt: now,
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath: "functions.ts",
+      contentHash: "functions-hash",
+      language: "ts",
+      byteSize: Buffer.byteLength(functionFile),
+      lastIndexedAt: now,
+    });
+    for (const symbol of [
+      { symbolId: calculateSymbolId, name: "calculateSum", kind: "function", exported: true, range: calculateRange },
+      { symbolId: resultSymbolId, name: "result", kind: "variable", exported: false, range: resultRange },
+    ] as const) {
+      await ladybugDb.upsertSymbol(conn, {
+        symbolId: symbol.symbolId,
+        repoId,
+        fileId,
+        kind: symbol.kind,
+        name: symbol.name,
+        exported: symbol.exported,
+        visibility: "public",
+        language: "ts",
+        rangeStartLine: symbol.range.startLine,
+        rangeStartCol: symbol.range.startCol,
+        rangeEndLine: symbol.range.endLine,
+        rangeEndCol: symbol.range.endCol,
+        astFingerprint: `fp-${symbol.name}`,
+        signatureJson: "{}",
+        summary: `${symbol.name} range fixture`,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: now,
+      });
+    }
   });
 
-  afterEach(() => {
+  after(async () => {
+    await closeLadybugDb();
+    if (originalGraphDbPath === undefined) {
+      delete process.env.SDL_GRAPH_DB_PATH;
+    } else {
+      process.env.SDL_GRAPH_DB_PATH = originalGraphDbPath;
+    }
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
@@ -291,6 +377,68 @@ export enum Priority {
 
       assert.strictEqual(code, content, "Should not modify content");
       assert.strictEqual(truncated, false, "Should not be marked as truncated");
+    });
+  });
+
+  describe("skeleton source ranges", () => {
+    it("keeps an exact ordered range for a one-line nonzero-column symbol and IR", async () => {
+      const skeleton = await generateSymbolSkeleton(repoId, resultSymbolId, {
+        maxLines: 1,
+        maxTokens: 1,
+      });
+      const ir = await generateSkeletonIR(repoId, resultSymbolId, {
+        maxLines: 1,
+        maxTokens: 1,
+      });
+
+      assert.ok(skeleton);
+      assert.ok(ir);
+      assertExactOrderedRange(skeleton.actualRange, resultRange);
+      assertExactOrderedRange(ir.actualRange, resultRange);
+    });
+
+    it("keeps the exact indexed range for a multiline symbol and IR", async () => {
+      const skeleton = await generateSymbolSkeleton(repoId, calculateSymbolId);
+      const ir = await generateSkeletonIR(repoId, calculateSymbolId);
+
+      assert.ok(skeleton);
+      assert.ok(ir);
+      assertExactOrderedRange(skeleton.actualRange, calculateRange);
+      assertExactOrderedRange(ir.actualRange, calculateRange);
+    });
+
+    it("reports the exact ordered file range", async () => {
+      const skeleton = await generateFileSkeleton(
+        repoId,
+        "functions.ts",
+        false,
+        { maxLines: 1 },
+      );
+
+      assert.ok(skeleton);
+      assertExactOrderedRange(skeleton.actualRange, fileRange);
+    });
+
+    it("keeps source coordinates stable across skeletonOffset resume", async () => {
+      const first = await generateSymbolSkeleton(repoId, calculateSymbolId, {
+        maxLines: 1,
+      });
+      assert.ok(first);
+      assert.equal(first.truncated, true);
+      assert.equal(first.skeletonLinesConsumed, 1);
+
+      const resumed = await generateSymbolSkeleton(repoId, calculateSymbolId, {
+        maxLines: 1,
+        skeletonOffset: first.skeletonLinesConsumed,
+      });
+      assert.ok(resumed);
+      assert.notEqual(resumed.skeleton, first.skeleton);
+      assert.ok(
+        (resumed.skeletonLinesConsumed ?? 0) >
+          (first.skeletonLinesConsumed ?? 0),
+      );
+      assertExactOrderedRange(first.actualRange, calculateRange);
+      assertExactOrderedRange(resumed.actualRange, calculateRange);
     });
   });
 

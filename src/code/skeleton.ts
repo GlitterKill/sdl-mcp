@@ -882,16 +882,12 @@ export async function generateSymbolSkeleton(
       maxTokens,
       options.skeletonOffset,
     );
-    const skeletonLines = code.split("\n");
 
     const actualRange: Range = {
       startLine: symbol.rangeStartLine,
       startCol: symbol.rangeStartCol,
-      endLine: Math.max(
-        symbol.rangeStartLine,
-        symbol.rangeStartLine + skeletonLines.length - 1,
-      ),
-      endCol: truncated ? 0 : symbol.rangeEndCol,
+      endLine: symbol.rangeEndLine,
+      endCol: symbol.rangeEndCol,
     };
 
     return {
@@ -971,13 +967,12 @@ export async function generateFileSkeleton(
       maxTokens,
       options.skeletonOffset,
     );
-    const skeletonLines = code.split("\n");
 
     const actualRange: Range = {
-      startLine: 1,
-      startCol: 0,
-      endLine: skeletonLines.length,
-      endCol: skeletonLines[skeletonLines.length - 1]?.length ?? 0,
+      startLine: tree.rootNode.startPosition.row + 1,
+      startCol: tree.rootNode.startPosition.column,
+      endLine: tree.rootNode.endPosition.row + 1,
+      endCol: tree.rootNode.endPosition.column,
     };
 
     return {
@@ -1333,13 +1328,12 @@ export async function generateSkeletonIR(
     const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_SKELETON;
 
     const { code } = trimSkeletonToBounds(skeletonText, maxLines, maxTokens);
-    const skeletonLines = code.split("\n");
 
     const actualRange: Range = {
       startLine: symbol.rangeStartLine,
       startCol: symbol.rangeStartCol,
-      endLine: symbol.rangeStartLine + skeletonLines.length - 1,
-      endCol: skeletonLines[skeletonLines.length - 1]?.length ?? 0,
+      endLine: symbol.rangeEndLine,
+      endCol: symbol.rangeEndCol,
     };
 
     return {
