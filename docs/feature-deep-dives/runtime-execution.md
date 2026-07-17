@@ -76,6 +76,8 @@ Use `outputMode: "digest"` for build, test, lint, and other noisy diagnostics. T
 
 Use `outputMode: "minimal"` when exit status and metadata are enough. Use `outputMode: "intent"` when you already know the terms that define success or failure. If the digest omits the detail you need, query the artifact with focused `queryTerms` or a `lineRange`; do not rerun the command just to print full output.
 
+Runtime stdout/stderr handles are retrieved with `sdl.runtime.queryOutput`. They are distinct from large tool-response handles: retrieve those with `sdl.response.get`, selecting `full: true`, `jsonPath`, or `raw: true` explicitly for JSON response artifacts.
+
 ---
 
 ## Sandboxed Execution Flow

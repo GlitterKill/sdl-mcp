@@ -18,6 +18,7 @@ import {
 } from "../../dist/mcp/tools/response.js";
 import { ResponseGetRequestSchema } from "../../dist/mcp/tools.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+import { ValidationError } from "../../dist/domain/errors.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
 let tempDirs: string[] = [];
@@ -338,7 +339,7 @@ describe("response artifact storage", () => {
     );
   });
 
-  it("returns bounded JSON byte excerpts by default for handle compatibility", async () => {
+  it("requires an explicit retrieval mode before slicing JSON artifacts", async () => {
     const baseDir = makeTempDir();
     const payload = {
       finalEvidence: [{ reference: "symbol:alpha" }],
@@ -355,12 +356,23 @@ describe("response artifact storage", () => {
     });
     assert.strictEqual(stored.responseMode, "handle");
 
-    const excerpt = await readResponseArtifact({
-      repoId: "repo-a",
-      handle: stored.payload.handle,
-      artifactBaseDir: baseDir,
-      maxBytes: 20,
-    });
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          maxBytes: 20,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.match(error.message, /full:true/);
+        assert.match(error.message, /jsonPath/);
+        assert.match(error.message, /raw:true/);
+        assert.match(error.message, /syntactically incomplete JSON/);
+        return true;
+      },
+    );
 
     const raw = await readResponseArtifact({
       repoId: "repo-a",
@@ -370,10 +382,85 @@ describe("response artifact storage", () => {
       raw: true,
     });
 
-    assert.equal(typeof excerpt.content, "string");
-    assert.equal(excerpt.truncated, true);
     assert.equal(typeof raw.content, "string");
     assert.equal(raw.truncated, true);
+  });
+
+  it("rejects incompatible JSON retrieval option combinations", async () => {
+    const baseDir = makeTempDir();
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload: { finalEvidence: [{ reference: "symbol:alpha" }] },
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "6767676767676767",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          jsonPath: "finalEvidence",
+          offsetBytes: 1,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.match(error.message, /offsetBytes.*raw:true/i);
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          full: true,
+          offsetBytes: 1,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.match(error.message, /offsetBytes.*full:true/i);
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          full: true,
+          raw: true,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.match(error.message, /exactly one JSON retrieval mode/i);
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          raw: true,
+          offset: 1,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.match(error.message, /offset and limit.*jsonPath/i);
+        return true;
+      },
+    );
   });
 
   it("omits token savings from response.get output", async () => {
@@ -850,6 +937,7 @@ describe("response artifact maxTokens enforcement", () => {
       repoId: "repo-a",
       handle: stored.payload.handle,
       maxTokens: 100,
+      raw: true,
       artifactBaseDir: baseDir,
     });
 
@@ -881,6 +969,7 @@ describe("response artifact maxTokens enforcement", () => {
       repoId: "repo-a",
       handle: stored.payload.handle,
       maxBytes: 1200,
+      raw: true,
       artifactBaseDir: baseDir,
     });
 

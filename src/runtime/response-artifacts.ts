@@ -5,7 +5,7 @@ import { promisify } from "util";
 import { gzip, gunzip } from "zlib";
 
 import { estimateTokens } from "../util/tokenize.js";
-import { NotFoundError } from "../domain/errors.js";
+import { NotFoundError, ValidationError } from "../domain/errors.js";
 import {
   captureActiveRepoEpoch,
   isRepoEpochCurrent,
@@ -224,6 +224,49 @@ function extractJsonPath(obj: unknown, keyPath: string): unknown {
     }
   }
   return current;
+}
+
+function validateResponseArtifactReadMode(
+  contentKind: ResponseContentKind,
+  opts: ResponseArtifactReadOptions,
+): void {
+  const full = opts.full === true;
+  const structuralJson = opts.jsonPath !== undefined;
+  const raw = opts.raw === true;
+
+  if (contentKind === "json") {
+    const selectedModes = Number(full) + Number(structuralJson) + Number(raw);
+    if (selectedModes === 0) {
+      throw new ValidationError(
+        "JSON response artifacts require an explicit retrieval mode: use full:true for parsed JSON, jsonPath for a complete extracted JSON value, or raw:true for a byte excerpt that may be syntactically incomplete JSON.",
+      );
+    }
+    if (selectedModes > 1) {
+      throw new ValidationError(
+        "Choose exactly one JSON retrieval mode: full:true, jsonPath, or raw:true.",
+      );
+    }
+    if ((opts.offsetBytes ?? 0) > 0 && !raw) {
+      const selectedMode = full ? "full:true" : "jsonPath";
+      throw new ValidationError(
+        `offsetBytes is incompatible with ${selectedMode}; use offsetBytes only with raw:true for JSON artifacts.`,
+      );
+    }
+  } else if (structuralJson) {
+    throw new ValidationError(
+      "jsonPath is only supported for JSON response artifacts",
+    );
+  } else if (full && (opts.offsetBytes ?? 0) > 0) {
+    throw new ValidationError(
+      "offsetBytes is incompatible with full:true because full text retrieval returns the entire artifact.",
+    );
+  }
+
+  if ((opts.offset !== undefined || opts.limit !== undefined) && !structuralJson) {
+    throw new ValidationError(
+      "offset and limit are only supported with jsonPath array retrieval.",
+    );
+  }
 }
 
 function safeRepoId(repoId: string): string {
@@ -626,6 +669,9 @@ export async function readResponseArtifact(
     );
   }
 
+  // Validate the retrieval contract before reading or slicing the stored body.
+  validateResponseArtifactReadMode(metadata.contentKind, opts);
+
   const compressed = await readFile(contentPath(baseDir, opts.handle));
   let decompressed: Buffer;
   try {
@@ -646,9 +692,6 @@ export async function readResponseArtifact(
   }
 
   if (opts.jsonPath !== undefined) {
-    if (metadata.contentKind !== "json") {
-      throw new Error("jsonPath is only supported for JSON response artifacts");
-    }
     const parsed = JSON.parse(decompressed.toString("utf-8")) as unknown;
     const extractedContent = extractJsonPath(parsed, opts.jsonPath);
     if (extractedContent === undefined) {
