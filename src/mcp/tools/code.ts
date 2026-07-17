@@ -336,10 +336,20 @@ function buildPolicyNextBestAction(params: {
   }
 }
 
+type DeliveredCodeNeedWindowResponse = Extract<
+  CodeNeedWindowResponse,
+  { approved: true }
+>;
+type PendingCodeNeedWindowResponse = Omit<
+  DeliveredCodeNeedWindowResponse,
+  "contentKind" | "status"
+>;
+
 async function finalizeCodeNeedWindowResponse(
   request: ResolvedCodeNeedWindowRequest,
   context: ToolContext | undefined,
-  response: Extract<CodeNeedWindowResponse, { approved: true }>,
+  response: PendingCodeNeedWindowResponse,
+  contentKind: DeliveredCodeNeedWindowResponse["contentKind"],
   fileId: string,
 ): Promise<CodeNeedWindowResponse> {
   const responseWithStatus = {
@@ -347,6 +357,7 @@ async function finalizeCodeNeedWindowResponse(
     status: response.downgradedFrom
       ? ("downgraded" as const)
       : ("approvedRaw" as const),
+    contentKind,
   };
   const rawContext = { fileIds: [fileId] };
   let enriched = attachRawContext(responseWithStatus, rawContext);
@@ -684,7 +695,7 @@ export async function handleCodeNeedWindow(
               },
             }
           : undefined;
-        const response: CodeNeedWindowResponse = {
+        const response: PendingCodeNeedWindowResponse = {
           approved: true,
           symbolId: request.symbolId,
           file: file.relPath,
@@ -705,6 +716,7 @@ export async function handleCodeNeedWindow(
           request,
           context,
           response,
+          "hotPath",
           symbol.fileId,
         );
       }
@@ -766,7 +778,7 @@ export async function handleCodeNeedWindow(
         }
       : undefined;
 
-    const response: CodeNeedWindowResponse = {
+    const response: PendingCodeNeedWindowResponse = {
       approved: true,
       symbolId: request.symbolId,
       file: file.relPath,
@@ -798,6 +810,7 @@ export async function handleCodeNeedWindow(
       request,
       context,
       response,
+      "skeleton",
       symbol.fileId,
     );
   }
@@ -839,7 +852,7 @@ export async function handleCodeNeedWindow(
         }
       : undefined;
 
-    const response: CodeNeedWindowResponse = {
+    const response: PendingCodeNeedWindowResponse = {
       approved: true,
       symbolId: request.symbolId,
       file: file.relPath,
@@ -859,6 +872,7 @@ export async function handleCodeNeedWindow(
       request,
       context,
       response,
+      "hotPath",
       symbol.fileId,
     );
   }
@@ -1078,7 +1092,7 @@ export async function handleCodeNeedWindow(
         }
       : undefined;
 
-    const response: CodeNeedWindowResponse = {
+    const response: PendingCodeNeedWindowResponse = {
       approved: true,
       symbolId: request.symbolId,
       file: file.relPath,
@@ -1094,6 +1108,7 @@ export async function handleCodeNeedWindow(
       request,
       context,
       response,
+      "raw",
       symbol.fileId,
     );
   } else {

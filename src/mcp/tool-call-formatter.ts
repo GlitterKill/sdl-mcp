@@ -247,22 +247,35 @@ function fmtCodeNeedWindow(
   _args: Record<string, unknown>,
   result: Record<string, unknown>,
 ): string | null {
-  const approved = result.approved;
-  const downgradedFrom = str(result.downgradedFrom);
-  const status = approved
-    ? downgradedFrom === "raw-code"
-      ? "approved hot-path excerpt"
-      : "approved"
-    : "denied";
-  const downgraded = downgradedFrom
-    ? ` (raw window downgraded from ${downgradedFrom})`
-    : "";
-  const estimatedTokens = num(result.estimatedTokens);
-  if (!approved) {
-    const next = str(result.nextBestAction);
-    return `code.needWindow -> [${status}]${next ? `\n  Suggestion: ${next}` : ""}`;
+  const status = str(result.status);
+  if (status === "denied") {
+    return "code.needWindow -> Code access denied.";
   }
-  return `code.needWindow -> [${status}]${downgraded} ${rng(safeRange(result.range))}\n  (~${tok(estimatedTokens)} tokens)`;
+
+  const contentKind = str(result.contentKind);
+  const delivered =
+    contentKind === "raw"
+      ? "raw code"
+      : contentKind === "skeleton"
+        ? "skeleton"
+        : contentKind === "hotPath"
+          ? "hot path"
+          : "code";
+  const downgradedFrom = str(result.downgradedFrom);
+  const downgradeSource =
+    downgradedFrom === "raw-code"
+      ? "raw window"
+      : downgradedFrom === "skeleton"
+        ? "skeleton"
+        : downgradedFrom === "hotpath"
+          ? "hot path"
+          : undefined;
+  const downgradeSummary =
+    status === "downgraded" && downgradeSource
+      ? `; ${downgradeSource} was downgraded by policy`
+      : "";
+
+  return `code.needWindow -> Delivered ${delivered}${downgradeSummary}.`;
 }
 
 function fmtSliceBuild(

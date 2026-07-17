@@ -11,6 +11,8 @@
   },
   "expectedResponse": {
     "approved": "boolean",
+    "status": "string",
+    "contentKind": "string",
     "whyApproved": ["array"],
     "whyDenied": ["array"],
     "suggestedNextRequest": "object"

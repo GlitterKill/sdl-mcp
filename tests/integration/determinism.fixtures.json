@@ -69,6 +69,20 @@
       }
     },
     {
+      "tool": "sdl.code.needWindow",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "symbolRef": {
+          "name": "findById",
+          "file": "src/typescript/models.ts"
+        },
+        "reason": "Inspect deterministic repository lookup behavior",
+        "expectedLines": 5,
+        "maxTokens": 160,
+        "identifiersToFind": ["users"]
+      }
+    },
+    {
       "tool": "sdl.file.read",
       "args": {
         "repoId": "{REPO_ID}",
@@ -139,10 +153,6 @@
     {
       "tool": "sdl.delta.get",
       "reason": "Depends on version history created by index refreshes."
-    },
-    {
-      "tool": "sdl.code.needWindow",
-      "reason": "Governed raw-code access emits audit decisions rather than cache-stable context."
     },
     {
       "tool": "sdl.policy.set",

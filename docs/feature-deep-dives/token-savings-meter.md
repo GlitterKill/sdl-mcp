@@ -246,7 +246,7 @@ Alongside the savings meter, each tool call also sends a human-readable one-line
 | `symbol.search` | `symbol.search "parse" → 12 results` |
 | `symbol.getCard` | `symbol.getCard → parseConfig (function)` |
 | `code.getSkeleton` | `code.getSkeleton → .../server.ts` |
-| `code.needWindow` | `code.needWindow → [approved] L42-120 (~1.2k tokens)` |
+| `code.needWindow` | `code.needWindow -> Delivered skeleton; raw window was downgraded by policy.` |
 | `slice.build` | `slice.build → 24 cards (handle: a1b2c3d4...)` |
 | `workflow` | `workflow -> 5 steps (4 ok, 1 errors) ~2.5k tokens` |
 

@@ -1784,6 +1784,7 @@ export const CodeNeedWindowRequestSchema = CodeNeedWindowRequestObjectSchema
 const CodeWindowResponseApprovedSchema = z.object({
   approved: z.literal(true),
   status: z.enum(["approvedRaw", "downgraded"]).optional(),
+  contentKind: z.enum(["raw", "skeleton", "hotPath"]),
   repoId: z.string().optional(),
   symbolId: z.string(),
   file: z.string(),

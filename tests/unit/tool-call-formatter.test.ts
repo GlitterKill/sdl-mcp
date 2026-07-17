@@ -169,37 +169,57 @@ describe("formatToolCallForUser", () => {
 
   // --- code.needWindow ---
 
-  it("formats code.needWindow approved", () => {
+  it("summarizes delivered raw code without redundant approval details", () => {
     const result = formatToolCallForUser("sdl.code.needWindow", {}, {
       approved: true,
+      status: "approvedRaw",
+      contentKind: "raw",
+      whyApproved: ["matched requested identifier"],
       estimatedTokens: 800,
       range: { startLine: 1, endLine: 50 },
     });
-    assert.ok(result !== null);
-    assert.ok(result.includes("[approved]"));
-    assert.ok(result.includes("L1–50"));
+    assert.equal(result, "code.needWindow -> Delivered raw code.");
   });
 
-  it("formats code.needWindow denied with suggestion", () => {
+  it("summarizes denied code access without duplicating next-step prose", () => {
     const result = formatToolCallForUser("sdl.code.needWindow", {}, {
       approved: false,
+      status: "denied",
       nextBestAction: "Try sdl.code.getSkeleton first",
     });
-    assert.ok(result !== null);
-    assert.ok(result.includes("[denied]"));
-    assert.ok(result.includes("Suggestion:"));
-    assert.ok(result.includes("getSkeleton"));
+    assert.equal(result, "code.needWindow -> Code access denied.");
   });
 
-  it("formats code.needWindow with downgrade", () => {
+  it("summarizes skeleton downgrades from the delivery contract", () => {
     const result = formatToolCallForUser("sdl.code.needWindow", {}, {
       approved: true,
+      status: "downgraded",
+      contentKind: "skeleton",
       downgradedFrom: "raw-code",
+      whyApproved: ["policy downgrade"],
       estimatedTokens: 500,
       range: { startLine: 5, endLine: 40 },
+      downgradeGuidance: "Set policy.allowBreakGlass and retry.",
     });
-    assert.ok(result !== null);
-    assert.ok(result.includes("downgraded from raw-code"));
+    assert.equal(
+      result,
+      "code.needWindow -> Delivered skeleton; raw window was downgraded by policy.",
+    );
+  });
+
+  it("summarizes hot-path downgrades from the delivery contract", () => {
+    const result = formatToolCallForUser("sdl.code.needWindow", {}, {
+      approved: true,
+      status: "downgraded",
+      contentKind: "hotPath",
+      downgradedFrom: "raw-code",
+      estimatedTokens: 500,
+      downgradeGuidance: "Request a skeleton for broader context.",
+    });
+    assert.equal(
+      result,
+      "code.needWindow -> Delivered hot path; raw window was downgraded by policy.",
+    );
   });
 
   // --- slice.build ---

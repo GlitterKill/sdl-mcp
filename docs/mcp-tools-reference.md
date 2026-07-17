@@ -838,9 +838,9 @@ The `expectedLines` and `maxTokens` values are clamped to the effective policy l
 
 Approval can proceed when one or more requested identifiers match the candidate window. Prefer a short list of precise identifiers instead of long all-or-nothing lists.
 
-**Response (approved):** `{ approved: true, symbolId, file, range, code, whyApproved, estimatedTokens, downgradedFrom?, matchedIdentifiers?, matchedLineNumbers?, truncation? }`. When `downgradedFrom` is present, the request was allowed but delivered a smaller representation such as a hot-path excerpt rather than the raw window.
+**Response (approved):** `{ approved: true, status, contentKind, symbolId, file, range, code, whyApproved, estimatedTokens, downgradedFrom?, matchedIdentifiers?, matchedLineNumbers?, truncation? }`. `contentKind` is `raw`, `skeleton`, or `hotPath`, so clients can identify the delivered representation without changing the established `approved` discriminant. When `downgradedFrom` is present, `status` is `downgraded`; otherwise raw delivery uses `approvedRaw`.
 
-**Response (denied):** `{ approved: false, whyDenied, suggestedNextRequest?, nextBestAction? }`
+**Response (denied):** `{ approved: false, status: "denied", whyDenied, suggestedNextRequest?, nextBestAction? }`
 
 When denied, `nextBestAction` suggests an alternative tool and args to try instead.
 

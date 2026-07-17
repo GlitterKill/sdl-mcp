@@ -191,6 +191,7 @@ describe("code.needWindow policy remediation", () => {
 
     assert.equal(response.approved, false);
     assert.equal(response.status, "denied");
+    assert.equal("contentKind" in response, false);
     if (response.approved) throw new Error("Expected denial response");
     assert.deepStrictEqual(response.whyDenied, [
       "Raw code access denied by custom policy",
@@ -208,20 +209,26 @@ describe("code.needWindow policy remediation", () => {
     });
   });
 
-  it("resolves symbolRef targets for raw code windows", async () => {
-    const response = await handleCodeNeedWindow({
+  it("returns byte-identical raw delivery contracts for repeated calls", async () => {
+    const request = {
       repoId: "repo-test",
       symbolRef: { name: "demoWindow", file: "src/example.ts" },
       reason: "inspect important flag handling",
       expectedLines: 20,
       maxTokens: 120,
       identifiersToFind: ["importantFlag"],
-    });
+    };
+    const first = await handleCodeNeedWindow(request);
+    const second = await handleCodeNeedWindow(request);
 
-    assert.equal(response.approved, true);
-    if (!response.approved) throw new Error("Expected approved response");
-    assert.equal(response.symbolId, "sym-demo");
-    assert.match(response.code, /importantFlag/);
+    assert.equal(first.approved, true);
+    if (!first.approved) throw new Error("Expected approved response");
+    assert.equal(first.status, "approvedRaw");
+    assert.equal(first.contentKind, "raw");
+    assert.equal(first.downgradedFrom, undefined);
+    assert.equal(first.symbolId, "sym-demo");
+    assert.match(first.code, /importantFlag/);
+    assert.equal(JSON.stringify(first), JSON.stringify(second));
   });
 
   it("resolves stringified symbolRef targets for raw code windows", async () => {
@@ -387,6 +394,9 @@ describe("code.needWindow policy remediation", () => {
 
     assert.equal(response.approved, true);
     if (!response.approved) throw new Error("Expected skeleton downgrade");
+    assert.equal(response.status, "downgraded");
+    assert.equal(response.contentKind, "skeleton");
+    assert.equal(response.downgradedFrom, "raw-code");
     assert.deepStrictEqual(response.range, {
       startLine: 1,
       startCol: 0,
@@ -398,6 +408,33 @@ describe("code.needWindow policy remediation", () => {
       value: 1,
       parameter: "skeletonOffset",
     });
+  });
+
+  it("labels hot-path policy downgrades as delivered hot-path content", async () => {
+    PolicyEngine.prototype.evaluate = function () {
+      return {
+        decision: "downgrade-to-hotpath",
+        evidenceUsed: [],
+        auditHash: "audit-hotpath-kind",
+        deniedReasons: ["Use targeted context first"],
+      };
+    };
+
+    const response = await handleCodeNeedWindow({
+      repoId: "repo-test",
+      symbolId: "sym-demo",
+      reason: "inspect the important flag branch",
+      expectedLines: 20,
+      maxTokens: 120,
+      identifiersToFind: ["importantFlag"],
+    });
+
+    assert.equal(response.approved, true);
+    if (!response.approved) throw new Error("Expected hot-path downgrade");
+    assert.equal(response.status, "downgraded");
+    assert.equal(response.contentKind, "hotPath");
+    assert.equal(response.downgradedFrom, "raw-code");
+    assert.match(response.code, /importantFlag/);
   });
 
   it("requestRaw NBA rebuilds needWindow args from requiredFieldsForNext", async () => {
