@@ -31,6 +31,31 @@ export interface OverlaySnapshot {
   outgoingEdgesBySymbolId: Map<string, EdgeForSlice[]>;
 }
 
+export type OverlaySymbolReadQueries = Pick<
+  typeof ladybugDb,
+  "getSymbolsByIds" | "getFilesByIds"
+>;
+
+export type OverlaySymbolResolution =
+  | {
+      status: "resolved";
+      symbolId: string;
+      source: "durable" | "overlay";
+      symbol: SymbolRow;
+      file?: FileRow;
+    }
+  | {
+      status: "missing";
+      symbolId: string;
+      reason: "not_found" | "shadowed" | "repo_mismatch";
+      actualRepoId?: string;
+    };
+
+export interface OverlaySymbolBatchResolution {
+  snapshot: OverlaySnapshot;
+  items: OverlaySymbolResolution[];
+}
+
 function toEdgeForSlice(edge: {
   fromSymbolId: string;
   toSymbolId: string;
@@ -150,6 +175,100 @@ export async function getShadowedDurableSymbol(
   }
 
   return snapshot.symbolsById.get(symbolId) ? durableSymbol : null;
+}
+
+/**
+ * Resolve a batch against one captured overlay view and one durable batch read.
+ * The ordered item list deliberately retains duplicates so callers can preserve
+ * request ordering while deciding whether individual misses are fatal.
+ */
+export async function resolveSymbolsWithOverlay(
+  conn: Connection,
+  repoId: string,
+  symbolIds: string[],
+  options: {
+    snapshot?: OverlaySnapshot;
+    queries?: OverlaySymbolReadQueries;
+  } = {},
+): Promise<OverlaySymbolBatchResolution> {
+  const snapshot = options.snapshot ?? getOverlaySnapshot(repoId);
+  const queries = options.queries ?? ladybugDb;
+  const uniqueSymbolIds = [...new Set(symbolIds)];
+
+  // With no active draft, stay on the existing durable-only batch path.
+  const hasOverlay =
+    snapshot.touchedFileIds.size > 0 || snapshot.symbolsById.size > 0;
+  const overlayResolvedIds = new Set<string>();
+  if (hasOverlay) {
+    for (const symbolId of uniqueSymbolIds) {
+      const symbol = snapshot.symbolsById.get(symbolId);
+      const file = symbol ? snapshot.filesById.get(symbol.fileId) : undefined;
+      if (symbol?.repoId === repoId && file) {
+        overlayResolvedIds.add(symbolId);
+      }
+    }
+  }
+
+  const durableIds = hasOverlay
+    ? uniqueSymbolIds.filter((symbolId) => !overlayResolvedIds.has(symbolId))
+    : uniqueSymbolIds;
+  const durableSymbols =
+    durableIds.length > 0
+      ? await queries.getSymbolsByIds(conn, durableIds)
+      : new Map<string, SymbolRow>();
+  const durableFileIds = [
+    ...new Set(
+      [...durableSymbols.values()]
+        .filter(
+          (symbol) =>
+            symbol.repoId === repoId &&
+            !snapshot.touchedFileIds.has(symbol.fileId),
+        )
+        .map((symbol) => symbol.fileId),
+    ),
+  ];
+  const durableFiles =
+    durableFileIds.length > 0
+      ? await queries.getFilesByIds(conn, durableFileIds)
+      : new Map<string, FileRow>();
+
+  const items = symbolIds.map((symbolId): OverlaySymbolResolution => {
+    if (overlayResolvedIds.has(symbolId)) {
+      const symbol = snapshot.symbolsById.get(symbolId)!;
+      return {
+        status: "resolved",
+        symbolId,
+        source: "overlay",
+        symbol,
+        file: snapshot.filesById.get(symbol.fileId),
+      };
+    }
+
+    const durable = durableSymbols.get(symbolId);
+    if (!durable) {
+      return { status: "missing", symbolId, reason: "not_found" };
+    }
+    if (durable.repoId !== repoId) {
+      return {
+        status: "missing",
+        symbolId,
+        reason: "repo_mismatch",
+        actualRepoId: durable.repoId,
+      };
+    }
+    if (snapshot.touchedFileIds.has(durable.fileId)) {
+      return { status: "missing", symbolId, reason: "shadowed" };
+    }
+    return {
+      status: "resolved",
+      symbolId,
+      source: "durable",
+      symbol: durable,
+      file: durableFiles.get(durable.fileId),
+    };
+  });
+
+  return { snapshot, items };
 }
 
 function buildOverlaySearchTerms(query: string): string[] {

@@ -40,6 +40,7 @@ import {
   getOverlaySymbol,
   getShadowedDurableSymbol,
   getTargetNamesWithOverlay,
+  type OverlaySnapshot,
 } from "../live-index/overlay-reader.js";
 import { logger } from "../util/logger.js";
 import { safeJsonParse, StringArraySchema } from "../util/safeJson.js";
@@ -65,6 +66,8 @@ function etagMatches(
 export interface BuildCardOptions {
   minCallConfidence?: number;
   includeResolutionMetadata?: boolean;
+  /** Reuse a caller-captured live view across batch selection and hydration. */
+  overlaySnapshot?: OverlaySnapshot;
   /**
    * When false or undefined at the MCP layer, omit the per-card `processes`
    * array. Internal callers pass undefined and still get processes (default
@@ -97,13 +100,13 @@ async function buildOverlayCardForSymbol(
   conn: Awaited<ReturnType<typeof getLadybugConn>>,
   repoId: string,
   symbolId: string,
+  overlaySnapshot: OverlaySnapshot,
   ifNoneMatch: string | undefined,
   effectiveMinCallConfidence: number | undefined,
   includeResolutionMetadata: boolean | undefined,
   includeProcesses: boolean | undefined,
 ) {
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
-  const overlaySnapshot = getOverlaySnapshot(repoId);
   const overlay = getOverlaySymbol(overlaySnapshot, symbolId);
   if (!overlay) {
     return null;
@@ -325,17 +328,19 @@ export async function buildCardForSymbol(
   const effectiveMinCallConfidence = getEffectiveMinCallConfidence(
     options.minCallConfidence,
   );
+  const overlaySnapshot = options.overlaySnapshot ?? getOverlaySnapshot(repoId);
   const useCache =
     cacheEnabled &&
+    overlaySnapshot.touchedFileIds.size === 0 &&
     effectiveMinCallConfidence === undefined &&
     !options.includeResolutionMetadata;
 
   const conn = await getLadybugConn();
-  const overlaySnapshot = getOverlaySnapshot(repoId);
   const overlayCard = await buildOverlayCardForSymbol(
     conn,
     repoId,
     symbolId,
+    overlaySnapshot,
     ifNoneMatch,
     effectiveMinCallConfidence,
     options.includeResolutionMetadata,

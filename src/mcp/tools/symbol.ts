@@ -29,6 +29,7 @@ import { compactCardForWire } from "./symbol-utils.js";
 import { sessionContentLedger } from "../session-dedupe.js";
 import { hashContent } from "../../util/hashing.js";
 import {
+  resolveSymbolsWithOverlay,
   searchSymbolsWithOverlay,
   searchSymbolsHybridWithOverlay,
 } from "../../live-index/overlay-reader.js";
@@ -908,13 +909,18 @@ async function buildCardsForSymbolIds(
     );
   }
 
-  const symbolMap = await ladybugDb.getSymbolsByIds(conn, input.symbolIds);
-  for (const symbolId of input.symbolIds) {
-    const symbol =
-      symbolMap.get(symbolId) ?? (await ladybugDb.getSymbol(conn, symbolId));
-    if (symbol && symbol.repoId !== input.repoId) {
+  const resolved = await resolveSymbolsWithOverlay(
+    conn,
+    input.repoId,
+    input.symbolIds,
+  );
+  const symbolMap = new Map<string, ladybugDb.SymbolRow>();
+  for (const item of resolved.items) {
+    if (item.status === "resolved") {
+      symbolMap.set(item.symbolId, item.symbol);
+    } else if (item.reason === "repo_mismatch") {
       throw new DatabaseError(
-        `Symbol ${symbolId} belongs to repo "${symbol.repoId}", not "${input.repoId}"`,
+        `Symbol ${item.symbolId} belongs to repo "${item.actualRepoId}", not "${input.repoId}"`,
       );
     }
   }
@@ -922,13 +928,21 @@ async function buildCardsForSymbolIds(
   const cards: Awaited<ReturnType<typeof buildCardForSymbol>>[] = [];
   const succeeded: string[] = [];
   const failures: SymbolResolutionFailure[] = [];
-  for (const id of input.symbolIds) {
+  for (const item of resolved.items) {
+    const id = item.symbolId;
     try {
+      if (item.status === "missing") {
+        throw Object.assign(
+          new NotFoundError(`Symbol not found: ${id}`),
+          createSymbolSearchFallback(),
+        );
+      }
       cards.push(
         await buildCardForSymbol(input.repoId, id, input.knownEtags?.[id], {
           minCallConfidence: input.minCallConfidence,
           includeResolutionMetadata: input.includeResolutionMetadata,
           includeProcesses: input.includeProcesses === true,
+          overlaySnapshot: resolved.snapshot,
         }),
       );
       succeeded.push(id);

@@ -537,14 +537,8 @@ describe("Executor focus selection", () => {
   });
 
   it("resolves opaque file IDs before enforcing explicit focus paths", async () => {
-    const sourceSymbol = {
-      ...createExecutorSymbol("src-symbol", "opaque-src-file"),
-      repoId: "org:repo",
-    };
-    const testSymbol = {
-      ...createExecutorSymbol("test-symbol", "opaque-test-file"),
-      repoId: "org:repo",
-    };
+    const sourceSymbol = createExecutorSymbol("src-symbol", "opaque-src-file");
+    const testSymbol = createExecutorSymbol("test-symbol", "opaque-test-file");
     const symbolMap = new Map([
       ["src-symbol", sourceSymbol],
       ["test-symbol", testSymbol],

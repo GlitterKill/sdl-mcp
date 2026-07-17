@@ -49,6 +49,12 @@ import { isHybridRetrievalAvailable } from "../retrieval/fallback.js";
 import { hybridSearch } from "../retrieval/orchestrator.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import {
+  getOverlaySnapshot,
+  resolveSymbolsWithOverlay,
+  type OverlaySnapshot,
+  type OverlaySymbolBatchResolution,
+} from "../live-index/overlay-reader.js";
+import {
   rankSymbols,
   applyAdaptiveCutoff,
   explicitFocusPaths,
@@ -193,6 +199,7 @@ export class Executor {
   private gateEvaluator: GateEvaluator;
   private connPromise: ReturnType<typeof getLadybugConn> | null = null;
   private dbQueries: ExecutorDbQueries;
+  private overlaySnapshots = new Map<string, OverlaySnapshot>();
 
   private cardCache = new Set<string>();
 
@@ -221,6 +228,21 @@ export class Executor {
     return this.connPromise;
   }
 
+  private async resolveVisibleSymbols(
+    repoId: string,
+    symbolIds: string[],
+  ): Promise<OverlaySymbolBatchResolution> {
+    let snapshot = this.overlaySnapshots.get(repoId);
+    if (!snapshot) {
+      snapshot = getOverlaySnapshot(repoId);
+      this.overlaySnapshots.set(repoId, snapshot);
+    }
+    return resolveSymbolsWithOverlay(await this.getConn(), repoId, symbolIds, {
+      snapshot,
+      queries: this.dbQueries,
+    });
+  }
+
   async execute(
     task: AgentTask,
     rungs: RungType[],
@@ -232,6 +254,7 @@ export class Executor {
     success: boolean;
   }> {
     this.startTime = Date.now();
+    this.overlaySnapshots.clear();
     const mutableRungs = [...rungs];
     let escalationCount = 0;
 
@@ -630,25 +653,15 @@ export class Executor {
     seedCandidates: ContextSeedCandidate[] = [],
     feedbackBoosts?: Map<string, number>,
   ): Promise<string[]> {
-    const conn = symbolIds.length > 0 ? await this.getConn() : undefined;
-    const storedSymbols: Map<string, SymbolRow> = conn
-      ? await this.dbQueries.getSymbolsByIds(conn, symbolIds)
-      : new Map();
-    let symbolMap = storedSymbols;
-    if (conn && storedSymbols.size > 0) {
-      const files = await this.dbQueries.getFilesByIds(conn, [
-        ...new Set([...storedSymbols.values()].map((symbol) => symbol.fileId)),
-      ]);
-      // Persisted file IDs are opaque hashes. Clone only the ranking view so
-      // path affinity and explicit-scope finalization receive repo-relative paths.
-      symbolMap = new Map(
-        [...storedSymbols].map(([symbolId, symbol]) => {
-          const file = files.get(symbol.fileId);
-          return [
-            symbolId,
-            file ? { ...symbol, fileId: file.relPath } : symbol,
-          ];
-        }),
+    const resolved = await this.resolveVisibleSymbols(task.repoId, symbolIds);
+    // Persisted file IDs are opaque hashes. Clone only the ranking view so
+    // path affinity and explicit-scope finalization receive repo-relative paths.
+    const symbolMap = new Map<string, SymbolRow>();
+    for (const item of resolved.items) {
+      if (item.status !== "resolved") continue;
+      symbolMap.set(
+        item.symbolId,
+        item.file ? { ...item.symbol, fileId: item.file.relPath } : item.symbol,
       );
     }
 
@@ -1038,6 +1051,7 @@ export class Executor {
       const strictExplicitPathScope =
         task.options?.contextMode === "precise" &&
         explicitFocusPaths(task.options).length > 0;
+      let processedSymbolCount = 0;
 
       // Fallback: identifier-based search with per-term resolution
       if (
@@ -1189,20 +1203,29 @@ export class Executor {
           this.evidenceCapture.captureSearchResult(task.taskText, 0);
         }
       } else {
-        // Fetch real symbol data from DB
         const conn = await this.getConn();
-        const symbolMap = await this.dbQueries.getSymbolsByIds(conn, allSymbols);
+        const resolved = await this.resolveVisibleSymbols(
+          task.repoId,
+          allSymbols,
+        );
+        const resolvedItems = resolved.items.filter(
+          (item) => item.status === "resolved",
+        );
+        const resolvedSymbolIds = resolvedItems.map((item) => item.symbolId);
+        const symbolMap = new Map(
+          resolvedItems.map((item) => [item.symbolId, item.symbol]),
+        );
+        const fileBySymbolId = new Map(
+          resolvedItems.map((item) => [item.symbolId, item.file]),
+        );
+        processedSymbolCount = resolvedSymbolIds.length;
         let outlineSymbols = [...symbolMap.values()];
         if (task.options?.semantic === true) {
-          const fileIds = [
-            ...new Set(outlineSymbols.map(({ fileId }) => fileId).filter(Boolean)),
-          ];
-          const files = await this.dbQueries.getFilesByIds(conn, fileIds);
           // Persisted file IDs are opaque. Repository paths plus source ranges
           // provide a stable outline order without changing omitted/false mode.
           outlineSymbols = outlineSymbols.sort((a, b) => {
-            const aPath = files.get(a.fileId)?.relPath ?? a.fileId;
-            const bPath = files.get(b.fileId)?.relPath ?? b.fileId;
+            const aPath = fileBySymbolId.get(a.symbolId)?.relPath ?? a.fileId;
+            const bPath = fileBySymbolId.get(b.symbolId)?.relPath ?? b.fileId;
             return (
               aPath.localeCompare(bPath) ||
               a.rangeStartLine - b.rangeStartLine ||
@@ -1219,7 +1242,7 @@ export class Executor {
         const surfacedSemanticOutlines = new Set<string>();
 
         // Iterate in ranked order to preserve relevance in evidence
-        for (const symbolId of allSymbols) {
+        for (const symbolId of resolvedSymbolIds) {
           const sym = symbolMap.get(symbolId);
           if (!sym) continue;
           // Track cache hits for repeated symbol lookups
@@ -1228,10 +1251,7 @@ export class Executor {
           } else {
             this.cardCache.add(sym.symbolId);
           }
-          // Extract relPath from fileId (format: "repoId:relPath")
-          const relPath = sym.fileId?.includes(":")
-            ? sym.fileId.slice(sym.fileId.indexOf(":") + 1)
-            : undefined;
+          const relPath = fileBySymbolId.get(symbolId)?.relPath;
           const parts: string[] = [`${sym.kind} ${sym.name}`];
           if (relPath) parts.push(relPath);
           const fileAlias = this.fileAliasForPath(relPath);
@@ -1271,9 +1291,9 @@ export class Executor {
       const action: Action = {
         id: actionId,
         type: "getCard",
-        status: allSymbols.length > 0 ? "completed" : "failed",
+        status: processedSymbolCount > 0 ? "completed" : "failed",
         input: { context },
-        output: { cardsProcessed: allSymbols.length },
+        output: { cardsProcessed: processedSymbolCount },
         timestamp: startTime,
         durationMs: Date.now() - startTime,
         evidence: [
@@ -1282,7 +1302,7 @@ export class Executor {
         ],
       };
       this.actions.push(action);
-      if (allSymbols.length > 0) {
+      if (processedSymbolCount > 0) {
         this.metrics.successfulActions++;
       } else {
         this.metrics.failedActions++;
@@ -1329,16 +1349,23 @@ export class Executor {
 
       let processedCount = 0;
       const hydrateEvidencePrefixes = this.shouldHydrateEvidencePrefixes(task);
-      const conn =
-        hydrateEvidencePrefixes && symbolIds.length > 0
-          ? await this.getConn()
-          : undefined;
-      const symbolMap = conn
-        ? await this.dbQueries.getSymbolsByIds(conn, symbolIds)
-        : new Map();
+      const resolved = await this.resolveVisibleSymbols(task.repoId, symbolIds);
+      const visibleItems = resolved.items.filter(
+        (item) => item.status === "resolved",
+      );
+      const symbolMap = hydrateEvidencePrefixes
+        ? new Map(
+            visibleItems.map((item) => [
+              item.symbolId,
+              item.file
+                ? { ...item.symbol, fileId: item.file.relPath }
+                : item.symbol,
+            ]),
+          )
+        : new Map<string, SymbolRow>();
 
       // Generate skeletons for symbol IDs (skip degenerate < 10 tokens)
-      for (const symbolId of symbolIds) {
+      for (const { symbolId } of visibleItems) {
         try {
           const result = await generateSkeletonIR(task.repoId, symbolId, {});
           if (result && result.estimatedTokens >= 10) {
@@ -1447,15 +1474,22 @@ export class Executor {
 
       let processedCount = 0;
       const hydrateEvidencePrefixes = this.shouldHydrateEvidencePrefixes(task);
-      const conn =
-        hydrateEvidencePrefixes && symbols.length > 0
-          ? await this.getConn()
-          : undefined;
-      const symbolMap = conn
-        ? await this.dbQueries.getSymbolsByIds(conn, symbols)
-        : new Map();
+      const resolved = await this.resolveVisibleSymbols(task.repoId, symbols);
+      const visibleItems = resolved.items.filter(
+        (item) => item.status === "resolved",
+      );
+      const symbolMap = hydrateEvidencePrefixes
+        ? new Map(
+            visibleItems.map((item) => [
+              item.symbolId,
+              item.file
+                ? { ...item.symbol, fileId: item.file.relPath }
+                : item.symbol,
+            ]),
+          )
+        : new Map<string, SymbolRow>();
 
-      for (const symbolId of symbols) {
+      for (const { symbolId } of visibleItems) {
         try {
           const result = await extractHotPath(
             task.repoId,
@@ -1743,6 +1777,7 @@ export class Executor {
     };
     this.startTime = 0;
     this.policyDecisions.clear();
+    this.overlaySnapshots.clear();
     // connPromise references a shared pool connection from getLadybugConn();
     // dropping the reference is safe — the pool manages connection lifecycle.
     this.connPromise = null;
