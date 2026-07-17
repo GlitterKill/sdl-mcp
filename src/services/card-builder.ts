@@ -22,7 +22,7 @@ import { symbolCardCache } from "../graph/cache.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { pickDepLabel } from "../util/depLabels.js";
 import { hashCard } from "../util/hashing.js";
-import { DatabaseError } from "../domain/errors.js";
+import { DatabaseError, NotFoundError } from "../domain/errors.js";
 import { createPolicyDenial } from "../mcp/errors.js";
 import {
   decideCodeAccess,
@@ -377,7 +377,11 @@ export async function buildCardForSymbol(
     overlaySnapshot,
   );
   if (!symbol) {
-    throw new DatabaseError(`Symbol not found: ${symbolId}`);
+    throw Object.assign(new NotFoundError(`Symbol not found: ${symbolId}`), {
+      fallbackTools: ["sdl.symbol.search", "sdl.action.search"],
+      fallbackRationale:
+        "Use sdl.symbol.search to discover the canonical symbol identifier.",
+    });
   }
   if (symbol.repoId !== repoId) {
     throw new DatabaseError(

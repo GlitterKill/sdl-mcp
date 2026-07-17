@@ -14,12 +14,16 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { buildCardForSymbol } from "../../dist/services/card-builder.js";
-import { DatabaseError } from "../../dist/domain/errors.js";
+import { NotFoundError } from "../../dist/domain/errors.js";
 import { PolicyEngine } from "../../dist/policy/engine.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEST_DB_PATH = join(tmpdir(), ".lbug-card-builder-unit-test-db.lbug");
+const TEST_DB_PATH = join(
+  tmpdir(),
+  `.lbug-card-builder-unit-test-db-${process.pid}.lbug`,
+);
+const ORIGINAL_GRAPH_DB_PATH = process.env.SDL_GRAPH_DB_PATH;
 
 async function resetDb(): Promise<void> {
   clearAllCaches();
@@ -93,14 +97,27 @@ async function seedSymbol(params: {
 describe("card-builder", () => {
   before(async () => {
     process.env.SDL_MCP_DISABLE_NATIVE_ADDON = "1";
+    process.env.SDL_GRAPH_DB_PATH = TEST_DB_PATH;
   });
 
   after(async () => {
     clearAllCaches();
     clearSnapshotCache();
     await closeLadybugDb();
-    if (existsSync(TEST_DB_PATH)) {
-      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    for (const path of [
+      TEST_DB_PATH,
+      `${TEST_DB_PATH}.wal`,
+      `${TEST_DB_PATH}.shadow`,
+      `${TEST_DB_PATH}.lock`,
+    ]) {
+      if (existsSync(path)) {
+        rmSync(path, { recursive: true, force: true });
+      }
+    }
+    if (ORIGINAL_GRAPH_DB_PATH === undefined) {
+      delete process.env.SDL_GRAPH_DB_PATH;
+    } else {
+      process.env.SDL_GRAPH_DB_PATH = ORIGINAL_GRAPH_DB_PATH;
     }
   });
 
@@ -125,14 +142,15 @@ describe("card-builder", () => {
     assert.equal(typeof card.etag, "string");
   });
 
-  it("throws DatabaseError when symbol does not exist", async () => {
+  it("throws NotFoundError when symbol does not exist", async () => {
     await resetDb();
     await seedRepoAndFile("repo-a", "file-a");
 
     await assert.rejects(
       () => buildCardForSymbol("repo-a", "missing-symbol", undefined),
       (error: unknown) => {
-        assert.ok(error instanceof DatabaseError);
+        assert.ok(error instanceof NotFoundError);
+        assert.equal(error.code, "NOT_FOUND");
         assert.match(
           (error as Error).message,
           /Symbol not found: missing-symbol/,
