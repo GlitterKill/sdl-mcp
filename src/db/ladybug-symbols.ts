@@ -1491,6 +1491,7 @@ export async function getSymbolsByFile(
     packageName: string | null;
     packageVersion: string | null;
     scipSymbol: string | null;
+    source: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -1520,6 +1521,7 @@ export async function getSymbolsByFile(
             s.packageName AS packageName,
             s.packageVersion AS packageVersion,
             s.scipSymbol AS scipSymbol,
+            s.source AS source,
             s.updatedAt AS updatedAt`,
     { fileId },
   );
@@ -1550,6 +1552,7 @@ export async function getSymbolsByFile(
     packageName: row.packageName,
     packageVersion: row.packageVersion,
     scipSymbol: row.scipSymbol,
+    source: row.source,
     updatedAt: row.updatedAt,
   }));
 }

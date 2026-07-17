@@ -17,8 +17,16 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { enforceCodeWindow } from "../../dist/code/enforce.js";
-import { handleCodeNeedWindow } from "../../dist/mcp/tools/code.js";
+import {
+  handleCodeNeedWindow,
+  handleGetHotPath,
+} from "../../dist/mcp/tools/code.js";
 import { handleResponseGet } from "../../dist/mcp/tools/response.js";
+import {
+  GetHotPathRequestSchema,
+  GetHotPathResponseSchema,
+} from "../../dist/mcp/tools.js";
+import { zodSchemaToJsonSchema } from "../../dist/gateway/compact-schema.js";
 import { PolicyEngine } from "../../dist/policy/engine.js";
 
 describe("code.needWindow policy remediation", () => {
@@ -28,6 +36,21 @@ describe("code.needWindow policy remediation", () => {
   let originalSDLConfigPath: string | undefined;
   let originalEvaluate: typeof PolicyEngine.prototype.evaluate;
   let originalGenerateNextBestAction: typeof PolicyEngine.prototype.generateNextBestAction;
+  const largeExampleLines = [
+    "export class LargeExample {",
+    "  registerToolFactory() { return true; }",
+    ...Array.from({ length: 24 }, (_, index) =>
+      `  filler${index}() { return ${index}; }`,
+    ),
+    "  registerTool() {",
+    "    return true;",
+    "  }",
+    ...Array.from({ length: 12 }, (_, index) =>
+      `  trailing${index}() { return ${index}; }`,
+    ),
+    "  tailAnchor() { return true; }",
+    "}",
+  ];
 
   before(async () => {
     tempDir = mkdtempSync(
@@ -43,6 +66,10 @@ describe("code.needWindow policy remediation", () => {
         "}",
         "",
       ].join("\n"),
+    );
+    writeFileSync(
+      join(tempDir, "src", "large-example.ts"),
+      largeExampleLines.join("\n"),
     );
 
     const configPath = join(tempDir, "sdlmcp.config.json");
@@ -119,6 +146,36 @@ describe("code.needWindow policy remediation", () => {
       astFingerprint: "fp-demo-window",
       signatureJson: JSON.stringify({ name: "demoWindow", params: [] }),
       summary: "Demo code window target",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: now,
+    });
+
+    await ladybugDb.upsertFile(conn, {
+      fileId: "file-large-example",
+      repoId: "repo-test",
+      relPath: "src/large-example.ts",
+      contentHash: "hash-file-large-example",
+      language: "ts",
+      byteSize: largeExampleLines.join("\n").length,
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertSymbol(conn, {
+      symbolId: "sym-large-example",
+      repoId: "repo-test",
+      fileId: "file-large-example",
+      kind: "class",
+      name: "LargeExample",
+      exported: true,
+      visibility: "public",
+      language: "ts",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: largeExampleLines.length,
+      rangeEndCol: 1,
+      astFingerprint: "fp-large-example",
+      signatureJson: JSON.stringify({ name: "LargeExample" }),
+      summary: "Large code window target",
       invariantsJson: null,
       sideEffectsJson: null,
       updatedAt: now,
@@ -785,5 +842,67 @@ describe("code.needWindow policy remediation", () => {
       response.whyDenied.includes("Identifiers not found in code window"),
       `Expected identifier-miss denial, got: ${response.whyDenied.join(", ")}`,
     );
+  });
+
+  it("anchors block windows on a late exact identifier while preserving cursor continuation", async () => {
+    const anchored = await handleCodeNeedWindow({
+      repoId: "repo-test",
+      symbolId: "sym-large-example",
+      reason: "inspect registerTool implementation",
+      expectedLines: 8,
+      maxTokens: 500,
+      identifiersToFind: ["registerTool"],
+      granularity: "block",
+    });
+
+    assert.equal(anchored.approved, true);
+    if (!anchored.approved) throw new Error("Expected approved response");
+    assert.ok(anchored.code.includes("registerTool()"));
+    assert.equal(anchored.code.includes("registerToolFactory"), false);
+
+    const continued = await handleCodeNeedWindow({
+      repoId: "repo-test",
+      symbolId: "sym-large-example",
+      reason: "continue after registerTool implementation",
+      expectedLines: 8,
+      maxTokens: 500,
+      identifiersToFind: ["registerTool", "tailAnchor"],
+      granularity: "block",
+      cursor: largeExampleLines.length - 8,
+    });
+
+    assert.equal(continued.approved, true);
+    if (!continued.approved) throw new Error("Expected approved continuation");
+    assert.ok(continued.code.includes("tailAnchor"));
+    assert.equal(continued.code.includes("registerTool()"), false);
+  });
+
+  it("documents hot-path identifiers and guides keyword misses to skeleton", async () => {
+    const requestJsonSchema = zodSchemaToJsonSchema(
+      GetHotPathRequestSchema,
+    ) as {
+      properties?: Record<string, { description?: string }>;
+    };
+    const identifierDescription =
+      requestJsonSchema.properties?.identifiersToFind?.description ?? "";
+    assert.match(identifierDescription, /AST identifier names/i);
+    assert.match(identifierDescription, /keywords|arbitrary text/i);
+
+    const response = await handleGetHotPath({
+      repoId: "repo-test",
+      symbolId: "sym-demo",
+      identifiersToFind: ["return"],
+    }) as Record<string, unknown>;
+
+    assert.deepStrictEqual(response.missedIdentifiers, ["return"]);
+    const missedIdentifierHint = String(response.missedIdentifierHint ?? "");
+    assert.match(missedIdentifierHint, /keyword/i);
+    assert.match(missedIdentifierHint, /sdl\.code\.getSkeleton/);
+
+    const parsed = GetHotPathResponseSchema.parse(response) as Record<
+      string,
+      unknown
+    >;
+    assert.equal(parsed.missedIdentifierHint, missedIdentifierHint);
   });
 });

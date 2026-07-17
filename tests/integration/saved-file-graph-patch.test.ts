@@ -12,7 +12,13 @@ import { tmpdir } from "node:os";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
-import { indexRepo } from "../../dist/indexer/indexer.js";
+import {
+  capturePersistedGraphIntegrity,
+} from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
+import {
+  getDerivedState,
+  markGraphIntegrityVerified,
+} from "../../dist/db/ladybug-derived-state.js";
 import { handleBufferPush } from "../../dist/mcp/tools/buffer.js";
 import {
   resetDefaultLiveIndexCoordinator,
@@ -24,6 +30,7 @@ describe("saved file graph patch", () => {
   const dbPath = join(tmpdir(), ".lbug-saved-file-graph-patch-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-saved-file-patch-${Date.now()}.json`);
   let repoDir = "";
+  let baselineDigest = "";
   const prevConfig = process.env.SDL_CONFIG;
   const prevConfigPath = process.env.SDL_CONFIG_PATH;
 
@@ -73,7 +80,51 @@ describe("saved file graph patch", () => {
       }),
       createdAt: now,
     });
-    await indexRepo(repoId, "full");
+    await ladybugDb.upsertFile(conn, {
+      fileId: `${repoId}:src/example.ts`,
+      repoId,
+      relPath: "src/example.ts",
+      contentHash: "baseline-content-hash",
+      language: "typescript",
+      byteSize: 108,
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertSymbolBatch(conn, [
+      {
+        symbolId: "scip-alpha",
+        repoId,
+        fileId: `${repoId}:src/example.ts`,
+        kind: "function",
+        name: "alpha",
+        exported: true,
+        visibility: "public",
+        language: "typescript",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 3,
+        rangeEndCol: 1,
+        astFingerprint: "baseline-alpha",
+        signatureJson: JSON.stringify({ name: "alpha" }),
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        source: "scip",
+        scipSymbol: "scip-alpha",
+        updatedAt: now,
+      },
+    ]);
+
+    await ladybugDb.createVersion(conn, {
+      versionId: "v1",
+      repoId,
+      createdAt: now,
+      reason: "verified live-edit baseline",
+      prevVersionHash: null,
+      versionHash: null,
+    });
+    const baseline = await capturePersistedGraphIntegrity(conn, repoId);
+    baselineDigest = baseline.digest;
+    await markGraphIntegrityVerified(repoId, "v1", baselineDigest);
   });
 
   beforeEach(() => {
@@ -93,7 +144,7 @@ describe("saved file graph patch", () => {
   });
 
   it("updates durable ladybug state on save without repo-wide reindex", async () => {
-    await handleBufferPush({
+    const firstSave = await handleBufferPush({
       repoId,
       eventType: "save",
       filePath: "src/example.ts",
@@ -112,6 +163,7 @@ describe("saved file graph patch", () => {
       timestamp: "2026-03-07T12:10:00.000Z",
     });
     await waitForDefaultLiveIndexIdle();
+    assert.deepStrictEqual(firstSave.warnings, []);
 
     const conn = await getLadybugConn();
     const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/example.ts");
@@ -119,5 +171,43 @@ describe("saved file graph patch", () => {
     const symbols = await ladybugDb.getSymbolsByFile(conn, file!.fileId);
     const names = symbols.map((symbol) => symbol.name).sort();
     assert.deepStrictEqual(names, ["alpha", "gamma"]);
+    const alpha = symbols.find((symbol) => symbol.name === "alpha");
+    assert.equal(alpha?.symbolId, "scip-alpha");
+    assert.equal(alpha?.source, "scip");
+    assert.equal(alpha?.scipSymbol, "scip-alpha");
+
+    const state = await getDerivedState(repoId);
+    const captured = await capturePersistedGraphIntegrity(conn, repoId);
+    assert.equal(state?.graphIntegrityState, "verified");
+    assert.equal(state?.graphIntegrityVersionId, "v1");
+    assert.equal(state?.graphIntegrityDigest, captured.digest);
+    assert.notEqual(captured.digest, baselineDigest);
+
+    await handleBufferPush({
+      repoId,
+      eventType: "save",
+      filePath: "src/example.ts",
+      content: [
+        "export function alpha() {",
+        "  return gamma();",
+        "}",
+        "",
+        "export function gamma() {",
+        "  return 3;",
+        "}",
+      ].join("\n"),
+      language: "typescript",
+      version: 3,
+      dirty: false,
+      timestamp: "2026-03-07T12:20:00.000Z",
+    });
+    await waitForDefaultLiveIndexIdle();
+
+    const matchedState = await getDerivedState(repoId);
+    const matchedCapture = await capturePersistedGraphIntegrity(conn, repoId);
+    assert.equal(matchedState?.graphIntegrityState, "verified");
+    assert.equal(matchedState?.graphIntegrityVersionId, "v1");
+    assert.equal(matchedState?.graphIntegrityDigest, matchedCapture.digest);
+    assert.notEqual(matchedCapture.digest, captured.digest);
   });
 });

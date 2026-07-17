@@ -47,6 +47,8 @@ Escalate through `sdl.retrieve` in this order:
 5. `codeHotPath`
 6. `codeNeedWindow`
 
+For `codeHotPath`, pass AST identifier names in `identifiersToFind`; use `codeSkeleton` for keywords and control-flow structure such as `return` or `throw`.
+
 Use `codeNeedWindow` only as a last resort. Include a concrete `reason`, bounded `expectedLines`, and precise `identifiersToFind`. If SDL-MCP returns `nextBestAction`, `fallbackTools`, `fallbackRationale`, or denial guidance, follow that guidance instead of retrying broader native reads, `file.read` on indexed source, or larger raw windows.
 
 For `codeSkeleton` file-mode retrieval, `file` is canonical. `sdl.retrieve` also accepts `args.filePath` and maps it to `file` for compatibility with other file-oriented SDL surfaces.
@@ -137,7 +139,7 @@ Use this when you need likely files and symbols before choosing `symbol.edit` or
       "fn": "codeHotPath",
       "args": {
         "symbolId": "$0.results.0.symbolId",
-        "identifiersToFind": ["validate", "throw"],
+        "identifiersToFind": ["validate", "result"],
         "contextLines": 2,
         "maxTokens": 900
       }
@@ -428,8 +430,10 @@ For indexing:
 
 - Do not refresh by habit.
 - Run `index.refresh` only when `repo.status` shows stale or missing indexed state and the task depends on current code.
+- When `rootAvailability` is missing or unreadable, restore the root or unregister the repository; refresh advice is intentionally suppressed until the root is usable.
 - Prefer incremental refresh.
 - When `repo.status` reports unverified or failed graph integrity, run `index.refresh` with `mode: "full"`. Incremental mutations require a verified baseline for the latest graph version.
+- Successful indexed edits through SDL advance a verified baseline on the current graph version, so they remain eligible for incremental refresh.
 - If refresh runs asynchronously, poll `repo.status` and wait for completion before continuing graph-backed retrieval.
 - Avoid full refresh unless the repo is newly registered, unindexed, or explicitly required.
 

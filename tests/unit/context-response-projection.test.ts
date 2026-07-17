@@ -1473,6 +1473,25 @@ describe("context-response-projection", () => {
       );
     });
 
+    it("does not run action-search validation errors through the success projector", () => {
+      const errorResult = {
+        error: {
+          message: "Invalid tool arguments:\n  - limit: Too small",
+          code: "VALIDATION_ERROR",
+          details: [{ path: "limit", message: "Too small" }],
+        },
+      };
+
+      assert.deepEqual(
+        projectToolResultForModelContent(
+          "sdl.action.search",
+          errorResult,
+          { detail: "compact" },
+        ),
+        errorResult,
+      );
+    });
+
     it("continues to hide trace-like internal fields from other tools", () => {
       const projected = projectToolResultForModelContent(
         "sdl.context",

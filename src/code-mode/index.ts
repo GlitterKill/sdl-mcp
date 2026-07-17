@@ -11,7 +11,6 @@ import {
 } from "../mcp/tools/file-gateway.js";
 import type { MCPServer, ToolContext } from "../server.js";
 import { estimateTokens } from "../util/tokenize.js";
-import { getServerInfo } from "../util/runtime-identity.js";
 
 import {
   buildCatalog,
@@ -293,11 +292,17 @@ export function handleManual(
       knownSelector(action.normalized),
     );
     if (unknownActions.length > 0 && knownRequestedActions.length === 0) {
-      return {
-        error: "UNKNOWN_ACTIONS",
-        unknownActions,
-        validActions: Array.from(validNames).sort(),
-      };
+      const error = new ValidationError(
+        `Unknown manual action selector(s): ${unknownActions.join(", ")}`,
+      );
+      Object.assign(error, {
+        details: unknownActions.map(
+          (action) => `Unknown action selector: ${action}`,
+        ),
+        fallbackTools: ["sdl.action.search"],
+        fallbackRationale: "Search the enabled action catalog.",
+      });
+      throw error;
     }
 
     const filtered: ActionCatalogEntry[] = [];
@@ -315,13 +320,9 @@ export function handleManual(
   } else if (args.query) {
     catalog = rankCatalog(fullCatalog, args.query);
   }
-  const nextAction = args.detail === "compact"
-    ? buildFullSchemaNextAction(catalog.map((entry) => entry.action))
-    : undefined;
   if (format === "json") {
     return {
       actions: catalog,
-      serverInfo: getServerInfo(),
       tokenEstimate: estimateTokens(JSON.stringify(catalog)),
       ...(unknownActions.length > 0
         ? {
@@ -329,7 +330,6 @@ export function handleManual(
             warning: `Ignored unknown action selector(s): ${unknownActions.join(", ")}`,
           }
         : {}),
-      ...(nextAction ? { nextAction } : {}),
     };
   }
 
@@ -345,7 +345,6 @@ export function handleManual(
           warning: `Ignored unknown action selector(s): ${unknownActions.join(", ")}`,
         }
       : {}),
-    ...(nextAction ? { nextAction } : {}),
   };
 }
 

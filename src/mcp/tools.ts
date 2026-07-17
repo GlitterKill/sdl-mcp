@@ -1118,8 +1118,13 @@ const ResponseArtifactMetadataSchema = z.object({
   sessionKeyHash: z.string().optional(),
 });
 
-const ResponseArtifactPublicMetadataSchema = ResponseArtifactMetadataSchema.omit({
-  estimatedOriginalTokens: true,
+const ResponseArtifactPublicMetadataSchema = ResponseArtifactMetadataSchema.pick({
+  handle: true,
+  repoId: true,
+  toolName: true,
+  originalBytes: true,
+  etag: true,
+  contentKind: true,
 });
 
 export const ToolTimingDiagnosticsSchema = z.object({
@@ -1942,7 +1947,13 @@ export const GetHotPathRequestSchema = z
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
     symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
     symbolRef: SymbolRefSchema.optional(),
-    identifiersToFind: z.array(z.string().min(1).max(256)).min(1).max(50),
+    identifiersToFind: z
+      .array(z.string().min(1).max(256))
+      .min(1)
+      .max(50)
+      .describe(
+        "AST identifier names only; not keywords (for example, return) or arbitrary text.",
+      ),
     maxLines: z.number().int().min(1).optional(),
     maxTokens: z.number().int().min(1).optional(),
     contextLines: z.number().int().min(0).optional(),
@@ -1973,6 +1984,7 @@ const GetHotPathPayloadSchema = z.object({
   matchedIdentifiers: z.array(z.string()),
   matchedLineNumbers: z.array(z.number().int()),
   missedIdentifiers: z.array(z.string()).optional(),
+  missedIdentifierHint: z.string().optional(),
   truncated: z.boolean(),
 });
 

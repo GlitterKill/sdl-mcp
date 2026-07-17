@@ -6,11 +6,13 @@ import { tmpdir } from "node:os";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
-import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
-import { indexRepo } from "../../dist/indexer/indexer.js";
+import {
+  getDerivedState,
+  markGraphIntegrityVerified,
+} from "../../dist/db/ladybug-derived-state.js";
+import { capturePersistedGraphIntegrity } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
 import { loadBuiltInAdapters } from "../../dist/indexer/adapter/registry.js";
 import { patchSavedFile } from "../../dist/live-index/file-patcher.js";
-import { getRepoHealthSnapshot } from "../../dist/services/health.js";
 
 describe("patchSavedFile", () => {
   const repoId = "file-patcher-repo";
@@ -70,7 +72,16 @@ describe("patchSavedFile", () => {
       }),
       createdAt: now,
     });
-    await indexRepo(repoId, "full");
+    await ladybugDb.createVersion(conn, {
+      versionId: "v1",
+      repoId,
+      createdAt: now,
+      reason: "verified live-edit baseline",
+      prevVersionHash: null,
+      versionHash: null,
+    });
+    const baseline = await capturePersistedGraphIntegrity(conn, repoId);
+    await markGraphIntegrityVerified(repoId, "v1", baseline.digest);
   });
 
   after(async () => {
@@ -124,11 +135,9 @@ describe("patchSavedFile", () => {
     assert.ok(outgoing.some((edge) => edge.toSymbolId === gamma!.symbolId));
 
     const afterState = await getDerivedState(repoId);
-    const health = await getRepoHealthSnapshot(repoId);
-    assert.equal(afterState?.graphIntegrityState, "unknown");
-    assert.equal(afterState?.graphIntegrityVersionId, null);
-    assert.equal(afterState?.graphIntegrityDigest, null);
-    assert.equal(health.available, false);
-    assert.equal(health.score, null);
+    const captured = await capturePersistedGraphIntegrity(conn, repoId);
+    assert.equal(afterState?.graphIntegrityState, "verified");
+    assert.equal(afterState?.graphIntegrityVersionId, "v1");
+    assert.equal(afterState?.graphIntegrityDigest, captured.digest);
   });
 });

@@ -1038,7 +1038,7 @@ export function projectToolResultForModelContent(
   result: unknown,
   args: Record<string, unknown> = {},
 ): unknown {
-  if (!isRecord(result)) {
+  if (!isRecord(result) || isRecord(result.error)) {
     return result;
   }
 

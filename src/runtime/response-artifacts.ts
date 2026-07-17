@@ -82,10 +82,14 @@ export interface ResponseArtifactMetadata {
   sessionKeyHash?: string;
 }
 
-export type ResponseArtifactPublicMetadata = Omit<
-  ResponseArtifactMetadata,
-  "estimatedOriginalTokens" | "repoEpoch"
->;
+export interface ResponseArtifactPublicMetadata {
+  handle: string;
+  repoId: string;
+  toolName: string;
+  originalBytes: number;
+  etag: string;
+  contentKind: ResponseContentKind;
+}
 
 export interface ResponseArtifactSavings {
   originalTokens: number;
@@ -227,18 +231,47 @@ function extractJsonPath(obj: unknown, keyPath: string): unknown {
 }
 
 function validateResponseArtifactReadMode(
-  contentKind: ResponseContentKind,
+  metadata: ResponseArtifactMetadata,
   opts: ResponseArtifactReadOptions,
 ): void {
   const full = opts.full === true;
   const structuralJson = opts.jsonPath !== undefined;
   const raw = opts.raw === true;
 
-  if (contentKind === "json") {
+  if (metadata.contentKind === "json") {
     const selectedModes = Number(full) + Number(structuralJson) + Number(raw);
     if (selectedModes === 0) {
-      throw new ValidationError(
-        "JSON response artifacts require an explicit retrieval mode: use full:true for parsed JSON, jsonPath for a complete extracted JSON value, or raw:true for a byte excerpt that may be syntactically incomplete JSON.",
+      const rawCall = {
+        action: "response.get",
+        args: {
+          repoId: opts.repoId,
+          handle: opts.handle,
+          raw: true,
+          maxBytes: opts.maxBytes ?? DEFAULT_RESPONSE_EXCERPT_BYTES,
+        },
+      };
+      throw Object.assign(
+        new ValidationError(
+          "JSON response artifacts require an explicit retrieval mode: use full:true for parsed JSON, jsonPath for a complete extracted JSON value, or raw:true for a byte excerpt that may be syntactically incomplete JSON.",
+        ),
+        {
+          fallbackTools: ["response.get"],
+          nextCalls: metadata.toolName === "sdl.context"
+            ? [
+                {
+                  action: "response.get",
+                  args: {
+                    repoId: opts.repoId,
+                    handle: opts.handle,
+                    jsonPath: "finalEvidence",
+                    offset: 0,
+                    limit: 20,
+                  },
+                },
+                rawCall,
+              ]
+            : [rawCall],
+        },
       );
     }
     if (selectedModes > 1) {
@@ -370,18 +403,26 @@ function createSavings(
   };
 }
 
+export function toPublicResponseArtifactMetadata(
+  metadata: ResponseArtifactMetadata,
+): ResponseArtifactPublicMetadata {
+  return {
+    handle: metadata.handle,
+    repoId: metadata.repoId,
+    toolName: metadata.toolName,
+    originalBytes: metadata.originalBytes,
+    etag: metadata.etag,
+    contentKind: metadata.contentKind,
+  };
+}
+
 function createReference(metadata: ResponseArtifactMetadata): ResponseArtifactReference {
-  const {
-    estimatedOriginalTokens: _estimatedOriginalTokens,
-    repoEpoch: _repoEpoch,
-    ...publicMetadata
-  } = metadata;
   return {
     responseMode: "handle",
     kind: "responseArtifact",
     handle: metadata.handle,
     action: "response.get",
-    metadata: publicMetadata,
+    metadata: toPublicResponseArtifactMetadata(metadata),
   };
 }
 
@@ -670,7 +711,7 @@ export async function readResponseArtifact(
   }
 
   // Validate the retrieval contract before reading or slicing the stored body.
-  validateResponseArtifactReadMode(metadata.contentKind, opts);
+  validateResponseArtifactReadMode(metadata, opts);
 
   const compressed = await readFile(contentPath(baseDir, opts.handle));
   let decompressed: Buffer;

@@ -878,6 +878,13 @@ function compactPrefetchStatsForStatus(
         nextBestAction: graphIntegrityNextBestAction("version-mismatch"),
       };
     }
+    if (!rootAvailable && derivedState) {
+      derivedState = {
+        ...derivedState,
+        stale: true,
+        nextBestAction: rootRecoveryAction,
+      };
+    }
     const effectiveHealth = rootAvailable && graphIntegrityReady
       ? health
       : unavailableHealth.snapshot;
@@ -959,7 +966,7 @@ function compactPrefetchStatsForStatus(
       watcherHealth: includeExpensiveStatus
         ? compactWatcherHealthForStatus(watcherHealth)
         : undefined,
-      watcherNote: includeExpensiveStatus && watcherHealth === null
+      watcherNote: rootAvailable && includeExpensiveStatus && watcherHealth === null
         ? "Watcher not active. Run 'sdl-mcp serve' or call sdl.index.refresh after edits."
         : undefined,
       prefetchStats: compactPrefetchStatsForStatus(prefetchStats),

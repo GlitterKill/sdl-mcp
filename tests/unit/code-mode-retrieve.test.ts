@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { ValidationError } from "../../dist/domain/errors.js";
 
 import {
   handleActionSearch,
@@ -220,6 +221,39 @@ describe("sdl.retrieve", () => {
     assert.equal(Object.hasOwn(result as object, "totalTokens"), false);
     assert.equal(Object.hasOwn(result as object, "durationMs"), false);
     assert.equal(Object.hasOwn(result as object, "intermediateResultsSuppressed"), false);
+  });
+
+  it("reports nested action validation failures as actionable validation errors", async () => {
+    await assert.rejects(
+      () =>
+        handleRetrieve(
+          { repoId: "repo", op: "codeHotPath", args: { symbolId: "sym" } },
+          {
+            "code.getHotPath": {
+              schema: z.object({
+                repoId: z.string(),
+                symbolId: z.string(),
+                identifiersToFind: z.array(z.string()).min(1),
+              }),
+              handler: async (args: unknown) => args,
+            },
+          } as never,
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.match(error.message, /args\.identifiersToFind/);
+        assert.deepEqual(
+          (error as ValidationError & { details?: unknown }).details,
+          [
+            {
+              path: "args.identifiersToFind",
+              message: "Invalid input: expected array, received undefined",
+            },
+          ],
+        );
+        return true;
+      },
+    );
   });
 
   it("does not forward diagnostics through retrieve actions", async () => {

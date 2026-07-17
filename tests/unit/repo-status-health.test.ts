@@ -450,7 +450,7 @@ describe("repo status root availability", { concurrency: 1 }, () => {
     }
   });
 
-  it("keeps clean derived state separate from a missing runtime root", async () => {
+  it("makes missing-root recovery override persisted graph advice", async () => {
     const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
     const status = await handleRepoStatus({
       repoId: "missing",
@@ -460,10 +460,15 @@ describe("repo status root availability", { concurrency: 1 }, () => {
     assert.strictEqual(status.rootAvailability.status, "missing");
     assert.match(status.rootAvailability.nextBestAction ?? "", /repo\.register/);
     assert.match(status.rootAvailability.nextBestAction ?? "", /repo\.unregister/);
-    assert.strictEqual(status.derivedState?.stale, false);
+    assert.strictEqual(status.derivedState?.stale, true);
     assert.strictEqual(status.derivedState?.graphIntegrityState, "verified");
+    assert.strictEqual(
+      status.derivedState?.nextBestAction,
+      status.rootAvailability.nextBestAction,
+    );
     assert.strictEqual(status.healthAvailable, false);
     assert.strictEqual(status.healthScore, undefined);
+    assert.doesNotMatch(JSON.stringify(status), /index\.refresh/);
   });
 
   it("returns configured-root recovery without runtime unregister guidance", async () => {

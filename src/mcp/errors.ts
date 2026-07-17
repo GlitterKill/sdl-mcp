@@ -64,6 +64,7 @@ export interface McpErrorDetail {
   retryable?: boolean;
   suggestedRetryDelayMs?: number;
   fallbackTools?: string[];
+  nextCalls?: Array<{ action: string; args: Record<string, unknown> }>;
   fallbackRationale?: string;
   candidates?: Array<Record<string, unknown>>;
 }
@@ -184,6 +185,7 @@ export function errorToMcpResponse(error: unknown): Record<string, unknown> {
       retryable?: boolean;
       suggestedRetryDelayMs?: number;
       fallbackTools?: string[];
+      nextCalls?: Array<{ action: string; args: Record<string, unknown> }>;
       fallbackRationale?: string;
       candidates?: Array<Record<string, unknown>>;
     };
@@ -197,6 +199,9 @@ export function errorToMcpResponse(error: unknown): Record<string, unknown> {
       detail.fallbackTools = classifiedError.fallbackTools;
     } else if (detail.nextBestAction) {
       detail.fallbackTools = fallbackToolsForNextAction(detail.nextBestAction);
+    }
+    if (Array.isArray(classifiedError.nextCalls)) {
+      detail.nextCalls = classifiedError.nextCalls;
     }
     if (classifiedError.fallbackRationale) {
       detail.fallbackRationale = classifiedError.fallbackRationale;

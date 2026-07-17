@@ -18,6 +18,7 @@ type ErrorResponse = {
     classification?: string;
     retryable?: boolean;
     fallbackTools?: string[];
+    nextCalls?: Array<{ action: string; args: Record<string, unknown> }>;
     candidates?: Array<{ symbolId: string }>;
     suggestedRetryDelayMs?: number;
     details?: string[];
@@ -63,6 +64,12 @@ describe("errorToMcpResponse", () => {
       classification: "transient",
       retryable: true,
       fallbackTools: ["sdl.repo.status"],
+      nextCalls: [
+        {
+          action: "response.get",
+          args: { repoId: "repo-1", handle: "response-1" },
+        },
+      ],
       candidates: [{ symbolId: "sym-1" }],
     });
 
@@ -70,6 +77,12 @@ describe("errorToMcpResponse", () => {
     assert.strictEqual(response.error?.classification, "transient");
     assert.strictEqual(response.error?.retryable, true);
     assert.deepStrictEqual(response.error?.fallbackTools, ["sdl.repo.status"]);
+    assert.deepStrictEqual(response.error?.nextCalls, [
+      {
+        action: "response.get",
+        args: { repoId: "repo-1", handle: "response-1" },
+      },
+    ]);
     assert.deepStrictEqual(response.error?.candidates, [{ symbolId: "sym-1" }]);
   });
 

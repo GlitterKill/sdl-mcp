@@ -16,6 +16,7 @@ import {
 } from "../../dist/code-mode/manual-generator.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { estimateTokens } from "../../dist/util/tokenize.js";
+import { ValidationError } from "../../dist/domain/errors.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
 
@@ -202,6 +203,16 @@ describe("code-mode manual generator", () => {
     assert.ok(result.actions?.some((entry) => entry.action === "workflow"));
   });
 
+  it("keeps JSON manual output free of runtime identity metadata", () => {
+    const result = handleManual({
+      actions: ["workflow"],
+      format: "json",
+    }) as Record<string, unknown>;
+
+    assert.equal(result.serverInfo, undefined);
+    assert.equal(result.nextAction, undefined);
+  });
+
   it("returns known focused manual actions when some requested actions are stale", () => {
     const result = handleManual(
       {
@@ -222,13 +233,26 @@ describe("code-mode manual generator", () => {
     assert.ok(result.actions?.some((entry) => entry.action === "workflow"));
   });
 
-  it("keeps all-unknown focused manual requests as UNKNOWN_ACTIONS", () => {
-    const result = handleManual(
-      { actions: ["summary.get"], format: "json" },
-      {},
-    ) as { error?: string; unknownActions?: string[] };
-
-    assert.equal(result.error, "UNKNOWN_ACTIONS");
-    assert.deepEqual(result.unknownActions, ["summary.get"]);
+  it("reports all-unknown focused manual requests as validation errors", () => {
+    assert.throws(
+      () =>
+        handleManual(
+          { actions: ["summary.get"], format: "json" },
+          {},
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.equal(error.code, "VALIDATION_ERROR");
+        assert.deepEqual(
+          (error as ValidationError & { details?: unknown }).details,
+          ["Unknown action selector: summary.get"],
+        );
+        assert.deepEqual(
+          (error as ValidationError & { fallbackTools?: unknown }).fallbackTools,
+          ["sdl.action.search"],
+        );
+        return true;
+      },
+    );
   });
 });

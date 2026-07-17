@@ -18,6 +18,7 @@ import {
 import { compactPRRiskResponse } from "../../dist/mcp/tools/prRisk.js";
 import { compactBufferStatusForAgent } from "../../dist/mcp/tools/buffer.js";
 import { _policyToolTesting } from "../../dist/mcp/tools/policy.js";
+import { stripDefaultContextOperationalFields } from "../../dist/mcp/tools/context.js";
 
 describe("agent-facing SDL tool contracts", () => {
   it("policy.set patches preserve only user-supplied policy keys", () => {
@@ -91,6 +92,32 @@ describe("agent-facing SDL tool contracts", () => {
       dryRun: true,
     });
     assert.equal(repoRegister.detail, "compact");
+  });
+
+  it("context output omits operational timing and timestamps by default", () => {
+    const contextResponse = (durationMs: number, timestamp: string) => ({
+      summary: `Actions: - getCard (completed, ${durationMs}ms)`,
+      actionsTaken: [
+        {
+          type: "getCard",
+          status: "completed",
+          durationMs,
+          evidence: [{ timestamp, reference: "symbol:abc" }],
+        },
+      ],
+      finalEvidence: [{ reference: "symbol:abc", timestamp }],
+    });
+
+    const first = stripDefaultContextOperationalFields(
+      contextResponse(38, "2026-07-17T12:00:00.000Z"),
+    );
+    const second = stripDefaultContextOperationalFields(
+      contextResponse(37, "2026-07-17T12:00:01.000Z"),
+    );
+
+    assert.deepEqual(first, second);
+    assert.equal(JSON.stringify(first).includes("ms"), false);
+    assert.equal(JSON.stringify(first).includes("timestamp"), false);
   });
 
   it("compact pr risk responses omit verbose analysis arrays", () => {

@@ -70,7 +70,7 @@ function stripVolatileEvidenceFields(value: unknown): unknown {
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
     const stableEntries = Object.entries(record)
-      .filter(([key]) => key !== "timestamp")
+      .filter(([key]) => key !== "timestamp" && key !== "durationMs")
       .map(([key, entryValue]) => [
         key,
         stripVolatileEvidenceFields(entryValue),
@@ -79,6 +79,16 @@ function stripVolatileEvidenceFields(value: unknown): unknown {
   }
 
   return value;
+}
+
+export function stripDefaultContextOperationalFields<
+  T extends Record<string, unknown>,
+>(response: T): T {
+  const stable = stripVolatileEvidenceFields(response) as Record<string, unknown>;
+  if (typeof stable.summary === "string") {
+    stable.summary = stable.summary.replace(/, \d+ms(?=\))/g, "");
+  }
+  return stable as T;
 }
 
 function buildStableAgentContextValue(
@@ -614,7 +624,10 @@ export async function handleAgentContext(
       estimateContextRawEquivalentTokens(request.repoId, response),
     );
     const config = loadConfig();
-    const enrichedResponse = attachRawContext(response, { rawTokens });
+    const rawResponse = attachRawContext(response, { rawTokens });
+    const enrichedResponse = request.includeDiagnostics
+      ? rawResponse
+      : stripDefaultContextOperationalFields(rawResponse);
     if (isAnswerFirstRequested(request.taskType, request.options)) {
       const answerFirstStartedAt = timer.start();
       const answerFirst = buildAnswerFirstResponse(

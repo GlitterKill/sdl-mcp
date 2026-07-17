@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { ValidationError } from "../domain/errors.js";
 import { dispatchAction, type ActionMap } from "../gateway/router.js";
 import type { ToolContext } from "../server.js";
@@ -38,11 +39,27 @@ export async function handleRetrieve(
     repoId: request.repoId,
     ...request.args,
   };
-  return dispatchAction(
-    actionName,
-    actionArgs,
-    actionMap,
-    { kind: "retrieve", responseMode: request.responseMode },
-    context,
-  );
+  try {
+    return await dispatchAction(
+      actionName,
+      actionArgs,
+      actionMap,
+      { kind: "retrieve", responseMode: request.responseMode },
+      context,
+    );
+  } catch (error) {
+    if (!(error instanceof z.ZodError)) throw error;
+
+    const details = error.issues.map((issue) => ({
+      path: ["args", ...issue.path].join("."),
+      message: issue.message,
+    }));
+    const validationError = new ValidationError(
+      `Invalid tool arguments:\n${details
+        .map((detail) => `  - ${detail.path}: ${detail.message}`)
+        .join("\n")}`,
+    );
+    Object.assign(validationError, { details });
+    throw validationError;
+  }
 }

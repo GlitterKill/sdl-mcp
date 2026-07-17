@@ -119,7 +119,14 @@ describe("response artifact storage", () => {
     ]);
     assert.equal(result.payload.metadata.handle, result.payload.handle);
     assert.equal(result.payload.metadata.etag, result.metadata.etag);
-    assert.equal("estimatedOriginalTokens" in result.payload.metadata, false);
+    assert.deepStrictEqual(Object.keys(result.payload.metadata).sort(), [
+      "contentKind",
+      "etag",
+      "handle",
+      "originalBytes",
+      "repoId",
+      "toolName",
+    ]);
     assert.equal("savings" in result.payload, false);
 
     const read = await readResponseArtifact({
@@ -376,6 +383,32 @@ describe("response artifact storage", () => {
         assert.match(error.message, /jsonPath/);
         assert.match(error.message, /raw:true/);
         assert.match(error.message, /syntactically incomplete JSON/);
+        const recovery = error as ValidationError & {
+          fallbackTools?: string[];
+          nextCalls?: Array<{ action: string; args: Record<string, unknown> }>;
+        };
+        assert.deepStrictEqual(recovery.fallbackTools, ["response.get"]);
+        assert.deepStrictEqual(recovery.nextCalls, [
+          {
+            action: "response.get",
+            args: {
+              repoId: "repo-a",
+              handle: stored.payload.handle,
+              jsonPath: "finalEvidence",
+              offset: 0,
+              limit: 20,
+            },
+          },
+          {
+            action: "response.get",
+            args: {
+              repoId: "repo-a",
+              handle: stored.payload.handle,
+              raw: true,
+              maxBytes: 20,
+            },
+          },
+        ]);
         return true;
       },
     );

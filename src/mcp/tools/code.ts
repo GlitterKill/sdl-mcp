@@ -23,7 +23,11 @@ import {
 } from "../../config/constants.js";
 import { enforceCodeWindow } from "../../code/enforce.js";
 import { LadybugWindowLoader } from "../../code/window-loader.js";
-import { extractWindow, identifiersExistInWindow } from "../../code/windows.js";
+import {
+  extractWindow,
+  findMatchedIdentifiersInWindow,
+  identifiersExistInWindow,
+} from "../../code/windows.js";
 import {
   buildRedactionPatterns,
   redactSecrets,
@@ -911,8 +915,9 @@ export async function handleCodeNeedWindow(
       effectiveGranularity = "fileWindow";
     }
     if (
+      request.cursor === undefined &&
       request.identifiersToFind.length > 0 &&
-      granularity === "symbol" &&
+      (granularity === "symbol" || granularity === "block") &&
       symbolRange.endLine - symbolRange.startLine + 1 > maxLines
     ) {
       try {
@@ -930,22 +935,23 @@ export async function handleCodeNeedWindow(
             const line = fileLines[ln - 1];
             if (
               line &&
-              request.identifiersToFind.some((id) => line.includes(id))
+              findMatchedIdentifiersInWindow(
+                line,
+                request.identifiersToFind,
+              ).length > 0
             ) {
               idLineNumbers.push(ln);
             }
           }
+          const anchorLine = idLineNumbers[0];
           if (
-            idLineNumbers.length > 0 &&
-            idLineNumbers[idLineNumbers.length - 1] >=
-              symbolRange.startLine + maxLines
+            anchorLine !== undefined &&
+            anchorLine >= symbolRange.startLine + maxLines
           ) {
-            const medianLine =
-              idLineNumbers[Math.floor(idLineNumbers.length / 2)];
             const halfWindow = Math.floor(maxLines / 2);
             const centeredStart = Math.max(
               symbolRange.startLine,
-              medianLine - halfWindow,
+              anchorLine - halfWindow,
             );
             const centeredEnd = Math.min(
               symbolRange.endLine,
@@ -1456,7 +1462,7 @@ export async function handleGetHotPath(
     ...(missedIdentifiers.length > 0
       ? {
           missedIdentifiers,
-          missedIdentifierHint: `Identifiers not found in this symbol's excerpt. Use sdl.symbol.search to find the symbol containing these identifiers, then call sdl.code.getHotPath on that symbol.`,
+          missedIdentifierHint: `Hot paths match AST identifier names, not keywords or arbitrary text (for example, return). Use sdl.code.getSkeleton for control-flow structure; use sdl.symbol.search when an identifier name belongs to another symbol.`,
         }
       : {}),
     truncated: result.truncated,

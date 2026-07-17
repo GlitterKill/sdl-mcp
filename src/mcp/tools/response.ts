@@ -13,7 +13,10 @@ import { NotFoundError } from "../../domain/errors.js";
 import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { readResponseArtifact } from "../../runtime/response-artifacts.js";
+import {
+  readResponseArtifact,
+  toPublicResponseArtifactMetadata,
+} from "../../runtime/response-artifacts.js";
 import { recordTokenSavings } from "../response-compression.js";
 import { attachTokenUsage, computeSavings } from "../token-usage.js";
 import {
@@ -65,11 +68,7 @@ export async function handleResponseGet(
       sessionId: context?.sessionId,
     });
     const { savings, metadata, range, ...rest } = response;
-    const {
-      estimatedOriginalTokens: _estimatedOriginalTokens,
-      repoEpoch: _repoEpoch,
-      ...publicMetadata
-    } = metadata;
+    const publicMetadata = toPublicResponseArtifactMetadata(metadata);
     const { estimatedReturnedTokens: _estimatedReturnedTokens, ...publicRange } = range;
     const publicResponse = {
       ...rest,
