@@ -134,6 +134,7 @@ describe("provider-first indexRepo fallback", () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       seedStaleSymbol: true,
+      semanticProvider: "mock",
       semanticRetrieval: true,
     });
     setGraphSnapshot(repoId, {
@@ -154,6 +155,7 @@ describe("provider-first indexRepo fallback", () => {
 
     assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
     assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.semanticDeferred, true);
     assert.equal(result.providerFirstExecution?.shadowBuild?.status, "staged");
     assert.equal(result.providerFirstExecution.shadowBuild?.format, "csv");
     assert.equal(result.providerFirstExecution.shadowBuild?.counts.files, 1);
@@ -386,6 +388,7 @@ describe("provider-first indexRepo fallback", () => {
       clustersDirty: boolean;
       processesDirty: boolean;
       algorithmsDirty: boolean;
+      embeddingsDirty: boolean;
       lastError: string | null;
     }>(
       conn,
@@ -393,13 +396,18 @@ describe("provider-first indexRepo fallback", () => {
        RETURN d.clustersDirty AS clustersDirty,
               d.processesDirty AS processesDirty,
               d.algorithmsDirty AS algorithmsDirty,
+              d.embeddingsDirty AS embeddingsDirty,
               d.lastError AS lastError`,
       { repoId },
     );
     assert.equal(derivedState?.clustersDirty, false);
     assert.equal(derivedState?.processesDirty, false);
     assert.equal(derivedState?.algorithmsDirty, false);
-    assert.equal(derivedState?.lastError, null);
+    assert.equal(derivedState?.embeddingsDirty, true);
+    assert.match(
+      derivedState?.lastError ?? "",
+      /FileSummary embedding refresh incomplete/,
+    );
   });
 
   it(
@@ -585,7 +593,7 @@ describe("provider-first indexRepo fallback", () => {
     );
   });
 
-  it("runs provider-first semantic embeddings after graph readiness", async () => {
+  it("defers provider-first semantic readiness when the embedding provider is mock", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       semanticProvider: "mock",
@@ -597,7 +605,7 @@ describe("provider-first indexRepo fallback", () => {
 
     assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
     assert.equal(result.providerFirstExecution?.status, "executed");
-    assert.equal(result.semanticDeferred, undefined);
+    assert.equal(result.semanticDeferred, true);
     assert.equal(result.summaryStats, undefined);
     assert.equal(result.timings?.phases["finalizeIndexing.semanticSummaries"], undefined);
     assert.equal(
@@ -612,7 +620,7 @@ describe("provider-first indexRepo fallback", () => {
       typeof result.timings?.phases[
         "semanticReadiness.symbolEmbeddings:jina-embeddings-v2-base-code"
       ],
-      "number",
+      "undefined",
     );
     assert.equal(
       typeof result.timings?.phases[
@@ -633,10 +641,10 @@ describe("provider-first indexRepo fallback", () => {
       { repoId },
     );
     assert.equal(derivedState?.summariesDirty, false);
-    assert.equal(derivedState?.embeddingsDirty, false);
+    assert.equal(derivedState?.embeddingsDirty, true);
   });
 
-  it("clears deferred summaries after provider-first semantic refresh", async () => {
+  it("keeps configured semantic work dirty when the embedding provider is mock", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       semanticProvider: "mock",
@@ -645,7 +653,7 @@ describe("provider-first indexRepo fallback", () => {
 
     const result = await indexRepo(repoId, "full");
 
-    assert.equal(result.semanticDeferred, undefined);
+    assert.equal(result.semanticDeferred, true);
     const conn = await getLadybugConn();
     const derivedState = await ladybugDb.querySingle<{
       summariesDirty: boolean;
@@ -657,8 +665,8 @@ describe("provider-first indexRepo fallback", () => {
               d.embeddingsDirty AS embeddingsDirty`,
       { repoId },
     );
-    assert.equal(derivedState?.summariesDirty, false);
-    assert.equal(derivedState?.embeddingsDirty, false);
+    assert.equal(derivedState?.summariesDirty, true);
+    assert.equal(derivedState?.embeddingsDirty, true);
   });
 
   it("requires scip.generator for explicit providerFirst incremental refreshes", async () => {
@@ -852,7 +860,7 @@ describe("provider-first indexRepo fallback", () => {
     );
   });
 
-  it("runs semantic embeddings after provider-first uses legacy fallback", async () => {
+  it("defers semantic readiness after provider-first uses legacy fallback with mock", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       extraScannedFile: true,
@@ -865,7 +873,7 @@ describe("provider-first indexRepo fallback", () => {
 
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.equal(result.providerFirstExecution?.coverage?.fallbackFiles, 1);
-    assert.equal(result.semanticDeferred, undefined);
+    assert.equal(result.semanticDeferred, true);
     assert.equal(
       result.timings?.phases["finalizeIndexing.semanticEmbeddings:jina-embeddings-v2-base-code"],
       undefined,
@@ -878,7 +886,7 @@ describe("provider-first indexRepo fallback", () => {
       typeof result.timings?.phases[
         "semanticReadiness.symbolEmbeddings:jina-embeddings-v2-base-code"
       ],
-      "number",
+      "undefined",
     );
     assert.equal(
       typeof result.timings?.phases[
@@ -896,7 +904,7 @@ describe("provider-first indexRepo fallback", () => {
        RETURN d.embeddingsDirty AS embeddingsDirty`,
       { repoId },
     );
-    assert.equal(derivedState?.embeddingsDirty, false);
+    assert.equal(derivedState?.embeddingsDirty, true);
   });
 
   it("materializes SCIP rows for partial reference coverage without legacy reparsing", async () => {

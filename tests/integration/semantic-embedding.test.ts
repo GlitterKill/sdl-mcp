@@ -270,7 +270,8 @@ describe("Semantic Embedding Pipeline", () => {
     });
 
     assert.strictEqual(result.embedded, 0);
-    assert.strictEqual(result.skipped, 3);
+    assert.strictEqual(result.skipped, 0);
+    assert.strictEqual(result.degraded, true);
 
     // Mock fallback vectors are intentionally not persisted to Symbol node
     // properties because they do not map to a supported embedding model.
@@ -294,7 +295,8 @@ describe("Semantic Embedding Pipeline", () => {
       symbols,
     });
     assert.strictEqual(first.embedded, 0);
-    assert.strictEqual(first.skipped, 3);
+    assert.strictEqual(first.skipped, 0);
+    assert.strictEqual(first.degraded, true);
 
     // Second run with the same inputs should behave identically.
     const second = await refreshSymbolEmbeddings({
@@ -304,7 +306,43 @@ describe("Semantic Embedding Pipeline", () => {
       symbols,
     });
     assert.strictEqual(second.embedded, 0);
-    assert.strictEqual(second.skipped, 3);
+    assert.strictEqual(second.skipped, 0);
+    assert.strictEqual(second.degraded, true);
+  });
+
+  it("does not report mock-degraded symbol batches as completed progress", async () => {
+    let mockFallback = false;
+    const progress: Array<{ current: number; total: number }> = [];
+    const embeddingProvider: EmbeddingProvider = {
+      async embed(texts): Promise<number[][]> {
+        mockFallback = true;
+        return texts.map(() => new Array<number>(64).fill(0));
+      },
+      getDimension(): number {
+        return 768;
+      },
+      isMockFallback(): boolean {
+        return mockFallback;
+      },
+    };
+
+    const result = await refreshSymbolEmbeddings({
+      repoId,
+      provider: "local",
+      model: "jina-embeddings-v2-base-code",
+      symbols,
+      rebuildMinUncachedRows: 1,
+      embeddingProvider,
+      onProgress: ({ current, total }) => progress.push({ current, total }),
+    });
+
+    assert.deepStrictEqual(result, {
+      embedded: 0,
+      skipped: 0,
+      degraded: true,
+    });
+    assert.ok(progress.length > 0);
+    assert.ok(progress.every(({ current, total }) => current < total));
   });
 
   it("refreshFileSummaryEmbeddings marks mock fallback as degraded without persistence", async () => {
@@ -350,6 +388,48 @@ describe("Semantic Embedding Pipeline", () => {
       assert.strictEqual(summary.embeddingJinaCode, null);
       assert.strictEqual(summary.embeddingJinaCodeCardHash, null);
     }
+  });
+
+  it("marks a mid-refresh FileSummary mock fallback as degraded", async () => {
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertFileSummaryBatch(conn, [
+      {
+        fileId: "file1",
+        repoId,
+        summary: "File: src/auth.ts\nLanguage: ts\nExports: authenticateUser",
+        searchText: "file: src/auth.ts exports: authenticateUser",
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+    let mockFallback = false;
+    const embeddingProvider: EmbeddingProvider = {
+      async embed(texts): Promise<number[][]> {
+        mockFallback = true;
+        return texts.map(() => new Array<number>(64).fill(0));
+      },
+      getDimension(): number {
+        return 768;
+      },
+      isMockFallback(): boolean {
+        return mockFallback;
+      },
+    };
+
+    const result = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "local",
+      model: "nomic-embed-text-v1.5",
+      fileIds: ["file1"],
+      rebuildMinUncachedRows: 1,
+      embeddingProvider,
+    });
+
+    assert.deepStrictEqual(result, {
+      embedded: 0,
+      skipped: 0,
+      missing: 1,
+      degraded: true,
+    });
   });
 
   it("refreshFileSummaryEmbeddings degrades unknown models without persistence", async () => {

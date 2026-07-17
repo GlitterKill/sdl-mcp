@@ -267,6 +267,16 @@ Invoke-Step "Install local packages globally" {
   Invoke-Native npm install -g @localPackages
 }
 
+Invoke-Step "Verify tokenizer runtime" {
+  $globalSdlMcpRoot = Join-Path ((npm root -g).Trim()) "sdl-mcp"
+  if (-not (Test-Path $globalSdlMcpRoot)) {
+    throw "Global sdl-mcp package was not found at $globalSdlMcpRoot"
+  }
+  # Load through the installed package root so malformed optional platform
+  # packages fail here instead of silently degrading every embedding run.
+  Invoke-Native node -e "require(require.resolve('tokenizers', { paths: [process.argv[1]] }));" $globalSdlMcpRoot
+}
+
 Invoke-Step "Verify global sdl-mcp command" {
   Invoke-Native sdl-mcp version
 }

@@ -433,7 +433,7 @@ flowchart LR
 | **`api`**             | Anthropic API                               | Enterprise environments               |
 | **`mock`**            | Deterministic hash-based vectors (64-dim)   | Testing, CI, when ONNX is unavailable |
 
-The local provider uses `onnxruntime-node` and `tokenizers` (optional dependencies). If they're not installed, it gracefully falls back to mock embeddings.
+The local provider uses `onnxruntime-node` and `tokenizers` (optional dependencies). If either runtime cannot load, it falls back to mock embeddings for test behavior, but the refresh remains degraded and does not satisfy semantic readiness.
 
 ### Model-Aware Embedding Payloads
 

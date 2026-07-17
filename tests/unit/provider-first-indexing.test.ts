@@ -282,6 +282,75 @@ describe("provider-first indexing foundation", () => {
     ]);
   });
 
+  it("keeps semantic readiness deferred when either embedding lane is incomplete", async () => {
+    for (const incomplete of [
+      "file-degraded",
+      "symbol-degraded",
+      "file-deferred",
+      "symbol-deferred",
+    ] as const) {
+      const [incompleteLane, incompleteState] = incomplete.split("-") as [
+        "file" | "symbol",
+        "degraded" | "deferred",
+      ];
+      const calls: string[] = [];
+      const result = await runProviderFirstSemanticReadinessRefresh({
+        repoId: `repo-semantic-${incomplete}`,
+        versionId: `v-semantic-${incomplete}`,
+        appConfig: {
+          semantic: {
+            enabled: true,
+            provider: "local",
+            generateSummaries: false,
+          },
+        } as AppConfig,
+        deps: {
+          refreshFileSummaryEmbeddings: async () => {
+            calls.push("file");
+            return {
+              embedded: incompleteLane === "file" ? 0 : 1,
+              skipped: 0,
+              missing: incompleteLane === "file" ? 1 : 0,
+              degraded:
+                incompleteLane === "file" && incompleteState === "degraded",
+              deferred:
+                incompleteLane === "file" && incompleteState === "deferred"
+                  ? 1
+                  : undefined,
+            };
+          },
+          refreshSymbolEmbeddings: async () => {
+            calls.push("symbol");
+            return {
+              embedded: incompleteLane === "symbol" ? 0 : 1,
+              skipped: 0,
+              degraded:
+                incompleteLane === "symbol" && incompleteState === "degraded",
+              deferred:
+                incompleteLane === "symbol" && incompleteState === "deferred"
+                  ? 1
+                  : undefined,
+            };
+          },
+          buildDeferredIndexes: async () => {
+            calls.push("indexes");
+          },
+          markDerivedStateComputed: async () => {
+            calls.push("computed");
+          },
+          recordDerivedStateError: async (_repoId, message) => {
+            calls.push(`error:${message}`);
+          },
+        },
+      });
+
+      assert.equal(result.semanticDeferred, true);
+      assert.ok(calls.some((call) => call.startsWith("error:")));
+      assert.ok(!calls.includes("indexes"));
+      assert.ok(!calls.includes("computed"));
+    }
+  });
+
   it("caps provider-first same-run legacy fallback only for extreme uncovered tails", () => {
     assert.deepEqual(
       resolveProviderFirstLegacyFallbackPlan({

@@ -51,4 +51,16 @@ describe("install-local-global.ps1", () => {
     assert.ok(script.includes("$env:SDL_WATCHMAN_BINARY = $watchmanBinary"));
     assert.match(script, /Invoke-Native npm install --legacy-peer-deps/);
   });
+
+  it("verifies the installed tokenizer runtime before reporting success", () => {
+    assert.match(script, /Invoke-Step "Verify tokenizer runtime"/);
+    assert.match(
+      script,
+      /require\(require\.resolve\('tokenizers', \{ paths: \[process\.argv\[1\]\] \}\)\)/,
+    );
+    assert.match(
+      script,
+      /Install local packages globally[\s\S]*Verify tokenizer runtime[\s\S]*Global sdl-mcp now points/,
+    );
+  });
 });

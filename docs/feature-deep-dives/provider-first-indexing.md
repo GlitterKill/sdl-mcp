@@ -147,7 +147,7 @@ After the finalized graph is active, SDL-MCP runs the configured semantic readin
 - Deferred retrieval indexes are rebuilt.
 - Semantic dirty flags are cleared only after that pass completes.
 
-If semantic refresh cannot complete, the CLI reports `Semantic readiness: deferred`, `DerivedState.embeddingsDirty` remains set, and `DerivedState.summariesDirty` is set only when summaries are configured. Shadow activation re-applies the semantic dirty marker after the activated DB is reopened. Repeated provider-first runs that reuse already-current active provider rows run the same post-graph semantic refresh rather than reporting a clean graph prematurely.
+If semantic refresh cannot complete, the CLI reports `Semantic readiness: deferred`, `DerivedState.embeddingsDirty` remains set, and `DerivedState.summariesDirty` is set only when summaries are configured. A degraded mock fallback or any deferred embedding rows count as incomplete; mock rows are not reported as embedded. Shadow activation re-applies the semantic dirty marker after the activated DB is reopened. Repeated provider-first runs that reuse already-current active provider rows run the same post-graph semantic refresh rather than reporting a clean graph prematurely.
 
 ### Persisted Graph Integrity
 

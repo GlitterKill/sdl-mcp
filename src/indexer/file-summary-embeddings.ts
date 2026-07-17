@@ -227,6 +227,7 @@ export async function refreshFileSummaryEmbeddings(params: {
 
   let embedded = 0;
   let failed = 0;
+  let degraded = false;
   const pendingWrites: ladybugDb.FileSummaryEmbeddingBatchItem[] = [];
   const flush = async (): Promise<void> => {
     if (pendingWrites.length === 0) return;
@@ -239,7 +240,7 @@ export async function refreshFileSummaryEmbeddings(params: {
   };
 
   try {
-    for (let i = 0; i < batches.length; i += maxConcurrency) {
+    batchLoop: for (let i = 0; i < batches.length; i += maxConcurrency) {
       const chunk = batches.slice(i, i + maxConcurrency);
       const results = await Promise.allSettled(
         chunk.map((batch) => embedBatch(provider, batch)),
@@ -264,6 +265,10 @@ export async function refreshFileSummaryEmbeddings(params: {
           total: uncached.length,
           model: storageModel,
         });
+        if (provider.isMockFallback?.()) {
+          degraded = true;
+          break batchLoop;
+        }
       }
       await flush();
       if (failed > 0 && failed / batches.length > 0.5) {
@@ -296,7 +301,7 @@ export async function refreshFileSummaryEmbeddings(params: {
     embedded,
     skipped,
     missing: missingPayloads + uncached.length - embedded,
-    degraded: failed > 0,
+    degraded: degraded || failed > 0,
   };
 }
 

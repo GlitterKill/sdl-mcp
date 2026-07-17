@@ -6,6 +6,7 @@ import {
   markDerivedStateDirty,
   recordDerivedStateError,
 } from "../../db/ladybug-derived-state.js";
+import { IndexError } from "../../domain/errors.js";
 import { refreshSymbolEmbeddings } from "../embeddings.js";
 import {
   refreshFileSummaryEmbeddings,
@@ -141,7 +142,7 @@ export async function runProviderFirstSemanticReadinessRefresh(params: {
     if (shouldRunFileSummaryEmbeddings) {
       fileSummaryEmbeddingStats = {};
       for (const embModel of modelPlan.fileSummaryEmbeddingModels) {
-        fileSummaryEmbeddingStats[embModel] = await measure(
+        const stats = await measure(
           `semanticReadiness.fileSummaryEmbeddings:${embModel}`,
           () =>
             deps.refreshFileSummaryEmbeddings({
@@ -154,11 +155,17 @@ export async function runProviderFirstSemanticReadinessRefresh(params: {
               maxChars: semanticConfig.fileSummaryEmbeddingMaxChars,
             }),
         );
+        fileSummaryEmbeddingStats[embModel] = stats;
+        if (stats.degraded || (stats.deferred ?? 0) > 0) {
+          throw new IndexError(
+            `FileSummary embedding refresh incomplete for ${embModel}`,
+          );
+        }
       }
     }
 
     for (const embModel of modelPlan.symbolEmbeddingModels) {
-      await measure(`semanticReadiness.symbolEmbeddings:${embModel}`, () =>
+      const stats = await measure(`semanticReadiness.symbolEmbeddings:${embModel}`, () =>
         deps.refreshSymbolEmbeddings({
           repoId: params.repoId,
           provider: semanticConfig.provider ?? "local",
@@ -168,6 +175,11 @@ export async function runProviderFirstSemanticReadinessRefresh(params: {
           batchSize: semanticConfig.embeddingBatchSize,
         }),
       );
+      if (stats.degraded || (stats.deferred ?? 0) > 0) {
+        throw new IndexError(
+          `Symbol embedding refresh incomplete for ${embModel}`,
+        );
+      }
     }
 
     await measure("semanticReadiness.deferredIndexes", () =>

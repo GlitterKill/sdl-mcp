@@ -675,7 +675,7 @@ cardHash = SHA256(symbolName | kind | signature | astFingerprint | providerName 
 
 ### "Embeddings will fall back to deterministic mock vectors"
 
-**Cause:** `onnxruntime-node` or `tokenizers` not installed.
+**Cause:** `onnxruntime-node` or `tokenizers` is missing or cannot load its native binding. A partial optional-dependency install can leave the platform package present but unusable.
 
 **Fix:**
 
@@ -684,6 +684,8 @@ npm install onnxruntime-node tokenizers@npm:@anush008/tokenizers@^0.6.0
 ```
 
 Then run `npx sdl-mcp doctor` to verify.
+
+For local global-package builds, `scripts/install-local-global.ps1` also loads `tokenizers` from the installed package before reporting success. If that verification fails, repair the dependency installation before indexing.
 
 ### "Model files not found"
 
@@ -725,16 +727,18 @@ Or point to a custom cache directory:
 
 ### "Local embedding provider falling back to mock"
 
-**Cause:** ONNX session creation failed. Could be missing model files, incompatible onnxruntime version, or corrupted download.
+**Cause:** ONNX session creation failed. This can be caused by missing model files, an incompatible runtime, a tokenizer native binding that cannot load, or a corrupted download.
 
 **Fix:**
 
 1. Run `npx sdl-mcp doctor` to identify what's missing
 2. Re-download the model: `node scripts/download-models.mjs <model-name>`
-3. If onnxruntime-node won't install (platform issue), use mock mode:
+3. For testing only, use mock mode if the native runtime is intentionally unavailable:
    ```jsonc
    { "semantic": { "provider": "mock" } }
    ```
+
+Mock fallback does not produce model-compatible vectors. SDL-MCP reports the embedding refresh as degraded, leaves semantic readiness deferred, and does not count those rows as embedded.
 
 ### "No API key for summary generation"
 

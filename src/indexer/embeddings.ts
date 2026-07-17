@@ -309,9 +309,17 @@ export async function refreshSymbolEmbeddings(params: {
    * the rebuild path.
    */
   rebuildMinUncachedRows?: number;
-}): Promise<{ embedded: number; skipped: number; deferred?: number }> {
+  /** @internal Allows tests to exercise provider degradation deterministically. */
+  embeddingProvider?: EmbeddingProvider;
+}): Promise<{
+  embedded: number;
+  skipped: number;
+  deferred?: number;
+  degraded?: boolean;
+}> {
   const modelName = params.model ?? "jina-embeddings-v2-base-code";
-  const provider = getEmbeddingProvider(params.provider, modelName);
+  const provider =
+    params.embeddingProvider ?? getEmbeddingProvider(params.provider, modelName);
   const conn = await getLadybugConn();
   const symbols =
     params.symbols ?? (await ladybugDb.getSymbolsByRepo(conn, params.repoId));
@@ -322,8 +330,8 @@ export async function refreshSymbolEmbeddings(params: {
     : modelName;
 
   if (storageModel === "mock-fallback") {
-    // Mock-fallback vectors must not be persisted. Skip all symbols.
-    return { embedded: 0, skipped: symbols.length };
+    // Mock-fallback vectors must not be persisted or reported as cache hits.
+    return { embedded: 0, skipped: 0, degraded: true };
   }
 
   let embedded = 0;
@@ -515,6 +523,7 @@ export async function refreshSymbolEmbeddings(params: {
     skipped: number;
     terminal: boolean;
     failed: boolean;
+    degraded?: boolean;
   };
 
   // P2.b: write-coalescing buffer for the rebuild path. When the HNSW index is
@@ -581,7 +590,13 @@ export async function refreshSymbolEmbeddings(params: {
       logger.debug("Provider degraded to mock, skipping batch persistence", {
         batchSize: batch.length,
       });
-      return { embedded: 0, skipped: batch.length, terminal: false, failed: false };
+      return {
+        embedded: 0,
+        skipped: 0,
+        terminal: true,
+        failed: false,
+        degraded: true,
+      };
     }
 
     // P5: post-embed recheck for race avoidance is now an in-memory lookup
@@ -641,6 +656,7 @@ export async function refreshSymbolEmbeddings(params: {
   // Process batches with bounded concurrency using a sliding window.
   // Each "chunk" is at most maxConcurrency batches run in parallel.
   let aborted = false;
+  let degraded = false;
   let failedBatches = 0;
   let processedBatches = 0;
   try {
@@ -658,6 +674,7 @@ export async function refreshSymbolEmbeddings(params: {
           skipped += res.skipped;
           processedBatches++;
           if (res.failed) failedBatches++;
+          if (res.degraded) degraded = true;
           fireProgress();
           return res;
         }),
@@ -762,5 +779,7 @@ export async function refreshSymbolEmbeddings(params: {
   // made beyond the last tick; for partial/aborted runs that means
   // honest "current < total" rather than a dishonest forced-to-total.
   fireProgress();
-  return { embedded, skipped };
+  return degraded
+    ? { embedded, skipped, degraded: true }
+    : { embedded, skipped };
 }
