@@ -4,6 +4,10 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { ShellAdapter } from "../../dist/indexer/adapter/shell.js";
+import {
+  normalizeFixtureOutput,
+  stringifyFixtureOutput,
+} from "../helpers/stable-fixture-output.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -29,7 +33,7 @@ describe("Shell Adapter Tests (ML2-C5.x)", () => {
 
       const goldenPath = resolve(goldenDir, "expected-symbols.json");
       ensureGoldenDir();
-      writeFileSync(goldenPath, JSON.stringify(symbols, null, 2), "utf-8");
+      writeFileSync(goldenPath, stringifyFixtureOutput(symbols), "utf-8");
 
       console.log(`✓ Generated ${symbols.length} symbols for symbols.sh`);
 
@@ -95,7 +99,7 @@ describe("Shell Adapter Tests (ML2-C5.x)", () => {
 
       const goldenPath = resolve(goldenDir, "expected-imports.json");
       ensureGoldenDir();
-      writeFileSync(goldenPath, JSON.stringify(imports, null, 2), "utf-8");
+      writeFileSync(goldenPath, stringifyFixtureOutput(imports), "utf-8");
 
       console.log(`✓ Generated ${imports.length} imports for imports.sh`);
 
@@ -143,7 +147,7 @@ describe("Shell Adapter Tests (ML2-C5.x)", () => {
 
       const goldenPath = resolve(goldenDir, "expected-calls.json");
       ensureGoldenDir();
-      writeFileSync(goldenPath, JSON.stringify(calls, null, 2), "utf-8");
+      writeFileSync(goldenPath, stringifyFixtureOutput(calls), "utf-8");
 
       console.log(`✓ Generated ${calls.length} calls for calls.sh`);
 
@@ -276,7 +280,7 @@ describe("Shell Adapter Tests (ML2-C5.x)", () => {
       const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
       assert.deepStrictEqual(
-        symbols,
+        normalizeFixtureOutput(symbols),
         golden,
         "Extracted symbols should match golden file",
       );
@@ -294,7 +298,7 @@ describe("Shell Adapter Tests (ML2-C5.x)", () => {
       const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
       assert.deepStrictEqual(
-        imports,
+        normalizeFixtureOutput(imports),
         golden,
         "Extracted imports should match golden file",
       );
@@ -313,7 +317,7 @@ describe("Shell Adapter Tests (ML2-C5.x)", () => {
       const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
       assert.deepStrictEqual(
-        calls,
+        normalizeFixtureOutput(calls),
         golden,
         "Extracted calls should match golden file",
       );

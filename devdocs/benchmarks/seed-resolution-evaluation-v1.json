@@ -7,12 +7,12 @@
     "caseCount": 4
   },
   "baseline": {
-    "gitHead": "86f5c5a2aceb56cc4c6b7433036e013cfa7d02c8",
+    "gitHead": "12e1b799e78bc1ac47217986d92308a527a485b0",
     "evaluatedSourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "sourceHashes": {
-      "src/agent/context-seeding.ts": "447b53110f561a438ad2c32797bea8cdac5eb84f9cc0b3f2fe17d1d68f4af9a5",
+      "src/agent/context-seeding.ts": "9e21564529a350bdf66892e4bc4d7a7acf082c5dec0fc60b020daf6e5e2725fb",
       "src/agent/planner.ts": "2c6a8a3f7ad57248a0dc5261d05d5c4f99c59baac8759a35cae89b2a802adecd",
-      "src/agent/executor.ts": "63ba3dda907c2bf879cc2fbce47898afd6b9e63b84b7213b79ec1da35ababfc4",
+      "src/agent/executor.ts": "2d30628bd155d9f8e68a3c138671b354afd12fa8183ffa038a6e5ff421a9ff2d",
       "src/graph/slice/start-node-resolver.ts": "9584d711965a144bf56ade8668be759ffb7d5e4619333e903f1c8407327d6ea0",
       "src/retrieval/seed-resolver.ts": "f2429719b1ae16e02e9b3f296ca09f67240d3ac71bce5d3c42c7295f80b1c672"
     },
@@ -472,9 +472,9 @@
     "autopilotExplicitScopeRecall": 1
   },
   "observedMedianPolicyLatencyMs": {
-    "contextAssembly": 0.1576,
-    "sliceStartNodes": 0.0115,
-    "autopilotExecution": 0.7401
+    "contextAssembly": 0.1505,
+    "sliceStartNodes": 0.0103,
+    "autopilotExecution": 0.6332
   },
   "interfaces": {
     "contextAssembly": "task text/options -> entity query plan + mixed entity candidates -> context refs",

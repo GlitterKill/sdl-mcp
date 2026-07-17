@@ -15,6 +15,10 @@ import {
   clearLoadedPlugins,
   getHostApiVersion,
 } from "../../dist/indexer/adapter/plugin/loader.js";
+import {
+  normalizeFixtureOutput,
+  stringifyFixtureOutput,
+} from "../helpers/stable-fixture-output.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -229,7 +233,7 @@ describe("Example Plugin Integration Tests (V06-10)", () => {
 
         const goldenPath = resolve(goldenDir, "expected-symbols.json");
         ensureGoldenDir();
-        writeFileSync(goldenPath, JSON.stringify(symbols, null, 2), "utf-8");
+        writeFileSync(goldenPath, stringifyFixtureOutput(symbols), "utf-8");
 
         assert.ok(symbols.length > 0, "Should extract symbols");
       });
@@ -245,7 +249,7 @@ describe("Example Plugin Integration Tests (V06-10)", () => {
         const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
         assert.deepStrictEqual(
-          JSON.parse(JSON.stringify(symbols)),
+          normalizeFixtureOutput(symbols),
           golden,
           "Extracted symbols should match golden file",
         );
@@ -286,7 +290,7 @@ describe("Example Plugin Integration Tests (V06-10)", () => {
 
         const goldenPath = resolve(goldenDir, "expected-imports.json");
         ensureGoldenDir();
-        writeFileSync(goldenPath, JSON.stringify(imports, null, 2), "utf-8");
+        writeFileSync(goldenPath, stringifyFixtureOutput(imports), "utf-8");
 
         assert.ok(imports.length > 0, "Should extract imports");
       });
@@ -302,7 +306,7 @@ describe("Example Plugin Integration Tests (V06-10)", () => {
         const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
         assert.deepStrictEqual(
-          JSON.parse(JSON.stringify(imports)),
+          normalizeFixtureOutput(imports),
           golden,
           "Extracted imports should match golden file",
         );
@@ -377,7 +381,7 @@ describe("Example Plugin Integration Tests (V06-10)", () => {
 
         const goldenPath = resolve(goldenDir, "expected-calls.json");
         ensureGoldenDir();
-        writeFileSync(goldenPath, JSON.stringify(calls, null, 2), "utf-8");
+        writeFileSync(goldenPath, stringifyFixtureOutput(calls), "utf-8");
 
         assert.ok(calls.length > 0, "Should extract calls");
       });
@@ -399,7 +403,7 @@ describe("Example Plugin Integration Tests (V06-10)", () => {
         const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
         assert.deepStrictEqual(
-          JSON.parse(JSON.stringify(calls)),
+          normalizeFixtureOutput(calls),
           golden,
           "Extracted calls should match golden file",
         );
@@ -434,7 +438,7 @@ describe("Example Plugin Integration Tests (V06-10)", () => {
 
         const goldenPath = resolve(goldenDir, "expected-graph.json");
         ensureGoldenDir();
-        writeFileSync(goldenPath, JSON.stringify(graphData, null, 2), "utf-8");
+        writeFileSync(goldenPath, stringifyFixtureOutput(graphData), "utf-8");
       });
 
       it("should maintain symbol ID references in calls", () => {

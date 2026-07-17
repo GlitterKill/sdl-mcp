@@ -4,6 +4,10 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { PythonAdapter } from "../../dist/indexer/adapter/python.js";
+import {
+  normalizeFixtureOutput,
+  stringifyFixtureOutput,
+} from "../helpers/stable-fixture-output.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -29,7 +33,7 @@ describe("Python Adapter Tests (ML-C1.x)", () => {
 
       const goldenPath = resolve(goldenDir, "expected-symbols.json");
       ensureGoldenDir();
-      writeFileSync(goldenPath, JSON.stringify(symbols, null, 2), "utf-8");
+      writeFileSync(goldenPath, stringifyFixtureOutput(symbols), "utf-8");
 
       console.log(`✓ Generated ${symbols.length} symbols for symbols.py`);
 
@@ -127,7 +131,7 @@ describe("Python Adapter Tests (ML-C1.x)", () => {
 
       const goldenPath = resolve(goldenDir, "expected-imports.json");
       ensureGoldenDir();
-      writeFileSync(goldenPath, JSON.stringify(imports, null, 2), "utf-8");
+      writeFileSync(goldenPath, stringifyFixtureOutput(imports), "utf-8");
 
       console.log(`✓ Generated ${imports.length} imports for imports.py`);
 
@@ -229,7 +233,7 @@ describe("Python Adapter Tests (ML-C1.x)", () => {
 
       const goldenPath = resolve(goldenDir, "expected-calls.json");
       ensureGoldenDir();
-      writeFileSync(goldenPath, JSON.stringify(calls, null, 2), "utf-8");
+      writeFileSync(goldenPath, stringifyFixtureOutput(calls), "utf-8");
 
       console.log(`✓ Generated ${calls.length} calls for calls.py`);
 
@@ -331,7 +335,7 @@ describe("Python Adapter Tests (ML-C1.x)", () => {
       const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
       assert.deepStrictEqual(
-        normalize(symbols),
+        normalizeFixtureOutput(normalize(symbols)),
         golden,
         "Extracted symbols should match golden file",
       );
@@ -349,7 +353,7 @@ describe("Python Adapter Tests (ML-C1.x)", () => {
       const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
       assert.deepStrictEqual(
-        normalize(imports),
+        normalizeFixtureOutput(normalize(imports)),
         golden,
         "Extracted imports should match golden file",
       );
@@ -368,7 +372,7 @@ describe("Python Adapter Tests (ML-C1.x)", () => {
       const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
       assert.deepStrictEqual(
-        normalize(calls),
+        normalizeFixtureOutput(normalize(calls)),
         golden,
         "Extracted calls should match golden file",
       );
