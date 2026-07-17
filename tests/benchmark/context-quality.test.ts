@@ -1075,8 +1075,12 @@ describe("context quality benchmarks", () => {
       [...new Set([...symbols.values()].map(({ fileId }) => fileId))],
     );
     const providerBackedSymbolIds = symbolIds.filter((symbolId) => {
-      const source = symbols.get(symbolId)?.source;
-      return source === "scip" || source === "lsp";
+      const symbol = symbols.get(symbolId);
+      return (
+        Boolean(symbol?.scipSymbol) ||
+        symbol?.source === "scip" ||
+        symbol?.source === "lsp"
+      );
     });
     assert.ok(
       providerBackedSymbolIds.length > 0,
@@ -1093,7 +1097,10 @@ describe("context quality benchmarks", () => {
       const signature = symbol.signatureJson
         ? (JSON.parse(symbol.signatureJson) as Record<string, unknown>)
         : undefined;
-      assert.match(evidence.summary, new RegExp(relPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      assert.match(
+        evidence.summary,
+        new RegExp(relPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      );
       if (typeof signature?.text === "string") {
         assert.ok(evidence.summary.includes(`sig: ${signature.text}`));
       }
