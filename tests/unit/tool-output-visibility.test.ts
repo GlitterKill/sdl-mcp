@@ -692,6 +692,34 @@ describe("visible tool output", () => {
     );
   });
 
+  it("renders canonical search preview artifacts as stable continuation handles", () => {
+    const args = { mode: "preview" };
+    const payload = {
+      responseMode: "handle",
+      kind: "responseArtifact",
+      handle: "response-canonical-preview-123",
+      action: "response.get",
+      metadata: {
+        toolName: "sdl.search.edit",
+        contentKind: "json",
+        originalBytes: 100_000,
+      },
+    };
+    const first = buildVisibleEnvelope("sdl.search.edit", args, payload);
+    const second = buildVisibleEnvelope("sdl.search.edit", args, payload);
+    const notification = formatToolCallForUser(
+      "sdl.search.edit",
+      args,
+      payload,
+    );
+    const expected =
+      "search.edit preview -> Response artifact (handle: response-canonical-preview-123; action: response.get).";
+
+    assert.equal(first.content[0]?.text, expected);
+    assert.equal(notification, expected);
+    assert.equal(JSON.stringify(first), JSON.stringify(second));
+  });
+
   it("reports an edit count for file writes without replacement matches", () => {
     const envelope = buildVisibleEnvelope(
       "sdl.file.write",

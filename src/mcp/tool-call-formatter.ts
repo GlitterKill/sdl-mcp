@@ -614,11 +614,21 @@ function fmtSearchEditApply(
 }
 
 function fmtSearchEdit(
-  _args: Record<string, unknown>,
+  args: Record<string, unknown>,
   result: Record<string, unknown>,
   presentation: ToolCallPresentation,
 ): string | null {
-  const mode = str(result.mode);
+  const mode = str(result.mode) || str(args.mode);
+  // Response artifacts omit the inline result mode, so use the requested mode
+  // to retain an operation-aware continuation instruction.
+  if (
+    mode === "preview" &&
+    result.kind === "responseArtifact" &&
+    str(result.handle) &&
+    result.action === "response.get"
+  ) {
+    return `search.edit preview -> Response artifact (handle: ${str(result.handle)}; action: response.get).`;
+  }
   if (mode === "preview") return fmtSearchEditPreview(result, presentation);
   if (mode === "apply") return fmtSearchEditApply(result, presentation);
   return null;
