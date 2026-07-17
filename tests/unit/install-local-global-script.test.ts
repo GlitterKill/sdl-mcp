@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -63,4 +64,32 @@ describe("install-local-global.ps1", () => {
       /Install local packages globally[\s\S]*Verify tokenizer runtime[\s\S]*Global sdl-mcp now points/,
     );
   });
+
+  it(
+    "passes the Node eval flag through Invoke-Native",
+    { skip: process.platform !== "win32" },
+    () => {
+      const invokeNative = script.slice(
+        script.indexOf("function Invoke-Native"),
+        script.indexOf("function Resolve-InstalledWatchmanBinary"),
+      );
+      const tokenizerCall = script
+        .split(/\r?\n/)
+        .find((line) => line.includes("Invoke-Native") && line.includes("tokenizers"));
+      assert.ok(tokenizerCall);
+
+      const root = repoRoot.replaceAll("'", "''");
+      const result = spawnSync(
+        "pwsh.exe",
+        [
+          "-NoProfile",
+          "-Command",
+          `${invokeNative}\n$globalSdlMcpRoot = '${root}'\n${tokenizerCall}`,
+        ],
+        { encoding: "utf8" },
+      );
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+    },
+  );
 });

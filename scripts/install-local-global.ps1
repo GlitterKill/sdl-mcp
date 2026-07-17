@@ -274,7 +274,7 @@ Invoke-Step "Verify tokenizer runtime" {
   }
   # Load through the installed package root so malformed optional platform
   # packages fail here instead of silently degrading every embedding run.
-  Invoke-Native node -e "require(require.resolve('tokenizers', { paths: [process.argv[1]] }));" $globalSdlMcpRoot
+  Invoke-Native -FilePath node -Arguments @("-e", "require(require.resolve('tokenizers', { paths: [process.argv[1]] }));", $globalSdlMcpRoot)
 }
 
 Invoke-Step "Verify global sdl-mcp command" {
