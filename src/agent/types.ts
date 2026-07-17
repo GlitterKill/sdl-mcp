@@ -211,6 +211,7 @@ export interface ScoredSymbol {
   structuralBonus: number; // 0-14
   pathAffinity: number; // -10 to 10
   languageAffinity: number; // 0-4
+  genericModulePenalty: number; // -8 or 0
 }
 
 /** Result of symbol ranking with confidence metadata. */

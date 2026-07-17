@@ -230,6 +230,37 @@ export function buildActionSeedQueries(taskText: string): string[] {
     }
   }
 
+  const hasOutputQaIntent =
+    /\b(?:contract|display|format|formatting|output|projection|qa|response|tests?|visibility)\b/i.test(
+      taskText,
+    );
+  if (hasOutputQaIntent) {
+    // Output-contract QA needs the shared response projection in addition to
+    // the action handler. Ordinary runtime debugging stays handler-shaped.
+    const projectionQuery = [
+      "context",
+      "response",
+      "projection",
+      ...new Set(
+        rankedActions.flatMap((action) => [
+          action.fn,
+          ...action.action.split("."),
+        ]),
+      ),
+    ].join(" ");
+    if (!seen.has(projectionQuery)) queries.push(projectionQuery);
+  }
+
+  if (hasOutputQaIntent && /\btests?\b/i.test(taskText)) {
+    const responseTestQuery = [
+      "response",
+      ...new Set(
+        rankedActions.flatMap((action) => action.action.split(".")),
+      ),
+    ].join(" ");
+    if (!seen.has(responseTestQuery)) queries.push(responseTestQuery);
+  }
+
   return queries;
 }
 
@@ -272,6 +303,16 @@ export function buildSeedEntitySearchPlan(
  * related symbols are most likely to live.
  */
 const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
+  {
+    // Cross-surface QA needs the public server, shared gateway, and formatter;
+    // exact file anchors let broad retrieval inspect those contracts together.
+    keywords: ["mcp dispatch", "tool functionality", "tool formatting"],
+    paths: [
+      "src/server.ts",
+      "src/gateway/router.ts",
+      "src/mcp/tool-call-formatter.ts",
+    ],
+  },
   {
     keywords: ["buildcontext", "build context", "context seeding", "seed context", "context seed"],
     paths: [
@@ -529,6 +570,66 @@ export function selectFirstUnseenPerBatch<T>(
   return { selected, complete: selected.length === batches.length };
 }
 
+/** Preserve each resolved named concept even when another concept misses. */
+export function selectScopedConceptSeeds<T extends { symbolId: string }>(
+  batches: readonly (readonly T[])[],
+): { selected: T[]; resolvedRefs: string[]; complete: boolean } {
+  const selection = selectFirstUnseenPerBatch(
+    batches,
+    ({ symbolId }) => symbolId,
+  );
+  return {
+    ...selection,
+    resolvedRefs: selection.selected.map(
+      ({ symbolId }) => `symbol:${symbolId}`,
+    ),
+  };
+}
+
+/** Attach named/action provenance when semantic retrieval found the seed first. */
+export function tagExistingSeedCandidate(
+  candidates: ContextSeedCandidate[],
+  contextRef: string,
+  expansionReason: "namedConcept" | "actionCatalog",
+): boolean {
+  const existing = candidates.find(
+    (candidate) => candidate.contextRef === contextRef,
+  );
+  if (!existing) return false;
+  existing.expansionReason = expansionReason;
+  return true;
+}
+
+/** Keep named/action seeds inside a bounded deterministic score ranking. */
+export function selectPreservedSeedCandidates(
+  candidates: ContextSeedCandidate[],
+  preservedRefs: ReadonlySet<string>,
+  limit: number,
+): ContextSeedCandidate[] {
+  if (limit <= 0) return [];
+  const ranked = [...candidates].sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.sourceRank - b.sourceRank ||
+      a.contextRef.localeCompare(b.contextRef),
+  );
+  const preserved = ranked
+    .filter((candidate) => preservedRefs.has(candidate.contextRef))
+    .slice(0, limit);
+  const selectedRefs = new Set(
+    preserved.map((candidate) => candidate.contextRef),
+  );
+  const remaining = ranked
+    .filter((candidate) => !selectedRefs.has(candidate.contextRef))
+    .slice(0, limit - preserved.length);
+  return [...preserved, ...remaining].sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.sourceRank - b.sourceRank ||
+      a.contextRef.localeCompare(b.contextRef),
+  );
+}
+
 /**
  * Preserve a successful scoped result, including an empty result set, and use
  * the global lane only when the scoped pool was unavailable (for example,
@@ -617,8 +718,10 @@ export async function buildSeedContext(
   const isBroad = task.options?.contextMode !== "precise";
   const scopePaths = explicitFocusPaths(task.options);
   const collectBeforeCaps = scopePaths.length > 0;
-  const useScopedPreciseLexical =
-    collectBeforeCaps && !isBroad && !forceSemanticEntitySearch;
+  // Explicit precise scope still needs per-concept lexical coverage when the
+  // caller forces semantic retrieval; otherwise one semantic topic can crowd
+  // out the other named subsystems before final ranking.
+  const useScopedPreciseLexical = collectBeforeCaps && !isBroad;
   const seedPlan = buildSeedEntitySearchPlan(task.taskText, isBroad);
   const useSemanticEntitySearch =
     forceSemanticEntitySearch || (!semanticDisabled && isBroad);
@@ -794,29 +897,44 @@ export async function buildSeedContext(
   const usingScopedLexicalPool =
     useScopedPreciseLexical && scopedLexicalResults !== undefined;
   let completeScopedConceptRefs: Set<string> | undefined;
+  const preservedScopedSeedRefs = new Set<string>();
 
   if (usingScopedLexicalPool) {
-    const conceptSelection = selectFirstUnseenPerBatch(
+    const conceptSelection = selectScopedConceptSeeds(
       scopedLexicalResults?.concept ?? [],
-      ({ symbolId }) => symbolId,
     );
     const conceptSeeds = conceptSelection.selected;
+    for (const ref of conceptSelection.resolvedRefs) {
+      preservedScopedSeedRefs.add(ref);
+    }
     if (conceptQueries.length > 0 && conceptSelection.complete) {
-      completeScopedConceptRefs = new Set(
-        conceptSeeds.map(({ symbolId }) => `symbol:${symbolId}`),
-      );
+      // Completeness controls only redundant lexical pruning. Resolved concept
+      // seeds remain preserved independently of whether every query matched.
+      completeScopedConceptRefs = new Set(conceptSelection.resolvedRefs);
     }
     for (let conceptRank = 0; conceptRank < conceptSeeds.length; conceptRank++) {
       const ref = `symbol:${conceptSeeds[conceptRank].symbolId}`;
-      if (seen.has(ref)) continue;
+      if (seen.has(ref)) {
+        tagExistingSeedCandidate(allCandidates, ref, "namedConcept");
+        continue;
+      }
       seen.add(ref);
       allCandidates.push({
         contextRef: ref,
         source: "lexical",
         score: Math.max(0.8, 1 - conceptRank / 20),
         sourceRank: conceptRank,
+        expansionReason: "namedConcept",
       });
       sourceCounts.lexical++;
+    }
+
+    const actionSelection = selectFirstUnseenPerBatch(
+      scopedLexicalResults?.action ?? [],
+      ({ symbolId }) => symbolId,
+    );
+    for (const { symbolId } of actionSelection.selected) {
+      preservedScopedSeedRefs.add(`symbol:${symbolId}`);
     }
   }
 
@@ -840,18 +958,27 @@ export async function buildSeedContext(
             : undefined,
           () => searchSymbols(conn, task.repoId, query, 4),
         );
-        for (const r of results) {
+        const selectedResults = usingScopedLexicalPool
+          ? results.filter((result) =>
+              preservedScopedSeedRefs.has(`symbol:${result.symbolId}`),
+            )
+          : results;
+        for (const r of selectedResults) {
           if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
             break;
           }
           const ref = `symbol:${r.symbolId}`;
-          if (seen.has(ref)) continue;
+          if (seen.has(ref)) {
+            tagExistingSeedCandidate(allCandidates, ref, "actionCatalog");
+            continue;
+          }
           seen.add(ref);
           allCandidates.push({
             contextRef: ref,
             source: "lexical",
             score: Math.max(0.8, 1 - actionRank / 12),
             sourceRank: actionRank,
+            expansionReason: "actionCatalog",
           });
           sourceCounts.lexical++;
           actionRank++;
@@ -1083,9 +1210,12 @@ export async function buildSeedContext(
         (candidate) =>
           candidate.source === "lexical" &&
           (!completeScopedConceptRefs ||
-            completeScopedConceptRefs.has(candidate.contextRef)),
+            preservedScopedSeedRefs.has(candidate.contextRef)),
       )
-      .slice(0, lexicalTargetCap);
+      .slice(
+        0,
+        Math.max(lexicalTargetCap, preservedScopedSeedRefs.size),
+      );
     const feedbackCandidates = scopeFilteredCandidates
       .filter((candidate) => candidate.source === "feedback")
       .slice(0, feedbackCap);
@@ -1095,8 +1225,16 @@ export async function buildSeedContext(
       ...feedbackCandidates,
     ];
   }
-  candidatesForFinalCap.sort((a, b) => b.score - a.score);
-  const finalCandidates = candidatesForFinalCap.slice(0, maxSeeds);
+  const finalCandidates =
+    preservedScopedSeedRefs.size > 0
+      ? selectPreservedSeedCandidates(
+          candidatesForFinalCap,
+          preservedScopedSeedRefs,
+          maxSeeds,
+        )
+      : candidatesForFinalCap
+          .sort((a, b) => b.score - a.score)
+          .slice(0, maxSeeds);
 
   // Recount sources after capping
   const finalSources = { semantic: 0, lexical: 0, feedback: 0 };

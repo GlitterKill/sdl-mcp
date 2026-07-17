@@ -2871,7 +2871,36 @@ function mergeSearchSymbolLiteTermResults(
   }
 
   const lowerQuery = query.trim().toLowerCase();
+  const queryTerms = splitSearchTerms(lowerQuery);
   return Array.from(matchCounts.values())
+    .map((entry) => {
+      const name = entry.row.name.toLowerCase();
+      const file = entry.row.file.toLowerCase();
+      let queryTermCoverage = 0;
+      let queryTermPriority = 0;
+      let nameTermAffinity = 0;
+      let pathTermAffinity = 0;
+      for (let index = 0; index < queryTerms.length; index++) {
+        const term = queryTerms[index];
+        const nameMatch = name.includes(term);
+        const pathMatch = file.includes(term);
+        if (nameMatch || pathMatch) {
+          queryTermCoverage++;
+          // Earlier terms preserve the caller's concept priority when a
+          // generic later term (for example, "output") creates a tie.
+          queryTermPriority += queryTerms.length - index;
+        }
+        if (nameMatch) nameTermAffinity++;
+        if (pathMatch) pathTermAffinity++;
+      }
+      return {
+        ...entry,
+        queryTermCoverage,
+        queryTermPriority,
+        nameTermAffinity,
+        pathTermAffinity,
+      };
+    })
     .sort((a, b) => {
       const aName = a.row.name.toLowerCase();
       const bName = b.row.name.toLowerCase();
@@ -2885,7 +2914,14 @@ function mergeSearchSymbolLiteTermResults(
       const bContains = bName.includes(lowerQuery) ? 0 : 1;
       if (aContains !== bContains) return aContains - bContains;
       return (
+        // Preserve the established multi-token relevance signal before using
+        // term affinity to break ties. Otherwise a strong first-term match
+        // can outrank a candidate that matched the whole query.
         b.count - a.count ||
+        b.queryTermCoverage - a.queryTermCoverage ||
+        b.queryTermPriority - a.queryTermPriority ||
+        b.nameTermAffinity - a.nameTermAffinity ||
+        b.pathTermAffinity - a.pathTermAffinity ||
         a.row.name.localeCompare(b.row.name) ||
         (a.row.file.startsWith("tests/") ? 1 : 0) -
           (b.row.file.startsWith("tests/") ? 1 : 0) ||

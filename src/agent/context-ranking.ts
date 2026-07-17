@@ -38,6 +38,7 @@ const BEHAVIORAL_KINDS = new Set([
   "class",
   "constructor",
 ]);
+const GENERIC_MODULE_NAMES = new Set(["index", "main", "mod", "module"]);
 
 // ---------------------------------------------------------------------------
 // Score components (each capped to their documented range)
@@ -331,6 +332,22 @@ function scoreLanguageAffinity(
   return affinityExtensions.has(ext) ? 4 : 0;
 }
 
+/** Penalize generic module containers only when neither task nor path agrees. */
+function scoreGenericModulePenalty(
+  sym: RankableSymbol,
+  lexicalOverlap: number,
+  pathAffinity: number,
+): number {
+  if (sym.kind !== "module" || lexicalOverlap > 0 || pathAffinity > 0) {
+    return 0;
+  }
+  const normalizedName = sym.name
+    .replace(/^[`'"]+|[`'"]+$/g, "")
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase();
+  return GENERIC_MODULE_NAMES.has(normalizedName) ? -8 : 0;
+}
+
 const SCRIPT_INTENT = /\bscripts?\b/;
 const DIST_INTENT = /\bdist\b|\bbuild output\b|\bcompiled\b/;
 const TEST_INTENT = /\btests?\b|\bspecs?\b|\btesting\b/;
@@ -535,6 +552,7 @@ export function rankSymbols(
         structuralBonus: 0,
         pathAffinity: 0,
         languageAffinity: 0,
+        genericModulePenalty: 0,
       });
       continue;
     }
@@ -561,6 +579,11 @@ export function rankSymbols(
       task.options?.includeTests,
     );
     const languageAffinity = scoreLanguageAffinity(sym, affinityExtensions);
+    const genericModulePenalty = scoreGenericModulePenalty(
+      sym,
+      lexicalOverlap,
+      pathAffinity,
+    );
 
     const totalScore = Math.max(
       0,
@@ -573,7 +596,8 @@ export function rankSymbols(
           feedbackPrior +
           structuralBonus +
           pathAffinity +
-          languageAffinity,
+          languageAffinity +
+          genericModulePenalty,
       ),
     );
 
@@ -588,6 +612,7 @@ export function rankSymbols(
       structuralBonus,
       pathAffinity,
       languageAffinity,
+      genericModulePenalty,
     });
   }
 

@@ -5,6 +5,9 @@ import {
   buildScopedPreciseConceptQueries,
   filterSeedCandidatesToScope,
   selectFirstUnseenPerBatch,
+  selectPreservedSeedCandidates,
+  selectScopedConceptSeeds,
+  tagExistingSeedCandidate,
   useScopedResultsOrFallback,
 } from "../../../dist/agent/context-seeding.js";
 import type { ContextSeedCandidate } from "../../../dist/agent/types.js";
@@ -180,6 +183,59 @@ describe("scoped lexical fallback", () => {
         selected: [{ id: "workflow" }, { id: "delta" }],
         complete: false,
       },
+    );
+  });
+
+  it("preserves every resolved concept when another concept is unresolved", () => {
+    assert.deepEqual(
+      selectScopedConceptSeeds(
+        [
+          [{ symbolId: "workflow" }],
+          [],
+          [{ symbolId: "delta" }],
+        ],
+      ),
+      {
+        selected: [{ symbolId: "workflow" }, { symbolId: "delta" }],
+        resolvedRefs: ["symbol:workflow", "symbol:delta"],
+        complete: false,
+      },
+    );
+  });
+
+  it("tags a semantic-first duplicate with named-concept provenance", () => {
+    const candidates: ContextSeedCandidate[] = [
+      {
+        contextRef: "symbol:workflow",
+        source: "semantic",
+        score: 0.35,
+        sourceRank: 0,
+      },
+    ];
+
+    assert.equal(
+      tagExistingSeedCandidate(
+        candidates,
+        "symbol:workflow",
+        "namedConcept",
+      ),
+      true,
+    );
+    assert.equal(candidates[0]?.expansionReason, "namedConcept");
+  });
+
+  it("keeps resolved named seeds when higher generic scores fill the cap", () => {
+    const high = candidate("symbol:high", 1, "symbol");
+    const medium = candidate("symbol:medium", 0.9, "symbol");
+    const named = candidate("symbol:named", 0.2, "symbol");
+
+    assert.deepEqual(
+      selectPreservedSeedCandidates(
+        [high, medium, named],
+        new Set([named.contextRef]),
+        2,
+      ).map(({ contextRef }) => contextRef),
+      [high.contextRef, named.contextRef],
     );
   });
 

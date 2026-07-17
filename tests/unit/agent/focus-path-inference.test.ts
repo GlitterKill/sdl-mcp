@@ -141,6 +141,18 @@ describe("inferFocusPathsFromTaskText", () => {
     );
   });
 
+  it("infers dispatch, gateway, and formatter files for broad tool QA", () => {
+    const paths = inferFocusPathsFromTaskText(
+      "Retrieve code context for SDL tool functionality QA: MCP dispatch, workflow, tool formatting",
+    );
+
+    assert.deepStrictEqual(paths, [
+      "src/server.ts",
+      "src/gateway/router.ts",
+      "src/mcp/tool-call-formatter.ts",
+    ]);
+  });
+
   it("returns empty array for unrecognized queries", () => {
     const paths = inferFocusPathsFromTaskText("what is the meaning of life?");
     assert.deepStrictEqual(paths, []);
@@ -188,7 +200,7 @@ describe("buildContextFtsQuery", () => {
 describe("buildActionSeedQueries", () => {
   it("prioritizes exact tool handler and schema names", () => {
     const queries = buildActionSeedQueries(
-      "debug runtime.execute and runtime.queryOutput behavior",
+      "debug runtime.execute and runtime.queryOutput output behavior",
     );
     const joined = queries.join(" ");
 
@@ -196,12 +208,42 @@ describe("buildActionSeedQueries", () => {
     assert.ok(joined.includes("handleRuntimeExecute"));
     assert.ok(joined.includes("RuntimeExecuteRequestSchema"));
     assert.ok(joined.includes("handleRuntimeQueryOutput"));
+    assert.ok(
+      queries.some((query) => query.startsWith("context response projection ")),
+      "tool requests should retain a response-projection test seed",
+    );
   });
 
   it("does not seed unrelated prompts", () => {
     assert.deepStrictEqual(
       buildActionSeedQueries("what is the meaning of life?"),
       [],
+    );
+  });
+
+  it("does not add response-projection seeds without QA intent", () => {
+    const queries = buildActionSeedQueries("Debug runtime.execute timeout");
+
+    assert.equal(queries.length, 1);
+    assert.ok(queries[0]?.includes("handleRuntimeExecute"));
+    assert.ok(
+      queries.every(
+        (query) => !query.startsWith("context response projection "),
+      ),
+    );
+  });
+
+  it("adds a bounded response-test query for named tool QA", () => {
+    const queries = buildActionSeedQueries(
+      "Find tests for search edit and usage stats output",
+    );
+
+    assert.ok(
+      queries.some(
+        (query) =>
+          query.startsWith("response ") && query.includes("search edit"),
+      ),
+      "test-focused tool requests should retain a response-contract seed",
     );
   });
 });

@@ -257,6 +257,57 @@ describe("context-ranking", () => {
       assert.ok(focused.pathAffinity > other.pathAffinity);
     });
 
+    it("downranks generic modules only without task or path affinity", () => {
+      const symbolMap = new Map<string, RankableSymbol>([
+        [
+          "sym-generic",
+          createSymbol({
+            name: "`index.js`",
+            kind: "module",
+            fileId: "grammar-wrappers/example/index.js",
+          }),
+        ],
+        [
+          "sym-gateway",
+          createSymbol({
+            name: "routeGatewayCall",
+            kind: "function",
+            exported: true,
+            fileId: "src/gateway/router.ts",
+          }),
+        ],
+      ]);
+      const seeds: ContextSeedCandidate[] = [
+        {
+          contextRef: "symbol:sym-generic",
+          source: "semantic",
+          score: 1,
+          sourceRank: 0,
+        },
+        {
+          contextRef: "symbol:sym-gateway",
+          source: "semantic",
+          score: 0.7,
+          sourceRank: 1,
+        },
+      ];
+
+      const result = rankSymbols(
+        [...symbolMap.keys()],
+        symbolMap,
+        ["gateway", "routing"],
+        createTask({ taskText: "Review gateway routing" }),
+        { seedCandidates: seeds },
+      );
+
+      assert.equal(result.ranked[0]?.symbolId, "sym-gateway");
+      assert.equal(
+        result.ranked.find(({ symbolId }) => symbolId === "sym-generic")
+          ?.genericModulePenalty,
+        -8,
+      );
+    });
+
     it("confidence tier reflects score gap", () => {
       const symbolMap = new Map<string, RankableSymbol>([
         ["sym-top", createSymbol({ name: "buildContext", kind: "method" })],

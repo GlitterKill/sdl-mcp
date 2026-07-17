@@ -669,6 +669,87 @@ describe("LadybugDB Search Queries", () => {
   );
 
   it(
+    "prefers combined name and path affinity over a generic symbol in the same file",
+    { skip: !ladybugAvailable },
+    () => {
+      const scoped = queries as unknown as ScopedSearchQueries;
+      const common = {
+        fileId: "file-determinism",
+        file: "tests/integration/determinism.test.ts",
+        exported: false,
+        summary: "determinism output",
+        searchText: "determinism output",
+      };
+      const results = scoped.searchSymbolsLiteInPool(
+        [
+          {
+            ...common,
+            symbolId: "sym-generic",
+            name: "__dirname",
+            kind: "variable",
+          },
+          {
+            ...common,
+            symbolId: "sym-module",
+            name: "`determinism.test.ts`",
+            kind: "module",
+          },
+          {
+            ...common,
+            symbolId: "sym-generic-output",
+            name: "`cli-tool-output.test.ts`",
+            fileId: "file-cli-output",
+            file: "tests/unit/cli-tool-output.test.ts",
+            summary: "determinism output",
+            searchText: "determinism output",
+            kind: "module",
+          },
+        ],
+        "determinism output",
+        3,
+      );
+
+      assert.equal(results[0]?.symbolId, "sym-module");
+    },
+  );
+
+  it(
+    "prefers full query-term coverage before first-term affinity",
+    { skip: !ladybugAvailable },
+    () => {
+      const scoped = queries as unknown as ScopedSearchQueries;
+      const results = scoped.searchSymbolsLiteInPool(
+        [
+          {
+            symbolId: "sym-alpha-only",
+            name: "alphaOnly",
+            fileId: "file-alpha",
+            file: "src/alpha.ts",
+            kind: "function",
+            exported: true,
+            summary: "alpha",
+            searchText: "alpha",
+          },
+          {
+            symbolId: "sym-all-terms",
+            name: "betaTarget",
+            fileId: "file-beta",
+            file: "src/beta.ts",
+            kind: "function",
+            exported: true,
+            summary: "alpha beta",
+            searchText: "alpha beta",
+          },
+        ],
+        "alpha beta",
+        2,
+      );
+
+      assert.equal(results[0]?.symbolId, "sym-all-terms");
+    },
+  );
+
+  it(
     "honors mixed and root scopes while excluding non-file-backed symbols",
     { skip: !ladybugAvailable },
     async () => {

@@ -143,6 +143,7 @@ const MAX_RAW_SYMBOLS = 3;
 const MAX_SEARCH_FALLBACK = 10;
 const MAX_ESCALATIONS = 2;
 const MAX_FORCED_SEMANTIC_PRECISE_CARD_SYMBOLS = 20;
+const MAX_CARD_SYMBOLS_PER_FILE = 3;
 const MAX_RELATED_SYMBOLS = 14;
 const MAX_FORCED_SEMANTIC_RANKED_FILE_SYMBOLS = 80;
 const MAX_FORCED_SEMANTIC_FILE_OUTLINE_SYMBOLS = 160;
@@ -188,6 +189,232 @@ export {
   generateCompoundIdentifiers,
   extractIdentifiersFromText,
 };
+
+const LOW_SIGNAL_SKELETON_IMPORTS = new Set([
+  "after",
+  "assert",
+  "before",
+  "describe",
+  "dirname",
+  "fileURLToPath",
+  "it",
+  "join",
+  "mkdir",
+  "mkdtemp",
+  "readFile",
+  "resolve",
+  "rm",
+  "spawnSync",
+  "strict",
+  "test",
+  "tmpdir",
+  "writeFile",
+]);
+
+const MAX_SKELETON_EVIDENCE_EXCERPT_CHARS = 480;
+
+function uniqueBoundedIdentifiers(
+  matches: IterableIterator<RegExpMatchArray>,
+  limit: number,
+  excluded: ReadonlySet<string> = new Set(),
+): string[] {
+  const identifiers: string[] = [];
+  const seen = new Set<string>();
+  for (const match of matches) {
+    const identifier = match[1];
+    if (!identifier || excluded.has(identifier) || seen.has(identifier)) {
+      continue;
+    }
+    seen.add(identifier);
+    identifiers.push(identifier);
+    if (identifiers.length >= limit) break;
+  }
+  return identifiers;
+}
+
+/**
+ * Build a compact structural excerpt instead of returning an arbitrary source
+ * prefix. Imports expose test targets, while declarations retain late helpers
+ * without expanding every skeleton response to its full source text.
+ */
+export function buildSkeletonEvidenceExcerpt(
+  skeletonText: string,
+  taskText = "",
+): string {
+  const structuralPrefix = skeletonText
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+  const importIdentifiers: string[] = [];
+  const seenImports = new Set<string>();
+  for (const importMatch of skeletonText.matchAll(
+    /\bimport\s+(?:type\s+)?([\s\S]*?)\s+from\s+["'][^"']+["'];?/g,
+  )) {
+    const clause = importMatch[1] ?? "";
+    for (const identifierMatch of clause.matchAll(
+      /\b([A-Za-z_$][\w$]*)\b/g,
+    )) {
+      const identifier = identifierMatch[1];
+      if (
+        !identifier ||
+        identifier === "as" ||
+        identifier === "type" ||
+        LOW_SIGNAL_SKELETON_IMPORTS.has(identifier) ||
+        seenImports.has(identifier)
+      ) {
+        continue;
+      }
+      seenImports.add(identifier);
+      importIdentifiers.push(identifier);
+      if (importIdentifiers.length >= 8) break;
+    }
+    if (importIdentifiers.length >= 8) break;
+  }
+
+  const allDeclarations = uniqueBoundedIdentifiers(
+    skeletonText.matchAll(
+      /(?:^|\n)\s*(?:export\s+)?(?:declare\s+)?(?:async\s+)?(?:function|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g,
+    ),
+    256,
+  );
+  const taskTerms =
+    taskText.toLowerCase().match(/[a-z0-9]{3,}/g) ?? [];
+  const taskAcronyms = taskText.match(/\b[A-Z][A-Z0-9]{1,}\b/g) ?? [];
+  const acronymAffineDeclarations = allDeclarations.filter((identifier) => {
+    const normalized = identifier.toLowerCase();
+    return taskAcronyms.some((acronym) =>
+      normalized.includes(acronym.toLowerCase()),
+    );
+  });
+  const taskAffineDeclarations = allDeclarations.filter((identifier) => {
+    const normalized = identifier.toLowerCase();
+    return taskTerms.some((term) => normalized.includes(term));
+  });
+  const declarations = [
+    ...new Set([
+      ...acronymAffineDeclarations,
+      ...taskAffineDeclarations,
+      ...allDeclarations,
+    ]),
+  ]
+    .filter((identifier) => !structuralPrefix.includes(identifier))
+    .slice(0, 14);
+  const lateImports = importIdentifiers.filter(
+    (identifier) => !structuralPrefix.includes(identifier),
+  );
+  const parts = structuralPrefix ? [structuralPrefix] : [];
+  if (lateImports.length > 0) {
+    parts.push(`imports: ${lateImports.join(", ")}`);
+  }
+  if (declarations.length > 0) {
+    parts.push(`declarations: ${declarations.join(", ")}`);
+  }
+  return parts.join(" | ").slice(0, MAX_SKELETON_EVIDENCE_EXCERPT_CHARS);
+}
+
+function highConfidenceNamedSymbolIds(
+  seedCandidates: ContextSeedCandidate[],
+): Set<string> {
+  return new Set(
+    seedCandidates
+      .filter(
+        (candidate) =>
+          (candidate.expansionReason === "namedConcept" ||
+            candidate.expansionReason === "actionCatalog") &&
+          candidate.contextRef.startsWith("symbol:"),
+      )
+      .map((candidate) => candidate.contextRef.slice("symbol:".length)),
+  );
+}
+
+function countHighConfidenceNamedSymbolSeeds(
+  seedCandidates: ContextSeedCandidate[],
+): number {
+  return highConfidenceNamedSymbolIds(seedCandidates).size;
+}
+
+/** Keep named/action representatives inside a hard repeated-file evidence cap. */
+export function selectBoundedCardEvidenceItems<
+  T extends { symbolId: string; fileId?: string },
+>(
+  items: T[],
+  preservedSymbolIds: ReadonlySet<string>,
+  perFileLimit: number,
+): T[] {
+  if (perFileLimit <= 0) return [];
+  const itemsByFile = new Map<string, T[]>();
+  for (const item of items) {
+    const fileKey = item.fileId ?? `symbol:${item.symbolId}`;
+    const group = itemsByFile.get(fileKey) ?? [];
+    group.push(item);
+    itemsByFile.set(fileKey, group);
+  }
+
+  const selectedIds = new Set<string>();
+  for (const group of itemsByFile.values()) {
+    const prioritized = [
+      ...group.filter((item) => preservedSymbolIds.has(item.symbolId)),
+      ...group.filter((item) => !preservedSymbolIds.has(item.symbolId)),
+    ];
+    for (const item of prioritized.slice(0, perFileLimit)) {
+      selectedIds.add(item.symbolId);
+    }
+  }
+
+  // Preserve the original global rank after choosing each file's bounded set.
+  return items.filter((item) => selectedIds.has(item.symbolId));
+}
+
+/** Bound multi-topic precise cards once scoped lexical coverage is complete. */
+export function computeCardRungSymbolLimit(
+  task: AgentTask,
+  seedCandidates: ContextSeedCandidate[],
+): number {
+  if (task.options?.contextMode !== "precise") return MAX_CARD_SYMBOLS;
+  if (task.options.semantic !== true) return MAX_PRECISE_CARD_SYMBOLS;
+
+  const hasExplicitScope = !!(
+    task.options.focusPaths?.length || task.options.focusSymbols?.length
+  );
+  const highConfidenceCount = countHighConfidenceNamedSymbolSeeds(
+    seedCandidates,
+  );
+  if (hasExplicitScope && highConfidenceCount >= 5) {
+    // Two semantic complements retain useful adjacency without letting generic
+    // benchmark/support symbols crowd a complete named-subsystem result.
+    return Math.min(
+      MAX_FORCED_SEMANTIC_PRECISE_CARD_SYMBOLS,
+      highConfidenceCount + 2,
+    );
+  }
+  return MAX_FORCED_SEMANTIC_PRECISE_CARD_SYMBOLS;
+}
+
+/** Keep one bounded skeleton item per high-confidence named lexical seed. */
+export function computeEvidenceRungSymbolLimit(
+  task: AgentTask,
+  seedCandidates: ContextSeedCandidate[],
+  defaultMax: number,
+): number {
+  const hasExplicitScope = !!(
+    task.options?.focusPaths?.length || task.options?.focusSymbols?.length
+  );
+  if (
+    task.options?.contextMode !== "precise" ||
+    task.options?.semantic !== true ||
+    !hasExplicitScope
+  ) {
+    return defaultMax;
+  }
+  const highConfidenceCount = countHighConfidenceNamedSymbolSeeds(
+    seedCandidates,
+  );
+  const adaptiveCap = Math.max(defaultMax, 8);
+  return Math.min(
+    adaptiveCap,
+    Math.max(defaultMax, highConfidenceCount),
+  );
+}
 
 export class Executor {
   private evidenceCapture: EvidenceCapture;
@@ -1032,12 +1259,10 @@ export class Executor {
       // Precise scoped selection can contain every symbol in an exact file.
       // Keep card hydration bounded at the same moderate cap used by precise
       // adaptive ranking; broad mode retains the larger coverage cap.
-      const cardSymbolLimit =
-        task.options?.contextMode === "precise"
-          ? task.options.semantic === true
-            ? MAX_FORCED_SEMANTIC_PRECISE_CARD_SYMBOLS
-            : MAX_PRECISE_CARD_SYMBOLS
-          : MAX_CARD_SYMBOLS;
+      const cardSymbolLimit = computeCardRungSymbolLimit(
+        task,
+        expandedSeedCandidates,
+      );
 
       let allSymbols =
         rawSymbols.length > 0 && task.taskText
@@ -1208,8 +1433,17 @@ export class Executor {
           task.repoId,
           allSymbols,
         );
-        const resolvedItems = resolved.items.filter(
-          (item) => item.status === "resolved",
+        const resolvedItems = selectBoundedCardEvidenceItems(
+          resolved.items
+            .filter((item) => item.status === "resolved")
+            .map((item) => ({
+              ...item,
+              fileId: item.file?.fileId ?? item.symbol.fileId,
+            })),
+          // Preserve original named/action seeds only. Graph-expanded direct
+          // context is useful ranking input but must not bypass the file cap.
+          highConfidenceNamedSymbolIds(seedCandidates),
+          MAX_CARD_SYMBOLS_PER_FILE,
         );
         const resolvedSymbolIds = resolvedItems.map((item) => item.symbolId);
         const symbolMap = new Map(
@@ -1333,9 +1567,10 @@ export class Executor {
         seedCandidates,
       );
 
-      const skeletonSymbolLimit = this.rungSymbolLimit(
+      const skeletonSymbolLimit = computeEvidenceRungSymbolLimit(
         task,
-        MAX_SKELETON_SYMBOLS,
+        expandedSeedCandidates,
+        this.rungSymbolLimit(task, MAX_SKELETON_SYMBOLS),
       );
       const symbolIds =
         rawSkeletonSymbols.length > 0 && task.taskText
@@ -1374,7 +1609,7 @@ export class Executor {
             );
             this.evidenceCapture.captureSkeleton(
               symbolId,
-              `${prefix} | Skeleton (${result.originalLines} lines, ~${result.estimatedTokens} tokens): ${result.skeletonText.slice(0, 200)}`,
+              `${prefix} | Skeleton (${result.originalLines} lines, ~${result.estimatedTokens} tokens): ${buildSkeletonEvidenceExcerpt(result.skeletonText, task.taskText)}`,
             );
             processedCount++;
           }
@@ -1405,7 +1640,7 @@ export class Executor {
           if (result) {
             this.evidenceCapture.captureSkeleton(
               filePath,
-              `File skeleton (${result.originalLines} lines, ~${result.estimatedTokens} tokens): ${result.skeleton.slice(0, 200)}`,
+              `File skeleton (${result.originalLines} lines, ~${result.estimatedTokens} tokens): ${buildSkeletonEvidenceExcerpt(result.skeleton, task.taskText)}`,
             );
             processedCount++;
           }

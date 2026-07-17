@@ -60,7 +60,10 @@ describe("context seeding policy", () => {
       "const resolvedScopedCandidates = filterSeedCandidatesToScope(",
     );
     const primaryCap = src.indexOf(".slice(0, primarySourceCap)", scopeFilter);
-    const lexicalCap = src.indexOf(".slice(0, lexicalTargetCap)", scopeFilter);
+    const lexicalCap = src.indexOf(
+      "Math.max(lexicalTargetCap, preservedScopedSeedRefs.size)",
+      scopeFilter,
+    );
     const finalCap = src.indexOf(".slice(0, maxSeeds)", scopeFilter);
 
     assert.ok(scopeFilter >= 0, "expected production scope-filter call");
@@ -79,12 +82,21 @@ describe("context seeding policy", () => {
     assert.match(src, /const useScopedPreciseLexical/);
   });
 
+  it("retains scoped lexical concepts for forced semantic precise requests", () => {
+    const src = source();
+
+    assert.match(
+      src,
+      /const useScopedPreciseLexical =\s*collectBeforeCaps && !isBroad;/,
+    );
+  });
+
   it("uses only complete concept coverage instead of redundant scoped seeds", () => {
     const src = source();
 
     assert.match(src, /completeScopedConceptRefs/);
     assert.match(src, /conceptSelection\.complete/);
-    assert.match(src, /completeScopedConceptRefs\.has\(candidate\.contextRef\)/);
+    assert.match(src, /preservedScopedSeedRefs\.has\(candidate\.contextRef\)/);
   });
 
   it("keeps general scoped feedback behavior", () => {
