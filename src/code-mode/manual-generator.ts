@@ -97,19 +97,13 @@ function codeHotPath(p: { symbolId: string; identifiersToFind: string[]; context
 function codeNeedWindow(p: { symbolId: string; reason: string; expectedLines: number; identifiersToFind: string[]; maxTokens?: number; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): object | ResponseHandle
 
 // === Repo ===
-/** Register a repository */
 function repoRegister(p: { rootPath: string }): { repoId: string }
-/** Get repository status */
 function repoStatus(p?: { detail?: "minimal" | "standard" | "full"; includeTelemetry?: boolean }): { status: object }
-/** Permanently remove a runtime repository registration */
+/** Permanent removal */
 function repoUnregister(p: { confirmRepoId: string; discardDrafts?: boolean }): { ok: true; repoId: string; removed: true }
-/** Get codebase overview */
 function repoOverview(p: { level?: "stats" | "directories" | "full"; ifNoneMatch?: string }): object
-/** Refresh index */
 function indexRefresh(p: { mode: "full" | "incremental"; async?: boolean; includeDiagnostics?: boolean }): object
-/** Get policy config */
 function policyGet(): { policy: object }
-/** Set policy config */
 function policySet(p: { policyPatch: { maxWindowLines?: number; maxWindowTokens?: number; requireIdentifiers?: boolean; allowBreakGlass?: boolean; defaultDenyRaw?: boolean } }): { policy: object }
 
 // === Semantic Providers ===
