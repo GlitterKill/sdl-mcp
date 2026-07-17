@@ -2,29 +2,33 @@
 
 ## Problem
 
-CI run `29580560720` fails deterministically on the hosted Ubuntu benchmark runner while materializing the second sample against an existing LadybugDB graph. The provider-first planner deletes the existing provider symbols, then treats that database as fresh enough for `COPY Symbol`. LadybugDB still reports a duplicate primary key for the same symbol ID. Fresh local Windows and WSL runs pass, so the failure is specific to the hosted runtime's handling of delete followed by primary-key `COPY`, not duplicate provider input.
+CI run `29580560720` fails in the second locked Zod benchmark sample while replacing provider-first rows in an existing LadybugDB graph. Four hosted attempts failed with the same duplicate `Symbol` primary key, including attempts after deleting the Linux benchmark-repository and `node_modules` caches.
 
-Deleting the benchmark repository cache and the Linux `node_modules` cache did not change the failure. The failure occurs before benchmark thresholds are evaluated.
+The provider planner used a separate 50,000-symbol replacement ceiling, while the database layer already documents 2,048 as the safe limit for deleting or mutating a COPY-loaded `Symbol` table under LadybugDB 0.18.1. Zod materializes 4,414 provider symbols, so the repeat sample entered the unsafe replacement path.
+
+Local boundary probes confirmed the broader failure mode. After provider rows were reused but unchanged legacy fallback files were indexed again, a persisted `Symbol` scan returned 4,628 rows for only 4,160 unique IDs despite the primary key. Version snapshot COPY then failed on those duplicated physical rows.
 
 ## Design
 
-Use known-fresh `COPY` writers only when no provider rows existed before the materialization plan was created. Repeat runs that are small enough to retire stale rows will:
+Use the database layer's shared `LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT` everywhere the provider-first planner decides whether an active `Symbol` table can be replaced. Repositories above that limit reuse existing provider rows rather than deleting and copying them again.
 
-1. delete the old provider symbols;
-2. upsert replacement symbols with the merge-safe writer; and
-3. rebuild edges with the generic edge writer.
+An unchanged repeat can reuse the entire verified graph, including rows previously supplied by legacy fallback, only when all three conditions hold:
 
-Fresh databases retain the fast `COPY` path. Large repeat runs retain their existing row-reuse behavior. The benchmark continues to measure a real repeat index instead of resetting the database or turning the second sample into a no-op.
+1. the active-materialization plan already selected provider-row reuse;
+2. the generated provider input fingerprint matches the recorded active input; and
+3. every scanned source file is unchanged and no file was removed.
+
+That path performs the existing persisted-graph no-op verification, reuses the active version, and skips both provider graph materialization and legacy fallback writes. If any condition is false, normal indexing continues; a raw symbol-count match alone never qualifies for the full-graph no-op.
 
 ## Alternatives Rejected
 
-- Retry `COPY` after the duplicate-key error: the native transaction may already be aborted, and retrying does not remove the unsafe assumption.
-- Reset the database between benchmark samples: this hides repeat-index correctness and changes what the benchmark measures.
-- Reuse rows for the second sample: this makes the sample a no-op and produces misleading timing.
+- Deduplicate version snapshot rows: this masks a corrupted `Symbol` scan after unsafe mutations and does not repair the active graph.
+- Create a fresh version for the repeat: version IDs are not the failing boundary; the source `Symbol` table is already physically inconsistent by snapshot time.
+- Reset the benchmark database between samples: this hides repeat-index correctness and changes the guardrail's workload.
+- Treat every same-sized provider result as unchanged: equal counts do not prove provider content identity.
 
 ## Verification
 
-- Update the planner regression to require `deleteExistingFileSymbols: true`, `useKnownFreshWriters: false`, and `writeEdges: true` for small repeat runs.
-- Add a materializer regression proving that delete plus merge-safe symbol upsert still rebuilds edges without symbol `COPY`.
-- Run the focused provider-first suite, typecheck, lint, and the affected benchmark guardrail.
-- Rerun GitHub Actions run `29580560720`; hosted Ubuntu success is the final proof for the environment-specific failure.
+- Unit tests cover the shared 2,048-symbol ceiling and require all three full-graph reuse gates.
+- The exact locked Zod two-sample benchmark passes locally against a fresh database with all 10 threshold evaluations green.
+- Typecheck, lint, focused provider-first tests, and hosted Ubuntu CI remain required before completion.

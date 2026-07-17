@@ -1,6 +1,5 @@
+import { LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT } from "../db/ladybug-symbols.js";
 import { normalizePath } from "../util/paths.js";
-
-const PROVIDER_FIRST_ACTIVE_STALE_DELETE_SYMBOL_LIMIT = 50_000;
 
 export interface ProviderFirstActiveMaterializationPlan {
   deleteExistingFileSymbols: boolean;
@@ -33,7 +32,7 @@ export function resolveProviderFirstActiveMaterializationPlan(params: {
   const deleteExistingFileSymbols =
     hasExistingProviderRows &&
     params.providerSymbolCount <=
-      PROVIDER_FIRST_ACTIVE_STALE_DELETE_SYMBOL_LIMIT;
+      LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT;
   const useKnownFreshWriters =
     !hasExistingProviderRows || deleteExistingFileSymbols;
   const existingProviderRowsMatchCurrentShape =
@@ -52,6 +51,20 @@ export function resolveProviderFirstActiveMaterializationPlan(params: {
       !deleteExistingFileSymbols &&
       canReuseExistingProviderRows,
   };
+}
+
+export function shouldReuseProviderFirstFullGraph(params: {
+  reuseExistingProviderRows: boolean;
+  activeProviderInputMatches: boolean;
+  allFilesUnchanged: boolean;
+}): boolean {
+  // Large COPY-loaded Symbol tables cannot safely tolerate even fallback-only
+  // mutations, so reuse the whole graph only when both inputs are proven stable.
+  return (
+    params.reuseExistingProviderRows &&
+    params.activeProviderInputMatches &&
+    params.allFilesUnchanged
+  );
 }
 
 /** @internal exported for tests; do not import from product code. */

@@ -29,6 +29,46 @@ When a failure comes from `tests/runner.test.ts`, remember that the file imports
 
 ## Confirmed Findings
 
+### 2026-07-17: Repeat Provider Materialization Duplicate Primary Key (Hosted Validation Pending)
+
+Run `29580560720` failed only in `benchmarks (ubuntu-latest)`, step `Run Benchmark CI Guardrails (locked OSS repo)`, on commit `c4f55d79c9d169c674d6157124c1503f77e13895`. Attempts 1 through 4 used jobs `87884983590`, `87898973114`, `87900355505`, and `87903760317`.
+
+Every attempt failed before benchmark thresholds with the same symbol ID:
+
+```text
+Fatal error: index phase providerFirstMaterialize failed: Copy exception: Found duplicated primary key value c5ca46326d5a620a62bd6c138d6aa210033eb7f4e5777107e5734aec5245f273, which violates the uniqueness constraint of the primary key column.
+```
+
+Confirmed evidence and root cause:
+
+- Deleting the Linux benchmark-repository cache and rerunning produced the same failure after a fresh locked-repository setup.
+- Deleting the Linux `node_modules` cache and rerunning produced the same failure after a fresh dependency install and fresh locked-repository setup.
+- Provider rows are validated for duplicate symbol IDs before database writes.
+- The provider planner used a 50,000-symbol replacement ceiling even though `ladybug-symbols.ts` already limits safe deletion or mutation of COPY-loaded `Symbol` tables to 2,048 rows for LadybugDB 0.18.1. Zod's 4,414 provider symbols therefore entered the unsafe path.
+- A local failed database returned 4,628 `Symbol` rows but only 4,160 unique IDs after repeat fallback mutations. This physical duplication despite the primary key explains both the original materialization failure and later version snapshot duplicates.
+
+Current fix: the provider planner now uses the shared 2,048-row safety limit. Above it, unchanged repeats reuse the complete verified graph only when provider rows are reusable, the generated provider fingerprint matches the active record, and every scanned source file is unchanged. The no-op is verified against the persisted graph digest and reuses the active version, avoiding both provider and legacy fallback `Symbol` mutations.
+
+The exact local two-sample Zod guardrail passed all 10 thresholds against a fresh database after this change. Hosted Ubuntu validation on the fix SHA is still required.
+
+Useful inspection commands:
+
+```powershell
+gh run view 29580560720 --repo GlitterKill/sdl-mcp --json databaseId,headSha,jobs,status,conclusion,url
+gh run view 29580560720 --repo GlitterKill/sdl-mcp --attempt 4 --log-failed
+gh cache list --repo GlitterKill/sdl-mcp --limit 100 --json id,key,createdAt,lastAccessedAt,sizeInBytes
+```
+
+Focused local verification:
+
+```powershell
+npm run build:runtime
+node --experimental-strip-types --test --test-name-pattern "reuses active provider rows|reuses the full graph only" tests/unit/provider-first-indexing.test.ts
+node dist/cli/index.js benchmark:ci --repo-id zod-oss --threshold-path config/benchmark.ci.config.json --json
+npm run typecheck
+npm run lint
+```
+
 ### 2026-04-24: Semantic Embedding Refresh Race Regression
 
 Run `24870184275` failed in `CI`, jobs `72814789964` (`tests (ubuntu-latest, 24.x)`) and `72814789967` (`tests (windows-latest, 24.x)`), step `Run tests (including 6 new language adapters + cross-platform paths)`, on commit `2a7dcd47abd4413968caa4b9db00ae91cd723cf3` from `main`.

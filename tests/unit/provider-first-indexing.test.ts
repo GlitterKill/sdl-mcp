@@ -45,6 +45,7 @@ import {
   shouldUseBatchPersistAccumulator,
   shouldUseRustPass1Engine,
 } from "../../dist/indexer/indexer.js";
+import { shouldReuseProviderFirstFullGraph } from "../../dist/indexer/indexer-pass1-policy.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
 import {
   executeProviderFirstScipIncremental,
@@ -7913,7 +7914,7 @@ describe("provider-first indexing foundation", () => {
     assert.deepEqual(
       resolveProviderFirstActiveMaterializationPlan({
         existingProviderFileCount: 1_000,
-        providerSymbolCount: 25_000,
+        providerSymbolCount: 2_000,
       }),
       {
         deleteExistingFileSymbols: true,
@@ -7921,13 +7922,13 @@ describe("provider-first indexing foundation", () => {
         writeEdges: true,
         reuseExistingProviderRows: false,
       },
-      "small repeat runs still retire stale rows and use the fast replacement writers",
+      "small repeat runs below LadybugDB's safe delete ceiling use fast replacement writers",
     );
 
     assert.deepEqual(
       resolveProviderFirstActiveMaterializationPlan({
         existingProviderFileCount: 1_000,
-        providerSymbolCount: 84_000,
+        providerSymbolCount: 4_414,
       }),
       {
         deleteExistingFileSymbols: false,
@@ -7935,7 +7936,7 @@ describe("provider-first indexing foundation", () => {
         writeEdges: false,
         reuseExistingProviderRows: true,
       },
-      "LLVM-scale repeat runs avoid native-crashing active rewrites and reuse existing provider rows",
+      "Zod-scale repeat runs avoid unsafe active rewrites and reuse existing provider rows",
     );
 
     assert.deepEqual(
@@ -8000,6 +8001,36 @@ describe("provider-first indexing foundation", () => {
       }),
       1,
     );
+  });
+
+  it("reuses the full graph only for a verified unchanged provider repeat", () => {
+    assert.equal(
+      shouldReuseProviderFirstFullGraph({
+        reuseExistingProviderRows: true,
+        activeProviderInputMatches: true,
+        allFilesUnchanged: true,
+      }),
+      true,
+    );
+    for (const changedInput of [
+      {
+        reuseExistingProviderRows: false,
+        activeProviderInputMatches: true,
+        allFilesUnchanged: true,
+      },
+      {
+        reuseExistingProviderRows: true,
+        activeProviderInputMatches: false,
+        allFilesUnchanged: true,
+      },
+      {
+        reuseExistingProviderRows: true,
+        activeProviderInputMatches: true,
+        allFilesUnchanged: false,
+      },
+    ]) {
+      assert.equal(shouldReuseProviderFirstFullGraph(changedInput), false);
+    }
   });
 
   it("preserves release-scale symbol identities across provider-first checkpoints", async () => {

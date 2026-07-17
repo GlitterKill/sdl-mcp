@@ -91,6 +91,7 @@ import {
   countExistingProviderPrimaryFiles,
   resolvePass1BatchSymbolWriteMode,
   resolveProviderFirstActiveMaterializationPlan,
+  shouldReuseProviderFirstFullGraph,
   shouldCreateParserWorkerPool,
   shouldDeleteExistingFilesBeforeFullPass1,
   shouldStabilizePass1BatchPersist,
@@ -3068,21 +3069,14 @@ async function indexRepoImpl(
                   providerResult.generatedIndexes,
                 )
               : null;
-          const activeProviderInputRecord = activeProviderInputHash
-            ? await ladybugDb.getScipIngestionRecord(
-                conn,
-                repoId,
-                PROVIDER_FIRST_ACTIVE_INPUT_RECORD_PATH,
-              )
-            : null;
+          const activeProviderInputRecord = activeProviderInputHash ? await ladybugDb.getScipIngestionRecord(conn, repoId, PROVIDER_FIRST_ACTIVE_INPUT_RECORD_PATH) : null;
           const activeProviderInputMatches = Boolean(
             activeProviderInputHash &&
             activeProviderInputRecord?.contentHash ===
               activeProviderInputHash &&
             activeProviderInputRecord.truncated !== true,
           );
-          const existingProviderSymbolCount =
-            await countExistingScipProviderSymbols(conn, repoId);
+          const existingProviderSymbolCount = await countExistingScipProviderSymbols(conn, repoId);
           const activeMaterializationPlan: ProviderFirstActiveMaterializationPlan =
             providerFirstIncrementalActive
               ? {
@@ -3100,6 +3094,7 @@ async function indexRepoImpl(
                   activeProviderInputMatches,
                   existingProviderSymbolCount,
                 });
+          const reuseExistingFullGraph = shouldReuseProviderFirstFullGraph({ reuseExistingProviderRows: activeMaterializationPlan.reuseExistingProviderRows, activeProviderInputMatches, allFilesUnchanged: providerScan.allFilesUnchanged });
           await measureProviderFirstPhase(
             "persistProvenance",
             "providerFirstPersistProvenance",
@@ -3225,10 +3220,12 @@ async function indexRepoImpl(
                 "provider active rows reused for existing large symbol set",
             });
           }
-          const integrityVersionId = activeMaterializationPlan.reuseExistingProviderRows ? await resolveActiveGraphVersionId("Provider-first SCIP active rows reused") : graphIntegrity.reserveVersionId();
-          providerFirstGraphCommitStarted = true;
-          await graphIntegrity.begin(integrityVersionId, materializedRows.files.map((file) => file.fileId));
-          graphIntegrity.applyProviderRows(materializedRows);
+          if (!reuseExistingFullGraph) {
+            const integrityVersionId = activeMaterializationPlan.reuseExistingProviderRows && !legacyFallbackPlan.runLegacyFallback ? await resolveActiveGraphVersionId("Provider-first SCIP active rows reused") : graphIntegrity.reserveVersionId();
+            providerFirstGraphCommitStarted = true;
+            await graphIntegrity.begin(integrityVersionId, materializedRows.files.map((file) => file.fileId));
+            graphIntegrity.applyProviderRows(materializedRows);
+          }
           await measureProviderFirstPhase(
             "materialize",
             "providerFirstMaterialize",
@@ -3371,7 +3368,7 @@ async function indexRepoImpl(
             );
           }
           if (coverageReport.fallbackPaths.size > 0) {
-            if (legacyFallbackPlan.runLegacyFallback) {
+            if (legacyFallbackPlan.runLegacyFallback && !reuseExistingFullGraph) {
               executionReasons.push(
                 `legacy fallback indexed ${legacyFallbackPlan.parsedFiles} uncovered or provider-unusable file(s) after provider-first materialization`,
               );
@@ -3418,7 +3415,7 @@ async function indexRepoImpl(
             reasons: executionReasons,
           };
 
-          if (legacyFallbackPlan.runLegacyFallback) {
+          if (legacyFallbackPlan.runLegacyFallback && !reuseExistingFullGraph) {
             logger.info(
               "indexRepo: provider-first materialized; using legacy fallback for uncovered files",
               {
@@ -3444,9 +3441,7 @@ async function indexRepoImpl(
             providerFirstLegacyFallbackStartedAt = Date.now();
           } else {
             if (activeMaterializationPlan.reuseExistingProviderRows) {
-              const versionId = await resolveActiveGraphVersionId(
-                "Provider-first SCIP active rows reused",
-              );
+              const versionId = reuseExistingFullGraph ? await verifyNoOpIncrementalGraphIntegrity(repoId) : await resolveActiveGraphVersionId("Provider-first SCIP active rows reused");
               let semanticDeferred: boolean | undefined =
                 await markProviderFirstSemanticReadinessDeferred({
                   repoId,
@@ -3459,7 +3454,7 @@ async function indexRepoImpl(
                   semanticDeferred,
                 });
               semanticDeferred = semanticRefresh.semanticDeferred;
-              await graphIntegrity.complete(versionId);
+              if (!reuseExistingFullGraph) await graphIntegrity.complete(versionId);
               providerFirstExecutedSummary = withProviderFirstPhaseTimings(
                 providerFirstExecutedSummary,
               );
