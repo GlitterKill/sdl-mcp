@@ -268,14 +268,24 @@ function indentAtOffset(content: string, offset: number): string {
   return leadingIndent(content.slice(lineStart, offset));
 }
 
-function inferIndentUnit(content: string, closingIndent: string): string {
-  const indents = content
-    .split(/\r\n|\n/)
-    .filter((line) => line.trim().length > 0)
-    .map(leadingIndent)
-    .filter((indent) => indent.length > 0)
-    .sort((a, b) => a.length - b.length || a.localeCompare(b));
-  if (indents[0]) return indents[0];
+function inferIndentUnit(
+  content: string,
+  bodyStart: number,
+  closingIndent: string,
+): string {
+  const precedingLines = content.slice(0, bodyStart).split(/\r\n|\n/);
+  // The nearest shallower compatible line provides the target's local indent step.
+  for (let index = precedingLines.length - 2; index >= 0; index -= 1) {
+    const line = precedingLines[index];
+    if (!line || line.trim().length === 0) continue;
+    const ancestorIndent = leadingIndent(line);
+    if (
+      ancestorIndent.length < closingIndent.length &&
+      closingIndent.startsWith(ancestorIndent)
+    ) {
+      return closingIndent.slice(ancestorIndent.length);
+    }
+  }
   return closingIndent.includes("\t") ? "\t" : "  ";
 }
 
@@ -294,7 +304,7 @@ function normalizeBodyContent(
     .find((line) => line.trim().length > 0);
   const targetIndent = existingBodyLine
     ? leadingIndent(existingBodyLine)
-    : closingIndent + inferIndentUnit(content, closingIndent);
+    : closingIndent + inferIndentUnit(content, bodyRange.start, closingIndent);
 
   const normalizedReplacement = replacement.replace(/\r\n|\r|\n/g, newline);
   const replacementLines = normalizedReplacement.split(newline);

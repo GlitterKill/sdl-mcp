@@ -132,6 +132,26 @@ describe("planTypeScriptSymbolEdit", () => {
     );
   });
 
+  it("keeps an empty method in its local whitespace family", () => {
+    const content =
+      "function tabIndented() {\n\treturn false;\n}\nclass Auth {\n  handleAuth() {\n  }\n}\n";
+    const result = planTypeScriptSymbolEdit({
+      content,
+      filePath: "src/auth.ts",
+      symbol: {
+        ...functionSnapshot,
+        kind: "method",
+        range: { startLine: 5, startCol: 2, endLine: 6, endCol: 3 },
+      },
+      operation: { kind: "replaceBody", content: "return true;" },
+    });
+
+    assert.equal(
+      result.newContent,
+      "function tabIndented() {\n\treturn false;\n}\nclass Auth {\n  handleAuth() {\n    return true;\n  }\n}\n",
+    );
+  });
+
   it("preserves CRLF line endings for logical body text", () => {
     const content =
       "export function handleAuth() {\r\n  return false;\r\n}\r\n";
