@@ -248,8 +248,21 @@ function fmtCodeNeedWindow(
   result: Record<string, unknown>,
 ): string | null {
   const status = str(result.status);
-  if (status === "denied") {
+  if (result.approved === false || status === "denied") {
     return "code.needWindow -> Code access denied.";
+  }
+
+  const responseMode = str(result.responseMode);
+  const kind = str(result.kind);
+  const handle = str(result.handle);
+  const action = str(result.action);
+  if (
+    responseMode === "handle" &&
+    kind === "responseArtifact" &&
+    handle &&
+    action === "response.get"
+  ) {
+    return `code.needWindow -> Response artifact (handle: ${handle}; action: ${action}).`;
   }
 
   const contentKind = str(result.contentKind);

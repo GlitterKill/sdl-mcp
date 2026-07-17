@@ -190,6 +190,29 @@ describe("formatToolCallForUser", () => {
     assert.equal(result, "code.needWindow -> Code access denied.");
   });
 
+  it("treats approved false as denied when legacy responses omit status", () => {
+    const result = formatToolCallForUser("sdl.code.needWindow", {}, {
+      approved: false,
+      nextBestAction: "Try sdl.code.getSkeleton first",
+    });
+
+    assert.equal(result, "code.needWindow -> Code access denied.");
+  });
+
+  it("summarizes response artifact handles as retrieval instructions", () => {
+    const result = formatToolCallForUser("sdl.code.needWindow", {}, {
+      responseMode: "handle",
+      kind: "responseArtifact",
+      handle: "response-artifact-opaque-handle",
+      action: "response.get",
+    });
+
+    assert.equal(
+      result,
+      "code.needWindow -> Response artifact (handle: response-artifact-opaque-handle; action: response.get).",
+    );
+  });
+
   it("summarizes skeleton downgrades from the delivery contract", () => {
     const result = formatToolCallForUser("sdl.code.needWindow", {}, {
       approved: true,
