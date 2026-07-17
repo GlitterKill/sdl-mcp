@@ -17,6 +17,8 @@ import { performance } from "node:perf_hooks";
 
 const REPO_ID = "sdl-mcp";
 const REQUIRE_LIVE_INDEX = process.env.SDL_CONTEXT_QUALITY_REQUIRE_INDEX === "1";
+const REQUIRE_PROVIDER_CONTEXT_CARD_INVARIANT =
+  process.env.SDL_CONTEXT_QUALITY_REQUIRE_PROVIDER_INVARIANT === "1";
 const RUN_SEMANTIC_ONLY =
   process.env.SDL_CONTEXT_QUALITY_VARIANT === "semantic";
 const CASE_DETAIL_MODE = process.env.SDL_CONTEXT_QUALITY_CASE_DETAILS;
@@ -109,6 +111,16 @@ interface CaseMetrics {
   evidenceSummaries: string[];
 }
 
+interface ProviderContextCardInvariantMetrics {
+  requested: boolean;
+  status: "not_requested" | "pending" | "passed";
+  graphIntegrityState: string | null;
+  graphIntegrityVersionId: string | null;
+  graphIntegrityDigest: string | null;
+  checkedSymbolIds: string[];
+  providerBackedSymbolIds: string[];
+}
+
 type LadybugModule = typeof import("../../dist/db/ladybug.js");
 type LadybugConnection = Awaited<
   ReturnType<LadybugModule["getLadybugConn"]>
@@ -117,6 +129,10 @@ type LadybugQueries = typeof import("../../dist/db/ladybug-queries.js");
 type PathsModule = typeof import("../../dist/util/paths.js");
 type BenchmarkOutputModule =
   typeof import("../../dist/benchmark/output-file.js");
+type ContextToolsModule = typeof import("../../dist/mcp/tools/context.js");
+type SymbolToolsModule = typeof import("../../dist/mcp/tools/symbol.js");
+type DerivedStateModule =
+  typeof import("../../dist/db/ladybug-derived-state.js");
 
 const variants: Variant[] = [
   { name: "lexical", semantic: false },
@@ -130,6 +146,17 @@ const metrics = {
   availabilityReason: "not checked",
   variants: new Map<string, VariantMetrics>(),
   scopedPrecise: createMetrics("scoped-precise"),
+  providerContextCardInvariant: {
+    requested: REQUIRE_PROVIDER_CONTEXT_CARD_INVARIANT,
+    status: REQUIRE_PROVIDER_CONTEXT_CARD_INVARIANT
+      ? "pending"
+      : "not_requested",
+    graphIntegrityState: null,
+    graphIntegrityVersionId: null,
+    graphIntegrityDigest: null,
+    checkedSymbolIds: [],
+    providerBackedSymbolIds: [],
+  } satisfies ProviderContextCardInvariantMetrics,
 };
 
 let cases: BenchmarkCase[] = [];
@@ -139,11 +166,17 @@ let ladybugConn: LadybugConnection | undefined;
 let ladybugQueries:
   | Pick<
       LadybugQueries,
-      "getSymbolsByIds" | "getFilesByIds" | "getFileIdsByRepoPaths"
+      | "getSymbolsByIds"
+      | "getFilesByIds"
+      | "getFileIdsByRepoPaths"
+      | "getLatestVersion"
     >
   | undefined;
 let normalizeEvidencePath: PathsModule["normalizePath"] | undefined;
 let writeBenchmarkOutput: BenchmarkOutputModule["writeUtf8Output"] | undefined;
+let handleAgentContext: ContextToolsModule["handleAgentContext"] | undefined;
+let handleSymbolGetCard: SymbolToolsModule["handleSymbolGetCard"] | undefined;
+let getDerivedState: DerivedStateModule["getDerivedState"] | undefined;
 
 function createMetrics(name: string): VariantMetrics {
   return {
@@ -677,6 +710,7 @@ function persistBenchmarkArtifact(): void {
       metrics.scopedPrecise.cases > 0
         ? variantMetricsForArtifact(metrics.scopedPrecise)
         : null,
+    providerContextCardInvariant: metrics.providerContextCardInvariant,
   };
   writeBenchmarkOutput(
     ARTIFACT_PATH,
@@ -709,6 +743,9 @@ describe("context quality benchmarks", () => {
         paths,
         engine,
         benchmarkOutput,
+        contextTools,
+        symbolTools,
+        derivedState,
       ] =
         await Promise.all([
           import("../../dist/config/configPath.js"),
@@ -720,6 +757,9 @@ describe("context quality benchmarks", () => {
           import("../../dist/util/paths.js"),
           import("../../dist/agent/context-engine.js"),
           import("../../dist/benchmark/output-file.js"),
+          import("../../dist/mcp/tools/context.js"),
+          import("../../dist/mcp/tools/symbol.js"),
+          import("../../dist/db/ladybug-derived-state.js"),
         ]);
       writeBenchmarkOutput = benchmarkOutput.writeUtf8Output;
       const configPath = activateCliConfigPath(process.env.SDL_CONFIG);
@@ -729,6 +769,9 @@ describe("context quality benchmarks", () => {
       contextEngine = engine.contextEngine;
       ladybugQueries = queries;
       normalizeEvidencePath = paths.normalizePath;
+      handleAgentContext = contextTools.handleAgentContext;
+      handleSymbolGetCard = symbolTools.handleSymbolGetCard;
+      getDerivedState = derivedState.getDerivedState;
 
       const conn = await ladybug.getLadybugConn();
       ladybugConn = conn;
@@ -955,6 +998,130 @@ describe("context quality benchmarks", () => {
       assert.ok(selectedResult, "selected report case result should exist");
       assertSelectedReportCase(selectedResult);
     }
+  });
+
+  it("dereferences clean provider-first context evidence through card lookup", async (t) => {
+    if (!REQUIRE_PROVIDER_CONTEXT_CARD_INVARIANT) {
+      t.skip("set SDL_CONTEXT_QUALITY_REQUIRE_PROVIDER_INVARIANT=1 for the clean provider proof");
+      return;
+    }
+    if (!metrics.repoAvailable) {
+      skipOrFail(metrics.availabilityReason);
+      return;
+    }
+    assert.ok(ladybugConn, "LadybugDB connection must be initialized");
+    assert.ok(ladybugQueries, "LadybugDB queries must be initialized");
+    assert.ok(normalizeEvidencePath, "Path normalizer must be initialized");
+    assert.ok(handleAgentContext, "sdl.context handler must be initialized");
+    assert.ok(handleSymbolGetCard, "symbol.getCard handler must be initialized");
+    assert.ok(getDerivedState, "derived-state reader must be initialized");
+
+    const [derivedState, latestVersion] = await Promise.all([
+      getDerivedState(REPO_ID),
+      ladybugQueries.getLatestVersion(ladybugConn, REPO_ID),
+    ]);
+    assert.ok(derivedState, "Clean provider graph must have derived state");
+    assert.ok(latestVersion, "Clean provider graph must have a current version");
+    assert.equal(derivedState.graphIntegrityState, "verified");
+    assert.equal(
+      derivedState.graphIntegrityVersionId,
+      latestVersion.versionId,
+      "Provider context/card proof must use the integrity-verified version",
+    );
+    assert.match(derivedState.graphIntegrityDigest ?? "", /^[a-f0-9]{64}$/);
+
+    const session = { sessionId: "provider-context-card-invariant" };
+    const context = await handleAgentContext(
+      {
+        repoId: REPO_ID,
+        taskType: "review",
+        taskText:
+          "Review SDL MCP tool handlers, schemas, gateway routing, and response formatting",
+        budget: { maxActions: 3, maxTokens: 12_000 },
+        options: {
+          contextMode: "broad",
+          semantic: true,
+          includeTests: false,
+          cardDetail: "full",
+        },
+        responseMode: "inline",
+        wireFormat: "json",
+        refsMode: "off",
+      },
+      session,
+    );
+    assert.ok("finalEvidence" in context);
+    const symbolEvidence = context.finalEvidence.filter(({ reference }) =>
+      reference.startsWith("symbol:"),
+    );
+    assert.ok(
+      symbolEvidence.length > 0,
+      "Clean provider context must return dereferenceable symbol evidence",
+    );
+
+    const symbolIds = [
+      ...new Set(
+        symbolEvidence.map(({ reference }) =>
+          reference.slice("symbol:".length),
+        ),
+      ),
+    ];
+    const symbols = await ladybugQueries.getSymbolsByIds(
+      ladybugConn,
+      symbolIds,
+    );
+    const files = await ladybugQueries.getFilesByIds(
+      ladybugConn,
+      [...new Set([...symbols.values()].map(({ fileId }) => fileId))],
+    );
+    const providerBackedSymbolIds = symbolIds.filter((symbolId) => {
+      const source = symbols.get(symbolId)?.source;
+      return source === "scip" || source === "lsp";
+    });
+    assert.ok(
+      providerBackedSymbolIds.length > 0,
+      "Invariant must exercise provider-first symbol rows, not only legacy fallback rows",
+    );
+
+    for (const evidence of symbolEvidence) {
+      const symbolId = evidence.reference.slice("symbol:".length);
+      const symbol = symbols.get(symbolId);
+      assert.ok(symbol, `Context returned missing provider symbol ${symbolId}`);
+      const file = files.get(symbol.fileId);
+      assert.ok(file, `Context symbol ${symbolId} has no owning file`);
+      const relPath = normalizeEvidencePath(file.relPath);
+      const signature = symbol.signatureJson
+        ? (JSON.parse(symbol.signatureJson) as Record<string, unknown>)
+        : undefined;
+      assert.match(evidence.summary, new RegExp(relPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      if (typeof signature?.text === "string") {
+        assert.ok(evidence.summary.includes(`sig: ${signature.text}`));
+      }
+
+      const cardResponse = await handleSymbolGetCard(
+        { repoId: REPO_ID, symbolId, refsMode: "off" },
+        session,
+      );
+      assert.ok("card" in cardResponse);
+      assert.equal(cardResponse.card.file, relPath);
+      assert.deepEqual(cardResponse.card.range, {
+        startLine: symbol.rangeStartLine,
+        startCol: symbol.rangeStartCol,
+        endLine: symbol.rangeEndLine,
+        endCol: symbol.rangeEndCol,
+      });
+      assert.deepEqual(cardResponse.card.signature, signature);
+    }
+
+    metrics.providerContextCardInvariant = {
+      requested: true,
+      status: "passed",
+      graphIntegrityState: derivedState.graphIntegrityState,
+      graphIntegrityVersionId: derivedState.graphIntegrityVersionId,
+      graphIntegrityDigest: derivedState.graphIntegrityDigest,
+      checkedSymbolIds: symbolIds,
+      providerBackedSymbolIds,
+    };
   });
 
   it("keeps scoped precise lookups below the latency target", async (t) => {
