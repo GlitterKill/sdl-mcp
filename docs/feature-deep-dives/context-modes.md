@@ -111,7 +111,11 @@ Candidate seeding uses a mode-based retrieval pipeline:
 
 Explicit `focusPaths` constrain whichever retrieval lane is active. Broad mode defaults to hybrid discovery for recall, while precise mode preserves the lexical fast path unless the caller forces semantic retrieval.
 
-Forced semantic retrieval treats inferred paths as soft coverage hints: retrieval evidence is ranked without inferred-path bias, then at most half of the selected slots are filled for inferred-path coverage. Precise forced-semantic calls may retain up to 20 cards. The first card per selected file also carries a deterministic compact outline of query-ranked names and declarations; the first deterministically ordered file adds a dependency sample bounded to 80 sources, 512 candidate targets, and 24 emitted names. This exposes relevant sibling types and helpers without another search pass. Omitted `semantic`, `semantic: false`, explicit scope, and every other SDL tool keep their existing behavior.
+Forced semantic retrieval treats inferred paths as soft coverage hints: retrieval evidence is ranked without inferred-path bias, then at most half of the selected slots are filled for inferred-path coverage. With explicit precise scope, SDL also runs deterministic scoped lexical queries for every named concept and catalog action. Each resolved named seed remains eligible even when another concept misses or the semantic lane found the same symbol first. Multi-term lexical matches prefer complete query coverage before name/path affinity breaks ties.
+
+Precise forced-semantic calls may retain up to 20 cards. Once at least five named/action seeds resolve, the card budget tightens to those seeds plus two semantic complements, still within the 20-card ceiling. Repeated evidence from one file is capped at three cards, with named/action representatives selected inside that hard cap. The skeleton rung can expand from five to at most eight named targets. Every skeleton summary keeps a structural/signature prefix plus task-relevant imports and declarations inside 480 characters, so increased coverage does not create an unbounded response.
+
+Broad cross-surface tool-QA prompts add deterministic anchors for MCP dispatch, gateway routing, and tool formatting. Ordinary action debugging stays handler-shaped; shared response-projection and response-test queries are added only when the task asks about output, formatting, contracts, visibility, QA, or tests. Unrelated context prompts and every other SDL tool keep their existing behavior.
 
 After seeding, an evidence-aware multi-factor scorer ranks every candidate using:
 
@@ -162,9 +166,10 @@ Returns a compact response by default. The model-visible payload includes:
 - `answer`
 - `finalEvidence` (primary evidence surface)
 - `nextBestAction` (when relevant)
+- `retrievalEvidence` (when requested and hybrid retrieval produced it)
 - `error` (when failed)
 
-The fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are computed internally but omitted from the model-visible response at the MCP serialization layer.
+The fields `actionsTaken`, `path`, and `metrics` are computed internally but omitted from the model-visible response at the MCP serialization layer.
 
 ### Precise mode
 

@@ -29,6 +29,13 @@ Use `repo.unregister` only to permanently remove a runtime registration. Confirm
 
 Use `sdl.context` for task-shaped understanding. For explain/debug tasks, start with `options.answerFirst: true` and expand through evidence IDs only when the answer is insufficient. Exact tool/action names are seeded from the action catalog, but use `sdl.retrieve` for one-hop retrieval when the task already names a symbol, API, operation, or focused code target. If you need to decide which files or symbols to edit, build a slice through `sdl.retrieve` before requesting code.
 
+Leave `options.semantic` unset for normal use: broad mode uses bounded hybrid
+retrieval by default, while precise mode keeps the lexical fast path. Set it to
+`true` to force hybrid retrieval in either mode and to `false` for lexical-only
+diagnostics. Explicit precise scope remains strict. Forced semantic precise
+retrieval also preserves bounded per-concept and named-action coverage, so do
+not replace one focused call with several broad searches.
+
 Use `sdl.workflow` only when steps need fields from earlier results, transforms, runtime execution, batch operations, mutations, or result piping. With `onError: "continueAll"`, failed and policy-denied gateway results continue execution but retain `status: "error"` and count as errors in the workflow summary.
 
 Escalate through `sdl.retrieve` in this order:

@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:simple_function:0",
+    "nodeId": "tests/fixtures/c/symbols.c:simple_function:0",
     "kind": "function",
     "name": "simple_function",
     "exported": true,
@@ -17,7 +17,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:add_numbers:1",
+    "nodeId": "tests/fixtures/c/symbols.c:add_numbers:1",
     "kind": "function",
     "name": "add_numbers",
     "exported": true,
@@ -43,7 +43,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:allocate_memory:2",
+    "nodeId": "tests/fixtures/c/symbols.c:allocate_memory:2",
     "kind": "function",
     "name": "allocate_memory",
     "exported": true,
@@ -60,7 +60,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:process_data:3",
+    "nodeId": "tests/fixtures/c/symbols.c:process_data:3",
     "kind": "function",
     "name": "process_data",
     "exported": true,
@@ -86,7 +86,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:compute_sum:4",
+    "nodeId": "tests/fixtures/c/symbols.c:compute_sum:4",
     "kind": "function",
     "name": "compute_sum",
     "exported": true,
@@ -112,7 +112,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:print_point:5",
+    "nodeId": "tests/fixtures/c/symbols.c:print_point:5",
     "kind": "function",
     "name": "print_point",
     "exported": true,
@@ -134,7 +134,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:create_point:6",
+    "nodeId": "tests/fixtures/c/symbols.c:create_point:6",
     "kind": "function",
     "name": "create_point",
     "exported": true,
@@ -160,7 +160,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:get_color:7",
+    "nodeId": "tests/fixtures/c/symbols.c:get_color:7",
     "kind": "function",
     "name": "get_color",
     "exported": true,
@@ -182,7 +182,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.c:print_status:8",
+    "nodeId": "tests/fixtures/c/symbols.c:print_status:8",
     "kind": "function",
     "name": "print_status",
     "exported": true,

@@ -1,10 +1,10 @@
 [
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_simple_calls:1",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_simple_calls:1",
     "calleeIdentifier": "simple_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:simple_function:0",
     "range": {
       "startLine": 9,
       "startCol": 4,
@@ -13,11 +13,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_simple_calls:1",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_simple_calls:1",
     "calleeIdentifier": "simple_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:simple_function:0",
     "range": {
       "startLine": 10,
       "startCol": 4,
@@ -26,7 +26,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:distance:4",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:distance:4",
     "calleeIdentifier": "(self.x * self.x + self.y * self.y).abs",
     "isResolved": false,
     "callType": "method",
@@ -38,7 +38,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_method_calls:6",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_method_calls:6",
     "calleeIdentifier": "Point::new",
     "isResolved": false,
     "callType": "function",
@@ -50,7 +50,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_method_calls:6",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_method_calls:6",
     "calleeIdentifier": "p.distance",
     "isResolved": false,
     "callType": "method",
@@ -62,7 +62,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_method_calls:6",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_method_calls:6",
     "calleeIdentifier": "p.translate",
     "isResolved": false,
     "callType": "method",
@@ -74,7 +74,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:new:8",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:new:8",
     "calleeIdentifier": "Vec::new",
     "isResolved": false,
     "callType": "function",
@@ -86,7 +86,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:push:9",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:push:9",
     "calleeIdentifier": "self.data.push",
     "isResolved": false,
     "callType": "method",
@@ -98,7 +98,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:len:10",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:len:10",
     "calleeIdentifier": "self.data.len",
     "isResolved": false,
     "callType": "method",
@@ -110,7 +110,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_chained_calls:11",
     "calleeIdentifier": "VecWrapper::new",
     "isResolved": false,
     "callType": "function",
@@ -122,7 +122,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_chained_calls:11",
     "calleeIdentifier": "VecWrapper::new().push",
     "isResolved": false,
     "callType": "method",
@@ -134,7 +134,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_chained_calls:11",
     "calleeIdentifier": "VecWrapper::new().push(1).push",
     "isResolved": false,
     "callType": "method",
@@ -146,7 +146,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_chained_calls:11",
     "calleeIdentifier": "VecWrapper::new().push(1).push(2).push",
     "isResolved": false,
     "callType": "method",
@@ -158,7 +158,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_chained_calls:11",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_chained_calls:11",
     "calleeIdentifier": "wrapper.len",
     "isResolved": false,
     "callType": "method",
@@ -170,7 +170,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_macros:12",
     "calleeIdentifier": "println!",
     "isResolved": false,
     "callType": "dynamic",
@@ -182,7 +182,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_macros:12",
     "calleeIdentifier": "println!",
     "isResolved": false,
     "callType": "dynamic",
@@ -194,7 +194,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_macros:12",
     "calleeIdentifier": "vec!",
     "isResolved": false,
     "callType": "dynamic",
@@ -206,7 +206,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_macros:12",
     "calleeIdentifier": "vec!",
     "isResolved": false,
     "callType": "dynamic",
@@ -218,7 +218,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_macros:12",
     "calleeIdentifier": "assert!",
     "isResolved": false,
     "callType": "dynamic",
@@ -230,7 +230,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_macros:12",
     "calleeIdentifier": "assert_eq!",
     "isResolved": false,
     "callType": "dynamic",
@@ -242,7 +242,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_macros:12",
     "calleeIdentifier": "format!",
     "isResolved": false,
     "callType": "dynamic",
@@ -254,7 +254,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_macros:12",
     "calleeIdentifier": "debug!",
     "isResolved": false,
     "callType": "dynamic",
@@ -266,7 +266,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_associated_functions:19",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_associated_functions:19",
     "calleeIdentifier": "Circle::from_radius",
     "isResolved": false,
     "callType": "function",
@@ -278,7 +278,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_associated_functions:19",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_associated_functions:19",
     "calleeIdentifier": "Rectangle::new",
     "isResolved": false,
     "callType": "function",
@@ -290,7 +290,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_associated_functions:19",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_associated_functions:19",
     "calleeIdentifier": "circle.area",
     "isResolved": false,
     "callType": "method",
@@ -302,7 +302,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_associated_functions:19",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_associated_functions:19",
     "calleeIdentifier": "rect.area",
     "isResolved": false,
     "callType": "method",
@@ -314,11 +314,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:outer_function:21",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:outer_function:21",
     "calleeIdentifier": "helper_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:helper_function:20",
     "range": {
       "startLine": 120,
       "startCol": 20,
@@ -327,11 +327,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:outer_function:21",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:outer_function:21",
     "calleeIdentifier": "helper_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:helper_function:20",
     "range": {
       "startLine": 121,
       "startCol": 20,
@@ -340,11 +340,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_nested_calls:22",
     "calleeIdentifier": "simple_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:simple_function:0",
     "range": {
       "startLine": 127,
       "startCol": 4,
@@ -353,11 +353,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_nested_calls:22",
     "calleeIdentifier": "helper_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:helper_function:20",
     "range": {
       "startLine": 127,
       "startCol": 20,
@@ -366,11 +366,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_nested_calls:22",
     "calleeIdentifier": "simple_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:simple_function:0",
     "range": {
       "startLine": 128,
       "startCol": 17,
@@ -379,11 +379,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_nested_calls:22",
     "calleeIdentifier": "simple_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:simple_function:0",
     "range": {
       "startLine": 128,
       "startCol": 33,
@@ -392,7 +392,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:draw:25",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:draw:25",
     "calleeIdentifier": "println!",
     "isResolved": false,
     "callType": "dynamic",
@@ -404,7 +404,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_trait_methods:27",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_trait_methods:27",
     "calleeIdentifier": "square.draw",
     "isResolved": false,
     "callType": "method",
@@ -416,7 +416,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_trait_methods:27",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_trait_methods:27",
     "calleeIdentifier": "square.area",
     "isResolved": false,
     "callType": "method",
@@ -428,7 +428,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_generic_associated:31",
     "calleeIdentifier": "Box::new",
     "isResolved": false,
     "callType": "function",
@@ -440,7 +440,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_generic_associated:31",
     "calleeIdentifier": "Box::new",
     "isResolved": false,
     "callType": "function",
@@ -452,7 +452,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_generic_associated:31",
     "calleeIdentifier": "boxed_int.get",
     "isResolved": false,
     "callType": "method",
@@ -464,7 +464,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_generic_associated:31",
     "calleeIdentifier": "boxed_str.get",
     "isResolved": false,
     "callType": "method",
@@ -476,7 +476,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:calculate_distance:33",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:calculate_distance:33",
     "calleeIdentifier": "(x2 - x1).powi",
     "isResolved": false,
     "callType": "method",
@@ -488,7 +488,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:calculate_distance:33",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:calculate_distance:33",
     "calleeIdentifier": "(y2 - y1).powi",
     "isResolved": false,
     "callType": "method",
@@ -500,7 +500,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:calculate_distance:33",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:calculate_distance:33",
     "calleeIdentifier": "((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt",
     "isResolved": false,
     "callType": "method",
@@ -512,7 +512,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_module_calls:34",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_module_calls:34",
     "calleeIdentifier": "geometry::calculate_distance",
     "isResolved": false,
     "callType": "function",
@@ -524,11 +524,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_closures:35",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_closures:35",
     "calleeIdentifier": "add",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:add:37",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:add:37",
     "range": {
       "startLine": 193,
       "startCol": 4,
@@ -537,7 +537,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_closures:35",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_closures:35",
     "calleeIdentifier": "multiply",
     "isResolved": false,
     "callType": "function",
@@ -549,7 +549,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:apply_operation:39",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:apply_operation:39",
     "calleeIdentifier": "op",
     "isResolved": false,
     "callType": "function",
@@ -561,11 +561,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_function_pointers:40",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_function_pointers:40",
     "calleeIdentifier": "apply_operation",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:apply_operation:39",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:apply_operation:39",
     "range": {
       "startLine": 214,
       "startCol": 4,
@@ -574,11 +574,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_function_pointers:40",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_function_pointers:40",
     "calleeIdentifier": "apply_operation",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:apply_operation:39",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:apply_operation:39",
     "range": {
       "startLine": 215,
       "startCol": 4,
@@ -587,11 +587,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_async_like_calls:42",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_async_like_calls:42",
     "calleeIdentifier": "async_helper",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:async_helper:41",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:async_helper:41",
     "range": {
       "startLine": 224,
       "startCol": 4,
@@ -600,7 +600,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_builder_pattern:47",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_builder_pattern:47",
     "calleeIdentifier": "Builder::new",
     "isResolved": false,
     "callType": "function",
@@ -612,7 +612,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_builder_pattern:47",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_builder_pattern:47",
     "calleeIdentifier": "Builder::new().with_value",
     "isResolved": false,
     "callType": "method",
@@ -624,7 +624,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_builder_pattern:47",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_builder_pattern:47",
     "calleeIdentifier": "Builder::new().with_value(10).build",
     "isResolved": false,
     "callType": "method",
@@ -636,11 +636,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:process:52",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:process:52",
     "calleeIdentifier": "self.increment",
     "isResolved": true,
     "callType": "method",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:increment:50",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:increment:50",
     "range": {
       "startLine": 270,
       "startCol": 8,
@@ -649,11 +649,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:process:52",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:process:52",
     "calleeIdentifier": "self.double",
     "isResolved": true,
     "callType": "method",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:double:51",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:double:51",
     "range": {
       "startLine": 271,
       "startCol": 8,
@@ -662,7 +662,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_self_calls:53",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_self_calls:53",
     "calleeIdentifier": "Counter::new",
     "isResolved": false,
     "callType": "function",
@@ -674,7 +674,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_self_calls:53",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_self_calls:53",
     "calleeIdentifier": "counter.process",
     "isResolved": false,
     "callType": "method",
@@ -686,11 +686,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_complex_expressions:54",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_complex_expressions:54",
     "calleeIdentifier": "simple_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:simple_function:0",
     "range": {
       "startLine": 282,
       "startCol": 17,
@@ -699,11 +699,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_complex_expressions:54",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_complex_expressions:54",
     "calleeIdentifier": "helper_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:helper_function:20",
     "range": {
       "startLine": 282,
       "startCol": 33,
@@ -712,11 +712,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_complex_expressions:54",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_complex_expressions:54",
     "calleeIdentifier": "helper_function",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "calleeSymbolId": "tests/fixtures/rust/calls.rs:helper_function:20",
     "range": {
       "startLine": 282,
       "startCol": 55,
@@ -725,7 +725,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_complex_expressions:54",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_complex_expressions:54",
     "calleeIdentifier": "println!",
     "isResolved": false,
     "callType": "dynamic",
@@ -737,7 +737,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_option_result:55",
     "calleeIdentifier": "Some",
     "isResolved": false,
     "callType": "function",
@@ -749,7 +749,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_option_result:55",
     "calleeIdentifier": "opt.unwrap",
     "isResolved": false,
     "callType": "method",
@@ -761,7 +761,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_option_result:55",
     "calleeIdentifier": "opt.unwrap_or",
     "isResolved": false,
     "callType": "method",
@@ -773,7 +773,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_option_result:55",
     "calleeIdentifier": "Ok",
     "isResolved": false,
     "callType": "function",
@@ -785,7 +785,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_option_result:55",
     "calleeIdentifier": "res.unwrap",
     "isResolved": false,
     "callType": "method",
@@ -797,7 +797,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_option_result:55",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_option_result:55",
     "calleeIdentifier": "res.unwrap_or",
     "isResolved": false,
     "callType": "method",
@@ -809,7 +809,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_iterators:56",
     "calleeIdentifier": "vec!",
     "isResolved": false,
     "callType": "dynamic",
@@ -821,7 +821,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_iterators:56",
     "calleeIdentifier": "numbers.iter",
     "isResolved": false,
     "callType": "method",
@@ -833,7 +833,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_iterators:56",
     "calleeIdentifier": "numbers.iter().map",
     "isResolved": false,
     "callType": "method",
@@ -845,7 +845,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_iterators:56",
     "calleeIdentifier": "numbers.iter().map(|x| x * 2).sum",
     "isResolved": false,
     "callType": "method",
@@ -857,7 +857,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_iterators:56",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_iterators:56",
     "calleeIdentifier": "println!",
     "isResolved": false,
     "callType": "dynamic",
@@ -869,7 +869,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_string_methods:57",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_string_methods:57",
     "calleeIdentifier": "String::from",
     "isResolved": false,
     "callType": "function",
@@ -881,7 +881,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_string_methods:57",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_string_methods:57",
     "calleeIdentifier": "s.len",
     "isResolved": false,
     "callType": "method",
@@ -893,7 +893,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_string_methods:57",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_string_methods:57",
     "calleeIdentifier": "s.to_uppercase",
     "isResolved": false,
     "callType": "method",
@@ -905,7 +905,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_string_methods:57",
+    "callerNodeId": "tests/fixtures/rust/calls.rs:test_string_methods:57",
     "calleeIdentifier": "s.contains",
     "isResolved": false,
     "callType": "method",

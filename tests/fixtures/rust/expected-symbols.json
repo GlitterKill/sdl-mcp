@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:my_module:0",
+    "nodeId": "tests/fixtures/rust/symbols.rs:my_module:0",
     "kind": "module",
     "name": "my_module",
     "exported": true,
@@ -13,7 +13,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:internal:1",
+    "nodeId": "tests/fixtures/rust/symbols.rs:internal:1",
     "kind": "module",
     "name": "internal",
     "exported": false,
@@ -26,7 +26,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:inline_mod:2",
+    "nodeId": "tests/fixtures/rust/symbols.rs:inline_mod:2",
     "kind": "module",
     "name": "inline_mod",
     "exported": false,
@@ -39,7 +39,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:inline_function:3",
+    "nodeId": "tests/fixtures/rust/symbols.rs:inline_function:3",
     "kind": "function",
     "name": "inline_function",
     "exported": true,
@@ -56,7 +56,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InlineStruct:4",
+    "nodeId": "tests/fixtures/rust/symbols.rs:InlineStruct:4",
     "kind": "class",
     "name": "InlineStruct",
     "exported": true,
@@ -77,7 +77,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:UserId:5",
+    "nodeId": "tests/fixtures/rust/symbols.rs:UserId:5",
     "kind": "type",
     "name": "UserId",
     "exported": true,
@@ -93,7 +93,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InternalId:6",
+    "nodeId": "tests/fixtures/rust/symbols.rs:InternalId:6",
     "kind": "type",
     "name": "InternalId",
     "exported": false,
@@ -109,7 +109,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Result:7",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Result:7",
     "kind": "type",
     "name": "Result",
     "exported": true,
@@ -128,7 +128,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Drawable:8",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Drawable:8",
     "kind": "interface",
     "name": "Drawable",
     "exported": true,
@@ -144,7 +144,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InternalTrait:9",
+    "nodeId": "tests/fixtures/rust/symbols.rs:InternalTrait:9",
     "kind": "interface",
     "name": "InternalTrait",
     "exported": false,
@@ -160,7 +160,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Container:10",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Container:10",
     "kind": "interface",
     "name": "Container",
     "exported": true,
@@ -179,7 +179,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Point:11",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Point:11",
     "kind": "class",
     "name": "Point",
     "exported": true,
@@ -204,7 +204,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InternalPoint:12",
+    "nodeId": "tests/fixtures/rust/symbols.rs:InternalPoint:12",
     "kind": "class",
     "name": "InternalPoint",
     "exported": false,
@@ -229,7 +229,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Color:13",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Color:13",
     "kind": "class",
     "name": "Color",
     "exported": true,
@@ -245,7 +245,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Box:14",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Box:14",
     "kind": "class",
     "name": "Box",
     "exported": true,
@@ -269,7 +269,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Ref:15",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Ref:15",
     "kind": "class",
     "name": "Ref",
     "exported": true,
@@ -293,7 +293,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:VisibilityExample:16",
+    "nodeId": "tests/fixtures/rust/symbols.rs:VisibilityExample:16",
     "kind": "class",
     "name": "VisibilityExample",
     "exported": true,
@@ -322,7 +322,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Direction:17",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Direction:17",
     "kind": "type",
     "name": "Direction",
     "exported": true,
@@ -351,7 +351,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Option:18",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Option:18",
     "kind": "type",
     "name": "Option",
     "exported": true,
@@ -377,7 +377,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:Message:19",
+    "nodeId": "tests/fixtures/rust/symbols.rs:Message:19",
     "kind": "type",
     "name": "Message",
     "exported": true,
@@ -406,7 +406,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:InternalEnum:20",
+    "nodeId": "tests/fixtures/rust/symbols.rs:InternalEnum:20",
     "kind": "type",
     "name": "InternalEnum",
     "exported": false,
@@ -429,7 +429,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:ResultType:21",
+    "nodeId": "tests/fixtures/rust/symbols.rs:ResultType:21",
     "kind": "type",
     "name": "ResultType",
     "exported": true,
@@ -456,7 +456,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:add:22",
+    "nodeId": "tests/fixtures/rust/symbols.rs:add:22",
     "kind": "function",
     "name": "add",
     "exported": true,
@@ -482,7 +482,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:multiply:23",
+    "nodeId": "tests/fixtures/rust/symbols.rs:multiply:23",
     "kind": "function",
     "name": "multiply",
     "exported": false,
@@ -508,7 +508,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:divide:24",
+    "nodeId": "tests/fixtures/rust/symbols.rs:divide:24",
     "kind": "function",
     "name": "divide",
     "exported": true,
@@ -534,7 +534,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:identity:25",
+    "nodeId": "tests/fixtures/rust/symbols.rs:identity:25",
     "kind": "function",
     "name": "identity",
     "exported": true,
@@ -559,7 +559,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:longest:26",
+    "nodeId": "tests/fixtures/rust/symbols.rs:longest:26",
     "kind": "function",
     "name": "longest",
     "exported": true,
@@ -585,7 +585,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:process_data:27",
+    "nodeId": "tests/fixtures/rust/symbols.rs:process_data:27",
     "kind": "function",
     "name": "process_data",
     "exported": true,
@@ -614,7 +614,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:new:28",
+    "nodeId": "tests/fixtures/rust/symbols.rs:new:28",
     "kind": "method",
     "name": "new",
     "exported": true,
@@ -640,7 +640,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:distance_from_origin:29",
+    "nodeId": "tests/fixtures/rust/symbols.rs:distance_from_origin:29",
     "kind": "method",
     "name": "distance_from_origin",
     "exported": true,
@@ -657,7 +657,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:translate:30",
+    "nodeId": "tests/fixtures/rust/symbols.rs:translate:30",
     "kind": "method",
     "name": "translate",
     "exported": true,
@@ -682,7 +682,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:draw:31",
+    "nodeId": "tests/fixtures/rust/symbols.rs:draw:31",
     "kind": "method",
     "name": "draw",
     "exported": false,
@@ -698,7 +698,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:area:32",
+    "nodeId": "tests/fixtures/rust/symbols.rs:area:32",
     "kind": "method",
     "name": "area",
     "exported": false,
@@ -715,7 +715,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:get:33",
+    "nodeId": "tests/fixtures/rust/symbols.rs:get:33",
     "kind": "method",
     "name": "get",
     "exported": false,
@@ -737,7 +737,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:set:34",
+    "nodeId": "tests/fixtures/rust/symbols.rs:set:34",
     "kind": "method",
     "name": "set",
     "exported": false,
@@ -762,7 +762,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:opposite:35",
+    "nodeId": "tests/fixtures/rust/symbols.rs:opposite:35",
     "kind": "method",
     "name": "opposite",
     "exported": true,
@@ -779,7 +779,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:from_polar:36",
+    "nodeId": "tests/fixtures/rust/symbols.rs:from_polar:36",
     "kind": "method",
     "name": "from_polar",
     "exported": true,
@@ -805,7 +805,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:DefaultStruct:37",
+    "nodeId": "tests/fixtures/rust/symbols.rs:DefaultStruct:37",
     "kind": "class",
     "name": "DefaultStruct",
     "exported": false,
@@ -826,7 +826,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:crate_internal:38",
+    "nodeId": "tests/fixtures/rust/symbols.rs:crate_internal:38",
     "kind": "function",
     "name": "crate_internal",
     "exported": false,
@@ -843,7 +843,7 @@
     "visibility": "internal"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\symbols.rs:CrateVisibility:39",
+    "nodeId": "tests/fixtures/rust/symbols.rs:CrateVisibility:39",
     "kind": "class",
     "name": "CrateVisibility",
     "exported": true,

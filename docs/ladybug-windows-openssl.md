@@ -22,13 +22,25 @@ The official LadybugDB 0.18.1 Windows FTS extension imports `libcrypto-3-x64.dll
 
 Upstream tracker: [LadybugDB/ladybug#685](https://github.com/LadybugDB/ladybug/issues/685).
 
-SDL loads the verified package DLLs by absolute path immediately before `LOAD EXTENSION fts`:
+Ladybug has two separate startup boundaries. SDL dynamically imports the
+official package and constructs `Database` without OpenSSL preloading. A clean
+Windows child-process regression creates a populated FTS database, closes it,
+then reopens it twice through the production database path with the ambient DLL
+directory removed from `PATH`. LadybugDB 0.18.1 completes those constructor-time
+reopens without the SDL runtime package in scope.
+
+SDL preloads the verified package DLLs by absolute path only around the explicit
+`LOAD EXTENSION fts` boundary:
 
 1. verify `package.json` version and `provenance.json` hashes;
 2. call the SDL native addon to load `libcrypto-3-x64.dll`, then `libssl-3-x64.dll` with `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)`;
 3. confirm native-reported module origins are inside the package `bin` directory;
 4. call Ladybug `LOAD EXTENSION fts`;
 5. release preload handles in reverse order.
+
+The dynamic `kuzu` import remains outside the preload callback. This keeps
+ordinary database startup non-blocking when the optional Windows runtime is
+missing, while the explicit FTS capability still fails with recovery guidance.
 
 SDL must not mutate global `PATH`, call `SetDllDirectory`, write into Ladybug's extension cache, or use Git/Conda/OpenSSL machine installs as runtime dependencies.
 
@@ -37,9 +49,10 @@ SDL must not mutate global `PATH`, call `SetDllDirectory`, write into Ladybug's 
 To verify an installed Windows runtime:
 
 1. Compare `bin/libcrypto-3-x64.dll` and `bin/libssl-3-x64.dll` SHA-256 values with `node_modules/@sdl-mcp/ladybug-openssl-win32-x64/provenance.json`.
-2. Run the Windows FTS compatibility test in `fixed-regression` mode.
-3. Confirm the native loader reports both module paths under the OpenSSL package `bin` directory.
-4. Confirm the test reaches `mutation`, `patchSavedFile`, and `shutdown` phases.
+2. Run the clean child-process reopen regression and confirm both production reopen attempts exit normally without ambient OpenSSL paths.
+3. Run the Windows FTS compatibility test in `fixed-regression` mode.
+4. Confirm the native loader reports both module paths under the OpenSSL package `bin` directory.
+5. Confirm the test reaches `mutation`, `patchSavedFile`, and `shutdown` phases.
 
 `@ladybugdb/core` is a required SDL dependency. Its matching platform binary is a transitive optional dependency, so npm's recursive `--omit=optional` mode is unsupported because it removes the database binary itself. To exercise the supported degraded boundary, set `SDL_MCP_DISABLE_NATIVE_ADDON=1`; a disabled/incompatible native addon, missing runtime package files, or hash mismatches disable only FTS-backed capability and should report recovery guidance instead of crashing startup.
 

@@ -1,6 +1,6 @@
 [
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:<init>:3",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:<init>:3",
     "calleeIdentifier": "println",
     "isResolved": false,
     "callType": "function",
@@ -12,11 +12,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:simpleCalls:5",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:simpleCalls:5",
     "calleeIdentifier": "processInput",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:processInput:26",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:processInput:26",
     "range": {
       "startLine": 18,
       "startCol": 21,
@@ -25,7 +25,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:simpleCalls:5",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:simpleCalls:5",
     "calleeIdentifier": "println",
     "isResolved": false,
     "callType": "function",
@@ -37,7 +37,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:methodCalls:7",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:methodCalls:7",
     "calleeIdentifier": "mutableListOf",
     "isResolved": false,
     "callType": "function",
@@ -49,7 +49,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:methodCalls:7",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:methodCalls:7",
     "calleeIdentifier": "list.add",
     "isResolved": false,
     "callType": "method",
@@ -61,7 +61,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:methodCalls:7",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:methodCalls:7",
     "calleeIdentifier": "list.clear",
     "isResolved": false,
     "callType": "method",
@@ -73,11 +73,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:constructorCalls:14",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:constructorCalls:14",
     "calleeIdentifier": "User",
     "isResolved": true,
     "callType": "constructor",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:User:29",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:User:29",
     "range": {
       "startLine": 46,
       "startCol": 19,
@@ -86,11 +86,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:constructorCalls:14",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:constructorCalls:14",
     "calleeIdentifier": "Task",
     "isResolved": true,
     "callType": "constructor",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:Task:30",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:Task:30",
     "range": {
       "startLine": 47,
       "startCol": 19,
@@ -99,7 +99,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:constructorCalls:14",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:constructorCalls:14",
     "calleeIdentifier": "Task.create",
     "isResolved": false,
     "callType": "method",
@@ -111,7 +111,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:extensionCalls:18",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:extensionCalls:18",
     "calleeIdentifier": "text.capitalizeExtension",
     "isResolved": false,
     "callType": "method",
@@ -123,7 +123,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:extensionCalls:18",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:extensionCalls:18",
     "calleeIdentifier": "listOf",
     "isResolved": false,
     "callType": "function",
@@ -135,7 +135,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:extensionCalls:18",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:extensionCalls:18",
     "calleeIdentifier": "numbers.map",
     "isResolved": false,
     "callType": "method",
@@ -147,11 +147,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:thisCalls:23",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:thisCalls:23",
     "calleeIdentifier": "this.simpleCalls",
     "isResolved": true,
     "callType": "method",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:simpleCalls:5",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:simpleCalls:5",
     "range": {
       "startLine": 62,
       "startCol": 8,
@@ -160,11 +160,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:nestedCalls:24",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:nestedCalls:24",
     "calleeIdentifier": "processInput",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:processInput:26",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:processInput:26",
     "range": {
       "startLine": 67,
       "startCol": 21,
@@ -173,11 +173,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:nestedCalls:24",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:nestedCalls:24",
     "calleeIdentifier": "uppercaseInput",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:uppercaseInput:27",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:uppercaseInput:27",
     "range": {
       "startLine": 67,
       "startCol": 34,
@@ -186,7 +186,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:uppercaseInput:27",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:uppercaseInput:27",
     "calleeIdentifier": "input.toUpperCase",
     "isResolved": false,
     "callType": "method",
@@ -198,7 +198,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:capitalizeExtension:28",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:capitalizeExtension:28",
     "calleeIdentifier": "this.capitalize",
     "isResolved": false,
     "callType": "method",
@@ -210,7 +210,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:create:32",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:create:32",
     "calleeIdentifier": "IllegalArgumentException",
     "isResolved": false,
     "callType": "function",
@@ -222,11 +222,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:create:32",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:create:32",
     "calleeIdentifier": "Task",
     "isResolved": true,
     "callType": "constructor",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:Task:30",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:Task:30",
     "range": {
       "startLine": 98,
       "startCol": 19,
@@ -235,7 +235,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:transform:34",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:transform:34",
     "calleeIdentifier": "transformer",
     "isResolved": false,
     "callType": "function",
@@ -247,11 +247,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:useTransform:35",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:useTransform:35",
     "calleeIdentifier": "transform",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:transform:34",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:transform:34",
     "range": {
       "startLine": 109,
       "startCol": 21,
@@ -260,7 +260,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:useTransform:35",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:useTransform:35",
     "calleeIdentifier": "it.toUpperCase",
     "isResolved": false,
     "callType": "method",
@@ -272,7 +272,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:useTransform:35",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:useTransform:35",
     "calleeIdentifier": "listOf",
     "isResolved": false,
     "callType": "function",
@@ -284,11 +284,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:useTransform:35",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:useTransform:35",
     "calleeIdentifier": "transform",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:transform:34",
+    "calleeSymbolId": "tests/fixtures/kotlin/calls.kt:transform:34",
     "range": {
       "startLine": 111,
       "startCol": 21,
@@ -297,7 +297,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\calls.kt:useTransform:35",
+    "callerNodeId": "tests/fixtures/kotlin/calls.kt:useTransform:35",
     "calleeIdentifier": "it.map",
     "isResolved": false,
     "callType": "method",

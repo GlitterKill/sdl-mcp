@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:StatusCode:0",
+    "nodeId": "tests/fixtures/c/symbols.h:StatusCode:0",
     "kind": "type",
     "name": "StatusCode",
     "exported": true,
@@ -13,7 +13,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Point:1",
+    "nodeId": "tests/fixtures/c/symbols.h:Point:1",
     "kind": "type",
     "name": "Point",
     "exported": true,
@@ -26,7 +26,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Point:2",
+    "nodeId": "tests/fixtures/c/symbols.h:Point:2",
     "kind": "class",
     "name": "Point",
     "exported": true,
@@ -42,7 +42,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Status:3",
+    "nodeId": "tests/fixtures/c/symbols.h:Status:3",
     "kind": "type",
     "name": "Status",
     "exported": true,
@@ -55,7 +55,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Status:4",
+    "nodeId": "tests/fixtures/c/symbols.h:Status:4",
     "kind": "class",
     "name": "Status",
     "exported": true,
@@ -71,7 +71,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Color:5",
+    "nodeId": "tests/fixtures/c/symbols.h:Color:5",
     "kind": "type",
     "name": "Color",
     "exported": true,
@@ -84,7 +84,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Color:6",
+    "nodeId": "tests/fixtures/c/symbols.h:Color:6",
     "kind": "class",
     "name": "Color",
     "exported": true,
@@ -100,7 +100,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Point:7",
+    "nodeId": "tests/fixtures/c/symbols.h:Point:7",
     "kind": "class",
     "name": "Point",
     "exported": true,
@@ -116,7 +116,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Rectangle:8",
+    "nodeId": "tests/fixtures/c/symbols.h:Rectangle:8",
     "kind": "class",
     "name": "Rectangle",
     "exported": true,
@@ -132,7 +132,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Status:9",
+    "nodeId": "tests/fixtures/c/symbols.h:Status:9",
     "kind": "class",
     "name": "Status",
     "exported": true,
@@ -148,7 +148,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Color:10",
+    "nodeId": "tests/fixtures/c/symbols.h:Color:10",
     "kind": "class",
     "name": "Color",
     "exported": true,
@@ -164,7 +164,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:CustomData:11",
+    "nodeId": "tests/fixtures/c/symbols.h:CustomData:11",
     "kind": "type",
     "name": "CustomData",
     "exported": true,
@@ -177,7 +177,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Buffer:12",
+    "nodeId": "tests/fixtures/c/symbols.h:Buffer:12",
     "kind": "type",
     "name": "Buffer",
     "exported": true,
@@ -190,7 +190,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\symbols.h:Callback:13",
+    "nodeId": "tests/fixtures/c/symbols.h:Callback:13",
     "kind": "type",
     "name": "Callback",
     "exported": true,

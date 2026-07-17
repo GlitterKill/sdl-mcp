@@ -1,6 +1,6 @@
 [
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_message:1",
+    "callerNodeId": "tests/fixtures/c/calls.c:print_message:1",
     "calleeIdentifier": "printf",
     "isResolved": false,
     "callType": "function",
@@ -12,7 +12,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:allocate_memory:2",
+    "callerNodeId": "tests/fixtures/c/calls.c:allocate_memory:2",
     "calleeIdentifier": "malloc",
     "isResolved": false,
     "callType": "function",
@@ -24,7 +24,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_point:4",
+    "callerNodeId": "tests/fixtures/c/calls.c:print_point:4",
     "calleeIdentifier": "printf",
     "isResolved": false,
     "callType": "function",
@@ -36,11 +36,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "callerNodeId": "tests/fixtures/c/calls.c:main:6",
     "calleeIdentifier": "add_numbers",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:add_numbers:0",
+    "calleeSymbolId": "tests/fixtures/c/calls.c:add_numbers:0",
     "range": {
       "startLine": 31,
       "startCol": 14,
@@ -49,11 +49,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "callerNodeId": "tests/fixtures/c/calls.c:main:6",
     "calleeIdentifier": "print_message",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_message:1",
+    "calleeSymbolId": "tests/fixtures/c/calls.c:print_message:1",
     "range": {
       "startLine": 32,
       "startCol": 4,
@@ -62,11 +62,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "callerNodeId": "tests/fixtures/c/calls.c:main:6",
     "calleeIdentifier": "allocate_memory",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:allocate_memory:2",
+    "calleeSymbolId": "tests/fixtures/c/calls.c:allocate_memory:2",
     "range": {
       "startLine": 34,
       "startCol": 16,
@@ -75,11 +75,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "callerNodeId": "tests/fixtures/c/calls.c:main:6",
     "calleeIdentifier": "create_point",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:create_point:5",
+    "calleeSymbolId": "tests/fixtures/c/calls.c:create_point:5",
     "range": {
       "startLine": 36,
       "startCol": 14,
@@ -88,11 +88,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "callerNodeId": "tests/fixtures/c/calls.c:main:6",
     "calleeIdentifier": "print_point",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_point:4",
+    "calleeSymbolId": "tests/fixtures/c/calls.c:print_point:4",
     "range": {
       "startLine": 37,
       "startCol": 4,
@@ -101,11 +101,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "callerNodeId": "tests/fixtures/c/calls.c:main:6",
     "calleeIdentifier": "print_point",
     "isResolved": true,
     "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:print_point:4",
+    "calleeSymbolId": "tests/fixtures/c/calls.c:print_point:4",
     "range": {
       "startLine": 40,
       "startCol": 4,
@@ -114,7 +114,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\c\\calls.c:main:6",
+    "callerNodeId": "tests/fixtures/c/calls.c:main:6",
     "calleeIdentifier": "free",
     "isResolved": false,
     "callType": "function",

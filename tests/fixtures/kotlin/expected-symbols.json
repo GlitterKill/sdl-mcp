@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:com.example.kotlin:0",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:com.example.kotlin:0",
     "kind": "module",
     "name": "com.example.kotlin",
     "exported": true,
@@ -13,7 +13,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:User:1",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:User:1",
     "kind": "class",
     "name": "User",
     "exported": true,
@@ -29,7 +29,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Animal:2",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:Animal:2",
     "kind": "class",
     "name": "Animal",
     "exported": true,
@@ -45,7 +45,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:makeSound:3",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:makeSound:3",
     "kind": "function",
     "name": "makeSound",
     "exported": true,
@@ -62,7 +62,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:eat:4",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:eat:4",
     "kind": "function",
     "name": "eat",
     "exported": true,
@@ -79,7 +79,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Dog:5",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:Dog:5",
     "kind": "class",
     "name": "Dog",
     "exported": true,
@@ -95,7 +95,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:makeSound:6",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:makeSound:6",
     "kind": "function",
     "name": "makeSound",
     "exported": true,
@@ -112,7 +112,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Repository:7",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:Repository:7",
     "kind": "interface",
     "name": "Repository",
     "exported": true,
@@ -131,7 +131,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findById:8",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:findById:8",
     "kind": "function",
     "name": "findById",
     "exported": true,
@@ -153,7 +153,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findAll:9",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:findAll:9",
     "kind": "function",
     "name": "findAll",
     "exported": true,
@@ -170,7 +170,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:save:10",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:save:10",
     "kind": "function",
     "name": "save",
     "exported": true,
@@ -192,7 +192,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:UserRepository:11",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:UserRepository:11",
     "kind": "class",
     "name": "UserRepository",
     "exported": true,
@@ -208,7 +208,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:users:12",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:users:12",
     "kind": "variable",
     "name": "users",
     "exported": false,
@@ -224,7 +224,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findById:13",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:findById:13",
     "kind": "function",
     "name": "findById",
     "exported": true,
@@ -246,7 +246,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findAll:14",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:findAll:14",
     "kind": "function",
     "name": "findAll",
     "exported": true,
@@ -263,7 +263,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:save:15",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:save:15",
     "kind": "function",
     "name": "save",
     "exported": true,
@@ -285,7 +285,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:DatabaseConnection:16",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:DatabaseConnection:16",
     "kind": "class",
     "name": "DatabaseConnection",
     "exported": true,
@@ -301,7 +301,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:connectionCount:17",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:connectionCount:17",
     "kind": "variable",
     "name": "connectionCount",
     "exported": false,
@@ -317,7 +317,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:connect:18",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:connect:18",
     "kind": "function",
     "name": "connect",
     "exported": true,
@@ -334,7 +334,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:disconnect:19",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:disconnect:19",
     "kind": "function",
     "name": "disconnect",
     "exported": true,
@@ -351,7 +351,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:UserService:20",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:UserService:20",
     "kind": "class",
     "name": "UserService",
     "exported": true,
@@ -367,7 +367,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:cache:21",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:cache:21",
     "kind": "variable",
     "name": "cache",
     "exported": false,
@@ -383,7 +383,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:getUser:22",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:getUser:22",
     "kind": "function",
     "name": "getUser",
     "exported": true,
@@ -405,7 +405,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:cached:23",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:cached:23",
     "kind": "variable",
     "name": "cached",
     "exported": true,
@@ -421,7 +421,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:24",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:user:24",
     "kind": "variable",
     "name": "user",
     "exported": true,
@@ -437,7 +437,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:getAllUsers:25",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:getAllUsers:25",
     "kind": "function",
     "name": "getAllUsers",
     "exported": true,
@@ -454,7 +454,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:createUser:26",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:createUser:26",
     "kind": "function",
     "name": "createUser",
     "exported": true,
@@ -480,7 +480,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:id:27",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:id:27",
     "kind": "variable",
     "name": "id",
     "exported": true,
@@ -496,7 +496,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:28",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:user:28",
     "kind": "variable",
     "name": "user",
     "exported": true,
@@ -512,7 +512,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:transformUser:29",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:transformUser:29",
     "kind": "function",
     "name": "transformUser",
     "exported": true,
@@ -541,7 +541,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:30",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:user:30",
     "kind": "variable",
     "name": "user",
     "exported": true,
@@ -557,7 +557,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Status:31",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:Status:31",
     "kind": "class",
     "name": "Status",
     "exported": true,
@@ -573,7 +573,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Task:32",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:Task:32",
     "kind": "class",
     "name": "Task",
     "exported": true,
@@ -589,7 +589,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:MAX_TITLE_LENGTH:33",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:MAX_TITLE_LENGTH:33",
     "kind": "variable",
     "name": "MAX_TITLE_LENGTH",
     "exported": true,
@@ -605,7 +605,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:create:34",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:create:34",
     "kind": "function",
     "name": "create",
     "exported": true,
@@ -631,7 +631,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:withStatus:35",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:withStatus:35",
     "kind": "function",
     "name": "withStatus",
     "exported": true,
@@ -653,7 +653,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:isActive:36",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:isActive:36",
     "kind": "function",
     "name": "isActive",
     "exported": true,
@@ -670,7 +670,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:TaskManager:37",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:TaskManager:37",
     "kind": "class",
     "name": "TaskManager",
     "exported": true,
@@ -686,7 +686,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:tasks:38",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:tasks:38",
     "kind": "variable",
     "name": "tasks",
     "exported": false,
@@ -702,7 +702,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:<init>:39",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:<init>:39",
     "kind": "constructor",
     "name": "<init>",
     "exported": true,
@@ -718,7 +718,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:<init>:40",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:<init>:40",
     "kind": "constructor",
     "name": "<init>",
     "exported": true,
@@ -739,7 +739,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:addTask:41",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:addTask:41",
     "kind": "function",
     "name": "addTask",
     "exported": true,
@@ -761,7 +761,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:findTask:42",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:findTask:42",
     "kind": "function",
     "name": "findTask",
     "exported": true,
@@ -783,7 +783,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:listTasks:43",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:listTasks:43",
     "kind": "function",
     "name": "listTasks",
     "exported": true,
@@ -800,7 +800,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Logger:44",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:Logger:44",
     "kind": "interface",
     "name": "Logger",
     "exported": true,
@@ -816,7 +816,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:log:45",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:log:45",
     "kind": "function",
     "name": "log",
     "exported": true,
@@ -837,7 +837,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:logError:46",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:logError:46",
     "kind": "function",
     "name": "logError",
     "exported": true,
@@ -862,7 +862,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:ConsoleLogger:47",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:ConsoleLogger:47",
     "kind": "class",
     "name": "ConsoleLogger",
     "exported": true,
@@ -878,7 +878,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:log:48",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:log:48",
     "kind": "function",
     "name": "log",
     "exported": true,
@@ -899,7 +899,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:logError:49",
+    "nodeId": "tests/fixtures/kotlin/symbols.kt:logError:49",
     "kind": "function",
     "name": "logError",
     "exported": true,

@@ -14,6 +14,16 @@ Use `repo.unregister` only for runtime registrations. It requires `confirmRepoId
 
 `sdl.symbol.search` searches symbol names; it does not add file-path matches to symbol ranking. When a search has no useful result and its query is clearly path-like (a slash or backslash, a known source extension, or an exact indexed repository-relative path), the response includes one structured `nextBestAction`. Call `sdl.context` with the supplied arguments to retry using `options.focusPaths: [query]`. Ordinary symbol-name misses do not receive this path-specific hint.
 
+## Context retrieval modes
+
+Broad `sdl.context` retrieval uses bounded hybrid search by default; precise
+retrieval stays lexical unless `options.semantic: true` is explicit. Forced
+semantic precise calls retain resolved named concepts and catalog actions inside
+strict explicit paths, including partial concept matches and symbols already
+found by the semantic lane. Card and skeleton evidence remains bounded per file
+and per response. See [Context Modes](./feature-deep-dives/context-modes.md) for
+the detailed selection and budget contracts.
+
 ## Response artifact retrieval
 
 `sdl.response.get` requires an explicit mode for JSON artifacts. Use `full: true` to return the parsed JSON value, `jsonPath` to return one complete structural value (with `offset` and `limit` for extracted arrays), or `raw: true` to request a bounded byte excerpt. Raw JSON excerpts may be syntactically incomplete. `offsetBytes` applies only to raw JSON or text excerpts and cannot be combined with `full: true` or `jsonPath`.
