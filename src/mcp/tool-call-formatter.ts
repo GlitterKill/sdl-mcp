@@ -562,9 +562,34 @@ function fmtSearchEditApply(
   const skipped = num(result.filesSkipped);
   const entries = records(result.fileEntries);
   if (presentation === "summary") {
-    const edits = entries.reduce((total, entry) => total + num(entry.matchCount), 0);
+    const results = records(result.results);
+    // fileEntries describe the plan. Count only matches whose file remains
+    // written after apply and any rollback.
+    const writtenFiles = new Set(
+      results
+        .filter((item) => str(item.status) === "written")
+        .map((item) => str(item.file))
+        .filter(Boolean),
+    );
+    const edits = entries.reduce(
+      (total, entry) =>
+        writtenFiles.has(str(entry.file))
+          ? total + num(entry.matchCount)
+          : total,
+      0,
+    );
+    const rolledBack = results.filter(
+      (item) => str(item.status) === "rolled-back",
+    ).length;
+    const rollbackTriggered = record(result.rollback)?.triggered === true;
+    const rollbackStatus =
+      rolledBack > 0
+        ? `, ${rolledBack} rolled back`
+        : rollbackTriggered
+          ? ", rollback triggered"
+          : "";
     const plan = str(result.planHandle);
-    return `search.edit apply -> applied ${edits} ${plural(edits, "edit")} in ${written}/${attempted} ${plural(attempted, "file")}${failed > 0 ? `, ${failed} failed` : ""}${skipped > 0 ? `, ${skipped} skipped` : ""}${plan ? ` (plan ${plan})` : ""}`;
+    return `search.edit apply -> applied ${edits} ${plural(edits, "edit")} in ${written}/${attempted} ${plural(attempted, "file")}${failed > 0 ? `, ${failed} failed` : ""}${skipped > 0 ? `, ${skipped} skipped` : ""}${rollbackStatus}${plan ? ` (plan ${plan})` : ""}`;
   }
   const fileEntriesByPath = new Map(
     entries.map(
@@ -701,6 +726,16 @@ function fmtFileGateway(
   presentation: ToolCallPresentation,
 ): string | null {
   const op = str(args.op);
+  // Large search-edit previews return an artifact reference instead of inline
+  // match counts. Surface its continuation handle before operation formatting.
+  if (
+    op === "searchEditPreview" &&
+    result.kind === "responseArtifact" &&
+    str(result.handle) &&
+    result.action === "response.get"
+  ) {
+    return `search.edit preview -> Response artifact (handle: ${str(result.handle)}; action: response.get).`;
+  }
   if (op.startsWith("symbolEdit")) {
     return fmtSymbolEdit(args, result, presentation);
   }

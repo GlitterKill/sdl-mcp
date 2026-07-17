@@ -652,6 +652,46 @@ describe("visible tool output", () => {
     }
   });
 
+  it("renders file-gateway search preview response artifacts as continuation handles", () => {
+    const payload = {
+      responseMode: "handle",
+      kind: "responseArtifact",
+      handle: "response-search-preview-123",
+      action: "response.get",
+      metadata: {
+        toolName: "sdl.search.edit",
+        contentKind: "json",
+        originalBytes: 100_000,
+      },
+    };
+    const args = { op: "searchEditPreview" };
+    const envelope = buildVisibleEnvelope("sdl.file", args, payload);
+
+    assert.equal(
+      envelope.content[0]?.text,
+      "search.edit preview -> Response artifact (handle: response-search-preview-123; action: response.get).",
+    );
+    assert.doesNotMatch(envelope.content[0]?.text ?? "", /0 matches|0 files/);
+  });
+
+  it("keeps file-gateway response artifact notifications truthful in full presentation", () => {
+    const display = formatToolCallForUser(
+      "sdl.file",
+      { op: "searchEditPreview" },
+      {
+        responseMode: "handle",
+        kind: "responseArtifact",
+        handle: "response-search-preview-456",
+        action: "response.get",
+      },
+    );
+
+    assert.equal(
+      display,
+      "search.edit preview -> Response artifact (handle: response-search-preview-456; action: response.get).",
+    );
+  });
+
   it("reports an edit count for file writes without replacement matches", () => {
     const envelope = buildVisibleEnvelope(
       "sdl.file.write",
@@ -744,6 +784,74 @@ describe("visible tool output", () => {
     assert.doesNotMatch(visibleText, /oldOne|newOne|oldTwo|newTwo|--- before|\+\+\+ after/);
     assert.equal(JSON.stringify(envelope).match(/oldOne/g)?.length, 1);
     assert.equal(JSON.stringify(envelope).match(/newOne/g)?.length, 1);
+  });
+
+  it("counts only written search edits and reports rollback, failure, and skip state", () => {
+    const envelope = buildVisibleEnvelope(
+      "sdl.search.edit",
+      { mode: "apply", planHandle: "plan-mixed-result" },
+      {
+        mode: "apply",
+        planHandle: "plan-mixed-result",
+        filesAttempted: 4,
+        filesWritten: 1,
+        filesFailed: 1,
+        filesSkipped: 1,
+        results: [
+          { file: "src/written.ts", status: "written" },
+          { file: "src/restored.ts", status: "rolled-back" },
+          { file: "src/failed.ts", status: "failed" },
+          { file: "src/skipped.ts", status: "skipped" },
+        ],
+        fileEntries: [
+          { file: "src/written.ts", matchCount: 2 },
+          { file: "src/restored.ts", matchCount: 3 },
+          { file: "src/failed.ts", matchCount: 4 },
+          { file: "src/skipped.ts", matchCount: 5 },
+        ],
+        rollback: {
+          triggered: true,
+          restoredFiles: ["src/restored.ts"],
+        },
+      },
+    );
+
+    assert.equal(
+      envelope.content[0]?.text,
+      "search.edit apply -> applied 2 edits in 1/4 files, 1 failed, 1 skipped, 1 rolled back (plan plan-mixed-result)",
+    );
+  });
+
+  it("reports a triggered rollback when no file needed restoration", () => {
+    const envelope = buildVisibleEnvelope(
+      "sdl.search.edit",
+      { mode: "apply", planHandle: "plan-first-write-failed" },
+      {
+        mode: "apply",
+        planHandle: "plan-first-write-failed",
+        filesAttempted: 2,
+        filesWritten: 0,
+        filesFailed: 1,
+        filesSkipped: 1,
+        results: [
+          { file: "src/failed.ts", status: "failed" },
+          { file: "src/skipped.ts", status: "skipped" },
+        ],
+        fileEntries: [
+          { file: "src/failed.ts", matchCount: 4 },
+          { file: "src/skipped.ts", matchCount: 5 },
+        ],
+        rollback: {
+          triggered: true,
+          restoredFiles: [],
+        },
+      },
+    );
+
+    assert.equal(
+      envelope.content[0]?.text,
+      "search.edit apply -> applied 0 edits in 0/2 files, 1 failed, 1 skipped, rollback triggered (plan plan-first-write-failed)",
+    );
   });
 
   it("summarizes symbol-edit previews with operation, path, edit count, and plan", () => {
