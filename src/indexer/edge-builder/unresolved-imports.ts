@@ -5,6 +5,8 @@ import { rewriteResolvedImportEdges } from "../../db/ladybug-unresolved-imports.
 interface ResolveUnresolvedImportEdgesOptions {
   includeTimings?: boolean;
   affectedPaths?: Iterable<string>;
+  /** Observe the deterministic replacement plan before its delete transaction. */
+  onPlannedTargetReplacement?: (symbolIds: readonly string[]) => void;
   /**
    * Per-chunk progress callback. Fires after each batch flush so the CLI can
    * draw a real bar instead of a stuck "Import re-resolution..." line. The
@@ -132,6 +134,10 @@ async function resolveUnresolvedImportEdges(
     }
   });
 
+  const replacedTargetIds = [
+    ...new Set(pendingUpdates.map((update) => update.edge.toSymbolId)),
+  ];
+  options?.onPlannedTargetReplacement?.(replacedTargetIds);
   let resolved = 0;
   await measure("rewriteEdges", async () => {
     if (pendingUpdates.length === 0) return;

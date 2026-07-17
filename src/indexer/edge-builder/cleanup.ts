@@ -4,7 +4,12 @@ import { parseUnresolvedCallTarget } from "../../db/symbol-placeholders.js";
 
 import { isBuiltinCall } from "./builtins.js";
 
-export async function cleanupUnresolvedEdges(repoId: string): Promise<void> {
+export async function cleanupUnresolvedEdges(
+  repoId: string,
+  options: {
+    onPlannedTargetCleanup?: (symbolIds: readonly string[]) => void;
+  } = {},
+): Promise<void> {
   await withWriteConn(async (wConn) => {
     const targetIds = await ladybugDb.getUnresolvedCallTargetIdsByRepo(
       wConn,
@@ -20,6 +25,7 @@ export async function cleanupUnresolvedEdges(repoId: string): Promise<void> {
       return;
     }
 
+    options.onPlannedTargetCleanup?.(targetsToDelete);
     await ladybugDb.withTransaction(wConn, async (txConn) => {
       await ladybugDb.deleteCallEdgesToTargetsByRepo(
         txConn,

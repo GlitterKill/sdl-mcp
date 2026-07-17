@@ -877,11 +877,9 @@ function projectRepoStatusForModel(
   const projected: Record<string, unknown> = {};
   for (const key of [
     "repoId",
-    "rootPath",
     "latestVersionId",
     "filesIndexed",
     "symbolsIndexed",
-    "lastIndexedAt",
   ]) {
     copyIfPresent(result, projected, key);
   }

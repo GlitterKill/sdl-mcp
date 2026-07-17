@@ -16,6 +16,27 @@ import {
   type Pass1Accumulator,
   type Pass1Params,
 } from "./indexer-init.js";
+import type { GraphIntegrityEdgeReference } from "./provider-first/persisted-graph-integrity.js";
+
+function accumulateGraphIntegrityReferences(
+  acc: Pass1Accumulator,
+  references: readonly GraphIntegrityEdgeReference[],
+): void {
+  for (const reference of references) {
+    const key = JSON.stringify([
+      reference.filelessSymbolId,
+      reference.sourceSymbolId,
+      reference.edgeType,
+      reference.direction,
+    ]);
+    const previous = acc.graphIntegrityFilelessReferences.get(key);
+    acc.graphIntegrityFilelessReferences.set(key, {
+      ...reference,
+      referenceCount:
+        (previous?.referenceCount ?? 0) + reference.referenceCount,
+    });
+  }
+}
 
 function collectKnownSymbolIdsForPass1EdgeCopy(
   symbolIndex: SymbolIndex,
@@ -82,6 +103,8 @@ export async function runPass1WithRustEngine(
     changedPass2FilePaths: new Set(),
     symbolMapFileUpdates: new Map(),
     graphIntegrityFiles: new Map(),
+    graphIntegrityFilelessSymbols: new Map(),
+    graphIntegrityFilelessReferences: new Map(),
     rustFilesProcessed: 0,
     tsFilesProcessed: 0,
     rustFallbackFiles: 0,
@@ -300,6 +323,13 @@ export async function runPass1WithRustEngine(
               result.graphIntegrityFile,
             );
           }
+          for (const symbol of result.graphIntegrityFilelessSymbols ?? []) {
+            acc.graphIntegrityFilelessSymbols.set(symbol.symbolId, symbol);
+          }
+          accumulateGraphIntegrityReferences(
+            acc,
+            result.graphIntegrityFilelessReferences ?? [],
+          );
           if (skipCallResolution) {
             acc.changedPass2FilePaths.add(file.path);
             for (const hinted of result.pass2HintPaths)
@@ -399,6 +429,13 @@ export async function runPass1WithRustEngine(
             result.graphIntegrityFile,
           );
         }
+        for (const symbol of result.graphIntegrityFilelessSymbols ?? []) {
+          acc.graphIntegrityFilelessSymbols.set(symbol.symbolId, symbol);
+        }
+        accumulateGraphIntegrityReferences(
+          acc,
+          result.graphIntegrityFilelessReferences ?? [],
+        );
         if (skipCallResolution) {
           acc.changedPass2FilePaths.add(file.path);
           for (const hinted of result.pass2HintPaths)
@@ -475,6 +512,8 @@ export async function runPass1WithTsEngine(
     changedPass2FilePaths: new Set(),
     symbolMapFileUpdates: new Map(),
     graphIntegrityFiles: new Map(),
+    graphIntegrityFilelessSymbols: new Map(),
+    graphIntegrityFilelessReferences: new Map(),
     rustFilesProcessed: 0,
     tsFilesProcessed: 0,
     rustFallbackFiles: 0,
@@ -555,6 +594,13 @@ export async function runPass1WithTsEngine(
               result.graphIntegrityFile,
             );
           }
+          for (const symbol of result.graphIntegrityFilelessSymbols ?? []) {
+            acc.graphIntegrityFilelessSymbols.set(symbol.symbolId, symbol);
+          }
+          accumulateGraphIntegrityReferences(
+            acc,
+            result.graphIntegrityFilelessReferences ?? [],
+          );
           if (skipCallResolution) {
             acc.changedPass2FilePaths.add(file.path);
             for (const hinted of result.pass2HintPaths)

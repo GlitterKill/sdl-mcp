@@ -120,15 +120,17 @@ Get status for one repository including latest version, indexed files/symbols, t
 | ----------------- | --------- | -------- | -------------------------------------------------------- |
 | `repoId`          | `string`  | Yes      | Repository identifier                                    |
 | `surfaceMemories` | `boolean` | No       | Include relevant development memories (default: `false`) |
+| `detail`          | `"minimal" \| "standard" \| "full"` | No | Response detail; defaults to `"minimal"` |
+| `includeTelemetry` | `boolean` | No       | Include volatile operational telemetry (default: `false`) |
 
 **Response includes:**
 
-- `repoId`, `rootPath`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `countNotes`, `lastIndexedAt`
+- `repoId`, `rootPath`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `countNotes`, `lastIndexedAt`. The default minimal model-facing projection omits `rootPath` and `lastIndexedAt`; broader detail can expose `rootPath`, while timestamp telemetry requires `includeTelemetry: true`.
 - `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`. Health remains unavailable until graph integrity is verified for `latestVersionId`.
 - `watcherHealth` (nullable) — runtime telemetry: provider/configuredProvider/fallbackReason, enabled/running state, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale timestamps, and Watchman warning/recrawl/fresh-instance diagnostics when Watchman is active or was attempted
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
 - `liveIndexStatus` — live buffer overlay state: enabled, pendingBuffers, dirtyBuffers, parseQueueDepth, checkpointPending, reconcileQueueDepth, etc.
-- `derivedState` — derived-state freshness: stale flag, dirty cluster/process/algorithm/summary/embedding flags, target/computed version ids, `lastError` when recomputation failed, graph-integrity state/version/digest, and `nextBestAction` when recovery is needed. Integrity mismatch details stay in operational logs and never appear in the response. Current index refreshes compute derived state inline; server startup still scans stale persisted rows from older interrupted runs and can enqueue background recovery.
+- `derivedState` — derived-state freshness: stale flag, dirty cluster/process/algorithm/summary/embedding flags, target/computed version ids, `lastError` when recomputation failed, graph-integrity state/version/digest, and `nextBestAction` when recovery is needed. Integrity mismatch details stay in operational logs and never appear in the response. Recovery first requests a full refresh; if full verification also fails, stop SDL-MCP, delete the configured `.lbug` database directory, and rebuild from source. Current index refreshes compute derived state inline; server startup still scans stale persisted rows from older interrupted runs and can enqueue background recovery.
 - `memories` (when `surfaceMemories: true` and memory is enabled in config) — array of relevant development memories auto-surfaced for the repository
 
 **Example:**

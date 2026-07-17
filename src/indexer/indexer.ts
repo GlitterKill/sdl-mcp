@@ -71,6 +71,7 @@ import { clearSliceCache } from "../graph/sliceCache.js";
 import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
 import {
+  fileIdForPath,
   loadExistingSymbolMaps,
   initPass2Context,
   type IndexProgress,
@@ -162,6 +163,7 @@ import {
   failActiveGraphIntegrityVerification,
   GraphIntegrityVerificationError,
   PersistedGraphIntegritySession,
+  verifyNoOpIncrementalGraphIntegrity,
 } from "./provider-first/persisted-graph-integrity.js";
 import {
   expandIdentifierText,
@@ -2308,6 +2310,7 @@ async function indexRepoImpl(
   let providerFirstProviderRows: ProviderFirstGraphRows | undefined;
   let providerFirstGenerationId: string | undefined;
   let providerFirstRemovedFilesDeleted = false;
+  let providerFirstGraphCommitStarted = false;
   const providerFirstFallbackPaths = new Set<string>();
   const providerFirstChangedFileIds = new Set<string>();
   const providerFirstShadowRepoScopeSkipReason =
@@ -2440,12 +2443,12 @@ async function indexRepoImpl(
             hasIndexMutations: params.hasIndexMutations,
             includeTimings: shouldCollectPostIndexSubphaseTimings(),
             callResolutionTelemetry: params.callResolutionTelemetry,
+            prepareGraphIntegrityPlaceholderPruning: graphIntegrity.prepareForPlaceholderPruning,
             deferSemanticRefresh: params.deferSemanticRefresh,
             onProgress,
           }),
         );
         recordFinalizeIndexingSubphaseTimings(finalizeResult.timings);
-
         await measurePhase("ensureCriticalSymbolFts", async () => {
           await ensureCriticalSymbolFtsIndex({
             recordTiming: recordIndexSubphaseTiming,
@@ -2762,7 +2765,7 @@ async function indexRepoImpl(
       providerFirstIncrementalActive &&
       providerCoverageScan.removedFileIds.length > 0
     ) {
-      await graphIntegrity.begin();
+      await graphIntegrity.begin(undefined, providerCoverageScan.removedFileIds);
       graphIntegrity.removeFiles(providerCoverageScan.removedFileIds);
       await measureProviderFirstPhase(
         "deleteRemovedFiles",
@@ -3097,13 +3100,6 @@ async function indexRepoImpl(
                   activeProviderInputMatches,
                   existingProviderSymbolCount,
                 });
-          const integrityVersionId = activeMaterializationPlan.reuseExistingProviderRows
-            ? await resolveActiveGraphVersionId(
-                "Provider-first SCIP active rows reused",
-              )
-            : graphIntegrity.reserveVersionId();
-          await graphIntegrity.begin(integrityVersionId);
-          graphIntegrity.applyProviderRows(materializedRows);
           await measureProviderFirstPhase(
             "persistProvenance",
             "providerFirstPersistProvenance",
@@ -3229,6 +3225,10 @@ async function indexRepoImpl(
                 "provider active rows reused for existing large symbol set",
             });
           }
+          const integrityVersionId = activeMaterializationPlan.reuseExistingProviderRows ? await resolveActiveGraphVersionId("Provider-first SCIP active rows reused") : graphIntegrity.reserveVersionId();
+          providerFirstGraphCommitStarted = true;
+          await graphIntegrity.begin(integrityVersionId, materializedRows.files.map((file) => file.fileId));
+          graphIntegrity.applyProviderRows(materializedRows);
           await measureProviderFirstPhase(
             "materialize",
             "providerFirstMaterialize",
@@ -3598,7 +3598,7 @@ async function indexRepoImpl(
     }
     } catch (err) {
       if (
-        err instanceof ProviderFirstGraphValidationError ||
+        providerFirstGraphCommitStarted || err instanceof ProviderFirstGraphValidationError ||
         err instanceof GraphIntegrityVerificationError
       ) throw err;
       if (providerFirst.requestedMode !== "auto") throw err;
@@ -3638,7 +3638,6 @@ async function indexRepoImpl(
     fileCount: files.length,
     removedFiles,
   });
-
   const LARGE_REPO_THRESHOLD = 5000;
   if (files.length > LARGE_REPO_THRESHOLD) {
     logger.warn(
@@ -3648,10 +3647,9 @@ async function indexRepoImpl(
       { repoId, fileCount: files.length },
     );
   }
-
   if (mode === "incremental" && scanAllFilesUnchanged) {
     return await measurePhase("shortCircuitNoOp", async () => {
-      const versionId = await createOrReuseVersion("Incremental index");
+      const versionId = await verifyNoOpIncrementalGraphIntegrity(repoId);
       const pass1Engine = emptyPass1EngineTelemetry();
       const recovery = await measurePhase("noOpRecoveryAssess", () =>
         assessNoOpIncrementalRecovery({
@@ -3662,7 +3660,6 @@ async function indexRepoImpl(
             .filter((fileId): fileId is string => typeof fileId === "string"),
         }),
       );
-
       if (recovery.needsVersionSnapshot) {
         await measurePhase("versionSnapshotRepair", () =>
           snapshotCurrentSymbolsForVersion({
@@ -3804,7 +3801,11 @@ async function indexRepoImpl(
       return result;
     });
   }
-  await graphIntegrity.begin();
+  await graphIntegrity.begin(undefined, [
+    ...removedFileIds,
+    ...files.filter((file) => isScannedFileChanged(file, existingByPath.get(file.path)))
+      .map((file) => fileIdForPath(repoId, file.path, existingByPath)),
+  ]);
   graphIntegrity.removeFiles(removedFileIds);
   if (
     mode === "incremental" &&
@@ -4068,10 +4069,7 @@ async function indexRepoImpl(
       },
       { engine: useRustEngine ? "rust" : "ts" },
     );
-    for (const file of pass1Acc.graphIntegrityFiles.values()) {
-      graphIntegrity.applyFile(file);
-    }
-    pass1Acc.graphIntegrityFiles.clear();
+    graphIntegrity.applyPass1Accumulator(pass1Acc);
     // Record actual engine used so engineDispatch reflects fallbacks.
     try {
       getObservabilityTap()?.indexPhase({
@@ -4083,7 +4081,6 @@ async function indexRepoImpl(
     } catch {
       /* swallow */
     }
-
     const {
       filesProcessed,
       changedFiles: changedFilesFromPass1,
@@ -4129,10 +4126,10 @@ async function indexRepoImpl(
     };
     const preloadedPass2ExportedSymbols =
       providerFirstScipMaterialized && providerFirstProviderRows
-        ? buildPreloadedPass2ExportedSymbolsFromRows({
-            files: providerFirstProviderRows.files,
-            symbols: providerFirstProviderRows.symbols,
-          })
+          ? buildPreloadedPass2ExportedSymbolsFromRows({
+              files: providerFirstProviderRows.files,
+              symbols: providerFirstProviderRows.symbols,
+            })
         : undefined;
     await measurePhase("pass1Drain", () => pass1DrainPromise);
     const pass2Task = measurePhase("pass2", async () =>
@@ -4158,6 +4155,7 @@ async function indexRepoImpl(
         preloadedExportedSymbols: preloadedPass2ExportedSymbols,
         recordTiming: recordPass2SubphaseTiming,
         writeStats: providerFirstLegacyFallbackPass2WriteStats,
+        onAuthoritativeEdgeWrite: (write) => graphIntegrity.applyPass2EdgeWrite(write),
       }),
     );
     // Always settle the drain before moving past pass 2: finalizeEdges and
@@ -4223,6 +4221,7 @@ async function indexRepoImpl(
                   ),
                 ])
               : undefined,
+          onPlannedTargetReplacement: (symbolIds) => graphIntegrity.replaceImportTargets(symbolIds),
           onChunkComplete: (current, total) => {
             onProgress?.({
               stage: "finalizing",
@@ -4286,6 +4285,7 @@ async function indexRepoImpl(
         createdCallEdges,
         allConfigEdges,
         configEdgeWeight,
+        onPlannedCallTargetCleanup: (symbolIds) => graphIntegrity.removeCallTargets(symbolIds),
         measurePhase: <T>(
           phaseName: string,
           fn: () => Promise<T> | T,
@@ -4369,12 +4369,12 @@ async function indexRepoImpl(
             hasIndexMutations,
             includeTimings: shouldCollectPostIndexSubphaseTimings(),
             callResolutionTelemetry,
+            prepareGraphIntegrityPlaceholderPruning: graphIntegrity.prepareForPlaceholderPruning,
             deferSemanticRefresh,
             onProgress,
           }),
         );
         recordFinalizeIndexingSubphaseTimings(finalizeResult.timings);
-
         await measurePhase("ensureCriticalSymbolFts", async () => {
           await ensureCriticalSymbolFtsIndex({
             recordTiming: recordIndexSubphaseTiming,

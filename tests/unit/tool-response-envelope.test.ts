@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { buildToolResponseEnvelope } from "../../dist/server.js";
+import { RepoStatusResponseSchema } from "../../dist/mcp/tools.js";
 
 function firstText(envelope: { content: Array<{ text?: string }> }): string {
   return envelope.content[0]?.text ?? "";
@@ -50,7 +51,9 @@ describe("tool response envelope model projection", () => {
     const envelope = buildToolResponseEnvelope(
       {
         repoId: "sdl-mcp",
-        rootPath: "F:/Claude/projects/sdl-mcp/sdl-mcp",
+        rootPath: "F:/secret/workspace/sdl-mcp",
+        latestVersionId: null,
+        lastIndexedAt: "2026-07-16T12:34:56.000Z",
         filesIndexed: 10,
         symbolsIndexed: 20,
         healthComponents: { freshness: 1, coverage: 1 },
@@ -73,10 +76,33 @@ describe("tool response envelope model projection", () => {
 
     assert.equal(envelope.structuredContent?.repoId, "sdl-mcp");
     assert.equal(envelope.structuredContent?.filesIndexed, 10);
+    assert.equal(envelope.structuredContent?.rootPath, undefined);
+    assert.equal(envelope.structuredContent?.lastIndexedAt, undefined);
+    const serialized = JSON.stringify(envelope.structuredContent);
+    assert.doesNotMatch(serialized, /F:\/secret\/workspace\/sdl-mcp/);
+    assert.doesNotMatch(serialized, /2026-07-16T12:34:56\.000Z/);
     assert.equal(envelope.structuredContent?.healthComponents, undefined);
     assert.equal(envelope.structuredContent?.serverInfo, undefined);
     assert.equal(envelope.structuredContent?.prefetchStats, undefined);
     assert.equal(envelope.structuredContent?.liveIndexStatus, undefined);
+    assert.equal(
+      RepoStatusResponseSchema.safeParse(envelope.structuredContent).success,
+      true,
+      "advertised outputSchema must accept projected structuredContent",
+    );
+    const raw = RepoStatusResponseSchema.parse({
+      repoId: "sdl-mcp",
+      rootPath: "F:/workspace/sdl-mcp",
+      latestVersionId: null,
+      filesIndexed: 10,
+      symbolsIndexed: 20,
+      lastIndexedAt: null,
+    });
+    assert.equal(
+      "rootPath" in raw ? raw.rootPath : undefined,
+      "F:/workspace/sdl-mcp",
+      "raw handler validation must preserve detailed-only fields",
+    );
   });
 
   it("sanitizes nested workflow child structured content", () => {

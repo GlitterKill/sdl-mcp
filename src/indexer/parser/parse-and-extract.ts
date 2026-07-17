@@ -72,6 +72,11 @@ export async function parseAndExtract(params: {
     if (parseError || !workerPool) {
       tree = adapter.parse(content, filePath);
       if (!tree) {
+        const result = createEmptyProcessFileResult(true, {
+          fileId,
+          relPath,
+          symbols: [],
+        });
         await withWriteConn(async (wConn) => {
           await persistSkippedFile({
             conn: wConn,
@@ -84,14 +89,7 @@ export async function parseAndExtract(params: {
             byteSize: fileMeta.size,
           });
         });
-        return {
-          status: "skip",
-          result: createEmptyProcessFileResult(true, {
-            fileId,
-            relPath,
-            symbols: [],
-          }),
-        };
+        return { status: "skip", result };
       }
 
       let extractedSymbols: ReturnType<LanguageAdapter["extractSymbols"]>;

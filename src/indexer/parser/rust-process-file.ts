@@ -32,7 +32,11 @@ import {
   type Pass1ExtractionCache,
   storePass1Extraction,
 } from "../pass2/types.js";
-import { createGraphIntegrityFileDigest } from "../provider-first/persisted-graph-integrity.js";
+import {
+  createGraphIntegrityFileDigest,
+  createGraphIntegrityFilelessEdgeReferences,
+  createGraphIntegrityFilelessSymbols,
+} from "../provider-first/persisted-graph-integrity.js";
 
 const C_FAMILY_PASS2_SOURCE_CACHE_EXTENSIONS = new Set([
   ".c",
@@ -148,6 +152,11 @@ export async function processFileFromRustResult(params: {
 
     // ── Language check ───────────────────────────────────────────
     if (!languages.includes(ext)) {
+      const graphIntegrityFile = createGraphIntegrityFileDigest({
+        fileId,
+        relPath,
+        symbols: [],
+      });
       await withWriteConn(async (wConn) => {
         await ladybugDb.withTransaction(wConn, async (txConn) => {
           if (existingFile) {
@@ -175,11 +184,7 @@ export async function processFileFromRustResult(params: {
           relPath,
           symbols: [],
         },
-        graphIntegrityFile: createGraphIntegrityFileDigest({
-          fileId,
-          relPath,
-          symbols: [],
-        }),
+        graphIntegrityFile,
       };
     }
 
@@ -370,6 +375,17 @@ export async function processFileFromRustResult(params: {
       relPath,
       symbols: symbolsToUpsert,
     });
+    const graphIntegrityFilelessSymbols = createGraphIntegrityFilelessSymbols({
+      symbols: symbolsToUpsert,
+      externalSymbols: [],
+      edges: edgesToInsert,
+    });
+    const graphIntegrityFilelessReferences =
+      createGraphIntegrityFilelessEdgeReferences(
+        edgesToInsert,
+        graphIntegrityFilelessSymbols.map((symbol) => symbol.symbolId),
+        { trackSources: mode === "incremental" },
+      );
 
     // ── Persist ──────────────────────────────────────────────────────────
     if (params.batchAccumulator) {
@@ -437,6 +453,8 @@ export async function processFileFromRustResult(params: {
         })),
       },
       graphIntegrityFile,
+      graphIntegrityFilelessSymbols,
+      graphIntegrityFilelessReferences,
     };
   } catch (error) {
     logger.error(`Error processing Rust result for ${fileMeta.path}: ${error}`);

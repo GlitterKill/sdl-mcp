@@ -549,8 +549,8 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /createOrReuseVersion\("Incremental index"\)/,
-      "no-op incremental runs should still reuse or create a version",
+      /verifyNoOpIncrementalGraphIntegrity\(repoId\)/,
+      "no-op incremental runs should validate and reuse the verified latest version",
     );
 
     assert.match(

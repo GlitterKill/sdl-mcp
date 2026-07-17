@@ -211,6 +211,9 @@ export async function runPass2Resolvers(params: {
   preloadedExportedSymbols?: PreloadedPass2ExportedSymbols;
   recordTiming?: Pass2TimingRecorder;
   writeStats?: Pass2WriteStats;
+  onAuthoritativeEdgeWrite?: (
+    write: Parameters<SubmitEdgeWrite>[0],
+  ) => Promise<void> | void;
 }): Promise<number> {
   const {
     repoId,
@@ -234,6 +237,7 @@ export async function runPass2Resolvers(params: {
     preloadedExportedSymbols,
     recordTiming,
     writeStats,
+    onAuthoritativeEdgeWrite,
   } = params;
 
   const measurePass2Subphase = async <T>(
@@ -532,7 +536,7 @@ export async function runPass2Resolvers(params: {
     // the in-memory createdCallEdges ordering that the legacy sequential path
     // relied on for duplicate suppression.
     const { acc: sequentialWriteAcc, submit: sequentialSubmit } =
-      makeBatchAccumulator();
+      makeBatchAccumulator(onAuthoritativeEdgeWrite);
     let filesSinceWriteFlush = 0;
     let filesPendingTelemetryCredit = 0;
     const pendingResolverTelemetryCredits: SequentialPass2TelemetryCredit[] =
@@ -833,7 +837,7 @@ export async function runPass2Resolvers(params: {
       // Cuts writeLimiter handshakes from O(batch.length) to 1 per batch and
       // amortises the delete-then-insert tx setup across N files.
       const { acc: batchWriteAcc, submit: batchSubmit } =
-        makeBatchAccumulator();
+        makeBatchAccumulator(onAuthoritativeEdgeWrite);
 
       // Launch all files in this batch concurrently, each with its own
       // local copy of the dedup set.

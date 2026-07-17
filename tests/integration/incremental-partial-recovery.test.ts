@@ -157,7 +157,7 @@ describe("incremental index partial-run recovery", () => {
     }
   });
 
-  it("recovers derived state during no-op incremental refresh without legacy SCIP ingestion", async () => {
+  it("rejects no-op recovery when the latest integrity baseline is missing", async () => {
     const full = await indexRepo(REPO_ID, "full");
     assert.ok(full.versionId.length > 0);
     assert.equal(
@@ -172,70 +172,19 @@ describe("incremental index partial-run recovery", () => {
       });
     });
     assert.equal(await getDerivedState(REPO_ID), null);
-
-    const connBeforeDamage = await getLadybugConn();
-    const removedSnapshot = await ladybugDb.querySingle<{ id: string }>(
-      connBeforeDamage,
-      `MATCH (sv:SymbolVersion {versionId: $versionId})
-       RETURN sv.id AS id
-       LIMIT 1`,
-      { versionId: full.versionId },
+    await assert.rejects(
+      indexRepo(REPO_ID, "incremental"),
+      /Incremental indexing requires a verified graph integrity baseline.*full/i,
     );
-    assert.ok(removedSnapshot, "fixture full index should create a snapshot row");
-    const removedMetrics = await ladybugDb.querySingle<{ symbolId: string }>(
-      connBeforeDamage,
-      `MATCH (m:Metrics)
-       RETURN m.symbolId AS symbolId
-       LIMIT 1`,
-      {},
+    assert.equal(
+      (await ladybugDb.getLatestVersion(await getLadybugConn(), REPO_ID))?.versionId,
+      full.versionId,
+      "failed no-op validation must not create a replacement version",
     );
-    assert.ok(removedMetrics, "fixture full index should create a metrics row");
-    await withWriteConn(async (wConn) => {
-      await exec(wConn, "MATCH (sv:SymbolVersion {id: $id}) DELETE sv", {
-        id: removedSnapshot.id,
-      });
-      await exec(wConn, "MATCH (m:Metrics {symbolId: $symbolId}) DELETE m", {
-        symbolId: removedMetrics.symbolId,
-      });
-    });
-
     assert.equal(
       await getScipIngestionRecord(await getLadybugConn(), REPO_ID, "index.scip"),
       null,
     );
-
-    const incremental = await indexRepo(REPO_ID, "incremental");
-
-    assert.equal(incremental.changedFiles, 0);
-    const conn = await getLadybugConn();
-    assert.equal(
-      await getScipIngestionRecord(conn, REPO_ID, "index.scip"),
-      null,
-      "legacy no-op incremental recovery should not ingest SCIP indexes",
-    );
-    const derived = await getDerivedState(REPO_ID);
-    assert.ok(derived, "no-op incremental recovery should recreate DerivedState");
-    assert.equal(derived.computedVersionId, incremental.versionId);
-
-    const finalConn = await getLadybugConn();
-    const symbolCount = await ladybugDb.getSymbolCount(finalConn, REPO_ID);
-    const snapshotCount = await ladybugDb.querySingle<{ count: unknown }>(
-      finalConn,
-      `MATCH (sv:SymbolVersion {versionId: $versionId})
-       RETURN count(sv) AS count`,
-      { versionId: incremental.versionId },
-    );
-    assert.equal(ladybugDb.toNumber(snapshotCount?.count ?? 0), symbolCount);
-    const metricsCount = await ladybugDb.querySingle<{ count: unknown }>(
-      finalConn,
-      `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
-       WHERE coalesce(s.symbolStatus, 'real') = 'real'
-       MATCH (m:Metrics)
-       WHERE m.symbolId = s.symbolId
-       RETURN count(m) AS count`,
-      { repoId: REPO_ID },
-    );
-    assert.equal(ladybugDb.toNumber(metricsCount?.count ?? 0), symbolCount);
   });
 
   it("repairs only missing file summaries during no-op incremental recovery", async () => {

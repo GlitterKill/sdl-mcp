@@ -56,6 +56,65 @@ function symbolRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function externalSymbolRow(symbolId: string, name: string) {
+  return {
+    symbolId,
+    kind: "function",
+    name,
+    exported: true,
+    language: "typescript",
+    external: true,
+    scipSymbol: symbolId,
+    source: "scip" as const,
+    updatedAt: "2026-07-16T00:00:00.000Z",
+  };
+}
+
+function callEdge(fromSymbolId: string, toSymbolId: string, repoId = "repo") {
+  return {
+    repoId,
+    fromSymbolId,
+    toSymbolId,
+    edgeType: "call",
+    weight: 1,
+    confidence: 1,
+    resolution: "exact",
+    provenance: null,
+    createdAt: "2026-07-16T00:00:00.000Z",
+  };
+}
+
+async function seedVersionedGraph(root: string): Promise<void> {
+  await initLadybugDb(join(root, "graph.lbug"));
+  const row = symbolRow();
+  await withWriteConn(async (conn) => {
+    await ladybugDb.upsertRepo(conn, {
+      repoId: "repo",
+      rootPath: root,
+      configJson: "{}",
+      createdAt: "2026-07-16T00:00:00.000Z",
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId: row.fileId,
+      repoId: "repo",
+      relPath: "src/alpha.ts",
+      contentHash: "a".repeat(64),
+      language: "typescript",
+      byteSize: 10,
+      lastIndexedAt: "2026-07-16T00:00:00.000Z",
+    });
+    await ladybugDb.upsertKnownFileSymbols(conn, [row]);
+    await ladybugDb.createVersion(conn, {
+      versionId: "v1",
+      repoId: "repo",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      reason: "test",
+      prevVersionHash: null,
+      versionHash: null,
+    });
+  });
+}
+
 describe("persisted graph integrity", () => {
   let root = "";
 
@@ -100,6 +159,299 @@ describe("persisted graph integrity", () => {
       createExpectation([forwardFile]),
       createExpectation([reverseFile]),
     );
+  });
+
+  it("matches Ladybug UTF-8 ordering for Unicode paths and symbol ids", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-unicode-order-"));
+    await initLadybugDb(join(root, "unicode-order.lbug"));
+    const createFileDigest = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFileDigest",
+    );
+    const createExpectation = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityExpectation",
+    );
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const compare = requiredFunction<SyncFn>(
+      integrityModule,
+      "compareGraphIntegrityExpectations",
+    );
+    const suffixes = ["e", "é", "\uE000", "\uFFFD", "😀"];
+    const files = suffixes.map((suffix, fileIndex) => {
+      const relPath = `src/a${suffix}.ts`;
+      const fileId = `repo:${relPath}`;
+      const symbols = [...suffixes].reverse().map((symbolSuffix) =>
+        symbolRow({
+          symbolId: `sym:${fileIndex}:a${symbolSuffix}`,
+          fileId,
+          name: `a${symbolSuffix}`,
+          astFingerprint: `fingerprint-${fileIndex}-${symbolSuffix}`,
+          signatureJson: `{"name":"a${symbolSuffix}"}`,
+          scipSymbol: `scip-typescript npm fixture 1.0.0 ${relPath}/a${symbolSuffix}().`,
+        }),
+      );
+      return { fileId, relPath, symbols };
+    });
+    const expected = createExpectation(
+      [...files].reverse().map((file) => createFileDigest(file)),
+    );
+
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-16T00:00:00.000Z",
+      });
+      for (const file of files) {
+        await ladybugDb.upsertFile(conn, {
+          fileId: file.fileId,
+          repoId: "repo",
+          relPath: file.relPath,
+          contentHash: "a".repeat(64),
+          language: "typescript",
+          byteSize: 10,
+          lastIndexedAt: "2026-07-16T00:00:00.000Z",
+        });
+      }
+      await ladybugDb.upsertKnownFileSymbols(
+        conn,
+        files.flatMap((file) => file.symbols),
+      );
+    });
+
+    const actual = await capture(await getLadybugConn(), "repo");
+    assert.equal(compare(expected, actual), null);
+    assert.equal((actual as { digest: string }).digest, expected.digest);
+  });
+
+  it("keeps shared fileless placeholders in each repository universe", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-shared-placeholder-"));
+    await initLadybugDb(join(root, "shared-placeholder.lbug"));
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const targetId = "unresolved:call:__sdl_v1__c2hhcmVkVGFyZ2V0";
+    const sourceA = symbolRow({
+      symbolId: "repo-a:sym:source",
+      repoId: "repo-a",
+      fileId: "repo-a:src/index.ts",
+    });
+    const sourceB = symbolRow({
+      symbolId: "repo-b:sym:source",
+      repoId: "repo-b",
+      fileId: "repo-b:src/index.ts",
+    });
+    await withWriteConn(async (conn) => {
+      for (const [repoId, source] of [
+        ["repo-a", sourceA],
+        ["repo-b", sourceB],
+      ] as const) {
+        await ladybugDb.upsertRepo(conn, {
+          repoId,
+          rootPath: join(root, repoId),
+          configJson: "{}",
+          createdAt: "2026-07-16T00:00:00.000Z",
+        });
+        await ladybugDb.upsertFile(conn, {
+          fileId: source.fileId,
+          repoId,
+          relPath: "src/index.ts",
+          contentHash: "a".repeat(64),
+          language: "typescript",
+          byteSize: 10,
+          lastIndexedAt: "2026-07-16T00:00:00.000Z",
+        });
+        await ladybugDb.upsertKnownFileSymbols(conn, [source]);
+      }
+      await ladybugDb.insertEdges(conn, [
+        {
+          ...callEdge(sourceA.symbolId, targetId, "repo-a"),
+          targetMeta: {
+            symbolStatus: "unresolved",
+            placeholderKind: "call",
+            placeholderTarget: "sharedTarget",
+          },
+        },
+      ]);
+    });
+    const baselineA = await capture(await getLadybugConn(), "repo-a");
+
+    await withWriteConn(async (conn) => {
+      const edge = {
+        ...callEdge(sourceB.symbolId, targetId, "repo-b"),
+        targetMeta: {
+          symbolStatus: "unresolved" as const,
+          placeholderKind: "call",
+          placeholderTarget: "sharedTarget",
+        },
+      };
+      await ladybugDb.insertEdges(conn, [edge]);
+      await ladybugDb.insertEdges(conn, [edge]);
+    });
+
+    const [actualA, actualB] = await Promise.all([
+      capture(await getLadybugConn(), "repo-a"),
+      capture(await getLadybugConn(), "repo-b"),
+    ]);
+    assert.deepEqual(actualA, baselineA);
+    assert.equal((actualA as { symbolCount: number }).symbolCount, 2);
+    assert.equal((actualB as { symbolCount: number }).symbolCount, 2);
+    const conn = await getLadybugConn();
+    assert.equal(
+      await ladybugDb.getPersistedGraphIntegrityOtherRepoSymbolCount(
+        conn,
+        "repo-a",
+      ),
+      2,
+      "repo-b's source and the shared target both remain physical",
+    );
+    assert.equal(
+      await ladybugDb.getPersistedGraphIntegrityOtherRepoSymbolCount(
+        conn,
+        "repo-b",
+      ),
+      2,
+      "repo-a's source and the shared target both remain physical",
+    );
+
+    await withWriteConn((writeConn) =>
+      ladybugDb.createVersion(writeConn, {
+        versionId: "repo-a-v1",
+        repoId: "repo-a",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        reason: "verified shared baseline",
+        prevVersionHash: null,
+        versionHash: null,
+      }),
+    );
+    await derivedState.markGraphIntegrityVerified(
+      "repo-a",
+      "repo-a-v1",
+      (baselineA as { digest: string }).digest,
+    );
+    const createFileDigest = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFileDigest",
+    );
+    const Session = requiredFunction<SyncFn>(
+      integrityModule,
+      "PersistedGraphIntegritySession",
+    ) as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string, affectedFileIds: string[]) => Promise<void>;
+      applyFile: (file: Record<string, unknown>) => void;
+      prepareForPlaceholderPruning: (conn: unknown) => Promise<boolean>;
+      complete: (versionId: string) => Promise<void>;
+    };
+    const session = new Session("repo-a", "incremental", true);
+    await session.begin("repo-a-v2", [sourceA.fileId]);
+    session.applyFile(
+      createFileDigest({
+        fileId: sourceA.fileId,
+        relPath: "src/index.ts",
+        symbols: [],
+      }) as Record<string, unknown>,
+    );
+    await withWriteConn((writeConn) =>
+      ladybugDb.deleteFilesByIds(writeConn, [sourceA.fileId]),
+    );
+    assert.equal(
+      await session.prepareForPlaceholderPruning(await getLadybugConn()),
+      true,
+    );
+    assert.equal(
+      await ladybugDb.pruneIsolatedPlaceholderSymbols(
+        await getLadybugConn(),
+        "repo-a",
+      ),
+      0,
+      "repo-b's edge keeps the shared target physically live",
+    );
+    await withWriteConn((writeConn) =>
+      ladybugDb.createVersion(writeConn, {
+        versionId: "repo-a-v2",
+        repoId: "repo-a",
+        createdAt: "2026-07-16T00:00:01.000Z",
+        reason: "remove repo-a source",
+        prevVersionHash: null,
+        versionHash: null,
+      }),
+    );
+    await session.complete("repo-a-v2");
+    const [incrementalA, incrementalB] = await Promise.all([
+      capture(await getLadybugConn(), "repo-a"),
+      capture(await getLadybugConn(), "repo-b"),
+    ]);
+    assert.equal((incrementalA as { symbolCount: number }).symbolCount, 0);
+    assert.equal((incrementalB as { symbolCount: number }).symbolCount, 2);
+
+    await withWriteConn(async (writeConn) => {
+      await ladybugDb.upsertFile(writeConn, {
+        fileId: sourceA.fileId,
+        repoId: "repo-a",
+        relPath: "src/index.ts",
+        contentHash: "b".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-16T00:00:02.000Z",
+      });
+      await ladybugDb.upsertKnownFileSymbols(writeConn, [sourceA]);
+      await ladybugDb.insertEdges(writeConn, [
+        {
+          ...callEdge(sourceA.symbolId, targetId, "repo-a"),
+          targetMeta: {
+            symbolStatus: "unresolved",
+            placeholderKind: "call",
+            placeholderTarget: "sharedTarget",
+          },
+        },
+      ]);
+    });
+
+    const full = new Session("repo-a", "full", true);
+    await full.begin("repo-a-v3", [sourceA.fileId]);
+    await withWriteConn((writeConn) =>
+      ladybugDb.deleteFilesByIds(writeConn, [sourceA.fileId]),
+    );
+    assert.equal(
+      await full.prepareForPlaceholderPruning(await getLadybugConn()),
+      true,
+    );
+    assert.equal(
+      await ladybugDb.pruneIsolatedPlaceholderSymbols(
+        await getLadybugConn(),
+        "repo-a",
+      ),
+      0,
+      "repo-b's edge keeps the shared target physically live",
+    );
+    await withWriteConn((writeConn) =>
+      ladybugDb.createVersion(writeConn, {
+        versionId: "repo-a-v3",
+        repoId: "repo-a",
+        createdAt: "2026-07-16T00:00:03.000Z",
+        reason: "authoritative removal of repo-a source",
+        prevVersionHash: null,
+        versionHash: null,
+      }),
+    );
+    await full.complete("repo-a-v3");
+
+    const [finalA, finalB] = await Promise.all([
+      capture(await getLadybugConn(), "repo-a"),
+      capture(await getLadybugConn(), "repo-b"),
+    ]);
+    assert.equal((finalA as { symbolCount: number }).symbolCount, 0);
+    assert.equal((finalB as { symbolCount: number }).symbolCount, 2);
   });
 
   it("commits every established immutable provider canonical field", () => {
@@ -160,6 +512,803 @@ describe("persisted graph integrity", () => {
     }
   });
 
+  it("derives empty authoritative expectations before every skip mutation", () => {
+    const cases = [
+      ["src/indexer/parser/early-exit.ts", "Skipping binary file", "createEmptyProcessFileResult(true"],
+      ["src/indexer/parser/early-exit.ts", "not in enabled languages", "createEmptyProcessFileResult(true"],
+      ["src/indexer/parser/early-exit.ts", "No adapter found", "createEmptyProcessFileResult(true"],
+      ["src/indexer/parser/parse-and-extract.ts", "if (!tree)", "createEmptyProcessFileResult(true"],
+      ["src/indexer/parser/rust-process-file.ts", "if (!languages.includes(ext))", "createGraphIntegrityFileDigest"],
+    ] as const;
+
+    for (const [relativePath, branchMarker, digestMarker] of cases) {
+      const source = readFileSync(join(process.cwd(), relativePath), "utf8");
+      const branchStart = source.indexOf(branchMarker);
+      assert.ok(branchStart >= 0, `${relativePath} must contain ${branchMarker}`);
+      const mutationStart = source.indexOf("await withWriteConn", branchStart);
+      const digestStart = source.indexOf(digestMarker, branchStart);
+      assert.ok(mutationStart >= 0, `${relativePath} must persist the skip`);
+      assert.ok(
+        digestStart >= 0 && digestStart < mutationStart,
+        `${relativePath} ${branchMarker} must derive its empty digest before persistence`,
+      );
+    }
+  });
+
+  it("derives fileless provider externals and edge placeholders authoritatively", () => {
+    const createFilelessSymbols = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFilelessSymbols",
+    );
+    const unresolvedId = "unresolved:call:__sdl_v1__bWlzc2luZw";
+    const rows = createFilelessSymbols({
+      symbols: [symbolRow()],
+      externalSymbols: [
+        {
+          symbolId: "external:fixture",
+          repoId: "repo",
+          kind: "class",
+          name: "Fixture",
+          exported: true,
+          language: "external",
+          rangeStartLine: 0,
+          rangeStartCol: 0,
+          rangeEndLine: 0,
+          rangeEndCol: 0,
+          external: true,
+          scipSymbol: "scip-typescript npm fixture 1.0.0 Fixture#",
+          source: "scip",
+          updatedAt: "2026-07-16T00:00:00.000Z",
+        },
+      ],
+      edges: [
+        {
+          repoId: "repo",
+          fromSymbolId: "sym:alpha",
+          toSymbolId: unresolvedId,
+          edgeType: "call",
+          weight: 0.5,
+          confidence: 0.5,
+          resolution: "unresolved",
+          targetMeta: {
+            symbolStatus: "unresolved",
+            placeholderKind: "call",
+            placeholderTarget: "missing",
+          },
+          createdAt: "2026-07-16T00:00:00.000Z",
+        },
+      ],
+    }) as Array<Record<string, unknown>>;
+
+    assert.deepEqual(
+      rows.map((row) => row.symbolId).sort(),
+      ["external:fixture", unresolvedId].sort(),
+    );
+    assert.ok(rows.every((row) => row.fileId === ""));
+    assert.equal(
+      rows.find((row) => row.symbolId === "external:fixture")?.astFingerprint,
+      "external:fixture",
+    );
+    assert.equal(
+      rows.find((row) => row.symbolId === unresolvedId)?.name,
+      unresolvedId,
+    );
+    assert.equal(
+      rows.find((row) => row.symbolId === unresolvedId)?.kind,
+      "unknown",
+    );
+    assert.equal(
+      rows.find((row) => row.symbolId === unresolvedId)?.placeholderTarget,
+      "missing",
+    );
+
+    const createReferences = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFilelessEdgeReferences",
+    );
+    assert.deepEqual(
+      createReferences(
+        [
+          {
+            fromSymbolId: "sym:alpha",
+            toSymbolId: unresolvedId,
+            edgeType: "call",
+          },
+          {
+            fromSymbolId: "sym:alpha",
+            toSymbolId: "sym:beta",
+            edgeType: "call",
+          },
+        ],
+        rows.map((row) => String(row.symbolId)),
+        { trackSources: true },
+      ),
+      [
+        {
+          filelessSymbolId: unresolvedId,
+          sourceSymbolId: "sym:alpha",
+          edgeType: "call",
+          direction: "incoming",
+          referenceCount: 1,
+        },
+      ],
+    );
+    assert.deepEqual(
+      createReferences(
+        Array.from({ length: 1_000 }, () => ({
+          fromSymbolId: "sym:alpha",
+          toSymbolId: unresolvedId,
+          edgeType: "call",
+        })),
+        [unresolvedId],
+        { trackSources: false },
+      ),
+      [
+        {
+          filelessSymbolId: unresolvedId,
+          sourceSymbolId: null,
+          edgeType: "call",
+          direction: "incoming",
+          referenceCount: 1_000,
+        },
+      ],
+      "full and baseline plans aggregate repeated references instead of retaining edges",
+    );
+  });
+
+  it("tracks baseline liveness as counts and current incremental source deltas", () => {
+    const Ledger = requiredFunction<SyncFn>(
+      integrityModule,
+      "GraphIntegrityFilelessLivenessLedger",
+    ) as unknown as new (trackSources: boolean) => {
+      seedReferenceCount: (row: Record<string, unknown>) => void;
+      seedFileReferenceCount: (
+        fileId: string,
+        row: Record<string, unknown>,
+      ) => void;
+      removeFile: (fileId: string) => void;
+      add: (row: Record<string, unknown>) => void;
+      removeOutgoing: (symbolIds: string[], edgeType: string) => void;
+      removeTargets: (symbolIds: string[], edgeType: string) => void;
+      isReferenced: (symbolId: string) => boolean;
+    };
+    const ledger = new Ledger(true);
+    const target = "external:fixture";
+    ledger.seedReferenceCount({
+      symbolId: target,
+      edgeType: "call",
+      referenceCount: 2,
+    });
+    ledger.seedFileReferenceCount("repo:src/alpha.ts", {
+      symbolId: target,
+      edgeType: "call",
+      referenceCount: 1,
+    });
+    ledger.removeFile("repo:src/alpha.ts");
+    assert.equal(ledger.isReferenced(target), true);
+
+    ledger.add({
+      filelessSymbolId: target,
+      sourceSymbolId: "sym:changed",
+      edgeType: "call",
+      direction: "incoming",
+      referenceCount: 1,
+    });
+    ledger.removeOutgoing(["sym:changed"], "call");
+    assert.equal(ledger.isReferenced(target), true);
+    ledger.removeTargets([target], "call");
+    assert.equal(ledger.isReferenced(target), false);
+  });
+
+  it("subtracts baseline calls only for exact pass-2 source submissions", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-pass2-source-"));
+    await initLadybugDb(join(root, "pass2-source.lbug"));
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const Session = requiredFunction<SyncFn>(
+      integrityModule,
+      "PersistedGraphIntegritySession",
+    ) as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+      applyPass2EdgeWrite: (write: Record<string, unknown>) => Promise<void>;
+      prepareForPlaceholderPruning: (conn: unknown) => Promise<boolean>;
+      complete: (versionId: string) => Promise<void>;
+    };
+    const refreshedSource = symbolRow();
+    const untouchedSource = symbolRow({
+      symbolId: "sym:beta",
+      name: "beta",
+      astFingerprint: "fingerprint-beta",
+      signatureJson: '{"name":"beta"}',
+    });
+    const refreshedTarget = "scip-typescript npm fixture 1.0.0 dep/refresh().";
+    const untouchedTarget = "scip-typescript npm fixture 1.0.0 dep/untouched().";
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId: refreshedSource.fileId,
+        repoId: "repo",
+        relPath: "src/alpha.ts",
+        contentHash: "a".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertKnownFileSymbols(conn, [
+        refreshedSource,
+        untouchedSource,
+      ]);
+      await ladybugDb.batchMergeExternalSymbols(conn, "repo", [
+        externalSymbolRow(refreshedTarget, "refresh"),
+        externalSymbolRow(untouchedTarget, "untouched"),
+      ]);
+      await ladybugDb.insertEdges(conn, [
+        callEdge(refreshedSource.symbolId, refreshedTarget),
+        callEdge(untouchedSource.symbolId, untouchedTarget),
+      ]);
+      await ladybugDb.createVersion(conn, {
+        versionId: "v1",
+        repoId: "repo",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        reason: "verified baseline",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+    });
+    const baseline = (await capture(await getLadybugConn(), "repo")) as {
+      digest: string;
+    };
+    await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
+
+    const session = new Session("repo", "incremental", true);
+    await session.begin("v2");
+    await session.applyPass2EdgeWrite({
+      symbolIdsToRefresh: [refreshedSource.symbolId],
+      edges: [],
+    });
+    await withWriteConn((conn) =>
+      ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+        conn,
+        [refreshedSource.symbolId],
+        "call",
+      ),
+    );
+    assert.equal(
+      await session.prepareForPlaceholderPruning(await getLadybugConn()),
+      true,
+    );
+    assert.equal(
+      await ladybugDb.pruneIsolatedPlaceholderSymbols(
+        await getLadybugConn(),
+        "repo",
+      ),
+      1,
+      "only the exact refreshed source loses its external target",
+    );
+    await withWriteConn((conn) =>
+      ladybugDb.createVersion(conn, {
+        versionId: "v2",
+        repoId: "repo",
+        createdAt: "2026-07-16T00:00:01.000Z",
+        reason: "exact pass-2 refresh",
+        prevVersionHash: null,
+        versionHash: null,
+      }),
+    );
+    await session.complete("v2");
+  });
+
+  for (const transition of ["provider", "legacy"] as const) {
+    it(`removes inherited fileless membership when ${transition} rows promote a symbol`, async () => {
+      root = mkdtempSync(join(tmpdir(), `sdl-graph-integrity-${transition}-promotion-`));
+      await initLadybugDb(join(root, `${transition}-promotion.lbug`));
+      const capture = requiredFunction<AsyncFn>(
+        integrityModule,
+        "capturePersistedGraphIntegrity",
+      );
+      const createFileDigest = requiredFunction<SyncFn>(
+        integrityModule,
+        "createGraphIntegrityFileDigest",
+      );
+      const Session = requiredFunction<SyncFn>(
+        integrityModule,
+        "PersistedGraphIntegritySession",
+      ) as unknown as new (
+        repoId: string,
+        mode: "full" | "incremental",
+        enabled: boolean,
+      ) => {
+        begin: (versionId: string, affectedFileIds: string[]) => Promise<void>;
+        applyProviderRows: (rows: Record<string, unknown>) => void;
+        applyPass1Accumulator: (accumulator: Record<string, unknown>) => void;
+        complete: (versionId: string) => Promise<void>;
+      };
+      const promotedId = "scip-typescript npm fixture 1.0.0 src/promoted.ts/promoted().";
+      const fileId = "repo:src/promoted.ts";
+      const promoted = symbolRow({
+        symbolId: promotedId,
+        fileId,
+        name: "promoted",
+        astFingerprint: "promoted-definition",
+        signatureJson: '{"name":"promoted"}',
+        scipSymbol: promotedId,
+      });
+      const file = {
+        fileId,
+        repoId: "repo",
+        relPath: "src/promoted.ts",
+        contentHash: "b".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-16T00:00:01.000Z",
+      };
+      await withWriteConn(async (conn) => {
+        await ladybugDb.upsertRepo(conn, {
+          repoId: "repo",
+          rootPath: root,
+          configJson: "{}",
+          createdAt: "2026-07-16T00:00:00.000Z",
+        });
+        await ladybugDb.batchMergeExternalSymbols(conn, "repo", [
+          externalSymbolRow(promotedId, "promoted"),
+        ]);
+        await ladybugDb.createVersion(conn, {
+          versionId: "v1",
+          repoId: "repo",
+          createdAt: "2026-07-16T00:00:00.000Z",
+          reason: "verified external baseline",
+          prevVersionHash: null,
+          versionHash: null,
+        });
+      });
+      const baseline = (await capture(await getLadybugConn(), "repo")) as {
+        digest: string;
+      };
+      await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
+
+      const session = new Session("repo", "incremental", true);
+      await session.begin("v2", [fileId]);
+      if (transition === "provider") {
+        session.applyProviderRows({
+          files: [file],
+          symbols: [promoted],
+          externalSymbols: [],
+          edges: [],
+          changedFileIds: new Set([fileId]),
+        });
+      } else {
+        session.applyPass1Accumulator({
+          symbolMapFileUpdates: new Map([
+            [fileId, { symbols: [{ symbolId: promotedId }] }],
+          ]),
+          graphIntegrityFiles: new Map([
+            [
+              file.relPath,
+              createFileDigest({
+                fileId,
+                relPath: file.relPath,
+                symbols: [promoted],
+              }),
+            ],
+          ]),
+          graphIntegrityFilelessSymbols: new Map(),
+          graphIntegrityFilelessReferences: new Map(),
+        });
+      }
+      await withWriteConn(async (conn) => {
+        await ladybugDb.deleteProviderReplacementSymbols(
+          conn,
+          "repo",
+          [fileId],
+          [promotedId],
+        );
+        await ladybugDb.upsertFile(conn, file);
+        await ladybugDb.upsertKnownFileSymbols(conn, [promoted]);
+        await ladybugDb.createVersion(conn, {
+          versionId: "v2",
+          repoId: "repo",
+          createdAt: "2026-07-16T00:00:01.000Z",
+          reason: `${transition} promotion`,
+          prevVersionHash: null,
+          versionHash: null,
+        });
+      });
+      await session.complete("v2");
+    });
+  }
+
+  it("finalizes fileless expectations from plans before persisted cleanup", () => {
+    const importSource = readFileSync(
+      join(process.cwd(), "src/indexer/edge-builder/unresolved-imports.ts"),
+      "utf8",
+    );
+    const builtinSource = readFileSync(
+      join(process.cwd(), "src/indexer/edge-builder/cleanup.ts"),
+      "utf8",
+    );
+    const finalizeSource = readFileSync(
+      join(process.cwd(), "src/indexer/metrics-updater.ts"),
+      "utf8",
+    );
+    const pruneSource = readFileSync(
+      join(process.cwd(), "src/db/ladybug-symbols.ts"),
+      "utf8",
+    );
+
+    assert.ok(
+      importSource.indexOf("onPlannedTargetReplacement?.") <
+        importSource.indexOf("rewriteResolvedImportEdges("),
+    );
+    assert.ok(
+      builtinSource.indexOf("onPlannedTargetCleanup?.") <
+        builtinSource.indexOf("deleteCallEdgesToTargetsByRepo("),
+    );
+    const preparationIndex = finalizeSource.indexOf(
+      "await prepareGraphIntegrityPlaceholderPruning?.(wConn)",
+    );
+    const pruningIndex = finalizeSource.indexOf(
+      "pruneIsolatedPlaceholderSymbols(",
+    );
+    assert.ok(preparationIndex >= 0, "placeholder preparation call must exist");
+    assert.ok(pruningIndex >= 0, "placeholder pruning call must exist");
+    assert.ok(preparationIndex < pruningIndex);
+    assert.doesNotMatch(pruneSource, /onPruned/);
+  });
+
+  it("mirrors the global placeholder-pruning safety boundary", () => {
+    const pruningIsSafe = requiredFunction<SyncFn>(
+      integrityModule,
+      "graphIntegrityPlaceholderPruningIsSafe",
+    );
+    const limit = ladybugDb.LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT;
+
+    assert.equal(pruningIsSafe(2, limit - 2), true);
+    assert.equal(
+      pruningIsSafe(2, limit - 1),
+      false,
+      "symbols in other repositories must participate in the safety gate",
+    );
+  });
+
+  it("does not retain the verified baseline as a second edge graph", () => {
+    const integritySource = readFileSync(
+      join(
+        process.cwd(),
+        "src/indexer/provider-first/persisted-graph-integrity.ts",
+      ),
+      "utf8",
+    );
+    const querySource = readFileSync(
+      join(process.cwd(), "src/db/ladybug-graph-integrity.ts"),
+      "utf8",
+    );
+    const indexerSource = readFileSync(
+      join(process.cwd(), "src/indexer/indexer.ts"),
+      "utf8",
+    );
+
+    assert.doesNotMatch(integritySource, /baselineFileSymbolIds/);
+    assert.doesNotMatch(
+      integritySource,
+      /getPersistedGraphIntegrityFilelessEdgeReferences/,
+    );
+    assert.match(integritySource, /seedPersistedReferenceCounts/);
+    assert.match(querySource, /count\(\*\) AS referenceCount/);
+    assert.match(indexerSource, /isScannedFileChanged\(/);
+    assert.match(
+      integritySource,
+      /getPersistedGraphIntegritySourceReferenceCounts/,
+    );
+  });
+
+  it("counts symbols in other repositories for the pruning boundary", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-multi-repo-"));
+    await seedVersionedGraph(root);
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "other",
+        rootPath: join(root, "other"),
+        configJson: "{}",
+        createdAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId: "other:src/beta.ts",
+        repoId: "other",
+        relPath: "src/beta.ts",
+        contentHash: "b".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertKnownFileSymbols(conn, [
+        symbolRow({
+          symbolId: "sym:beta",
+          repoId: "other",
+          fileId: "other:src/beta.ts",
+          name: "beta",
+        }),
+      ]);
+    });
+
+    const conn = await getLadybugConn();
+    assert.equal(
+      await ladybugDb.getPersistedGraphIntegrityOtherRepoSymbolCount(
+        conn,
+        "repo",
+      ),
+      1,
+    );
+    assert.equal(
+      await ladybugDb.getPersistedGraphIntegrityOtherRepoSymbolCount(
+        conn,
+        "other",
+      ),
+      1,
+    );
+  });
+
+  it("inherits large fileless membership only from a verified incremental baseline", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-large-baseline-"));
+    await initLadybugDb(join(root, "large-baseline.lbug"));
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const Session = requiredFunction<SyncFn>(
+      integrityModule,
+      "PersistedGraphIntegritySession",
+    ) as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+      prepareForPlaceholderPruning: (conn: unknown) => Promise<boolean>;
+      complete: (versionId: string) => Promise<void>;
+    };
+    const symbolIds = Array.from(
+      { length: ladybugDb.LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT + 1 },
+      (_, index) => `unresolved:call:stale-${index}`,
+    );
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.exec(
+        conn,
+        `MATCH (r:Repo {repoId: $repoId})
+         UNWIND $symbolIds AS symbolId
+         CREATE (s:Symbol {
+           symbolId: symbolId,
+           repoId: $repoId,
+           kind: 'unknown',
+           name: symbolId,
+           language: 'unknown',
+           rangeStartLine: 0,
+           rangeStartCol: 0,
+           rangeEndLine: 0,
+           rangeEndCol: 0,
+           astFingerprint: symbolId,
+           signatureJson: NULL,
+           source: 'treesitter',
+           scipSymbol: NULL,
+           symbolStatus: 'unresolved',
+           external: false,
+           placeholderKind: 'call',
+           placeholderTarget: symbolId
+         })-[:SYMBOL_IN_REPO]->(r)`,
+        { repoId: "repo", symbolIds },
+      );
+      await ladybugDb.createVersion(conn, {
+        versionId: "v1",
+        repoId: "repo",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        reason: "verified baseline",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+    });
+    const baseline = (await capture(await getLadybugConn(), "repo")) as {
+      digest: string;
+    };
+    await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
+
+    const incremental = new Session("repo", "incremental", true);
+    await incremental.begin("v1");
+    assert.equal(
+      await incremental.prepareForPlaceholderPruning(await getLadybugConn()),
+      false,
+      "large verified baselines retain inherited placeholders without loading edges",
+    );
+    await incremental.complete("v1");
+
+    const full = new Session("repo", "full", true);
+    await full.begin("v2");
+    assert.equal(
+      await full.prepareForPlaceholderPruning(await getLadybugConn()),
+      true,
+      "full expectations remain authoritative instead of inheriting stale rows",
+    );
+    assert.equal(
+      await ladybugDb.pruneIsolatedPlaceholderSymbols(
+        await getLadybugConn(),
+        "repo",
+      ),
+      0,
+      "Ladybug safety retains the large physical placeholder tail",
+    );
+    await assert.rejects(
+      () => full.complete("v2"),
+      /^Error: Persisted graph integrity verification failed$/,
+    );
+    assert.match(
+      requiredFunction<SyncFn>(
+        derivedState,
+        "graphIntegrityNextBestAction",
+      )("failed") as string,
+      /delete the configured \.lbug database directory/,
+    );
+  });
+
+  it("captures fileless externals and placeholders in the persisted universe", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-fileless-"));
+    await initLadybugDb(join(root, "fileless.lbug"));
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const expectedRow = symbolRow();
+    const unresolvedId = "unresolved:call:__sdl_v1__bWlzc2luZw";
+
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId: expectedRow.fileId,
+        repoId: "repo",
+        relPath: "src/alpha.ts",
+        contentHash: "a".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertKnownFileSymbols(conn, [expectedRow]);
+      await ladybugDb.batchMergeExternalSymbols(conn, "repo", [
+        {
+          symbolId: "external:fixture",
+          kind: "class",
+          name: "Fixture",
+          exported: true,
+          language: "external",
+          rangeStartLine: 0,
+          rangeStartCol: 0,
+          rangeEndLine: 0,
+          rangeEndCol: 0,
+          external: true,
+          scipSymbol: "scip-typescript npm fixture 1.0.0 Fixture#",
+          source: "scip",
+          updatedAt: "2026-07-16T00:00:00.000Z",
+        },
+      ]);
+      await ladybugDb.insertEdges(conn, [
+        {
+          repoId: "repo",
+          fromSymbolId: "sym:alpha",
+          toSymbolId: unresolvedId,
+          edgeType: "call",
+          weight: 0.5,
+          confidence: 0.5,
+          resolution: "unresolved",
+          targetMeta: {
+            symbolStatus: "unresolved",
+            placeholderKind: "call",
+            placeholderTarget: "missing",
+          },
+          createdAt: "2026-07-16T00:00:00.000Z",
+        },
+      ]);
+    });
+
+    const baseline = (await capture(await getLadybugConn(), "repo")) as {
+      symbolCount: number;
+      digest: string;
+    };
+    assert.equal(baseline.symbolCount, 3);
+    assert.deepEqual(
+      await ladybugDb.getPersistedGraphIntegrityReferenceCountPage(
+        await getLadybugConn(),
+        { repoId: "repo", limit: 10 },
+      ),
+      [
+        {
+          symbolId: unresolvedId,
+          edgeType: "call",
+          referenceCount: 1,
+        },
+      ],
+    );
+    assert.deepEqual(
+      await ladybugDb.getPersistedGraphIntegrityFileReferenceCounts(
+        await getLadybugConn(),
+        "repo",
+        [expectedRow.fileId],
+      ),
+      [
+        {
+          fileId: expectedRow.fileId,
+          symbolId: unresolvedId,
+          edgeType: "call",
+          referenceCount: 1,
+        },
+      ],
+    );
+
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         SET s.astFingerprint = 'legacy-provider-hash',
+             s.signatureJson = '{"legacy":true}'`,
+        { symbolId: "external:fixture" },
+      ),
+    );
+    const compatibleProvider = (await capture(
+      await getLadybugConn(),
+      "repo",
+    )) as { digest: string };
+    assert.equal(
+      compatibleProvider.digest,
+      baseline.digest,
+      "definition-derived provider fields normalize without mutating reused rows",
+    );
+
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         SET s.external = false, s.symbolStatus = 'real'`,
+        { symbolId: "external:fixture" },
+      ),
+    );
+    const externalCorruption = (await capture(
+      await getLadybugConn(),
+      "repo",
+    )) as { digest: string };
+    assert.notEqual(externalCorruption.digest, baseline.digest);
+
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         SET s.placeholderKind = 'import', s.placeholderTarget = 'changed'`,
+        { symbolId: unresolvedId },
+      ),
+    );
+    const placeholderCorruption = (await capture(
+      await getLadybugConn(),
+      "repo",
+    )) as { digest: string };
+    assert.notEqual(placeholderCorruption.digest, externalCorruption.digest);
+  });
+
   it("does not auto-fallback after persisted integrity verification fails", () => {
     const source = readFileSync(
       join(process.cwd(), "src/indexer/indexer.ts"),
@@ -170,6 +1319,138 @@ describe("persisted graph integrity", () => {
       source,
       /err instanceof ProviderFirstGraphValidationError\s*\|\|\s*err instanceof GraphIntegrityVerificationError/,
     );
+  });
+
+  it("keeps large provider-row reuse free of Symbol mutations", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/indexer/indexer.ts"),
+      "utf8",
+    );
+    const materializeStart = source.indexOf(
+      '"providerFirstMaterialize"',
+    );
+    const reuseStart = source.indexOf(
+      "if (activeMaterializationPlan.reuseExistingProviderRows)",
+      materializeStart,
+    );
+    const materializeEnd = source.indexOf(
+      "return withWriteConn(async (conn)",
+      reuseStart,
+    );
+    const reuseBranch = source.slice(reuseStart, materializeEnd);
+
+    assert.match(reuseBranch, /return Promise\.resolve\(\)/);
+    assert.doesNotMatch(reuseBranch, /withWriteConn|SET|repair/);
+  });
+
+  it("validates no-op integrity before versioning or recovery work", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/indexer/indexer.ts"),
+      "utf8",
+    );
+    const branchStart = source.indexOf(
+      'if (mode === "incremental" && scanAllFilesUnchanged)',
+    );
+    const branchEnd = source.indexOf("await graphIntegrity.begin()", branchStart);
+    const branch = source.slice(branchStart, branchEnd);
+    const validationIndex = branch.indexOf(
+      "verifyNoOpIncrementalGraphIntegrity",
+    );
+    const versioningIndex = branch.indexOf("createOrReuseVersion");
+
+    assert.ok(validationIndex >= 0, "no-op branch must validate persisted integrity");
+    assert.ok(
+      versioningIndex < 0 || validationIndex < versioningIndex,
+      "no-op integrity validation must run before any version creation",
+    );
+  });
+
+  it("rejects an unknown no-op integrity baseline", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-noop-unknown-"));
+    await seedVersionedGraph(root);
+    const verifyNoOp = requiredFunction<AsyncFn>(
+      integrityModule,
+      "verifyNoOpIncrementalGraphIntegrity",
+    );
+
+    await assert.rejects(
+      verifyNoOp("repo"),
+      /Incremental indexing requires a verified graph integrity baseline.*full/i,
+    );
+    assert.equal((await ladybugDb.getLatestVersion(await getLadybugConn(), "repo"))?.versionId, "v1");
+  });
+
+  it("rejects a failed no-op integrity baseline", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-noop-failed-"));
+    await seedVersionedGraph(root);
+    const verifyNoOp = requiredFunction<AsyncFn>(
+      integrityModule,
+      "verifyNoOpIncrementalGraphIntegrity",
+    );
+    await derivedState.markGraphIntegrityFailed("repo", "v1", "failed");
+
+    await assert.rejects(
+      verifyNoOp("repo"),
+      /Incremental indexing requires a verified graph integrity baseline.*full/i,
+    );
+  });
+
+  it("rejects a corrupt no-op graph and records failed state", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-noop-corrupt-"));
+    await seedVersionedGraph(root);
+    const verifyNoOp = requiredFunction<AsyncFn>(
+      integrityModule,
+      "verifyNoOpIncrementalGraphIntegrity",
+    );
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const baseline = (await capture(await getLadybugConn(), "repo")) as {
+      digest: string;
+    };
+    await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'sym:alpha'})
+         SET s.signatureJson = '{"name":"corrupted"}'`,
+      ),
+    );
+
+    await assert.rejects(
+      verifyNoOp("repo"),
+      /^Error: Persisted graph integrity verification failed$/,
+    );
+    const state = await derivedState.getDerivedState("repo");
+    assert.equal(state?.graphIntegrityState, "failed");
+    assert.equal(state?.graphIntegrityVersionId, "v1");
+  });
+
+  it("accepts a verified clean no-op without creating a version", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-noop-clean-"));
+    await seedVersionedGraph(root);
+    const verifyNoOp = requiredFunction<AsyncFn>(
+      integrityModule,
+      "verifyNoOpIncrementalGraphIntegrity",
+    );
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const baseline = (await capture(await getLadybugConn(), "repo")) as {
+      digest: string;
+    };
+    await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
+
+    assert.equal(await verifyNoOp("repo"), "v1");
+    const versionCount = await ladybugDb.querySingle<{ count: unknown }>(
+      await getLadybugConn(),
+      `MATCH (v:Version)-[:VERSION_OF_REPO]->(:Repo {repoId: $repoId})
+       RETURN count(v) AS count`,
+      { repoId: "repo" },
+    );
+    assert.equal(ladybugDb.toNumber(versionCount?.count ?? 0), 1);
   });
 
   it("keeps mismatch diagnostics deterministic and bounded", () => {

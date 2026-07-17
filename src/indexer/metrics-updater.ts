@@ -1,5 +1,7 @@
 import * as crypto from "crypto";
 
+import type { Connection } from "kuzu";
+
 import type { AppConfig } from "../config/types.js";
 import { resolveSemanticEmbeddingModelPlan } from "../config/semantic-embedding-model-plan.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
@@ -41,6 +43,9 @@ export interface FinalizeIndexingParams {
   includeTimings?: boolean;
   callResolutionTelemetry: CallResolutionTelemetry;
   deferSemanticRefresh?: boolean;
+  prepareGraphIntegrityPlaceholderPruning?: (
+    conn: Connection,
+  ) => Promise<boolean> | boolean;
   onProgress?: (progress: IndexProgress) => void;
 }
 
@@ -79,6 +84,7 @@ export async function finalizeIndexing({
   includeTimings,
   callResolutionTelemetry,
   deferSemanticRefresh = false,
+  prepareGraphIntegrityPlaceholderPruning,
   onProgress,
 }: FinalizeIndexingParams): Promise<FinalizeIndexingResult> {
   const timings: Record<string, number> | undefined = includeTimings
@@ -113,6 +119,8 @@ export async function finalizeIndexing({
 
   await measureSubphase("symbolStatusNormalize", async () => {
     await withWriteConn(async (wConn) => {
+      const shouldPrunePlaceholders =
+        await prepareGraphIntegrityPlaceholderPruning?.(wConn) ?? true;
       const normalizeScope =
         changedFileIds && changedFileIds.size > 0
           ? { fileIds: changedFileIds }
@@ -124,10 +132,9 @@ export async function finalizeIndexing({
       );
       const providerCallProvenanceRepaired =
         await ladybugDb.normalizeProviderFirstCallEdgeProvenance(wConn, repoId);
-      const pruned = await ladybugDb.pruneIsolatedPlaceholderSymbols(
-        wConn,
-        repoId,
-      );
+      const pruned = shouldPrunePlaceholders
+        ? await ladybugDb.pruneIsolatedPlaceholderSymbols(wConn, repoId)
+        : 0;
       if (
         repaired.fileBackedRepaired > 0 ||
         repaired.dependencyPlaceholdersRepaired > 0 ||

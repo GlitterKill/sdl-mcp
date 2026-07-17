@@ -24,7 +24,11 @@ import {
 } from "./symbol-mapping.js";
 import type { ProcessFileParams, ProcessFileResult } from "./types.js";
 import { storePass1Extraction } from "../pass2/types.js";
-import { createGraphIntegrityFileDigest } from "../provider-first/persisted-graph-integrity.js";
+import {
+  createGraphIntegrityFileDigest,
+  createGraphIntegrityFilelessEdgeReferences,
+  createGraphIntegrityFilelessSymbols,
+} from "../provider-first/persisted-graph-integrity.js";
 
 export type { ProcessFileParams, ProcessFileResult };
 
@@ -197,6 +201,17 @@ export async function processFile(
       relPath: fileData.relPath,
       symbols: symbolsToUpsert,
     });
+    const graphIntegrityFilelessSymbols = createGraphIntegrityFilelessSymbols({
+      symbols: symbolsToUpsert,
+      externalSymbols: [],
+      edges: edgesToInsert,
+    });
+    const graphIntegrityFilelessReferences =
+      createGraphIntegrityFilelessEdgeReferences(
+        edgesToInsert,
+        graphIntegrityFilelessSymbols.map((symbol) => symbol.symbolId),
+        { trackSources: mode === "incremental" },
+      );
 
     // ── Config edges (requires AST tree) ─────────────────────────
     let configEdges: ConfigEdge[] = [];
@@ -340,6 +355,8 @@ export async function processFile(
         })),
       },
       graphIntegrityFile,
+      graphIntegrityFilelessSymbols,
+      graphIntegrityFilelessReferences,
     };
   } catch (error) {
     logger.error(`Error processing file ${fileMeta.path}:`, { error });

@@ -363,7 +363,7 @@ export function graphIntegrityNextBestAction(
     return "Graph integrity verification is in progress. Wait for the active index refresh to finish; if no refresh is active, run sdl.index.refresh with mode:\"full\".";
   }
   if (state === "failed") {
-    return 'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph.';
+    return 'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph. If full verification fails again, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.';
   }
   if (state === "version-mismatch") {
     return 'Graph integrity belongs to another graph version. Run sdl.index.refresh with mode:"full" to establish a current verified baseline.';

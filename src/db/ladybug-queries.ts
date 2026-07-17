@@ -148,7 +148,16 @@ export {
 } from "./ladybug-retrieval.js";
 export { countRowsInNodeTable } from "./ladybug-index-lifecycle.js";
 export {
+  getPersistedGraphIntegrityFileReferenceCounts,
+  getPersistedGraphIntegrityOtherRepoSymbolCount,
+  getPersistedGraphIntegrityReferenceCountPage,
+  getPersistedGraphIntegritySourceReferenceCounts,
   getPersistedGraphIntegritySymbolPage,
+  hasPersistedGraphIntegrityFilelessSourceReferences,
   type GraphIntegritySymbolCursor,
+  type PersistedGraphIntegrityFileReferenceCount,
+  type PersistedGraphIntegrityReferenceCount,
+  type PersistedGraphIntegrityReferenceCountCursor,
+  type PersistedGraphIntegritySourceReferenceCount,
   type PersistedGraphIntegritySymbolRow,
 } from "./ladybug-graph-integrity.js";

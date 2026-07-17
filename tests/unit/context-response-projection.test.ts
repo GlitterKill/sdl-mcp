@@ -989,7 +989,6 @@ describe("context-response-projection", () => {
         assert.equal(projected.etagCache, undefined);
         assert.deepEqual(step.result, {
           repoId: "sdl-mcp",
-          rootPath: ".",
           filesIndexed: 1,
           symbolsIndexed: 2,
           derivedState: { stale: false },
@@ -1090,7 +1089,6 @@ describe("context-response-projection", () => {
             fn: "repoStatus",
             result: {
               repoId: "sdl-mcp",
-              rootPath: ".",
               filesIndexed: 1,
               symbolsIndexed: 2,
               healthAvailable: true,

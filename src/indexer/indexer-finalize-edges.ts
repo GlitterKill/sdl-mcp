@@ -18,6 +18,7 @@ export async function finalizeEdges(params: {
   allConfigEdges: ConfigEdge[];
   configEdgeWeight: number;
   measurePhase?: FinalizeEdgesPhaseMeasurer;
+  onPlannedCallTargetCleanup?: (symbolIds: readonly string[]) => void;
 }): Promise<{ configEdgesCreated: number }> {
   const {
     repoId,
@@ -27,6 +28,7 @@ export async function finalizeEdges(params: {
     allConfigEdges,
     configEdgeWeight,
     measurePhase,
+    onPlannedCallTargetCleanup,
   } = params;
   const measure =
     measurePhase ??
@@ -45,7 +47,10 @@ export async function finalizeEdges(params: {
   );
   await measure(
     "cleanupUnresolvedBuiltins",
-    async () => await cleanupUnresolvedEdges(repoId),
+    async () =>
+      await cleanupUnresolvedEdges(repoId, {
+        onPlannedTargetCleanup: onPlannedCallTargetCleanup,
+      }),
   );
 
   const now = new Date().toISOString();

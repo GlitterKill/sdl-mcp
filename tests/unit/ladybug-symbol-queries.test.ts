@@ -65,6 +65,26 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
   await createSchema(conn as unknown as import("kuzu").Connection);
 }
 
+function scipExternalSymbol(symbolId: string) {
+  return {
+    symbolId,
+    kind: "function",
+    name: "externalApi",
+    exported: true,
+    language: "external",
+    rangeStartLine: 0,
+    rangeStartCol: 0,
+    rangeEndLine: 0,
+    rangeEndCol: 0,
+    external: true,
+    scipSymbol: "scip-typescript npm dep 1.0.0 dep/index.ts/externalApi().",
+    source: "scip" as const,
+    packageName: "dep",
+    packageVersion: "1.0.0",
+    updatedAt: "2026-07-16T00:00:00.000Z",
+  };
+}
+
 describe("LadybugDB Symbol Queries", () => {
   let db: LadybugDatabase;
   let conn: LadybugConnection;
@@ -447,6 +467,135 @@ describe("LadybugDB Symbol Queries", () => {
       const row = await dbResult.getNext();
       dbResult.close();
       assert.strictEqual(row.external, false);
+    },
+  );
+
+  it(
+    "batchMergeExternalSymbols rewrites immutable external canonical fields",
+    { skip: !ladybugAvailable },
+    async () => {
+      const symbol = scipExternalSymbol("external:active-rewrite");
+      const typedConn = conn as unknown as import("kuzu").Connection;
+      await queries.batchMergeExternalSymbols(typedConn, repoId, [symbol]);
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: '${symbol.symbolId}'})
+         SET s.astFingerprint = 'stale',
+             s.signatureJson = '{"stale":true}'`,
+      );
+
+      await queries.batchMergeExternalSymbols(typedConn, repoId, [symbol]);
+
+      const dbResult = await conn.query(
+        `MATCH (s:Symbol {symbolId: '${symbol.symbolId}'})
+         RETURN s.astFingerprint AS astFingerprint,
+                s.signatureJson AS signatureJson`,
+      );
+      const row = await dbResult.getNext();
+      dbResult.close();
+      assert.strictEqual(row.astFingerprint, symbol.symbolId);
+      assert.strictEqual(row.signatureJson, null);
+    },
+  );
+
+  it(
+    "normalizeDependencyPlaceholderSymbols physically canonicalizes stable fields",
+    { skip: !ladybugAvailable },
+    async () => {
+      const typedConn = conn as unknown as import("kuzu").Connection;
+      await queries.upsertSymbol(typedConn, {
+        symbolId: "sym-placeholder-source",
+        repoId,
+        fileId,
+        kind: "function",
+        name: "source",
+        exported: true,
+        visibility: null,
+        language: "typescript",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 1,
+        rangeEndCol: 1,
+        astFingerprint: "source",
+        signatureJson: null,
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-07-16T00:00:00.000Z",
+      });
+      const placeholderId = "unresolved:call:legacyTarget";
+      await queries.insertEdges(typedConn, [
+        {
+          repoId,
+          fromSymbolId: "sym-placeholder-source",
+          toSymbolId: placeholderId,
+          edgeType: "call",
+          weight: 0.5,
+          confidence: 0.5,
+          resolution: "unresolved",
+          provenance: "legacy",
+          createdAt: "2026-07-16T00:00:00.000Z",
+        },
+      ]);
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: '${placeholderId}'})
+         SET s.name = 'legacyTarget',
+             s.kind = 'placeholder',
+             s.language = NULL,
+             s.rangeStartLine = NULL,
+             s.rangeStartCol = NULL,
+             s.rangeEndLine = NULL,
+             s.rangeEndCol = NULL,
+             s.astFingerprint = NULL,
+             s.signatureJson = '{"legacy":true}',
+             s.source = NULL,
+             s.scipSymbol = 'legacy'`,
+      );
+
+      const repaired = await queries.normalizeDependencyPlaceholderSymbols(
+        typedConn,
+        repoId,
+      );
+      assert.strictEqual(repaired.dependencyPlaceholdersRepaired, 1);
+      const dbResult = await conn.query(
+        `MATCH (s:Symbol {symbolId: '${placeholderId}'})
+         RETURN s.name AS name,
+                s.kind AS kind,
+                s.language AS language,
+                s.rangeStartLine AS rangeStartLine,
+                s.rangeStartCol AS rangeStartCol,
+                s.rangeEndLine AS rangeEndLine,
+                s.rangeEndCol AS rangeEndCol,
+                s.astFingerprint AS astFingerprint,
+                s.signatureJson AS signatureJson,
+                s.source AS source,
+                s.scipSymbol AS scipSymbol`,
+      );
+      const row = await dbResult.getNext();
+      dbResult.close();
+      assert.deepStrictEqual(
+        {
+          ...row,
+          rangeStartLine: Number(row.rangeStartLine),
+          rangeStartCol: Number(row.rangeStartCol),
+          rangeEndLine: Number(row.rangeEndLine),
+          rangeEndCol: Number(row.rangeEndCol),
+        },
+        {
+          name: placeholderId,
+          kind: "unknown",
+          language: "unknown",
+          rangeStartLine: 0,
+          rangeStartCol: 0,
+          rangeEndLine: 0,
+          rangeEndCol: 0,
+          astFingerprint: placeholderId,
+          signatureJson: null,
+          source: "treesitter",
+          scipSymbol: null,
+        },
+      );
     },
   );
 

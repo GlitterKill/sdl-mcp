@@ -36,7 +36,7 @@ const CSV_NULL_SENTINEL = "\\N";
 const CSV_ARRAY_NULL = Symbol("symbolCsvArrayNull");
 const DEFAULT_SYMBOL_SNAPSHOT_PAGE_SIZE = 32_768;
 const MAX_SYMBOL_SNAPSHOT_PAGE_SIZE = 65_536;
-const LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT = 2_048;
+export const LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT = 2_048;
 
 export async function countScipProviderSymbols(
   conn: Connection,
@@ -685,6 +685,12 @@ export interface DependencyPlaceholderNormalizeResult {
 
 export interface DependencyPlaceholderNormalizeOptions {
   fileIds?: ReadonlySet<string>;
+  /**
+   * Older migration fixtures predate some canonical Symbol columns. Runtime
+   * finalization keeps this enabled; migrations can opt out until DDL catches
+   * up and still repair the classification metadata available at that version.
+   */
+  normalizeStableFields?: boolean;
 }
 
 export async function normalizeDependencyPlaceholderSymbols(
@@ -694,6 +700,7 @@ export async function normalizeDependencyPlaceholderSymbols(
 ): Promise<DependencyPlaceholderNormalizeResult> {
   const hasExternalColumn = await symbolExternalColumnExists(conn);
   const fileIds = options.fileIds ? [...options.fileIds] : undefined;
+  const normalizeStableFields = options.normalizeStableFields ?? true;
   const fileBackedRepaired = await countFileBackedDependencyMetadataRepairs(
     conn,
     repoId,
@@ -720,6 +727,17 @@ export async function normalizeDependencyPlaceholderSymbols(
     placeholderKind: string | null;
     placeholderTarget: string | null;
     external?: unknown;
+    name?: string | null;
+    kind?: string | null;
+    language?: string | null;
+    rangeStartLine?: unknown;
+    rangeStartCol?: unknown;
+    rangeEndLine?: unknown;
+    rangeEndCol?: unknown;
+    signatureJson?: string | null;
+    source?: string | null;
+    scipSymbol?: string | null;
+    astFingerprint?: string | null;
   }>(
     conn,
     `MATCH (s:Symbol {repoId: $repoId})
@@ -733,6 +751,21 @@ export async function normalizeDependencyPlaceholderSymbols(
                 ? `,
             coalesce(s.external, false) AS external`
                 : ""
+            }${
+              normalizeStableFields
+                ? `,
+            s.name AS name,
+            s.kind AS kind,
+            s.language AS language,
+            s.rangeStartLine AS rangeStartLine,
+            s.rangeStartCol AS rangeStartCol,
+            s.rangeEndLine AS rangeEndLine,
+            s.rangeEndCol AS rangeEndCol,
+            s.signatureJson AS signatureJson,
+            s.source AS source,
+            s.scipSymbol AS scipSymbol,
+            s.astFingerprint AS astFingerprint`
+                : ""
             }`,
     { repoId },
   );
@@ -742,6 +775,17 @@ export async function normalizeDependencyPlaceholderSymbols(
     placeholderKind: string;
     placeholderTarget: string;
     external: boolean;
+    name: string;
+    kind: string;
+    language: string;
+    rangeStartLine: number;
+    rangeStartCol: number;
+    rangeEndLine: number;
+    rangeEndCol: number;
+    signatureJson: null;
+    source: string;
+    scipSymbol: null;
+    astFingerprint: string;
   }> = [];
 
   for (const row of rows) {
@@ -751,7 +795,19 @@ export async function normalizeDependencyPlaceholderSymbols(
       row.symbolStatus !== meta.symbolStatus ||
       (row.placeholderKind ?? "") !== (meta.placeholderKind ?? "") ||
       (row.placeholderTarget ?? "") !== (meta.placeholderTarget ?? "") ||
-      (hasExternalColumn && toBoolean(row.external) !== external)
+      (hasExternalColumn && toBoolean(row.external) !== external) ||
+      (normalizeStableFields &&
+        (row.name !== row.symbolId ||
+          row.kind !== "unknown" ||
+          row.language !== "unknown" ||
+          !isPersistedZero(row.rangeStartLine) ||
+          !isPersistedZero(row.rangeStartCol) ||
+          !isPersistedZero(row.rangeEndLine) ||
+          !isPersistedZero(row.rangeEndCol) ||
+          row.signatureJson !== null ||
+          row.source !== "treesitter" ||
+          row.scipSymbol !== null ||
+          row.astFingerprint !== row.symbolId))
     ) {
       repairs.push({
         symbolId: row.symbolId,
@@ -759,6 +815,17 @@ export async function normalizeDependencyPlaceholderSymbols(
         placeholderKind: meta.placeholderKind ?? "",
         placeholderTarget: meta.placeholderTarget ?? "",
         external,
+        name: row.symbolId,
+        kind: "unknown",
+        language: "unknown",
+        rangeStartLine: 0,
+        rangeStartCol: 0,
+        rangeEndLine: 0,
+        rangeEndCol: 0,
+        signatureJson: null,
+        source: "treesitter",
+        scipSymbol: null,
+        astFingerprint: row.symbolId,
       });
     }
   }
@@ -777,6 +844,21 @@ export async function normalizeDependencyPlaceholderSymbols(
                ? `,
            s.external = row.external`
                : ""
+           }${
+             normalizeStableFields
+               ? `,
+           s.name = row.name,
+           s.kind = row.kind,
+           s.language = row.language,
+           s.rangeStartLine = row.rangeStartLine,
+           s.rangeStartCol = row.rangeStartCol,
+           s.rangeEndLine = row.rangeEndLine,
+           s.rangeEndCol = row.rangeEndCol,
+           s.signatureJson = row.signatureJson,
+           s.source = row.source,
+           s.scipSymbol = row.scipSymbol,
+           s.astFingerprint = row.astFingerprint`
+               : ""
            }`,
       { rows: chunk },
     );
@@ -786,6 +868,10 @@ export async function normalizeDependencyPlaceholderSymbols(
     fileBackedRepaired,
     dependencyPlaceholdersRepaired: repairs.length,
   };
+}
+
+function isPersistedZero(value: unknown): boolean {
+  return value !== null && value !== undefined && toNumber(value) === 0;
 }
 
 async function countFileBackedDependencyMetadataRepairs(
@@ -823,20 +909,19 @@ export async function pruneIsolatedPlaceholderSymbols(
 ): Promise<number> {
   const rows = await queryAll<{ symbolId: string }>(
     conn,
-    `MATCH (s:Symbol {repoId: $repoId})
+    `MATCH (:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
      WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
        AND (
          s.symbolId STARTS WITH 'unresolved:'
          OR coalesce(s.symbolStatus, '') = 'unresolved'
          OR coalesce(s.symbolStatus, '') = 'external'
        )
-       AND NOT (:Symbol)-[:DEPENDS_ON]->(s)
-       AND NOT (s)-[:DEPENDS_ON]->(:Symbol)
-     RETURN s.symbolId AS symbolId`,
+     RETURN DISTINCT s.symbolId AS symbolId
+     ORDER BY symbolId ASC`,
     { repoId },
   );
-  const symbolIds = rows.map((row) => row.symbolId);
-  if (symbolIds.length === 0) return 0;
+  const candidateIds = rows.map((row) => row.symbolId);
+  if (candidateIds.length === 0) return 0;
 
   const symbolCountRow = await querySingle<{ count: unknown }>(
     conn,
@@ -850,13 +935,62 @@ export async function pruneIsolatedPlaceholderSymbols(
     // safely; stable placeholder IDs keep this bounded across unchanged runs.
     logger.debug("Retaining isolated placeholders for LadybugDB 0.18.1 safety", {
       repoId,
-      retained: symbolIds.length,
+      retained: candidateIds.length,
       symbolCount,
     });
     return 0;
   }
 
-  const cleanup = {
+  // Placeholder nodes are global because their stable IDs can be shared by
+  // repositories. Membership is repo-local: an edge from repo B must keep the
+  // physical node alive without leaving a stale SYMBOL_IN_REPO edge to repo A.
+  const repoReferencedRows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(:File)<-[:SYMBOL_IN_FILE]-(:Symbol)-[:DEPENDS_ON]->(s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     RETURN DISTINCT s.symbolId AS symbolId`,
+    { repoId, symbolIds: candidateIds },
+  );
+  const filelessSourceRows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (source:Symbol)-[:DEPENDS_ON]->(s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+       AND NOT (source)-[:SYMBOL_IN_FILE]->(:File)
+     RETURN DISTINCT s.symbolId AS symbolId`,
+    { symbolIds: candidateIds },
+  );
+  const outgoingRows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (s:Symbol)-[:DEPENDS_ON]->(:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     RETURN DISTINCT s.symbolId AS symbolId`,
+    { symbolIds: candidateIds },
+  );
+  const retainedMembershipIds = new Set([
+    ...repoReferencedRows.map((row) => row.symbolId),
+    ...filelessSourceRows.map((row) => row.symbolId),
+    ...outgoingRows.map((row) => row.symbolId),
+  ]);
+  const staleMembershipIds = candidateIds.filter(
+    (symbolId) => !retainedMembershipIds.has(symbolId),
+  );
+  if (staleMembershipIds.length === 0) return 0;
+
+  const deletableRows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo)
+     WHERE s.symbolId IN $symbolIds
+     WITH s, count(r) AS membershipCount
+     WHERE membershipCount = 1
+       AND NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+       AND NOT (:Symbol)-[:DEPENDS_ON]->(s)
+       AND NOT (s)-[:DEPENDS_ON]->(:Symbol)
+     RETURN s.symbolId AS symbolId`,
+    { symbolIds: staleMembershipIds },
+  );
+  const symbolIds = deletableRows.map((row) => row.symbolId);
+
+  const cleanup = symbolIds.length > 0 ? {
     symbolInFile: await cleanupPatternExists(
       conn,
       `MATCH (:Symbol)-[:SYMBOL_IN_FILE]->(:File) RETURN 1 AS ok LIMIT 0`,
@@ -889,17 +1023,17 @@ export async function pruneIsolatedPlaceholderSymbols(
       conn,
       `MATCH (:SummaryCache) RETURN 1 AS ok LIMIT 0`,
     ),
-  };
+  } : null;
 
   await withTransaction(conn, async (txConn) => {
     await exec(
       txConn,
-      `MATCH (s:Symbol)-[rel:SYMBOL_IN_REPO]->(:Repo)
-       WHERE s.symbolId IN $symbolIds
+      `MATCH (s:Symbol)-[rel:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.symbolId IN $staleMembershipIds
        DELETE rel`,
-      { symbolIds },
+      { repoId, staleMembershipIds },
     );
-    if (cleanup.symbolInFile) {
+    if (cleanup?.symbolInFile) {
       await exec(
         txConn,
         `MATCH (s:Symbol)-[rel:SYMBOL_IN_FILE]->(:File)
@@ -908,7 +1042,7 @@ export async function pruneIsolatedPlaceholderSymbols(
         { symbolIds },
       );
     }
-    if (cleanup.belongsToCluster) {
+    if (cleanup?.belongsToCluster) {
       await exec(
         txConn,
         `MATCH (s:Symbol)-[rel:BELONGS_TO_CLUSTER]->(:Cluster)
@@ -917,7 +1051,7 @@ export async function pruneIsolatedPlaceholderSymbols(
         { symbolIds },
       );
     }
-    if (cleanup.belongsToShadowCluster) {
+    if (cleanup?.belongsToShadowCluster) {
       await exec(
         txConn,
         `MATCH (s:Symbol)-[rel:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
@@ -926,7 +1060,7 @@ export async function pruneIsolatedPlaceholderSymbols(
         { symbolIds },
       );
     }
-    if (cleanup.participatesIn) {
+    if (cleanup?.participatesIn) {
       await exec(
         txConn,
         `MATCH (s:Symbol)-[rel:PARTICIPATES_IN]->(:Process)
@@ -935,7 +1069,7 @@ export async function pruneIsolatedPlaceholderSymbols(
         { symbolIds },
       );
     }
-    if (cleanup.memoryOf) {
+    if (cleanup?.memoryOf) {
       await exec(
         txConn,
         `MATCH (mem:Memory)-[rel:MEMORY_OF]->(s:Symbol)
@@ -944,7 +1078,7 @@ export async function pruneIsolatedPlaceholderSymbols(
         { symbolIds },
       );
     }
-    if (cleanup.metrics) {
+    if (cleanup?.metrics) {
       await exec(
         txConn,
         `MATCH (m:Metrics)
@@ -953,7 +1087,7 @@ export async function pruneIsolatedPlaceholderSymbols(
         { symbolIds },
       );
     }
-    if (cleanup.symbolEmbedding) {
+    if (cleanup?.symbolEmbedding) {
       await exec(
         txConn,
         `MATCH (e:SymbolEmbedding)
@@ -962,7 +1096,7 @@ export async function pruneIsolatedPlaceholderSymbols(
         { symbolIds },
       );
     }
-    if (cleanup.summaryCache) {
+    if (cleanup?.summaryCache) {
       await exec(
         txConn,
         `MATCH (sc:SummaryCache)
@@ -971,13 +1105,15 @@ export async function pruneIsolatedPlaceholderSymbols(
         { symbolIds },
       );
     }
-    await exec(
-      txConn,
-      `MATCH (s:Symbol {repoId: $repoId})
-       WHERE s.symbolId IN $symbolIds
-       DELETE s`,
-      { repoId, symbolIds },
-    );
+    if (symbolIds.length > 0) {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         DELETE s`,
+        { symbolIds },
+      );
+    }
   });
 
   return symbolIds.length;

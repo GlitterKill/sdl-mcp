@@ -99,7 +99,7 @@ describe("repo status health fields", () => {
         graphIntegrityDigest: null,
         graphIntegrityError: "nondeterministic internal mismatch detail",
         nextBestAction:
-          'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph.',
+          'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph. If full verification fails again, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.',
       },
     });
 
@@ -108,7 +108,7 @@ describe("repo status health fields", () => {
     assert.equal("graphIntegrityError" in (parsed.derivedState ?? {}), false);
     assert.equal(
       parsed.derivedState?.nextBestAction,
-      'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph.',
+      'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph. If full verification fails again, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.',
     );
   });
 

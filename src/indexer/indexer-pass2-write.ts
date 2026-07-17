@@ -644,24 +644,34 @@ function selectUnensuredPlaceholderTargets(
 /**
  * Build a `submitEdgeWrite` that defers the write into a shared accumulator.
  * Used by the parallel pass-2 dispatch path so all files in one concurrency
- * batch issue a single combined `withWriteConn`. The accumulator is mutated
- * synchronously from each resolver's submit call — JS event-loop semantics
- * guarantee no torn writes between the `.push(...)` calls in concurrent
- * closures.
+ * batch issue a single combined `withWriteConn`. Without a lifecycle hook the
+ * accumulator stays synchronous; an async hook must settle before its write is
+ * buffered so expected-state transitions preserve persistence order.
  */
 /** @internal exported for tests; do not import from product code. */
-export function makeBatchAccumulator(): {
+export function makeBatchAccumulator(
+  onSubmit?: (
+    write: Parameters<SubmitEdgeWrite>[0],
+  ) => Promise<void> | void,
+): {
   acc: BatchWriteAccumulator;
   submit: SubmitEdgeWrite;
 } {
   const acc: BatchWriteAccumulator = { symbolIdsToRefresh: [], edges: [] };
-  const submit: SubmitEdgeWrite = ({ symbolIdsToRefresh, edges }) => {
+  const append = (write: Parameters<SubmitEdgeWrite>[0]): void => {
+    const { symbolIdsToRefresh, edges } = write;
     if (symbolIdsToRefresh.length > 0) {
       acc.symbolIdsToRefresh.push(...symbolIdsToRefresh);
     }
     if (edges.length > 0) {
       acc.edges.push(...edges);
     }
+  };
+  const submit: SubmitEdgeWrite = (write) => {
+    const pending = onSubmit?.(write);
+    if (pending) return pending.then(() => append(write));
+    append(write);
+    return;
   };
   return { acc, submit };
 }

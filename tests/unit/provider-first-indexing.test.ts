@@ -8450,10 +8450,15 @@ describe("provider-first indexing foundation", () => {
       const sourceSymbol = shadowSymbols.find(
         (symbol) => symbol.symbolId === "symbol-1",
       );
+      const externalSymbol = shadowSymbols.find(
+        (symbol) => symbol.symbolId === "symbol-2",
+      );
       assert.equal(sourceSymbol?.visibility, "");
       assert.equal(sourceSymbol?.packageName, "");
       assert.equal(sourceSymbol?.placeholderKind, "");
       assert.equal(sourceSymbol?.placeholderTarget, "");
+      assert.equal(externalSymbol?.astFingerprint, "symbol-2");
+      assert.equal(externalSymbol?.signatureJson, null);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -11269,6 +11274,8 @@ async function readShadowSymbolRows(shadowDbPath: string): Promise<
     name: string;
     visibility: string | null;
     packageName: string | null;
+    astFingerprint: string | null;
+    signatureJson: string | null;
     placeholderKind: string | null;
     placeholderTarget: string | null;
   }>
@@ -11284,6 +11291,8 @@ async function readShadowSymbolRows(shadowDbPath: string): Promise<
               s.name AS name,
               s.visibility AS visibility,
               s.packageName AS packageName,
+              s.astFingerprint AS astFingerprint,
+              s.signatureJson AS signatureJson,
               s.placeholderKind AS placeholderKind,
               s.placeholderTarget AS placeholderTarget
        ORDER BY s.symbolId`,

@@ -19,7 +19,11 @@ import type { FileMetadata } from "./fileScanner.js";
 import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
 import type { ParserWorkerPool } from "./workerPool.js";
 import type { SymbolMapFileUpdate } from "./symbol-map-cache.js";
-import type { GraphIntegrityFileDigest } from "./provider-first/persisted-graph-integrity.js";
+import type {
+  GraphIntegrityCanonicalSymbol,
+  GraphIntegrityEdgeReference,
+  GraphIntegrityFileDigest,
+} from "./provider-first/persisted-graph-integrity.js";
 import {
   getOrLoadSymbolMapCache,
   removeFilesFromSymbolMapCache,
@@ -109,6 +113,8 @@ export interface Pass1Accumulator {
   changedPass2FilePaths: Set<string>;
   symbolMapFileUpdates: Map<string, SymbolMapFileUpdate>;
   graphIntegrityFiles: Map<string, GraphIntegrityFileDigest>;
+  graphIntegrityFilelessSymbols: Map<string, GraphIntegrityCanonicalSymbol>;
+  graphIntegrityFilelessReferences: Map<string, GraphIntegrityEdgeReference>;
   /**
    * Phase 1 Task 1.1 / 1.12 — Engine telemetry counters.
    *

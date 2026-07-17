@@ -21,6 +21,7 @@ import {
   withWriteConn,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { execDdl } from "../../dist/db/ladybug-core.js";
 import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
 import {
   getGraphSnapshotStats,
@@ -89,6 +90,35 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(integrity?.graphIntegrityState, "verified");
     assert.equal(integrity?.graphIntegrityVersionId, result.versionId);
     assert.match(integrity?.graphIntegrityDigest ?? "", /^[a-f0-9]{64}$/);
+  });
+
+  it("falls back cleanly when provenance fails before provider graph persistence", async () => {
+    const repoId = await initIndexedRepo("auto", { scipFixture: "complete" });
+    await withWriteConn((conn) =>
+      execDdl(conn, "ALTER TABLE SemanticProviderRun DROP providerType"),
+    );
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "fallback");
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /providerType/i,
+    );
+    assert.ok(result.symbolsIndexed > 0);
+    const integrity = await getDerivedState(repoId);
+    assert.equal(integrity?.graphIntegrityState, "verified");
+    assert.equal(integrity?.graphIntegrityVersionId, result.versionId);
+    assert.match(integrity?.graphIntegrityDigest ?? "", /^[a-f0-9]{64}$/);
+    const providerExternals = await ladybugDb.querySingle<{ count: unknown }>(
+      await getLadybugConn(),
+      `MATCH (s:Symbol {repoId: $repoId})
+       WHERE coalesce(s.external, false) = true
+         AND coalesce(s.source, '') = 'scip'
+       RETURN count(s) AS count`,
+      { repoId },
+    );
+    assert.equal(ladybugDb.toNumber(providerExternals?.count ?? 0), 0);
   });
 
   it("executes explicit providerFirst for a full SCIP-covered repository", async (t) => {

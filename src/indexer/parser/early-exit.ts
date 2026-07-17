@@ -80,6 +80,11 @@ export async function resolveFileForIndexing(params: {
   // ── Binary file check ────────────────────────────────────────────
   if (content.includes("\0")) {
     logger.debug(`Skipping binary file: ${fileMeta.path}`);
+    const result = createEmptyProcessFileResult(true, {
+      fileId,
+      relPath,
+      symbols: [],
+    });
     await withWriteConn(async (wConn) => {
       await persistSkippedFile({
         conn: wConn,
@@ -92,14 +97,7 @@ export async function resolveFileForIndexing(params: {
         byteSize: fileMeta.size,
       });
     });
-    return {
-      status: "skip",
-      result: createEmptyProcessFileResult(true, {
-        fileId,
-        relPath,
-        symbols: [],
-      }),
-    };
+    return { status: "skip", result };
   }
 
   // ── Content hash unchanged ───────────────────────────────────────
@@ -120,6 +118,11 @@ export async function resolveFileForIndexing(params: {
     logger.debug(
       `Language ${ext} not in enabled languages, skipping ${fileMeta.path}`,
     );
+    const result = createEmptyProcessFileResult(true, {
+      fileId,
+      relPath,
+      symbols: [],
+    });
     await withWriteConn(async (wConn) => {
       await persistSkippedFile({
         conn: wConn,
@@ -132,14 +135,7 @@ export async function resolveFileForIndexing(params: {
         byteSize: fileMeta.size,
       });
     });
-    return {
-      status: "skip",
-      result: createEmptyProcessFileResult(true, {
-        fileId,
-        relPath,
-        symbols: [],
-      }),
-    };
+    return { status: "skip", result };
   }
 
   // ── Adapter lookup ───────────────────────────────────────────────
@@ -149,6 +145,11 @@ export async function resolveFileForIndexing(params: {
     logger.debug(
       `No adapter found for ${extWithDot}, skipping ${fileMeta.path}`,
     );
+    const result = createEmptyProcessFileResult(true, {
+      fileId,
+      relPath,
+      symbols: [],
+    });
     await withWriteConn(async (wConn) => {
       await persistSkippedFile({
         conn: wConn,
@@ -161,14 +162,7 @@ export async function resolveFileForIndexing(params: {
         byteSize: fileMeta.size,
       });
     });
-    return {
-      status: "skip",
-      result: createEmptyProcessFileResult(true, {
-        fileId,
-        relPath,
-        symbols: [],
-      }),
-    };
+    return { status: "skip", result };
   }
 
   return {

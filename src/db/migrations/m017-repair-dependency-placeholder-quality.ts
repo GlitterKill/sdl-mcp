@@ -16,7 +16,12 @@ export async function up(conn: Connection): Promise<void> {
     {},
   );
   for (const repo of repos) {
-    await normalizeDependencyPlaceholderSymbols(conn, repo.repoId);
+    await normalizeDependencyPlaceholderSymbols(conn, repo.repoId, {
+      // v16 databases can predate columns referenced by the runtime's stable
+      // field repair. The normal post-index finalizer runs the default path
+      // once current schema DDL is available.
+      normalizeStableFields: false,
+    });
     await pruneIsolatedPlaceholderSymbols(conn, repo.repoId);
   }
 }

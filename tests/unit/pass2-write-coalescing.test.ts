@@ -263,6 +263,25 @@ describe("makeBatchAccumulator", () => {
     assert.deepStrictEqual(acc.edges, []);
   });
 
+  it("awaits an async lifecycle hook before buffering the write", async () => {
+    const { makeBatchAccumulator } =
+      await import("../../dist/indexer/indexer-pass2.js");
+    let releaseHook!: () => void;
+    const hookBarrier = new Promise<void>((resolve) => {
+      releaseHook = resolve;
+    });
+    const { acc, submit } = makeBatchAccumulator(async () => {
+      await hookBarrier;
+    });
+
+    const submitted = submit({ symbolIdsToRefresh: ["a"], edges: [] });
+    assert.ok(submitted instanceof Promise);
+    assert.deepStrictEqual(acc.symbolIdsToRefresh, []);
+    releaseHook();
+    await submitted;
+    assert.deepStrictEqual(acc.symbolIdsToRefresh, ["a"]);
+  });
+
   it("submit pushes edges into the accumulator", async () => {
     const { makeBatchAccumulator } =
       await import("../../dist/indexer/indexer-pass2.js");

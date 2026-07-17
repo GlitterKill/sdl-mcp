@@ -616,7 +616,7 @@ export const RepoStatusRequestSchema = z.object({
   includeTelemetry: z.boolean().optional().default(false),
 });
 
-export const RepoStatusResponseSchema = z.object({
+const RepoStatusRawResponseSchema = z.object({
   repoId: z.string().min(1),
   rootPath: z.string(),
   latestVersionId: z.string().nullable(),
@@ -743,6 +743,56 @@ export const RepoStatusResponseSchema = z.object({
     .optional(),
 
 });
+
+/**
+ * `structuredContent` is the model projection, not the raw handler object.
+ * Keep a static schema that explicitly admits the compact privacy-preserving
+ * shape without requiring rootPath or volatile timestamps.
+ */
+const RepoStatusCompactResponseSchema = z.object({
+  repoId: z.string().min(1),
+  latestVersionId: z.string().nullable(),
+  filesIndexed: z.number().int(),
+  symbolsIndexed: z.number().int(),
+  healthScore: z.number().int().min(0).max(100).nullable().optional(),
+  healthAvailable: z.boolean().optional(),
+  watcherHealth: z
+    .object({
+      enabled: z.boolean().optional(),
+      running: z.boolean().optional(),
+      provider: z.enum(["watchman", "chokidar", "fsWatch"]).nullable().optional(),
+      fallbackReason: z.string().nullable().optional(),
+      errors: z.number().int().min(0).optional(),
+      queueDepth: z.number().int().min(0).optional(),
+      stale: z.boolean().optional(),
+    })
+    .optional(),
+  derivedState: z
+    .object({
+      stale: z.boolean().optional(),
+      clustersDirty: z.boolean().optional(),
+      processesDirty: z.boolean().optional(),
+      algorithmsDirty: z.boolean().optional(),
+      summariesDirty: z.boolean().optional(),
+      embeddingsDirty: z.boolean().optional(),
+      lastError: z.string().nullable().optional(),
+      graphIntegrityState: z
+        .enum(["unknown", "verifying", "verified", "failed"])
+        .optional(),
+      graphIntegrityVersionId: z.string().nullable().optional(),
+      graphIntegrityDigest: z.string().nullable().optional(),
+      nextBestAction: z.string().optional(),
+    })
+    .optional(),
+  nextBestAction: z.string().optional(),
+  diagnostics: z.unknown().optional(),
+  retrievalEvidence: z.unknown().optional(),
+});
+
+export const RepoStatusResponseSchema = z.union([
+  RepoStatusRawResponseSchema,
+  RepoStatusCompactResponseSchema,
+]);
 
 export const IndexRefreshRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),

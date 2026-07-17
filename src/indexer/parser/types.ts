@@ -21,7 +21,11 @@ import type * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolMapFileUpdate } from "../symbol-map-cache.js";
 import type { BatchPersistAccumulator } from "./batch-persist.js";
 import type { Pass1ExtractionCache } from "../pass2/types.js";
-import type { GraphIntegrityFileDigest } from "../provider-first/persisted-graph-integrity.js";
+import type {
+  GraphIntegrityCanonicalSymbol,
+  GraphIntegrityEdgeReference,
+  GraphIntegrityFileDigest,
+} from "../provider-first/persisted-graph-integrity.js";
 
 // ── ProcessFile params & result ─────────────────────────────────────
 
@@ -67,6 +71,8 @@ export interface ProcessFileResult {
   pass2HintPaths: string[];
   symbolMapFileUpdate?: SymbolMapFileUpdate;
   graphIntegrityFile?: GraphIntegrityFileDigest;
+  graphIntegrityFilelessSymbols?: GraphIntegrityCanonicalSymbol[];
+  graphIntegrityFilelessReferences?: GraphIntegrityEdgeReference[];
 }
 
 // ── Early-exit phase output ─────────────────────────────────────────
