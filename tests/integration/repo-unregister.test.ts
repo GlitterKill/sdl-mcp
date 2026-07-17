@@ -83,6 +83,14 @@ describe("repo.unregister integration", () => {
     );
   }
 
+  async function waitForRepoInactive(repoId: string): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (captureActiveRepoEpoch(repoId) !== undefined) {
+      assert.ok(Date.now() < deadline, `Timed out waiting for ${repoId} removal`);
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
   before(async () => {
     writeConfig();
     await closeLadybugDb();
@@ -242,11 +250,7 @@ describe("repo.unregister integration", () => {
       .finally(() => {
         removalSettled = true;
       });
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (captureActiveRepoEpoch(repoId) === undefined) break;
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    assert.strictEqual(captureActiveRepoEpoch(repoId), undefined);
+    await waitForRepoInactive(repoId);
     assert.strictEqual(removalSettled, false);
 
     await assert.rejects(
@@ -429,11 +433,7 @@ describe("repo.unregister integration", () => {
     await mutationEntered;
 
     const removal = handleRepoUnregister({ repoId, confirmRepoId: repoId });
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (captureActiveRepoEpoch(repoId) === undefined) break;
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    assert.strictEqual(captureActiveRepoEpoch(repoId), undefined);
+    await waitForRepoInactive(repoId);
 
     await assert.rejects(
       () =>

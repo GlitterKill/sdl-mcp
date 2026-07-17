@@ -1038,11 +1038,14 @@ export function projectToolResultForModelContent(
   result: unknown,
   args: Record<string, unknown> = {},
 ): unknown {
-  if (!isRecord(result) || isRecord(result.error)) {
+  if (!isRecord(result)) {
     return result;
   }
 
   const options = modelOptionsFromArgs(args);
+  if (isRecord(result.error)) {
+    return projectGenericValueForModel(toolName, result, options);
+  }
   const projectionRule = getResponseProjectionRule(toolName);
   if (projectionRule?.projector === "workflow") {
     return projectWorkflowResultForModel(result, options, args);

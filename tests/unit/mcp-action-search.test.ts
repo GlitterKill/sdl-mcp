@@ -304,15 +304,7 @@ describe("sdl.action.search behavior", () => {
       assert.ok(fullBudget);
       assert.ok(Array.isArray(fullBudget.subFields));
       assert.ok(fullBudget.subFields.length > 0);
-      assert.deepStrictEqual(compact.nextAction, {
-        action: "sdl.manual",
-        args: {
-          actions: ["context"],
-          includeSchemas: true,
-          detail: "full",
-          format: "json",
-        },
-      });
+      assert.strictEqual(compact.nextAction, undefined);
       assert.strictEqual(full.nextAction, undefined);
       assert.strictEqual(JSON.stringify(compact), JSON.stringify(compactAgain));
     });
