@@ -1,5 +1,4 @@
-import { constants as fsConstants } from "node:fs";
-import { access, stat } from "node:fs/promises";
+import { opendir, stat } from "node:fs/promises";
 
 import type { HealthComponents } from "../mcp/types.js";
 import { RepoConfigSchema } from "../config/types.js";
@@ -21,14 +20,20 @@ export interface RepositoryRootAvailability {
   status: "available" | "missing" | "unreadable";
 }
 
+type RootDirectoryOpener = (
+  rootPath: string,
+) => Promise<{ close(): Promise<void> }>;
+
 /** Check only root metadata and access; repository contents are never scanned. */
 export async function probeRepositoryRoot(
   rootPath: string,
+  openDirectory: RootDirectoryOpener = opendir,
 ): Promise<RepositoryRootAvailability> {
   try {
     const root = await stat(rootPath);
     if (!root.isDirectory()) return { status: "unreadable" };
-    await access(rootPath, fsConstants.R_OK | fsConstants.X_OK);
+    const directory = await openDirectory(rootPath);
+    await directory.close();
     return { status: "available" };
   } catch (error) {
     return {
@@ -38,6 +43,24 @@ export async function probeRepositoryRoot(
           : "unreadable",
     };
   }
+}
+
+let healthRepositoryScanner = scanRepository;
+
+export function _setHealthRepositoryScannerForTesting(
+  scanner: typeof scanRepository = scanRepository,
+): void {
+  healthRepositoryScanner = scanner;
+}
+
+function isRootAccessError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return (
+    code === "ENOENT" ||
+    code === "ENOTDIR" ||
+    code === "EACCES" ||
+    code === "EPERM"
+  );
 }
 
 const WEIGHTS = {
@@ -181,10 +204,16 @@ export async function getRepoHealthSnapshot(
   );
   const repoConfig = RepoConfigSchema.parse(parsed);
   const rootAvailability = await probeRepositoryRoot(repo.rootPath);
-  const eligibleFiles =
-    rootAvailability.status === "available"
-      ? await scanRepository(repo.rootPath, repoConfig)
-      : [];
+  let rootAvailable = rootAvailability.status === "available";
+  let eligibleFiles: Awaited<ReturnType<typeof scanRepository>> = [];
+  if (rootAvailable) {
+    try {
+      eligibleFiles = await healthRepositoryScanner(repo.rootPath, repoConfig);
+    } catch (error) {
+      if (!isRootAccessError(error)) throw error;
+      rootAvailable = false;
+    }
+  }
   const files = await ladybugDb.getFilesByRepo(conn, repoId);
   const indexedSymbols = await ladybugDb.getSymbolCount(conn, repoId);
   const callCounts = await ladybugDb.getCallEdgeResolutionCounts(conn, repoId);
@@ -220,7 +249,7 @@ export async function getRepoHealthSnapshot(
     minutesSinceLastIndex,
     indexedSymbols,
     graphIntegrityReady,
-    rootAvailable: rootAvailability.status === "available",
+    rootAvailable,
   });
 
   return {

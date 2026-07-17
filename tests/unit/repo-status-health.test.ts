@@ -42,15 +42,70 @@ describe("repo status health fields", () => {
     assert.ok(source.includes("serverInfo: getServerInfo(),"));
   });
 
-  it("probes only root metadata and read access", async () => {
-    const healthModule = await import("../../dist/services/health.js");
-    const probe = Reflect.get(healthModule, "probeRepositoryRoot");
+  it("opens and closes the root without enumerating it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sdl-root-bounded-probe-"));
+    let opens = 0;
+    let reads = 0;
+    let closes = 0;
+    try {
+      const healthModule = await import("../../dist/services/health.js");
+      const probe = Reflect.get(healthModule, "probeRepositoryRoot") as
+        | ((
+            rootPath: string,
+            openDirectory: (rootPath: string) => Promise<{
+              read(): Promise<null>;
+              close(): Promise<void>;
+            }>,
+          ) => Promise<{ status: string }>)
+        | undefined;
+      assert.ok(probe);
 
-    assert.strictEqual(typeof probe, "function");
-    const source = String(probe);
-    assert.match(source, /stat\(/);
-    assert.match(source, /access\(/);
-    assert.doesNotMatch(source, /scanRepository|readdir|walk/);
+      const result = await probe(root, async () => {
+        opens++;
+        return {
+          read: async () => {
+            reads++;
+            return null;
+          },
+          close: async () => {
+            closes++;
+          },
+        };
+      });
+
+      assert.deepStrictEqual(result, { status: "available" });
+      assert.strictEqual(opens, 1);
+      assert.strictEqual(reads, 0);
+      assert.strictEqual(closes, 1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies a Windows-style ACL directory-open denial as unreadable", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sdl-root-acl-probe-"));
+    try {
+      const healthModule = await import("../../dist/services/health.js");
+      const probe = Reflect.get(healthModule, "probeRepositoryRoot") as
+        | ((
+            rootPath: string,
+            openDirectory: (rootPath: string) => Promise<never>,
+          ) => Promise<{ status: string }>)
+        | undefined;
+      assert.ok(probe);
+      const denied = Object.assign(new Error("raw ACL detail must stay private"), {
+        code: "EPERM",
+      });
+
+      const result = await probe(root, async () => {
+        throw denied;
+      });
+
+      assert.deepStrictEqual(result, { status: "unreadable" });
+      assert.doesNotMatch(JSON.stringify(result), /raw ACL detail/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("classifies existing, missing, and file roots", async () => {
@@ -447,6 +502,52 @@ describe("repo status root availability", { concurrency: 1 }, () => {
     assert.deepStrictEqual(status.rootAvailability, { status: "available" });
     assert.strictEqual(status.healthAvailable, false);
     assert.strictEqual(status.healthScore, null);
+  });
+
+  it("does not enter the repository-scan health path for minimal status", async () => {
+    const repoModule = await import("../../dist/mcp/tools/repo.js");
+    const setHealthLoader = Reflect.get(
+      repoModule,
+      "_setRepoStatusHealthLoaderForTesting",
+    ) as ((loader?: (repoId: string) => Promise<never>) => void) | undefined;
+    assert.strictEqual(typeof setHealthLoader, "function");
+    let calls = 0;
+    setHealthLoader!(async () => {
+      calls++;
+      throw new Error("repository scan path invoked");
+    });
+    try {
+      const status = await repoModule.handleRepoStatus({
+        repoId: "available",
+        detail: "minimal",
+      });
+      assert.deepStrictEqual(status.rootAvailability, { status: "available" });
+      assert.strictEqual(calls, 0);
+    } finally {
+      setHealthLoader!();
+    }
+  });
+
+  it("fails health closed when root access is lost after the probe", async () => {
+    const healthModule = await import("../../dist/services/health.js");
+    const setScanner = Reflect.get(
+      healthModule,
+      "_setHealthRepositoryScannerForTesting",
+    ) as ((scanner?: (rootPath: string) => Promise<never>) => void) | undefined;
+    assert.strictEqual(typeof setScanner, "function");
+    setScanner!(async () => {
+      throw Object.assign(new Error("raw TOCTOU detail must stay private"), {
+        code: "EPERM",
+      });
+    });
+    try {
+      const snapshot = await healthModule.getRepoHealthSnapshot("available");
+      assert.strictEqual(snapshot.available, false);
+      assert.strictEqual(snapshot.score, null);
+      assert.doesNotMatch(JSON.stringify(snapshot), /raw TOCTOU detail/);
+    } finally {
+      setScanner!();
+    }
   });
 
   it("is byte-stable across repeated status calls", async () => {

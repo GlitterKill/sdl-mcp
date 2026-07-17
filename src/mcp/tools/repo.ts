@@ -76,6 +76,15 @@ const lastKnownHealth = new Map<
   Awaited<ReturnType<typeof getRepoHealthSnapshot>>
 >();
 const HEALTH_CACHE_TTL_MS = 30_000;
+let repoStatusHealthLoader = getRepoHealthSnapshot;
+
+export function _setRepoStatusHealthLoaderForTesting(
+  loader: typeof getRepoHealthSnapshot = getRepoHealthSnapshot,
+): void {
+  repoStatusHealthLoader = loader;
+  healthSnapshotCache.clear();
+  lastKnownHealth.clear();
+}
 
 async function getCachedHealthSnapshot(repoId: string): Promise<{
   snapshot: Awaited<ReturnType<typeof getRepoHealthSnapshot>>;
@@ -86,7 +95,7 @@ async function getCachedHealthSnapshot(repoId: string): Promise<{
     return { snapshot: cached.snapshot, isStale: false };
   }
   try {
-    const snapshot = await getRepoHealthSnapshot(repoId);
+    const snapshot = await repoStatusHealthLoader(repoId);
     healthSnapshotCache.set(repoId, { snapshot, cachedAt: Date.now() });
     lastKnownHealth.set(repoId, snapshot);
     return { snapshot, isStale: false };

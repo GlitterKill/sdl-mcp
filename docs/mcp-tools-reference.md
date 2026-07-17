@@ -126,7 +126,8 @@ Get status for one repository including latest version, indexed files/symbols, t
 **Response includes:**
 
 - `repoId`, `rootPath`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `countNotes`, `lastIndexedAt`. The default minimal model-facing projection omits `rootPath` and `lastIndexedAt`; broader detail can expose `rootPath`, while timestamp telemetry requires `includeTelemetry: true`.
-- `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`. Health remains unavailable until graph integrity is verified for `latestVersionId`.
+- `rootAvailability` on every detail level, with `status` set to `available`, `missing`, or `unreadable`. An unavailable root also includes a stable `nextBestAction` for restoring or updating the registration.
+- `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`. Root availability and graph integrity are independent health gates. A missing or unreadable root sets `healthAvailable: false` and omits `healthScore`; health also remains unavailable until graph integrity is verified for `latestVersionId`.
 - `watcherHealth` (nullable) — runtime telemetry: provider/configuredProvider/fallbackReason, enabled/running state, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale timestamps, and Watchman warning/recrawl/fresh-instance diagnostics when Watchman is active or was attempted
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
 - `liveIndexStatus` — live buffer overlay state: enabled, pendingBuffers, dirtyBuffers, parseQueueDepth, checkpointPending, reconcileQueueDepth, etc.
