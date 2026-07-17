@@ -382,6 +382,28 @@ function addSymbolIdsFromEvidence(value: unknown, ids: Set<string>): void {
   }
 }
 
+// MCP edit envelopes already retain machine-readable snippets in structured
+// content. Only their visible text uses summary mode; notifications and CLI
+// formatting call the formatter separately and keep its default full mode.
+function isEditToolCall(
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+): boolean {
+  if (toolName === "sdl.file") {
+    return (
+      toolArgs.op === "write" ||
+      toolArgs.op === "searchEditPreview" ||
+      toolArgs.op === "searchEditApply" ||
+      (typeof toolArgs.op === "string" && toolArgs.op.startsWith("symbolEdit"))
+    );
+  }
+  return (
+    toolName === "sdl.file.write" ||
+    toolName === "sdl.search.edit" ||
+    toolName === "sdl.symbol.edit"
+  );
+}
+
 export function buildToolResponseContentBlocks(
   primaryPayload: unknown,
   userDisplay: string | null,
@@ -390,7 +412,10 @@ export function buildToolResponseContentBlocks(
   toolArgs: Record<string, unknown> = {},
 ): ToolResponseContentBlock[] {
   const displayText =
-    userDisplay ?? formatToolCallForUser(toolName, toolArgs, primaryPayload);
+    userDisplay ??
+    formatToolCallForUser(toolName, toolArgs, primaryPayload, {
+      presentation: isEditToolCall(toolName, toolArgs) ? "summary" : "full",
+    });
   const contentBlocks: ToolResponseContentBlock[] = [
     {
       type: "text",

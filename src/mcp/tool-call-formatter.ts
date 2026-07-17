@@ -129,7 +129,14 @@ function plural(
 type Formatter = (
   args: Record<string, unknown>,
   res: Record<string, unknown>,
+  presentation: ToolCallPresentation,
 ) => string | null;
+
+export type ToolCallPresentation = "full" | "summary";
+
+export interface ToolCallFormatterOptions {
+  presentation?: ToolCallPresentation;
+}
 
 function fmtSymbolSearch(
   args: Record<string, unknown>,
@@ -471,6 +478,7 @@ function fmtFileRead(
 function fmtFileWrite(
   args: Record<string, unknown>,
   result: Record<string, unknown>,
+  presentation: ToolCallPresentation = "full",
 ): string | null {
   const file = str(result.filePath) || str(args.filePath);
   const mode = str(result.mode) || str(args.editMode) || "write";
@@ -483,21 +491,33 @@ function fmtFileWrite(
   if (replacements > 0) {
     details.push(`${replacements} ${plural(replacements, "replacement")}`);
   }
-  const output = [
-    `file.write (${mode}) -> ${shortPath(file)}${details.length > 0 ? `, ${details.join(", ")}` : ""}`,
-  ];
+  if (presentation === "summary") {
+    const replacementCount = maybeNum(result.replacementCount);
+    const editCount =
+      replacementCount === undefined
+        ? "1 edit"
+        : `${replacementCount} ${plural(replacementCount, "replacement")}`;
+    return `file.write (${mode}) -> ${shortPath(file)}, ${editCount} (applied)`;
+  }
+
+  const summary = `file.write (${mode}) -> ${shortPath(file)}${details.length > 0 ? `, ${details.join(", ")}` : ""}`;
+  const output = [summary];
   appendDiffPreview(output, result.snippets);
   return output.join("\n");
 }
 
-function fmtSearchEditPreview(result: Record<string, unknown>): string | null {
+function fmtSearchEditPreview(
+  result: Record<string, unknown>,
+  presentation: ToolCallPresentation = "full",
+): string | null {
   const matches = num(result.matchesFound);
   const files = num(result.filesMatched);
   const plan = str(result.planHandle);
   const entries = records(result.fileEntries);
-  const lines = [
-    `search.edit preview -> ${matches} ${plural(matches, "match", "matches")} in ${files} ${plural(files, "file")}${plan ? ` (plan ${plan})` : ""}`,
-  ];
+  const summary = `search.edit preview -> ${matches} ${plural(matches, "match", "matches")} in ${files} ${plural(files, "file")}${plan ? ` (plan ${plan})` : ""}`;
+  if (presentation === "summary") return summary;
+
+  const lines = [summary];
 
   for (const entry of entries.slice(0, 2)) {
     const file = str(entry.file);
@@ -532,13 +552,22 @@ function fmtSearchEditPreview(result: Record<string, unknown>): string | null {
   return lines.join("\n");
 }
 
-function fmtSearchEditApply(result: Record<string, unknown>): string | null {
+function fmtSearchEditApply(
+  result: Record<string, unknown>,
+  presentation: ToolCallPresentation = "full",
+): string | null {
   const written = num(result.filesWritten);
   const attempted = num(result.filesAttempted);
   const failed = num(result.filesFailed);
   const skipped = num(result.filesSkipped);
+  const entries = records(result.fileEntries);
+  if (presentation === "summary") {
+    const edits = entries.reduce((total, entry) => total + num(entry.matchCount), 0);
+    const plan = str(result.planHandle);
+    return `search.edit apply -> applied ${edits} ${plural(edits, "edit")} in ${written}/${attempted} ${plural(attempted, "file")}${failed > 0 ? `, ${failed} failed` : ""}${skipped > 0 ? `, ${skipped} skipped` : ""}${plan ? ` (plan ${plan})` : ""}`;
+  }
   const fileEntriesByPath = new Map(
-    records(result.fileEntries).map(
+    entries.map(
       (entry) => [str(entry.file), entry] as const,
     ),
   );
@@ -562,10 +591,11 @@ function fmtSearchEditApply(result: Record<string, unknown>): string | null {
 function fmtSearchEdit(
   _args: Record<string, unknown>,
   result: Record<string, unknown>,
+  presentation: ToolCallPresentation,
 ): string | null {
   const mode = str(result.mode);
-  if (mode === "preview") return fmtSearchEditPreview(result);
-  if (mode === "apply") return fmtSearchEditApply(result);
+  if (mode === "preview") return fmtSearchEditPreview(result, presentation);
+  if (mode === "apply") return fmtSearchEditApply(result, presentation);
   return null;
 }
 
@@ -633,6 +663,7 @@ function fmtRuntimeExecute(
 function fmtSymbolEdit(
   _args: Record<string, unknown>,
   result: Record<string, unknown>,
+  presentation: ToolCallPresentation = "full",
 ): string | null {
   const mode = str(result.mode);
   const file = shortPath(str(result.file));
@@ -641,11 +672,24 @@ function fmtSymbolEdit(
   const writeTarget = str(result.writeTarget) || "file";
   if (mode === "preview") {
     const handle = str(result.planHandle);
+    if (presentation === "summary") {
+      const edits = records(result.fileEntries).reduce(
+        (total, entry) => total + num(entry.matchCount),
+        0,
+      );
+      return `symbol.edit preview -> ${operation} ${symbol} in ${file} (${writeTarget}); ${edits} ${plural(edits, "edit")}${handle ? `; plan ${handle}` : ""}`;
+    }
     return `symbol.edit preview -> ${operation} ${symbol} in ${file} (${writeTarget}); apply with ${handle}`;
   }
   if (mode === "apply") {
+    const attempted = num(result.filesAttempted);
     const written = num(result.filesWritten);
     const failed = num(result.filesFailed);
+    const skipped = num(result.filesSkipped);
+    if (presentation === "summary") {
+      const handle = str(result.planHandle);
+      return `symbol.edit apply -> ${operation} ${symbol} in ${file} (${writeTarget}); applied ${written}/${attempted} ${plural(attempted, "edit")}${failed > 0 ? `, ${failed} failed` : ""}${skipped > 0 ? `, ${skipped} skipped` : ""}${handle ? `; plan ${handle}` : ""}`;
+    }
     return `symbol.edit apply -> ${operation} ${symbol} in ${file} (${writeTarget}); ${written} written${failed > 0 ? `, ${failed} failed` : ""}`;
   }
   return null;
@@ -654,18 +698,19 @@ function fmtSymbolEdit(
 function fmtFileGateway(
   args: Record<string, unknown>,
   result: Record<string, unknown>,
+  presentation: ToolCallPresentation,
 ): string | null {
   const op = str(args.op);
   if (op.startsWith("symbolEdit")) {
-    return fmtSymbolEdit(args, result);
+    return fmtSymbolEdit(args, result, presentation);
   }
   if (result.mode === "preview" || op === "searchEditPreview") {
-    return fmtSearchEditPreview(result);
+    return fmtSearchEditPreview(result, presentation);
   }
   if (result.mode === "apply" || op === "searchEditApply") {
-    return fmtSearchEditApply(result);
+    return fmtSearchEditApply(result, presentation);
   }
-  if (op === "write") return fmtFileWrite(args, result);
+  if (op === "write") return fmtFileWrite(args, result, presentation);
   if (op === "read") return fmtFileRead(args, result);
   if (op === "previewWindow" || op === "sourceWindow") {
     const codeWindow = result.codeWindow;
@@ -875,11 +920,13 @@ const formatters: Record<string, Formatter> = {
 /**
  * Format a tool call + result as human-readable text for user display.
  * Uses action-specific summaries when available and a generic fallback otherwise.
+ * Summary presentation omits edit snippets only; other tools format identically.
  */
 export function formatToolCallForUser(
   toolName: string,
   args: Record<string, unknown>,
   result: unknown,
+  options: ToolCallFormatterOptions = {},
 ): string | null {
   const recordResult = record(result) ?? { value: result };
   if ("error" in recordResult) {
@@ -888,7 +935,8 @@ export function formatToolCallForUser(
   const formatter = formatters[toolName];
   try {
     return (
-      formatter?.(args, recordResult) ?? fmtGeneric(toolName, recordResult)
+      formatter?.(args, recordResult, options.presentation ?? "full") ??
+      fmtGeneric(toolName, recordResult)
     );
   } catch {
     return fmtGeneric(toolName, recordResult);

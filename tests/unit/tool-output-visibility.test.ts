@@ -48,7 +48,9 @@ type CallToolHandler = (
   },
   extra: {
     _meta: Record<string, unknown>;
-    sendNotification: () => Promise<void>;
+    sendNotification: (notification: {
+      params?: { data?: unknown };
+    }) => Promise<void>;
     signal: AbortSignal;
   },
 ) => Promise<Record<string, unknown>>;
@@ -74,6 +76,14 @@ function captureConsoleLog(run: () => void): string {
     console.log = originalLog;
   }
   return lines.join("\n");
+}
+
+function buildVisibleEnvelope(
+  toolName: string,
+  args: Record<string, unknown>,
+  payload: Record<string, unknown>,
+) {
+  return buildToolResponseEnvelope(payload, null, "", toolName, args);
 }
 
 describe("visible tool output", () => {
@@ -314,6 +324,44 @@ describe("visible tool output", () => {
     assert.doesNotMatch(output, /diagnostics|timings|totalMs/);
   });
 
+  it("keeps CLI pretty edit output on full presentation", () => {
+    const output = captureConsoleLog(() =>
+      formatCliToolOutput(
+        "file.write",
+        { filePath: "src/server.ts", editMode: "replacePattern" },
+        {
+          filePath: "src/server.ts",
+          mode: "replacePattern",
+          replacementCount: 1,
+          snippets: {
+            before: "  1 | oldCliValue",
+            after: "  1 | newCliValue",
+          },
+        },
+        "pretty",
+      ),
+    );
+
+    assert.match(output, /--- before[\s\S]*oldCliValue/);
+    assert.match(output, /\+\+\+ after[\s\S]*newCliValue/);
+  });
+
+  it("leaves non-edit formatting unchanged in summary presentation", () => {
+    const payload = {
+      status: "complete",
+      exitCode: 0,
+      stdoutSummary: "diff-looking text: --- before and +++ after",
+    };
+    const full = formatToolCallForUser("sdl.runtime.execute", {}, payload);
+    const summary = formatToolCallForUser("sdl.runtime.execute", {}, payload, {
+      presentation: "summary",
+    });
+    const envelope = buildVisibleEnvelope("sdl.runtime.execute", {}, payload);
+
+    assert.equal(summary, full);
+    assert.equal(envelope.content[0]?.text, full);
+  });
+
   it("projects sdl.context structured fields after compact visible projection", async () => {
     const server = new MCPServer();
     server.registerTool(
@@ -451,6 +499,308 @@ describe("visible tool output", () => {
       { path: "filePath", message: "Required" },
     ]);
     assert.equal(envelope.structuredContent?.diagnostics, undefined);
+  });
+
+  it("keeps file-write snippets only in structured content for real MCP envelopes", async () => {
+    const snippets = {
+      before: "  1 | oldValue",
+      after: "  1 | newValue",
+    };
+    const notifications: string[] = [];
+    const server = new MCPServer();
+    server.registerTool(
+      "sdl.file.write",
+      "File write visibility test tool",
+      z.object({ filePath: z.string() }),
+      async ({ filePath }) => ({
+        filePath,
+        mode: "replacePattern",
+        bytesWritten: 10,
+        linesWritten: 1,
+        replacementCount: 1,
+        snippets,
+      }),
+    );
+
+    const result = await getCallToolHandler(server)(
+      {
+        method: "tools/call",
+        params: {
+          name: "sdl.file.write",
+          arguments: { filePath: "src/server.ts" },
+        },
+      },
+      {
+        _meta: {},
+        sendNotification: async (notification) => {
+          if (typeof notification.params?.data === "string") {
+            notifications.push(notification.params.data);
+          }
+        },
+        signal: new AbortController().signal,
+      },
+    );
+
+    const visibleText = String(
+      (result.content as Array<Record<string, unknown>>)[0]?.text,
+    );
+    assert.equal(
+      visibleText,
+      "file.write (replacePattern) -> src/server.ts, 1 replacement (applied)",
+    );
+    assert.doesNotMatch(visibleText, /--- before|\+\+\+ after|oldValue|newValue/);
+    assert.deepEqual(
+      (result.structuredContent as Record<string, unknown>).snippets,
+      snippets,
+    );
+    assert.equal(JSON.stringify(result).match(/oldValue/g)?.length, 1);
+    assert.equal(JSON.stringify(result).match(/newValue/g)?.length, 1);
+    assert.match(notifications.join("\n"), /--- before[\s\S]*oldValue/);
+    assert.match(notifications.join("\n"), /\+\+\+ after[\s\S]*newValue/);
+  });
+
+  it("uses edit summaries for file-gateway edit operations", () => {
+    const cases: Array<{
+      name: string;
+      args: Record<string, unknown>;
+      payload: Record<string, unknown>;
+      expected: string;
+    }> = [
+      {
+        name: "write",
+        args: { op: "write", filePath: "src/server.ts" },
+        payload: {
+          filePath: "src/server.ts",
+          mode: "replacePattern",
+          replacementCount: 1,
+          snippets: { before: "oldGateway", after: "newGateway" },
+        },
+        expected:
+          "file.write (replacePattern) -> src/server.ts, 1 replacement (applied)",
+      },
+      {
+        name: "search preview",
+        args: { op: "searchEditPreview" },
+        payload: {
+          mode: "preview",
+          planHandle: "gateway-search-plan",
+          matchesFound: 1,
+          filesMatched: 1,
+          fileEntries: [{ file: "src/server.ts", matchCount: 1 }],
+        },
+        expected:
+          "search.edit preview -> 1 match in 1 file (plan gateway-search-plan)",
+      },
+      {
+        name: "search apply",
+        args: { op: "searchEditApply" },
+        payload: {
+          mode: "apply",
+          planHandle: "gateway-search-apply-plan",
+          filesAttempted: 1,
+          filesWritten: 1,
+          filesFailed: 0,
+          filesSkipped: 0,
+          fileEntries: [{ file: "src/server.ts", matchCount: 1 }],
+          results: [{ file: "src/server.ts", status: "written" }],
+        },
+        expected:
+          "search.edit apply -> applied 1 edit in 1/1 file (plan gateway-search-apply-plan)",
+      },
+      {
+        name: "symbol preview",
+        args: { op: "symbolEditPreview" },
+        payload: {
+          mode: "preview",
+          planHandle: "gateway-symbol-plan",
+          symbolName: "Widget",
+          operation: "replaceBody",
+          file: "src/widget.ts",
+          writeTarget: "file",
+          fileEntries: [{ file: "src/widget.ts", matchCount: 1 }],
+        },
+        expected:
+          "symbol.edit preview -> replaceBody Widget in src/widget.ts (file); 1 edit; plan gateway-symbol-plan",
+      },
+      {
+        name: "symbol apply-now",
+        args: { op: "symbolEditApplyNow" },
+        payload: {
+          mode: "apply",
+          planHandle: "gateway-symbol-apply-plan",
+          symbolName: "Widget",
+          operation: "replaceBody",
+          file: "src/widget.ts",
+          writeTarget: "file",
+          filesAttempted: 1,
+          filesWritten: 1,
+          filesFailed: 0,
+          filesSkipped: 0,
+        },
+        expected:
+          "symbol.edit apply -> replaceBody Widget in src/widget.ts (file); applied 1/1 edit; plan gateway-symbol-apply-plan",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const envelope = buildVisibleEnvelope(
+        "sdl.file",
+        testCase.args,
+        testCase.payload,
+      );
+      assert.equal(envelope.content[0]?.text, testCase.expected, testCase.name);
+    }
+  });
+
+  it("reports an edit count for file writes without replacement matches", () => {
+    const envelope = buildVisibleEnvelope(
+      "sdl.file.write",
+      { filePath: "src/new-file.ts", content: "export {};" },
+      {
+        filePath: "src/new-file.ts",
+        mode: "create",
+        bytesWritten: 12,
+        linesWritten: 1,
+      },
+    );
+
+    assert.equal(
+      envelope.content[0]?.text,
+      "file.write (create) -> src/new-file.ts, 1 edit (applied)",
+    );
+  });
+
+  it("summarizes search-edit previews with match, file, and plan counts", () => {
+    const envelope = buildVisibleEnvelope(
+      "sdl.search.edit",
+      { mode: "preview" },
+      {
+        mode: "preview",
+        planHandle: "plan-preview-123",
+        matchesFound: 3,
+        filesMatched: 2,
+        fileEntries: [
+          {
+            file: "src/one.ts",
+            matchCount: 2,
+            editMode: "replacePattern",
+            snippets: { before: "oldOne", after: "newOne" },
+          },
+          {
+            file: "src/two.ts",
+            matchCount: 1,
+            editMode: "replacePattern",
+            snippets: { before: "oldTwo", after: "newTwo" },
+          },
+        ],
+      },
+    );
+
+    const visibleText = envelope.content[0]?.text ?? "";
+    assert.equal(
+      visibleText,
+      "search.edit preview -> 3 matches in 2 files (plan plan-preview-123)",
+    );
+    assert.doesNotMatch(visibleText, /oldOne|newOne|oldTwo|newTwo|--- before|\+\+\+ after/);
+    assert.equal(JSON.stringify(envelope).match(/oldOne/g)?.length, 1);
+    assert.equal(JSON.stringify(envelope).match(/newOne/g)?.length, 1);
+  });
+
+  it("summarizes applied search edits with edit, file, and plan counts", () => {
+    const envelope = buildVisibleEnvelope(
+      "sdl.search.edit",
+      { mode: "apply", planHandle: "plan-apply-456" },
+      {
+        mode: "apply",
+        planHandle: "plan-apply-456",
+        filesAttempted: 2,
+        filesWritten: 2,
+        filesFailed: 0,
+        filesSkipped: 0,
+        results: [
+          { file: "src/one.ts", status: "written" },
+          { file: "src/two.ts", status: "written" },
+        ],
+        fileEntries: [
+          {
+            file: "src/one.ts",
+            matchCount: 2,
+            snippets: { before: "oldOne", after: "newOne" },
+          },
+          {
+            file: "src/two.ts",
+            matchCount: 1,
+            snippets: { before: "oldTwo", after: "newTwo" },
+          },
+        ],
+      },
+    );
+
+    const visibleText = envelope.content[0]?.text ?? "";
+    assert.equal(
+      visibleText,
+      "search.edit apply -> applied 3 edits in 2/2 files (plan plan-apply-456)",
+    );
+    assert.doesNotMatch(visibleText, /oldOne|newOne|oldTwo|newTwo|--- before|\+\+\+ after/);
+    assert.equal(JSON.stringify(envelope).match(/oldOne/g)?.length, 1);
+    assert.equal(JSON.stringify(envelope).match(/newOne/g)?.length, 1);
+  });
+
+  it("summarizes symbol-edit previews with operation, path, edit count, and plan", () => {
+    const envelope = buildVisibleEnvelope(
+      "sdl.symbol.edit",
+      { mode: "preview" },
+      {
+        mode: "preview",
+        planHandle: "symbol-plan-1",
+        symbolName: "Widget",
+        operation: "replaceBody",
+        file: "src/widget.ts",
+        writeTarget: "file",
+        fileEntries: [
+          {
+            file: "src/widget.ts",
+            matchCount: 1,
+            snippets: { before: "oldBody", after: "newBody" },
+          },
+        ],
+      },
+    );
+
+    assert.equal(
+      envelope.content[0]?.text,
+      "symbol.edit preview -> replaceBody Widget in src/widget.ts (file); 1 edit; plan symbol-plan-1",
+    );
+    assert.equal(JSON.stringify(envelope).match(/oldBody/g)?.length, 1);
+    assert.equal(JSON.stringify(envelope).match(/newBody/g)?.length, 1);
+    const entries = (envelope.structuredContent?.fileEntries ?? []) as Array<
+      Record<string, unknown>
+    >;
+    assert.equal(entries[0]?.matchCount, 1);
+  });
+
+  it("summarizes applied symbol edits with operation, path, edit count, and plan", () => {
+    const envelope = buildVisibleEnvelope(
+      "sdl.symbol.edit",
+      { mode: "apply", planHandle: "symbol-plan-2" },
+      {
+        mode: "apply",
+        planHandle: "symbol-plan-2",
+        symbolName: "Widget",
+        operation: "rename",
+        file: "src/widget.ts",
+        writeTarget: "file",
+        filesAttempted: 1,
+        filesWritten: 1,
+        filesFailed: 0,
+        filesSkipped: 0,
+      },
+    );
+
+    assert.equal(
+      envelope.content[0]?.text,
+      "symbol.edit apply -> rename Widget in src/widget.ts (file); applied 1/1 edit; plan symbol-plan-2",
+    );
   });
 
   it("formats file and edit operations with concise visible diffs", () => {

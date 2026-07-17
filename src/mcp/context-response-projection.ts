@@ -500,7 +500,9 @@ function shouldKeepModelField(
   }
   if (
     key === "matchCount" &&
-    (toolName === "sdl.file" || toolName === "sdl.search.edit")
+    (toolName === "sdl.file" ||
+      toolName === "sdl.search.edit" ||
+      toolName === "sdl.symbol.edit")
   ) {
     return true;
   }
