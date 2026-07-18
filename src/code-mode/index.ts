@@ -186,19 +186,16 @@ export function handleActionSearch(
     };
   }
 
-  const ranked: ActionCatalogEntry[] =
-    args.detail === "compact" ? [...candidates] : [];
-  if (args.detail === "full") {
-    for (const candidate of candidates) {
-      const next = [...ranked, candidate];
-      if (
-        ranked.length > 0 &&
-        estimateTokens(JSON.stringify(next)) > args.maxTokens
-      ) {
-        break;
-      }
-      ranked.push(candidate);
+  const ranked: ActionCatalogEntry[] = [];
+  for (const candidate of candidates) {
+    const next = [...ranked, candidate];
+    if (
+      ranked.length > 0 &&
+      estimateTokens(JSON.stringify(next)) > args.maxTokens
+    ) {
+      break;
     }
+    ranked.push(candidate);
   }
 
   // Compute disabled action hints.

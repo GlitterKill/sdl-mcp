@@ -470,6 +470,66 @@ describe("bounded full action search", () => {
     assert.ok(seen.size > 1, "broad query should page multiple actions");
   });
 
+  it("pages broad compact results within budget without duplicate actions", async () => {
+    const { estimateTokens } = await import("../../dist/util/tokenize.js");
+    const seen = new Set<string>();
+    let offset = 0;
+    let pages = 0;
+
+    while (pages < 100) {
+      const page = handleActionSearch({
+        query: "*",
+        offset,
+        limit: 50,
+        detail: "compact",
+        maxTokens: 500,
+      }) as {
+        actions: Array<{ action: string }>;
+        total: number;
+        hasMore: boolean;
+        tokenEstimate: number;
+      };
+
+      assert.ok(page.actions.length >= 1, "each non-empty page returns one action");
+      assert.strictEqual(
+        page.tokenEstimate,
+        estimateTokens(JSON.stringify(page.actions)),
+      );
+      assert.ok(
+        page.tokenEstimate <= 500 || page.actions.length === 1,
+        `compact page exceeded budget with ${page.actions.length} actions`,
+      );
+      for (const action of page.actions) {
+        assert.ok(!seen.has(action.action), `duplicate action ${action.action}`);
+        seen.add(action.action);
+      }
+
+      offset += page.actions.length;
+      pages++;
+      if (!page.hasMore) {
+        assert.strictEqual(offset, page.total);
+        break;
+      }
+    }
+
+    assert.ok(pages < 100, "compact paging should terminate");
+    assert.ok(seen.size > 1, "broad compact query should page multiple actions");
+  });
+
+  it("returns an over-budget compact singleton", () => {
+    const result = handleActionSearch({
+      query: "file",
+      limit: 1,
+      includeSchemas: true,
+      includeExamples: true,
+      detail: "compact",
+      maxTokens: 500,
+    }) as { actions: unknown[]; tokenEstimate: number };
+
+    assert.strictEqual(result.actions.length, 1);
+    assert.ok(result.tokenEstimate > 500);
+  });
+
   it("returns an exact over-budget action and keeps stable compact and summary shapes", () => {
     const exactSmall = handleActionSearch({
       query: "symbol.edit",
@@ -481,17 +541,16 @@ describe("bounded full action search", () => {
     }) as Record<string, unknown> & { actions: unknown[] };
     assert.strictEqual(exactSmall.actions.length, 1);
 
-    const compactSmall = handleActionSearch({
+    const compactDefault = handleActionSearch({
       query: "repo.status",
       detail: "compact",
-      maxTokens: 500,
     });
-    const compactLarge = handleActionSearch({
+    const compactExplicitDefault = handleActionSearch({
       query: "repo.status",
       detail: "compact",
-      maxTokens: 32000,
+      maxTokens: 4000,
     });
-    assert.deepStrictEqual(compactSmall, compactLarge);
+    assert.deepStrictEqual(compactDefault, compactExplicitDefault);
 
     const summarySmall = handleActionSearch({
       query: "*",
