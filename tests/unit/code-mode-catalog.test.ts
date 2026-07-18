@@ -476,6 +476,90 @@ describe("schema summary merge hardening", () => {
     assert.strictEqual(wrongRequiredness?.subFields, undefined);
   });
 
+  it("requires complete recursive metadata equivalence for shared fields", () => {
+    const differingMetadata = zodToSchemaSummary(
+      z.object({
+        by: z.union([
+          z.object({
+            value: z.string().default("first").describe("first branch"),
+          }),
+          z.array(
+            z.object({
+              value: z.string().default("second").describe("second branch"),
+            }),
+          ),
+        ]),
+      }),
+    ).fields.find((field) => field.name === "by");
+    assert.strictEqual(differingMetadata?.subFields, undefined);
+
+    const differingNestedFields = zodToSchemaSummary(
+      z.object({
+        by: z.union([
+          z.object({ config: z.object({ alpha: z.string() }) }),
+          z.array(z.object({ config: z.object({ beta: z.string() }) })),
+        ]),
+      }),
+    ).fields.find((field) => field.name === "by");
+    assert.strictEqual(differingNestedFields?.subFields, undefined);
+
+    const equivalentNestedFields = zodToSchemaSummary(
+      z.object({
+        by: z.union([
+          z.object({
+            config: z
+              .object({
+                label: z.string().describe("display label"),
+                flags: z.object({
+                  enabled: z.boolean(),
+                  count: z.number().optional(),
+                }),
+              })
+              .default({
+                label: "default",
+                flags: { enabled: true, count: 1 },
+              })
+              .describe("shared config"),
+          }),
+          z.array(
+            z.object({
+              config: z
+                .object({
+                  flags: z.object({
+                    count: z.number().optional(),
+                    enabled: z.boolean(),
+                  }),
+                  label: z.string().describe("display label"),
+                })
+                .default({
+                  flags: { count: 1, enabled: true },
+                  label: "default",
+                })
+                .describe("shared config"),
+            }),
+          ),
+        ]),
+      }),
+    ).fields.find((field) => field.name === "by");
+    const config = equivalentNestedFields?.subFields?.find(
+      (field) => field.name === "config",
+    );
+    assert.deepStrictEqual(
+      equivalentNestedFields?.subFields?.map((field) => field.name),
+      ["config"],
+    );
+    assert.deepStrictEqual(
+      config?.subFields?.map((field) => field.name),
+      ["label", "flags"],
+    );
+    assert.deepStrictEqual(
+      config?.subFields
+        ?.find((field) => field.name === "flags")
+        ?.subFields?.map((field) => field.name),
+      ["enabled", "count"],
+    );
+  });
+
   it("stops recursive getter expansion at the active schema cycle", () => {
     const Node = z.object({
       value: z.string(),

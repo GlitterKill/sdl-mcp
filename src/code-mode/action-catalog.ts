@@ -483,6 +483,105 @@ function mergeSchemaSummaryField(
   }
 }
 
+function schemaMetadataValueEquals(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) =>
+        schemaMetadataValueEquals(value, right[index]),
+      )
+    );
+  }
+  if (
+    left === null ||
+    right === null ||
+    typeof left !== "object" ||
+    typeof right !== "object"
+  ) {
+    return false;
+  }
+
+  const leftPrototype = Object.getPrototypeOf(left);
+  const rightPrototype = Object.getPrototypeOf(right);
+  if (
+    leftPrototype !== rightPrototype ||
+    (leftPrototype !== Object.prototype && leftPrototype !== null)
+  ) {
+    return false;
+  }
+
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord);
+  const rightKeys = Object.keys(rightRecord);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+        schemaMetadataValueEquals(leftRecord[key], rightRecord[key]),
+    )
+  );
+}
+
+function schemaSummaryFieldsEqual(
+  left: SchemaSummaryField[] | undefined,
+  right: SchemaSummaryField[] | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.length === right.length &&
+    left.every((field) => {
+      const candidate = right.find(
+        (rightField) => rightField.name === field.name,
+      );
+      return candidate !== undefined && schemaSummaryFieldEquals(field, candidate);
+    })
+  );
+}
+
+function schemaSummaryFieldEquals(
+  left: SchemaSummaryField,
+  right: SchemaSummaryField,
+): boolean {
+  const enumValuesEqual =
+    left.enumValues === undefined || right.enumValues === undefined
+      ? left.enumValues === right.enumValues
+      : left.enumValues.length === right.enumValues.length &&
+        left.enumValues.every((value, index) => value === right.enumValues?.[index]);
+  const variantsEqual =
+    left.variants === undefined || right.variants === undefined
+      ? left.variants === right.variants
+      : left.variants.length === right.variants.length &&
+        left.variants.every((variant, index) => {
+          const candidate = right.variants?.[index];
+          return (
+            candidate?.value === variant.value &&
+            candidate.requiredFields.length === variant.requiredFields.length &&
+            candidate.requiredFields.every(
+              (requiredField, fieldIndex) =>
+                requiredField === variant.requiredFields[fieldIndex],
+            )
+          );
+        });
+
+  return (
+    left.name === right.name &&
+    left.type === right.type &&
+    left.required === right.required &&
+    schemaMetadataValueEquals(left.default, right.default) &&
+    enumValuesEqual &&
+    left.nestedFieldCount === right.nestedFieldCount &&
+    left.description === right.description &&
+    left.discriminator === right.discriminator &&
+    variantsEqual &&
+    schemaSummaryFieldsEqual(left.subFields, right.subFields)
+  );
+}
+
 function describeObjectFields(
   schema: z.ZodType,
   shape: NonNullable<ReturnType<typeof getObjectShape>>,
@@ -594,15 +693,7 @@ function describeField(
       describedShapes.every(
         (fields) =>
           fields?.length === sharedFields.length &&
-          sharedFields.every((sharedField) => {
-            const candidate = fields.find(
-              (field) => field.name === sharedField.name,
-            );
-            return (
-              candidate?.type === sharedField.type &&
-              candidate.required === sharedField.required
-            );
-          }),
+          schemaSummaryFieldsEqual(sharedFields, fields),
       )
     ) {
       field.subFields = sharedFields;
