@@ -146,6 +146,20 @@ describe("code-mode manual generator", () => {
     assert.match(manual, /workflowContinuationGet[\s\S]*path\?: string/);
   });
 
+  it("documents that skeletonOffset preserves the original rendering options", () => {
+    const result = handleManual({
+      actions: ["code.getSkeleton"],
+      includeSchemas: true,
+      detail: "full",
+      format: "typescript",
+    }) as { manual: string };
+
+    assert.match(
+      result.manual,
+      /Resume at this rendered-skeleton line offset\. Repeat the original target, identifiersToFind, exportedOnly, maxLines, and maxTokens; change only skeletonOffset\./,
+    );
+  });
+
   it("focused manual requests can expand disabled memory wildcards", () => {
     const disabledDir = mkdtempSync(join(tmpdir(), "sdl-manual-disabled-"));
     const previousConfig = process.env.SDL_CONFIG;

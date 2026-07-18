@@ -1897,7 +1897,14 @@ export const GetSkeletonRequestSchema = z
     maxLines: z.number().int().min(1).optional(),
     maxTokens: z.number().int().min(1).optional(),
     identifiersToFind: z.array(z.string().min(1).max(256)).max(50).optional(),
-    skeletonOffset: z.number().int().min(0).optional(),
+    skeletonOffset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Resume at this rendered-skeleton line offset. Repeat the original target, identifiersToFind, exportedOnly, maxLines, and maxTokens; change only skeletonOffset.",
+      ),
     ifNoneMatch: z.string().optional(),
     refsMode: z.enum(["auto", "off"]).optional().default("auto"),
   })
@@ -1929,6 +1936,7 @@ const GetSkeletonPayloadSchema = z.object({
           type: z.enum(["cursor", "token"]),
           value: z.union([z.string(), z.number()]),
           parameter: z.string().optional(),
+          repeatOriginalRequest: z.literal(true).optional(),
         })
         .nullable(),
     })

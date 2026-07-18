@@ -1272,6 +1272,7 @@ export async function handleGetSkeleton(
             type: "cursor" as const,
             value: result.skeletonLinesConsumed ?? result.actualRange.endLine,
             parameter: "skeletonOffset",
+            repeatOriginalRequest: true,
           },
         }
       : undefined;
@@ -1325,6 +1326,7 @@ export async function handleGetSkeleton(
             type: "cursor" as const,
             value: result.skeletonLinesConsumed ?? result.actualRange.endLine,
             parameter: "skeletonOffset",
+            repeatOriginalRequest: true,
           },
         }
       : undefined;

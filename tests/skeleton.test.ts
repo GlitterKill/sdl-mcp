@@ -17,6 +17,9 @@ import {
   initLadybugDb,
 } from "../dist/db/ladybug.js";
 import * as ladybugDb from "../dist/db/ladybug-queries.js";
+import { handleGetSkeleton } from "../dist/mcp/tools/code.js";
+import { attachRawContext } from "../dist/mcp/token-usage.js";
+import { buildConditionalResponse } from "../dist/util/conditional-response.js";
 
 describe("Skeleton Generator Unit Tests", () => {
   const testDir = mkdtempSync(
@@ -54,14 +57,39 @@ export function complexLogic(items: Item[]): Item[] {
   
   return results;
 }
+
+export function buildContinuationFixture(input: number): string {
+  const alphaStage = input + 1;
+  const betaStage = alphaStage * 2;
+  const gammaStage = betaStage - 3;
+  const deltaStage = gammaStage + 4;
+  const epsilonStage = deltaStage * 5;
+  const zetaStage = epsilonStage - 6;
+  return [alphaStage, betaStage, gammaStage, deltaStage, epsilonStage, zetaStage].join(":");
+}
     `.trim();
   const repoId = `skeleton-range-${process.pid}`;
   const fileId = `${repoId}:functions`;
   const calculateSymbolId = `${repoId}:calculateSum`;
   const resultSymbolId = `${repoId}:result`;
+  const continuationSymbolId = `${repoId}:buildContinuationFixture`;
   const calculateRange = { startLine: 1, startCol: 0, endLine: 5, endCol: 1 };
   const resultRange = { startLine: 2, startCol: 2, endLine: 2, endCol: 23 };
   const functionLines = functionFile.split("\n");
+  const continuationStartLine =
+    functionLines.findIndex((line) =>
+      line.startsWith("export function buildContinuationFixture"),
+    ) + 1;
+  const continuationEndLine =
+    functionLines.findIndex(
+      (line, index) => index >= continuationStartLine && line === "}",
+    ) + 1;
+  const continuationRange = {
+    startLine: continuationStartLine,
+    startCol: 0,
+    endLine: continuationEndLine,
+    endCol: 1,
+  };
   const fileRange = {
     startLine: 1,
     startCol: 0,
@@ -154,6 +182,7 @@ export enum Priority {
     for (const symbol of [
       { symbolId: calculateSymbolId, name: "calculateSum", kind: "function", exported: true, range: calculateRange },
       { symbolId: resultSymbolId, name: "result", kind: "variable", exported: false, range: resultRange },
+      { symbolId: continuationSymbolId, name: "buildContinuationFixture", kind: "function", exported: true, range: continuationRange },
     ] as const) {
       await ladybugDb.upsertSymbol(conn, {
         symbolId: symbol.symbolId,
@@ -417,6 +446,114 @@ export enum Priority {
 
       assert.ok(skeleton);
       assertExactOrderedRange(skeleton.actualRange, fileRange);
+    });
+
+    it("returns a non-empty next skeleton page when the returned cursor is replayed with the same render options", async () => {
+      const includeIdentifiers = [
+        "alphaStage",
+        "betaStage",
+        "gammaStage",
+        "deltaStage",
+        "epsilonStage",
+        "zetaStage",
+      ];
+      const options = { includeIdentifiers, maxLines: 5, maxTokens: 2000 };
+      const first = await generateSymbolSkeleton(
+        repoId,
+        continuationSymbolId,
+        options,
+      );
+      assert.ok(first);
+      assert.equal(first.truncated, true);
+
+      const second = await generateSymbolSkeleton(repoId, continuationSymbolId, {
+        ...options,
+        skeletonOffset: first.skeletonLinesConsumed,
+      });
+      assert.ok(second);
+      assert.notEqual(second.skeleton.trim(), "");
+
+      const firstLines = first.skeleton.split("\n").filter(Boolean);
+      const secondLines = new Set(second.skeleton.split("\n").filter(Boolean));
+      assert.equal(firstLines.some((line) => secondLines.has(line)), false);
+      assert.ok(second.skeletonLinesConsumed > first.skeletonLinesConsumed);
+
+      const combined = `${first.skeleton}\n${second.skeleton}`;
+      const renderedPositions = includeIdentifiers.map((identifier) => {
+        const position = combined.indexOf(identifier);
+        assert.notEqual(position, -1);
+        return position;
+      });
+      assert.deepEqual(
+        renderedPositions,
+        [...renderedPositions].sort((a, b) => a - b),
+      );
+    });
+
+    it("marks truncated skeleton responses as requiring the original render request", async () => {
+      const generated = await generateSymbolSkeleton(repoId, calculateSymbolId, {
+        maxLines: 1,
+      });
+      assert.ok(generated);
+      assert.equal(generated.truncated, true);
+
+      const baselinePayload = attachRawContext(
+        {
+          skeleton: generated.skeleton,
+          file: "functions.ts",
+          range: calculateRange,
+          estimatedTokens: generated.estimatedTokens,
+          originalLines: generated.originalLines,
+          truncated: true,
+          truncation: {
+            truncated: true,
+            droppedCount:
+              generated.originalLines - generated.skeleton.split("\n").length,
+            howToResume: {
+              type: "cursor" as const,
+              value: generated.skeletonLinesConsumed,
+              parameter: "skeletonOffset",
+            },
+          },
+        },
+        { fileIds: [fileId] },
+      );
+      const expectedPayload = {
+        ...baselinePayload,
+        truncation: {
+          ...baselinePayload.truncation,
+          howToResume: {
+            ...baselinePayload.truncation.howToResume,
+            repeatOriginalRequest: true as const,
+          },
+        },
+      };
+      const expectedResponse = buildConditionalResponse(expectedPayload);
+
+      const response = await handleGetSkeleton({
+        repoId,
+        symbolId: calculateSymbolId,
+        maxLines: 1,
+        refsMode: "off",
+      });
+
+      assert.deepEqual(response, expectedResponse);
+      assert.ok("skeleton" in response);
+      const replayNeutralPayload = structuredClone(response) as Record<
+        string,
+        unknown
+      >;
+      delete replayNeutralPayload.etag;
+      const howToResume = (
+        replayNeutralPayload.truncation as {
+          howToResume: Record<string, unknown>;
+        }
+      ).howToResume;
+      delete howToResume.repeatOriginalRequest;
+      assert.equal(
+        JSON.stringify(replayNeutralPayload),
+        JSON.stringify(baselinePayload),
+      );
     });
 
     it("keeps source coordinates stable across skeletonOffset resume", async () => {
