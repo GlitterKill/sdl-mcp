@@ -9,6 +9,12 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { registerCodeModeTools } from "../../dist/code-mode/index.js";
+import { getContinuation } from "../../dist/code-mode/workflow-truncation.js";
+import type { CodeModeConfig } from "../../dist/config/types.js";
+import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
+import type { MCPServer } from "../../dist/server.js";
+import { z } from "zod";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -335,6 +341,61 @@ test("INVARIANT 2a: exposed tools are covered or justified", () => {
   );
   assert.deepEqual(stale, [], `Allowlist entries for non-exposed tools: ${stale.join(", ")}`);
   assert.deepEqual(reasonless, [], `Allowlist entries missing reasons: ${reasonless.join(", ")}`);
+});
+
+test("INVARIANT 2b: registered workflow uses resolved projection options deterministically", async () => {
+  const rawOverview = {
+    repoId: REPO_ID,
+    generatedAt: "2026-07-18T12:00:00.000Z",
+    durationMs: 42,
+    stableRepositoryData: { marker: "stable-repository-data", body: "stable ".repeat(1_000) },
+  };
+  const handlers = new Map<string, (args: unknown) => unknown>();
+  const server = {
+    registerTool: (name: string, _description: string, _schema: unknown, handler: (args: unknown) => unknown) => {
+      handlers.set(name, handler);
+    },
+  } as unknown as MCPServer;
+  registerCodeModeTools(
+    server,
+    {},
+    { etagCaching: false } as CodeModeConfig,
+    {
+      "repo.status": { schema: z.object({}).passthrough(), handler: async () => ({ flag: true }) },
+      "repo.overview": {
+        schema: z.object({ level: z.string(), includeTelemetry: z.boolean().optional() }).passthrough(),
+        handler: async () => rawOverview,
+      },
+    },
+  );
+  const workflow = handlers.get("sdl.workflow");
+  assert.ok(workflow);
+  const workflowArgs = {
+    repoId: REPO_ID,
+    steps: [
+      { fn: "repoStatus", args: {} },
+      { fn: "repoOverview", args: { level: "stats", includeTelemetry: "$0.flag" }, maxResponseTokens: 100 },
+    ],
+  };
+  const run = async (): Promise<string> => {
+    const response = await workflow(workflowArgs) as {
+      results: Array<{ result?: unknown; truncatedResponse?: { continuationHandle?: string } }>;
+    };
+    const handle = response.results[1].truncatedResponse?.continuationHandle;
+    assert.ok(handle);
+    const continuation = canonical(getContinuation(handle)?.data);
+    assert.doesNotMatch(continuation, /generatedAt/);
+    assert.match(continuation, /durationMs/);
+    const displayed = projectToolResultForModelContent("sdl.workflow", response, workflowArgs) as {
+      results: Array<{ result?: unknown }>;
+    };
+    assert.match(canonical(displayed.results[1].result), /durationMs/);
+    return continuation;
+  };
+
+  const first = await run();
+  assert.match(first, /stable-repository-data/);
+  assert.equal(await run(), first);
 });
 
 test("INVARIANT 2b: covered outputs are deterministic within and across processes", () => {

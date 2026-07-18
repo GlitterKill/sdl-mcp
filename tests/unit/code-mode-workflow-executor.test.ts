@@ -2,6 +2,8 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
 import { resolve } from "node:path";
 import { executeWorkflow } from "../../dist/code-mode/workflow-executor.js";
+import { getContinuation } from "../../dist/code-mode/workflow-truncation.js";
+import * as responseProjection from "../../dist/mcp/context-response-projection.js";
 import type { ParsedWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
 import type { CodeModeConfig } from "../../dist/config/types.js";
 import type { ToolContext } from "../../dist/server.js";
@@ -78,6 +80,20 @@ function createMockActionMap() {
           kind: "function",
           summary: "long result payload ".repeat(12),
         })),
+      }),
+    },
+    "repo.overview": {
+      schema: z.object({}).passthrough(),
+      handler: async () => ({
+        repoId: "test",
+        generatedAt: "2026-07-18T12:00:00.000Z",
+        stableRepositoryData: {
+          marker: "stable-repository-data",
+          body: "stable ".repeat(1_000),
+        },
+        durationMs: 42,
+        absolutePath: "F:/Claude/projects/sdl-mcp/sdl-mcp",
+        _rawContext: { timing: { totalMs: 12 } },
       }),
     },
     "test.fail": {
@@ -230,6 +246,56 @@ describe("code-mode workflow executor", () => {
     );
   });
 
+  it("projects child results before continuation storage deterministically", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [{ fn: "repoOverview", action: "repo.overview", args: {}, maxResponseTokens: 50 }],
+      onError: "stop",
+    };
+    const projectResult = (_fn: string, result: unknown) => {
+      const { generatedAt: _generatedAt, durationMs: _durationMs, absolutePath: _absolutePath, _rawContext, ...stable } = result as Record<string, unknown>;
+      return stable;
+    };
+
+    const first = await executeWorkflow(request, createMockActionMap(), testConfig, undefined, undefined, projectResult);
+    const firstHandle = first.results[0].truncatedResponse?.continuationHandle;
+    assert.ok(firstHandle);
+    const firstJson = JSON.stringify(getContinuation(firstHandle)?.data);
+    assert.doesNotMatch(firstJson, /generatedAt|durationMs|absolutePath|_rawContext|totalMs/);
+    assert.match(firstJson, /stable-repository-data/);
+
+    const second = await executeWorkflow(request, createMockActionMap(), testConfig, undefined, undefined, projectResult);
+    const secondHandle = second.results[0].truncatedResponse?.continuationHandle;
+    assert.ok(secondHandle);
+    assert.equal(JSON.stringify(getContinuation(secondHandle)?.data), firstJson);
+  });
+
+  it("keeps raw child results available to later $N references", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "repoOverview", action: "repo.overview", args: {} },
+        { fn: "testEcho", action: "test.echo", args: { message: "$0.generatedAt" } },
+      ],
+      onError: "stop",
+    };
+    const result = await executeWorkflow(request, createMockActionMap(), testConfig, undefined, undefined, (fn, childResult) => fn === "repoOverview" ? {} : childResult);
+    assert.equal((result.results[1].result as { message: string }).message, "2026-07-18T12:00:00.000Z");
+  });
+
+  it("projects workflow child results idempotently", () => {
+    const projector = (responseProjection as Record<string, unknown>).projectWorkflowChildResultForModel;
+    assert.equal(typeof projector, "function");
+    if (typeof projector !== "function") return;
+    const raw = { repoId: "test", generatedAt: "fixed", durationMs: 42, stable: { marker: "kept" } };
+    const once = projector("repoOverview", raw, {}, {});
+    assert.deepEqual(projector("repoOverview", once, {}, {}), once);
+    assert.deepEqual(
+      projector("repoOverview", raw, { detail: "full", includeTelemetry: true }, {}),
+      raw,
+    );
+  });
+
   it("exposes a truncated step's continuation handle to later steps", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",
@@ -258,6 +324,58 @@ describe("code-mode workflow executor", () => {
       (result.results[1].result as { message?: unknown }).message,
       result.results[0].truncatedResponse?.continuationHandle,
     );
+  });
+
+  it("charges raw child tokens to the workflow budget when model output is projected", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "repoOverview", action: "repo.overview", args: {}, maxResponseTokens: 50 },
+        { fn: "testEcho", action: "test.echo", args: { message: "must be skipped" } },
+      ],
+      budget: { maxTotalTokens: 500 },
+      onError: "continue",
+    };
+    const projector = (responseProjection as {
+      projectWorkflowChildResultForModel: (fn: string, result: unknown, workflowArgs: Record<string, unknown>, args: Record<string, unknown>) => unknown;
+    }).projectWorkflowChildResultForModel;
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+      undefined,
+      undefined,
+      (fn, childResult, args) => projector(fn, childResult, {}, args),
+    );
+
+    assert.ok(result.results[0].truncatedResponse);
+    assert.ok(result.results[0].tokens > 500);
+    assert.strictEqual(result.results[1].status, "budget_exceeded");
+  });
+
+  it("keeps raw child data and tokens in verbose workflow traces", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [{ fn: "repoOverview", action: "repo.overview", args: {}, maxResponseTokens: 50 }],
+      onError: "stop",
+    };
+    const projector = (responseProjection as {
+      projectWorkflowChildResultForModel: (fn: string, result: unknown, workflowArgs: Record<string, unknown>, args: Record<string, unknown>) => unknown;
+    }).projectWorkflowChildResultForModel;
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+      undefined,
+      { level: "verbose", maxPreviewTokens: 500 },
+      (fn, childResult, args) => projector(fn, childResult, {}, args),
+    );
+
+    assert.match(result.trace?.steps[0]?.resultPreview ?? "", /generatedAt/);
+    assert.strictEqual(result.trace?.steps[0]?.tokens, result.results[0].tokens);
+    assert.ok((result.trace?.steps[0]?.tokens ?? 0) > 500);
   });
 
   it("charges truncated response tokens against workflow budgets", async () => {
@@ -292,10 +410,7 @@ describe("code-mode workflow executor", () => {
       result.results.reduce((sum, step) => sum + step.tokens, 0),
     );
     assert.ok(result.totalTokens < 100);
-    assert.strictEqual(
-      result.trace?.steps[0]?.tokens,
-      result.results[0].tokens,
-    );
+    assert.ok((result.trace?.steps[0]?.tokens ?? 0) > result.results[0].tokens);
     assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
   });
 

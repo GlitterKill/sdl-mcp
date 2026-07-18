@@ -48,14 +48,16 @@ function applyStepTruncation(
   stepResult: WorkflowStepResult,
   step: { maxResponseTokens?: number },
   defaultMaxResponseTokens: number | undefined,
+  result: unknown = stepResult.result,
 ): void {
+  stepResult.result = result;
   const maxResponseTokens = step.maxResponseTokens ?? defaultMaxResponseTokens;
   if (
     maxResponseTokens != null &&
     stepResult.status === "ok" &&
     stepResult.result != null
   ) {
-    const truncation = truncateStepResult(stepResult.result, maxResponseTokens);
+    const truncation = truncateStepResult(result, maxResponseTokens);
     if (truncation.handle) {
       stepResult.result = truncation.truncated;
       stepResult.tokens = truncation.keptTokens;
@@ -128,7 +130,14 @@ function attachStepMetadataToPriorResult(
   stepIndex: number,
   rawResult: unknown,
   stepResult: WorkflowStepResult,
+  resolvedArgs: Record<string, unknown>,
 ): void {
+  Object.defineProperty(stepResult, "_resolvedArgs", {
+    value: resolvedArgs,
+    enumerable: false,
+    configurable: true,
+  });
+
   if (!stepResult.truncatedResponse) {
     return;
   }
@@ -275,12 +284,19 @@ function dryRunFixHint(action: string, issues: string[]): string {
  * Execute a parsed workflow request sequentially, resolving $N references,
  * tracking budget, validating the context ladder, and caching ETags.
  */
+export type WorkflowStepResultProjector = (
+  fn: string,
+  result: unknown,
+  args: Record<string, unknown>,
+) => unknown;
+
 export async function executeWorkflow(
   request: ParsedWorkflowRequest,
   actionMap: ActionMap,
   config: CodeModeConfig,
   context?: ToolContext,
   traceOpts?: WorkflowTraceOptions,
+  projectStepResult?: WorkflowStepResultProjector,
 ): Promise<WorkflowResponse> {
   const timer = new ToolPhaseTimer();
   const setupStartedAt = timer.start();
@@ -608,7 +624,7 @@ export async function executeWorkflow(
           getWorkflowAwareStepResponseTokens(request, budget, i, step),
         );
         budget.record(stepResult.tokens, stepDuration);
-        attachStepMetadataToPriorResult(priorResults, i, result, stepResult);
+        attachStepMetadataToPriorResult(priorResults, i, result, stepResult, resolvedArgs);
         stepResults.push(stepResult);
 
         if (traceOpts) {
@@ -759,6 +775,9 @@ export async function executeWorkflow(
           ? failureDetailsFrom(result)
           : undefined;
         priorResults.push(result);
+        const modelResult = projectStepResult
+          ? projectStepResult(step.fn, result, resolvedArgs)
+          : result;
         const stepResult: WorkflowStepResult = {
           stepIndex: i,
           fn: step.fn,
@@ -784,10 +803,12 @@ export async function executeWorkflow(
           stepResult,
           step,
           getWorkflowAwareStepResponseTokens(request, budget, i, step),
+          modelResult,
         );
+        if (projectStepResult) stepResult.tokens = tokens;
         budget.record(stepResult.tokens, stepDuration);
         tokenAccumulator.recordUsage(step.fn, stepResult.tokens, rawEquivalent);
-        attachStepMetadataToPriorResult(priorResults, i, result, stepResult);
+        attachStepMetadataToPriorResult(priorResults, i, result, stepResult, resolvedArgs);
         stepResults.push(stepResult);
 
         if (traceOpts) {
@@ -799,11 +820,11 @@ export async function executeWorkflow(
               "gateway",
               gatewayFailureMessage ? "error" : "ok",
               stepDuration,
-              stepResult.tokens,
+              tokens,
               traceOpts,
               traceCatalog,
               resolvedArgs,
-              stepResult.result,
+              result,
               gatewayFailureMessage ?? undefined,
             ),
           );

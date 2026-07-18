@@ -525,6 +525,8 @@ function shouldKeepModelField(
     key === "estimatedTokens"
     || key === "originalLines"
     || key === "generatedAt"
+    || (key === "durationMs" && !options.includeTelemetry)
+    || (key === "absolutePath" && !options.includeTelemetry)
     || key === "tokenMetrics"
   ) {
     return false;
@@ -737,6 +739,19 @@ function projectWorkflowStepResultForModel(
   return projectGenericValueForModel(childToolName, result, childOptions);
 }
 
+export function projectWorkflowChildResultForModel(
+  fn: string,
+  result: unknown,
+  workflowArgs: Record<string, unknown>,
+  childArgs: Record<string, unknown>,
+): unknown {
+  return projectWorkflowStepResultForModel(
+    fn,
+    result,
+    modelOptionsFromArgs(workflowArgs),
+    childArgs,
+  );
+}
 function projectWorkflowResultForModel(
   result: Record<string, unknown>,
   options: ModelContentProjectionOptions,
@@ -755,7 +770,9 @@ function projectWorkflowResultForModel(
     }
     const status = typeof item.status === "string" ? item.status : "ok";
     const stepIndex = typeof item.stepIndex === "number" ? item.stepIndex : index;
-    const stepArgs = workflowStepArgsAt(workflowArgs, stepIndex) ?? item.args;
+    const stepArgs = isRecord(item._resolvedArgs)
+      ? item._resolvedArgs
+      : workflowStepArgsAt(workflowArgs, stepIndex) ?? item.args;
     if (status === "ok") {
       const successStep: Record<string, unknown> = { fn: item.fn };
       if (includeWorkflowTelemetry) {

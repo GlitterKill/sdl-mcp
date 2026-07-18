@@ -5,6 +5,7 @@ import type { ToolServices } from "../gateway/index.js";
 import { createActionMap, type ActionMap } from "../gateway/router.js";
 import { AgentContextRequestSchema } from "../mcp/tools.js";
 import { handleAgentContext } from "../mcp/tools/context.js";
+import { projectWorkflowChildResultForModel } from "../mcp/context-response-projection.js";
 import {
   FileGatewayRequestSchema,
   handleFileGateway,
@@ -499,6 +500,8 @@ export function registerCodeModeTools(
         config,
         context,
         traceOpts,
+        (fn, result, args) =>
+          projectWorkflowChildResultForModel(fn, result, rawObject, args),
       );
     },
     {
