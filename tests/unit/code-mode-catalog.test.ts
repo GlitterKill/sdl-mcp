@@ -438,3 +438,94 @@ describe("full schema discovery regressions", () => {
     assert.ok(!("subFields" in (operation ?? {})));
   });
 });
+
+
+describe("schema summary merge hardening", () => {
+  it("shares object-array fields only when structure is compatible", () => {
+    const compatible = zodToSchemaSummary(
+      z.object({
+        by: z.union([
+          z.object({ name: z.string(), count: z.number().optional() }),
+          z.array(z.object({ count: z.number().optional(), name: z.string() })),
+        ]),
+      }),
+    ).fields.find((field) => field.name === "by");
+    assert.deepStrictEqual(
+      compatible?.subFields?.map((field) => field.name),
+      ["name", "count"],
+    );
+
+    const wrongType = zodToSchemaSummary(
+      z.object({
+        by: z.union([
+          z.object({ value: z.string() }),
+          z.array(z.object({ value: z.number() })),
+        ]),
+      }),
+    ).fields.find((field) => field.name === "by");
+    assert.strictEqual(wrongType?.subFields, undefined);
+
+    const wrongRequiredness = zodToSchemaSummary(
+      z.object({
+        by: z.union([
+          z.object({ value: z.string() }),
+          z.array(z.object({ value: z.string().optional() })),
+        ]),
+      }),
+    ).fields.find((field) => field.name === "by");
+    assert.strictEqual(wrongRequiredness?.subFields, undefined);
+  });
+
+  it("stops recursive getter expansion at the active schema cycle", () => {
+    const Node = z.object({
+      value: z.string(),
+      get children() {
+        return z.union([Node, z.array(Node)]).optional();
+      },
+    });
+    let summary: ReturnType<typeof zodToSchemaSummary> | undefined;
+
+    assert.doesNotThrow(() => {
+      summary = zodToSchemaSummary(
+        z.object({ node: z.union([Node, z.array(Node)]) }),
+      );
+    });
+    const node = summary?.fields.find((field) => field.name === "node");
+    assert.deepStrictEqual(
+      node?.subFields?.map((field) => field.name),
+      ["value", "children"],
+    );
+    assert.strictEqual(
+      node?.subFields?.find((field) => field.name === "children")?.subFields,
+      undefined,
+    );
+  });
+
+  it("intersects duplicate variant requirements and preserves unique order", () => {
+    const summary = zodToSchemaSummary(
+      z.discriminatedUnion("mode", [
+        z.object({
+          mode: z.literal("one"),
+          operation: z.discriminatedUnion("kind", [
+            z.object({ kind: z.literal("x"), a: z.string() }),
+            z.object({ kind: z.literal("y"), c: z.string() }),
+          ]),
+        }),
+        z.object({
+          mode: z.literal("two"),
+          operation: z.discriminatedUnion("kind", [
+            z.object({ kind: z.literal("x"), b: z.string() }),
+            z.object({ kind: z.literal("z"), d: z.string() }),
+          ]),
+        }),
+      ]),
+    );
+    const operation = summary.fields.find((field) => field.name === "operation");
+
+    assert.deepStrictEqual(operation?.variants, [
+      { value: "x", requiredFields: ["kind"] },
+      { value: "y", requiredFields: ["kind", "c"] },
+      { value: "z", requiredFields: ["kind", "d"] },
+    ]);
+  });
+});

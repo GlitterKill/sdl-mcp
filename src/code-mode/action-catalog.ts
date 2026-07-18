@@ -411,6 +411,8 @@ function fieldEnumValues(field: SchemaSummaryField): string[] {
 function describeDiscriminatedUnionVariants(
   schema: z.ZodType,
   discriminator: string,
+  active = new WeakSet<z.ZodType>(),
+  depth = 0,
 ): NonNullable<SchemaSummaryField["variants"]> {
   const variants: NonNullable<SchemaSummaryField["variants"]> = [];
   for (const option of getUnionOptions(schema)) {
@@ -422,14 +424,16 @@ function describeDiscriminatedUnionVariants(
 
     const requiredFields = Object.entries(shape)
       .filter(([name, fieldSchema]) =>
-        name === discriminator || describeField(name, fieldSchema).required,
+        name === discriminator ||
+        describeField(name, fieldSchema, active, depth + 1).required,
       )
       .map(([name]) => name);
     const existing = variants.find((variant) => variant.value === value);
     if (existing) {
-      existing.requiredFields = [
-        ...new Set([...existing.requiredFields, ...requiredFields]),
-      ];
+      const required = new Set(requiredFields);
+      existing.requiredFields = existing.requiredFields.filter((field) =>
+        required.has(field),
+      );
     } else {
       variants.push({ value, requiredFields });
     }
@@ -465,12 +469,10 @@ function mergeSchemaSummaryField(
         (variant) => variant.value === incomingVariant.value,
       );
       if (existing) {
-        existing.requiredFields = [
-          ...new Set([
-            ...existing.requiredFields,
-            ...incomingVariant.requiredFields,
-          ]),
-        ];
+        const required = new Set(incomingVariant.requiredFields);
+        existing.requiredFields = existing.requiredFields.filter((field) =>
+          required.has(field),
+        );
       } else {
         target.variants.push({
           value: incomingVariant.value,
@@ -481,7 +483,29 @@ function mergeSchemaSummaryField(
   }
 }
 
-function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
+function describeObjectFields(
+  schema: z.ZodType,
+  shape: NonNullable<ReturnType<typeof getObjectShape>>,
+  active: WeakSet<z.ZodType>,
+  depth: number,
+): SchemaSummaryField[] | undefined {
+  if (depth >= 16 || active.has(schema)) return undefined;
+  active.add(schema);
+  try {
+    return Object.entries(shape).map(([name, fieldSchema]) =>
+      describeField(name, fieldSchema, active, depth + 1),
+    );
+  } finally {
+    active.delete(schema);
+  }
+}
+
+function describeField(
+  name: string,
+  schema: z.ZodType,
+  active = new WeakSet<z.ZodType>(),
+  depth = 0,
+): SchemaSummaryField {
   let required = true;
   let defaultValue: unknown = undefined;
   let hasDefault = false;
@@ -521,7 +545,12 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
   const field: SchemaSummaryField = { name, type: typeName, required };
   if (discriminator) {
     field.discriminator = discriminator;
-    field.variants = describeDiscriminatedUnionVariants(current, discriminator);
+    field.variants = describeDiscriminatedUnionVariants(
+      current,
+      discriminator,
+      active,
+      depth,
+    );
   }
   const description = initialDescription ?? zodDescription(current);
   if (description) {
@@ -539,35 +568,44 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
 
   const nestedShape = getObjectShape(current);
   if (nestedShape) {
-    field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) =>
-      describeField(subName, subSchema),
-    );
+    field.subFields = describeObjectFields(current, nestedShape, active, depth);
   }
 
   if (zodKind(current) === "union" && !discriminator) {
     const options = getUnionOptions(current);
     const optionTypes = options.map((option) => resolveTypeName(option));
-    const objectShapes = options.map((option) => {
+    const objectSchemas = options.map((option) => {
       const unwrapped = unwrapZod(option);
-      if (zodKind(unwrapped) !== "array") return getObjectShape(unwrapped);
+      if (zodKind(unwrapped) !== "array") return unwrapped;
       const optionDef = zodDef(unwrapped);
-      const element = asZodType(optionDef.element ?? optionDef.innerType);
-      return element ? getObjectShape(element) : undefined;
+      return asZodType(optionDef.element ?? optionDef.innerType);
     });
-    const sharedShape = objectShapes[0];
+    const describedShapes = objectSchemas.map((objectSchema) => {
+      const shape = objectSchema ? getObjectShape(objectSchema) : undefined;
+      return objectSchema && shape
+        ? describeObjectFields(objectSchema, shape, active, depth)
+        : undefined;
+    });
+    const sharedFields = describedShapes[0];
     if (
       optionTypes.includes("object") &&
       optionTypes.includes("object[]") &&
-      sharedShape &&
-      objectShapes.every(
-        (shape) =>
-          shape &&
-          Object.keys(shape).join("\\0") === Object.keys(sharedShape).join("\\0"),
+      sharedFields &&
+      describedShapes.every(
+        (fields) =>
+          fields?.length === sharedFields.length &&
+          sharedFields.every((sharedField) => {
+            const candidate = fields.find(
+              (field) => field.name === sharedField.name,
+            );
+            return (
+              candidate?.type === sharedField.type &&
+              candidate.required === sharedField.required
+            );
+          }),
       )
     ) {
-      field.subFields = Object.entries(sharedShape).map(
-        ([subName, subSchema]) => describeField(subName, subSchema),
-      );
+      field.subFields = sharedFields;
     }
   }
 
@@ -575,10 +613,8 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
   if (zodKind(current) === "array") {
     const elemType = asZodType(def.element ?? def.innerType);
     const elemShape = elemType ? getObjectShape(elemType) : undefined;
-    if (elemShape) {
-      field.subFields = Object.entries(elemShape).map(([subName, subSchema]) =>
-        describeField(subName, subSchema),
-      );
+    if (elemType && elemShape) {
+      field.subFields = describeObjectFields(elemType, elemShape, active, depth);
     }
   }
 
