@@ -146,6 +146,50 @@ describe("saved file graph patch", () => {
     else process.env.SDL_CONFIG_PATH = prevConfigPath;
   });
 
+  it("serializes concurrent saved-file integrity patches for the same repository", async () => {
+    const request = {
+      repoId,
+      filePath: "src/example.ts",
+      content: [
+        "export function alpha() {",
+        "  return gamma();",
+        "}",
+        "",
+        "export function gamma() {",
+        "  return 2;",
+        "}",
+      ].join("\n"),
+      language: "typescript",
+      version: 2,
+    };
+
+    const patched = await Promise.all([
+      patchSavedFile(request),
+      patchSavedFile(request),
+    ]);
+    assert.equal(patched.length, 2);
+    assert.ok(patched.every((result) => result.fileId === durableFileId));
+
+    const conn = await getLadybugConn();
+    const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/example.ts");
+    assert.equal(file?.fileId, durableFileId);
+    const duplicateFiles = await ladybugDb.getFilesByIds(conn, [
+      `${repoId}:src/example.ts`,
+    ]);
+    assert.equal(duplicateFiles.has(`${repoId}:src/example.ts`), false);
+
+    const symbols = await ladybugDb.getSymbolsByFile(conn, durableFileId);
+    const alpha = symbols.find((symbol) => symbol.name === "alpha");
+    assert.equal(alpha?.source, "scip");
+    assert.equal(alpha?.scipSymbol, "scip-alpha");
+
+    const state = await getDerivedState(repoId);
+    const captured = await capturePersistedGraphIntegrity(conn, repoId);
+    assert.equal(state?.graphIntegrityState, "verified");
+    assert.equal(state?.graphIntegrityVersionId, "v1");
+    assert.equal(state?.graphIntegrityDigest, captured.digest);
+  });
+
   it("preserves the durable provider file identity across saved-file patches", async () => {
     const patched = await patchSavedFile({
       repoId,

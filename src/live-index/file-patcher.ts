@@ -9,6 +9,7 @@ import {
   createGraphIntegrityFilelessSymbols,
   PersistedGraphIntegritySession,
 } from "../indexer/provider-first/persisted-graph-integrity.js";
+import { withRepoWriteHeavyLock } from "../indexer/derived-refresh-queue.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { readFileAsync } from "../util/asyncFs.js";
@@ -50,6 +51,12 @@ export interface SavedFilePatchResult {
 }
 
 export async function patchSavedFile(
+  request: SavedFilePatchRequest,
+): Promise<SavedFilePatchResult> {
+  return withRepoWriteHeavyLock(request.repoId, () => patchSavedFileUnlocked(request));
+}
+
+async function patchSavedFileUnlocked(
   request: SavedFilePatchRequest,
 ): Promise<SavedFilePatchResult> {
   const conn = await getLadybugConn();
