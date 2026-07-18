@@ -471,7 +471,16 @@ export async function queryArtifactContent(
   const maxExcerpts = options.maxExcerpts ?? 10;
   const contextLines = options.contextLines ?? 3;
   const maxLineLength = options.maxLineLength ?? 500;
-  const manifest = await readArtifactManifest(artifactHandle, options.baseDir);
+  let manifest: ArtifactManifest | null = null;
+  try {
+    manifest = await readArtifactManifest(artifactHandle, options.baseDir);
+  } catch (error) {
+    // Artifact content remains recoverable when optional projection metadata is corrupt.
+    logger.warn("Runtime artifact manifest metadata is unavailable", {
+      artifactHandle,
+      error,
+    });
+  }
   const projectionMetadata = {
     ...(manifest?.runtime ? { runtime: manifest.runtime } : {}),
     ...(manifest?.commandSummary

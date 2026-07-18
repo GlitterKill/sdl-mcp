@@ -161,3 +161,39 @@ test("node:test keeps distinct failures in first-seen order", () => {
   );
   assert.equal(digest.summary, "2/2 tests failed");
 });
+
+
+test("node:test preserves distinct case-sensitive test names", () => {
+  const stdout = [
+    "✖ Case-sensitive test (1.1ms)",
+    "  AssertionError: upper-case assertion",
+    "✖ case-sensitive test (2.2ms)",
+    "  AssertionError: lower-case assertion",
+    "not ok 1 - Case-sensitive test (1.1ms)",
+    "not ok 2 - case-sensitive test (2.2ms)",
+    "ℹ tests 2",
+    "ℹ fail 2",
+  ].join("\n");
+
+  const digest = buildOutputDigest({
+    command: "node --test",
+    stdout,
+    stderr: "",
+    exitCode: 1,
+  });
+
+  assert.deepEqual(
+    digest.failures.map(({ name, message }) => ({ name, message })),
+    [
+      {
+        name: "Case-sensitive test",
+        message: "AssertionError: upper-case assertion",
+      },
+      {
+        name: "case-sensitive test",
+        message: "AssertionError: lower-case assertion",
+      },
+    ],
+  );
+  assert.equal(digest.summary, "2/2 tests failed");
+});

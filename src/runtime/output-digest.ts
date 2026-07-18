@@ -163,7 +163,7 @@ function digestNodeTest(input: DigestInput): OutputDigest {
       }
     }
 
-    const key = name.toLowerCase();
+    const key = name;
     const existing = failuresByName.get(key);
     if (!existing) {
       failuresByName.set(key, {

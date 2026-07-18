@@ -499,3 +499,34 @@ describe("queryArtifactContent trust metadata", () => {
     assert.strictEqual(afterHash, beforeHash);
     assert.strictEqual(afterManifest?.stdoutSha256, beforeManifest?.stdoutSha256);
   });
+
+
+it("queries intact gzip output when optional manifest metadata is corrupt", async () => {
+  const baseDir = makeTempDir();
+  const artifact = await writeArtifact({
+    repoId: "corrupt-manifest-repo",
+    runtime: "node",
+    argsHash: "args",
+    commandSummary: "node --test [argCount=1]",
+    exitCode: 1,
+    signal: null,
+    durationMs: 10,
+    stdout: Buffer.from("alpha\nnot ok 1 - recoverable\nomega", "utf8"),
+    stderr: Buffer.from("", "utf8"),
+    policyAuditHash: "audit",
+    artifactTtlHours: 1,
+    maxArtifactBytes: 1024 * 1024,
+    artifactBaseDir: baseDir,
+  });
+  writeFileSync(join(artifact.artifactDir, "manifest.json"), "{invalid json");
+
+  const result = await queryArtifactContent(
+    artifact.artifactHandle,
+    ["recoverable"],
+    { baseDir, stream: "stdout", contextLines: 0 },
+  );
+
+  assert.strictEqual(result.excerpts[0]?.content, "not ok 1 - recoverable");
+  assert.strictEqual(result.runtime, undefined);
+  assert.strictEqual(result.commandSummary, undefined);
+});
