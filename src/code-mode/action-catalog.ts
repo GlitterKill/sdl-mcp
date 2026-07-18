@@ -572,6 +572,8 @@ function schemaSummaryFieldEquals(
     left.name === right.name &&
     left.type === right.type &&
     left.required === right.required &&
+    Object.prototype.hasOwnProperty.call(left, "default") ===
+      Object.prototype.hasOwnProperty.call(right, "default") &&
     schemaMetadataValueEquals(left.default, right.default) &&
     enumValuesEqual &&
     left.nestedFieldCount === right.nestedFieldCount &&

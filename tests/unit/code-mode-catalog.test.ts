@@ -493,6 +493,35 @@ describe("schema summary merge hardening", () => {
     ).fields.find((field) => field.name === "by");
     assert.strictEqual(differingMetadata?.subFields, undefined);
 
+    const absentDefault = zodToSchemaSummary(
+      z.object({
+        by: z.union([
+          z.object({ value: z.string().default(undefined) }),
+          z.array(z.object({ value: z.string().optional() })),
+        ]),
+      }),
+    ).fields.find((field) => field.name === "by");
+    assert.strictEqual(absentDefault?.subFields, undefined);
+
+    const sharedUndefinedDefault = zodToSchemaSummary(
+      z.object({
+        by: z.union([
+          z.object({ value: z.string().default(undefined) }),
+          z.array(z.object({ value: z.string().default(undefined) })),
+        ]),
+      }),
+    ).fields.find((field) => field.name === "by");
+    assert.deepStrictEqual(
+      sharedUndefinedDefault?.subFields?.map((field) => field.name),
+      ["value"],
+    );
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(
+        sharedUndefinedDefault?.subFields?.[0] ?? {},
+        "default",
+      ),
+    );
+
     const differingNestedFields = zodToSchemaSummary(
       z.object({
         by: z.union([
