@@ -15,6 +15,8 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   capturePersistedGraphIntegrity,
 } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
+import { patchSavedFile } from "../../dist/live-index/file-patcher.js";
+import { generateFileId } from "../../dist/util/hashing.js";
 import {
   getDerivedState,
   markGraphIntegrityVerified,
@@ -27,6 +29,7 @@ import {
 
 describe("saved file graph patch", () => {
   const repoId = "saved-file-graph-patch-repo";
+  const durableFileId = generateFileId(repoId, "src/example.ts");
   const dbPath = join(tmpdir(), ".lbug-saved-file-graph-patch-test-db.lbug");
   const configPath = join(tmpdir(), `sdl-saved-file-patch-${Date.now()}.json`);
   let repoDir = "";
@@ -81,7 +84,7 @@ describe("saved file graph patch", () => {
       createdAt: now,
     });
     await ladybugDb.upsertFile(conn, {
-      fileId: `${repoId}:src/example.ts`,
+      fileId: durableFileId,
       repoId,
       relPath: "src/example.ts",
       contentHash: "baseline-content-hash",
@@ -93,7 +96,7 @@ describe("saved file graph patch", () => {
       {
         symbolId: "scip-alpha",
         repoId,
-        fileId: `${repoId}:src/example.ts`,
+        fileId: durableFileId,
         kind: "function",
         name: "alpha",
         exported: true,
@@ -143,10 +146,9 @@ describe("saved file graph patch", () => {
     else process.env.SDL_CONFIG_PATH = prevConfigPath;
   });
 
-  it("updates durable ladybug state on save without repo-wide reindex", async () => {
-    const firstSave = await handleBufferPush({
+  it("preserves the durable provider file identity across saved-file patches", async () => {
+    const patched = await patchSavedFile({
       repoId,
-      eventType: "save",
       filePath: "src/example.ts",
       content: [
         "export function alpha() {",
@@ -159,16 +161,26 @@ describe("saved file graph patch", () => {
       ].join("\n"),
       language: "typescript",
       version: 2,
-      dirty: false,
-      timestamp: "2026-03-07T12:10:00.000Z",
     });
-    await waitForDefaultLiveIndexIdle();
-    assert.deepStrictEqual(firstSave.warnings, []);
+    assert.equal(patched.fileId, durableFileId);
+    assert.equal(patched.parseResult.file.fileId, durableFileId);
+    assert.ok(patched.parseResult.symbols.length > 0);
+    assert.ok(
+      patched.parseResult.symbols.every(
+        (symbol) => symbol.fileId === durableFileId,
+      ),
+    );
 
     const conn = await getLadybugConn();
     const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/example.ts");
     assert.ok(file);
-    const symbols = await ladybugDb.getSymbolsByFile(conn, file!.fileId);
+    assert.equal(file.fileId, durableFileId);
+    const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
+    assert.ok(symbols.every((symbol) => symbol.fileId === durableFileId));
+    const duplicateFiles = await ladybugDb.getFilesByIds(conn, [
+      `${repoId}:src/example.ts`,
+    ]);
+    assert.equal(duplicateFiles.has(`${repoId}:src/example.ts`), false);
     const names = symbols.map((symbol) => symbol.name).sort();
     assert.deepStrictEqual(names, ["alpha", "gamma"]);
     const alpha = symbols.find((symbol) => symbol.name === "alpha");

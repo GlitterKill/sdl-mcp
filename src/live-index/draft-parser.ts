@@ -87,7 +87,13 @@ export async function parseDraftFile(
   input: DraftParseInput,
 ): Promise<DraftParseResult> {
   const relPath = normalizePath(input.filePath);
-  const fileId = `${input.repoId}:${relPath}`;
+  const conn = await getLadybugConn();
+  const durableFile = await ladybugDb.getFileByRepoPath(
+    conn,
+    input.repoId,
+    relPath,
+  );
+  const fileId = durableFile?.fileId ?? `${input.repoId}:${relPath}`;
   const ext = relPath.includes(".")
     ? relPath.slice(relPath.lastIndexOf(".") + 1)
     : "";
@@ -106,12 +112,6 @@ export async function parseDraftFile(
   };
 
   let durableSymbolsByMatchKey = new Map<DurableSymbolMatchKey, SymbolRow>();
-  const conn = await getLadybugConn();
-  const durableFile = await ladybugDb.getFileByRepoPath(
-    conn,
-    input.repoId,
-    relPath,
-  );
   if (durableFile) {
     const durableSymbols = await ladybugDb.getSymbolsByFile(
       conn,
