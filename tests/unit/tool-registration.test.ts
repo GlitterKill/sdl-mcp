@@ -81,12 +81,24 @@ describe("MCP tool registration", () => {
   });
 
   it("registers stable tools with output schemas", () => {
-    const { tools, server } = makeFakeServer();
+    const { tools: stableTools, server: stableServer } = makeFakeServer();
+    registerTools(stableServer as any);
 
-    registerTools(server as any);
+    const { tools: codeTools, server: codeServer } = makeFakeServer();
+    registerTools(
+      codeServer as any,
+      {},
+      undefined,
+      { enabled: true, exclusive: true } as any,
+    );
 
-    const repoStatus = tools.find((tool) => tool.name === "sdl.repo.status");
+    const repoStatus = stableTools.find((tool) => tool.name === "sdl.repo.status");
+    const actionSearch = codeTools.find((tool) => tool.name === "sdl.action.search");
+    const manual = codeTools.find((tool) => tool.name === "sdl.manual");
+
     assert.ok(repoStatus?.outputSchema, "expected repo.status output schema");
+    assert.ok(actionSearch?.outputSchema, "expected action.search output schema");
+    assert.ok(manual?.outputSchema, "expected manual output schema");
   });
 
 

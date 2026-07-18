@@ -10,13 +10,13 @@ SDL-MCP is the normal repository interface. Native filesystem and shell tools ar
 
 1. Confirm server and repository state with `repo.status`.
 2. For code context, use the cheapest SDL surface that can answer the question:
-   - Use `sdl.context` for explain, debug, review, implement, understand, or investigate prompts. For explain/debug, try `options.answerFirst: true` before card-heavy context.
+   - Use `sdl.context` for explain, debug, review, implement, understand, or investigate prompts. For explain/debug, try `options.answerFirst: true` before card-heavy context. When summary coverage is insufficient, the fallback includes a concise `answer` explaining why and a `nextBestAction`; retry without `options.answerFirst` to inspect `finalEvidence`.
    - Use `sdl.retrieve` for one-hop retrieval: `symbolSearch`, `symbolGetCard`, `sliceBuild`, `codeSkeleton`, `codeHotPath`, or a bounded `codeNeedWindow`.
    - Use `sdl.workflow` only when steps need result piping, transforms, runtime execution, batch operations, or mutations.
 3. Never use `file.read` for indexed source. It is only for non-indexed files such as docs, configs, templates, JSON, and YAML.
 4. Use `options.contextMode: "precise"` for named symbols, exact paths, narrow bugs, focused reviews, and implementation follow-up.
 5. Use `options.contextMode: "broad"` for subsystem mapping, behavior tracing, unfamiliar areas, or broad investigation.
-6. Keep `responseMode: "auto"` for potentially large responses. If a response handle is returned, use `response.get` only for the needed excerpt. For JSON artifacts, prefer `jsonPath` with dot or bracket array paths, add `offset`/`limit` for large arrays, and use `raw: true` only when byte-slicing JSON text is intentional.
+6. Keep `responseMode: "auto"` for potentially large responses. If a response handle is returned, use `response.get` only for the needed excerpt. For JSON artifacts, prefer `jsonPath` with dot or bracket array paths, add `offset`/`limit` for large arrays, and use `raw: true` only when byte-slicing JSON text is intentional. A missing path reports the available top-level keys and returns a same-handle `response.get` recovery call, preferring `finalEvidence` and then `summary`.
 7. Use focused `sdl.manual` only when composing a non-obvious request. Use `sdl.action.search` when the correct SDL action is unclear.
 
 Do not run `index.refresh` by habit. Refresh only when `repo.status` shows stale or missing indexed state and the task depends on current code.

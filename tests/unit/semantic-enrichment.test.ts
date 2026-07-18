@@ -256,6 +256,6 @@ describe("semantic enrichment bridge core", () => {
     assert.equal(run.cacheHit, true);
     assert.equal(run.canAffectPass2, true);
     assert.equal(run.selected, true);
-    assert.equal(run.precisionScore, 0);
+    assert.equal("precisionScore" in run, false);
   });
 });

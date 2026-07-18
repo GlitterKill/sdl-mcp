@@ -39,6 +39,10 @@ test("falls back when answer-first summary coverage is too low", () => {
   assert.deepEqual(result, {
     kind: "fallback",
     answerFirstFallback: INSUFFICIENT_SUMMARY_COVERAGE,
+    answer:
+      "Answer-first could not produce a reliable answer because too few symbol cards have high-quality summaries.",
+    nextBestAction:
+      "Retry sdl.context without options.answerFirst to inspect finalEvidence.",
   });
 });
 

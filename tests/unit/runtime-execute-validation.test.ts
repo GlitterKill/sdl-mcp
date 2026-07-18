@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { RuntimeConfigSchema } from "../../dist/config/types.js";
-import { handleRuntimeExecute } from "../../dist/mcp/tools/runtime.js";
+import {
+  _runtimeToolTesting,
+  handleRuntimeExecute,
+} from "../../dist/mcp/tools/runtime.js";
 import {
   getRuntime,
   getRuntimeDefaultExecutable,
@@ -41,5 +44,16 @@ describe("runtime.execute validation", () => {
       args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "script.ps1"],
     });
     assert.ok(RuntimeConfigSchema.parse({}).allowedRuntimes.includes("powershell"));
+  });
+
+  it("recommends the matching shell runtime for Windows command wrappers", () => {
+    const recovery = _runtimeToolTesting.runtimeExecutableRecovery({
+      runtime: "node",
+      executable: "npx.cmd",
+      args: ["ctx7@latest", "library", "zod"],
+    });
+
+    assert.match(recovery ?? "", /runtime:\s*"shell"/);
+    assert.match(recovery ?? "", /npx\.cmd ctx7@latest library zod/);
   });
 });

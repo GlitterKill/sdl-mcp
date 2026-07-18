@@ -1947,4 +1947,43 @@ describe("ContextEngine confidence-gated retrieval", () => {
     assert.ok(capturedContext.includes("symbol:semantic-hit"));
     assert.deepEqual(capturedSeeds, seedResult.candidates);
   });
+
+  it("drops zero-match evidence and keeps evidence bodies out of the summary", async () => {
+    const uniqueBody = "UNIQUE_SYMBOL_BODY_FOR_FINAL_EVIDENCE";
+    const evidence: Evidence[] = [
+      {
+        type: "symbolCard",
+        reference: "symbol:target",
+        summary: `Symbol card: ${uniqueBody}`,
+        timestamp: Date.now(),
+      },
+      {
+        type: "hotPath",
+        reference: "hotpath:empty",
+        summary: "Hot path (0 matches, 12 lines): no matching identifiers",
+        timestamp: Date.now() + 1,
+      },
+    ];
+
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        options: { contextMode: "precise", evidenceOptimization: "budgeted" },
+      }),
+    );
+
+    assert.deepEqual(
+      result.finalEvidence.map((item) => item.reference),
+      ["symbol:target"],
+    );
+    assert.doesNotMatch(result.summary, new RegExp(uniqueBody));
+    assert.match(result.summary, /finalEvidence/);
+  });
 });

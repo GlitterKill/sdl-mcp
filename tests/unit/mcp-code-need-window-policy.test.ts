@@ -860,6 +860,20 @@ describe("code.needWindow policy remediation", () => {
     assert.ok(anchored.code.includes("registerTool()"));
     assert.equal(anchored.code.includes("registerToolFactory"), false);
 
+    const multiIdentifier = await handleCodeNeedWindow({
+      repoId: "repo-test",
+      symbolId: "sym-large-example",
+      reason: "inspect the requested identifier that is absent from the initial block",
+      expectedLines: 8,
+      maxTokens: 500,
+      identifiersToFind: ["registerToolFactory", "tailAnchor"],
+      granularity: "block",
+    });
+
+    assert.equal(multiIdentifier.approved, true);
+    if (!multiIdentifier.approved) throw new Error("Expected approved response");
+    assert.ok(multiIdentifier.code.includes("tailAnchor()"));
+
     const continued = await handleCodeNeedWindow({
       repoId: "repo-test",
       symbolId: "sym-large-example",

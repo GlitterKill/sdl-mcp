@@ -189,8 +189,8 @@ describe("agent-facing SDL tool contracts", () => {
           edgesUpgraded: 0,
           edgesReplaced: 0,
           edgesSkipped: 0,
-          diagnosticsCount: 0,
-          metadataJson: "{\"internal\":true}",
+          diagnosticsCount: 3,
+          metadataJson: "{\"diagnosticsBySeverity\":{\"error\":1,\"warning\":2,\"information\":0,\"hint\":0}}",
         },
         {
           runId: "run-2",
@@ -218,6 +218,14 @@ describe("agent-facing SDL tool contracts", () => {
     assert.equal("metadataJson" in compact.lastRuns[0], false);
     assert.equal("documentsProcessed" in compact.lastRuns[0], false);
     assert.equal(compact.lastRuns.length, 1);
+    assert.equal(compact.lastRuns[0]?.precisionScore, null);
+    assert.equal(compact.lastRuns[0]?.precisionMeasurement, "unmeasured");
+    assert.deepEqual(compact.lastRuns[0]?.diagnosticsBySeverity, {
+      error: 1,
+      warning: 2,
+      information: 0,
+      hint: 0,
+    });
   });
 
   it("buffer.status omits null diagnostic fields", () => {
@@ -309,5 +317,21 @@ describe("agent-facing SDL tool contracts", () => {
       false,
     );
     assert.equal("preconditions" in symbolPreview, false);
+  });
+
+  it("does not warn for a disposable file write with a literal target", () => {
+    const warnings = _runtimeToolTesting.detectQuotingWarnings({
+      repoId: "r",
+      runtime: "node",
+      args: [],
+      code: 'writeFileSync("fixture.ts", "export const value = 1;")',
+    });
+
+    assert.equal(
+      (warnings ?? []).some((warning) =>
+        warning.startsWith("Runtime write scripts"),
+      ),
+      false,
+    );
   });
 });

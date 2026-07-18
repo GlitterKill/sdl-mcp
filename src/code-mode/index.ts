@@ -348,6 +348,26 @@ export function handleManual(
   };
 }
 
+const ACTION_SEARCH_OUTPUT_SCHEMA = z.object({
+  actions: z.array(z.record(z.string(), z.unknown())).optional(),
+  summary: z.record(z.string(), z.unknown()).optional(),
+  total: z.number().int().nonnegative().optional(),
+  hasMore: z.boolean().optional(),
+  tokenEstimate: z.number().int().nonnegative().optional(),
+  disabledHint: z.record(z.string(), z.unknown()).optional(),
+  schemaHint: z.string().optional(),
+  autoEnabled: z.record(z.string(), z.unknown()).optional(),
+  nextAction: z.record(z.string(), z.unknown()).optional(),
+});
+
+const MANUAL_OUTPUT_SCHEMA = z.object({
+  manual: z.string().optional(),
+  actions: z.array(z.record(z.string(), z.unknown())).optional(),
+  tokenEstimate: z.number().int().nonnegative().optional(),
+  unknownActions: z.array(z.string()).optional(),
+  warning: z.string().optional(),
+});
+
 export function registerActionSearchTool(
   server: MCPServer,
   services: ToolServices,
@@ -384,6 +404,8 @@ export function registerActionSearchTool(
       required: ["query"],
       additionalProperties: false,
     },
+    undefined,
+    ACTION_SEARCH_OUTPUT_SCHEMA,
   );
 }
 
@@ -439,6 +461,8 @@ export function registerCodeModeTools(
       },
       additionalProperties: false,
     },
+    undefined,
+    MANUAL_OUTPUT_SCHEMA,
   );
 
   server.registerTool(

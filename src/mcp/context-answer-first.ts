@@ -49,6 +49,8 @@ export type AnswerFirstResult =
   | {
       kind: "fallback";
       answerFirstFallback: typeof INSUFFICIENT_SUMMARY_COVERAGE;
+      answer: string;
+      nextBestAction: string;
     }
   | { kind: "ignored" };
 
@@ -67,6 +69,10 @@ export function buildAnswerFirstResponse(
     return {
       kind: "fallback",
       answerFirstFallback: INSUFFICIENT_SUMMARY_COVERAGE,
+      answer:
+        "Answer-first could not produce a reliable answer because too few symbol cards have high-quality summaries.",
+      nextBestAction:
+        "Retry sdl.context without options.answerFirst to inspect finalEvidence.",
     };
   }
 

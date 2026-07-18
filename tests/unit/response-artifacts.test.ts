@@ -1031,4 +1031,52 @@ describe("response artifact maxTokens enforcement", () => {
 
     assert.strictEqual(read.range.returnedBytes, 1200);
   });
+
+  it("returns same-handle recovery when a JSON path is missing", async () => {
+    const baseDir = makeTempDir();
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload: {
+        summary: "compact summary",
+        finalEvidence: [{ reference: "symbol:target", summary: "target" }],
+      },
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "fedcbafedcbafedc",
+    });
+
+    assert.strictEqual(stored.responseMode, "handle");
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          jsonPath: "answer",
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        const recovery = error as ValidationError & {
+          details?: string[];
+          fallbackTools?: string[];
+          nextCalls?: Array<{ action: string; args: Record<string, unknown> }>;
+        };
+        assert.match(recovery.message, /jsonPath not found/);
+        assert.match(recovery.details?.join(" ") ?? "", /finalEvidence/);
+        assert.deepEqual(recovery.fallbackTools, ["response.get"]);
+        assert.deepEqual(recovery.nextCalls?.[0], {
+          action: "response.get",
+          args: {
+            repoId: "repo-a",
+            handle: stored.payload.handle,
+            jsonPath: "finalEvidence",
+            offset: 0,
+            limit: 5,
+          },
+        });
+        return true;
+      },
+    );
+  });
 });

@@ -736,7 +736,45 @@ export async function readResponseArtifact(
     const parsed = JSON.parse(decompressed.toString("utf-8")) as unknown;
     const extractedContent = extractJsonPath(parsed, opts.jsonPath);
     if (extractedContent === undefined) {
-      throw new Error(`jsonPath not found: ${opts.jsonPath}`);
+      const topLevel =
+        typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : undefined;
+      const availableKeys = topLevel ? Object.keys(topLevel).sort() : [];
+      const preferredPath = availableKeys.includes("finalEvidence")
+        ? "finalEvidence"
+        : availableKeys.includes("summary")
+          ? "summary"
+          : availableKeys[0];
+      const preferredContent = preferredPath ? topLevel?.[preferredPath] : undefined;
+      throw Object.assign(
+        new ValidationError(`jsonPath not found: ${opts.jsonPath}`),
+        {
+          details: [
+            `Available top-level keys: ${availableKeys.join(", ") || "(none)"}`,
+          ],
+          fallbackTools: ["response.get"],
+          fallbackRationale:
+            "Retry response.get against the same artifact handle with an available JSON path.",
+          ...(preferredPath
+            ? {
+                nextCalls: [
+                  {
+                    action: "response.get",
+                    args: {
+                      repoId: opts.repoId,
+                      handle: opts.handle,
+                      jsonPath: preferredPath,
+                      ...(Array.isArray(preferredContent)
+                        ? { offset: 0, limit: 5 }
+                        : {}),
+                    },
+                  },
+                ],
+              }
+            : {}),
+        },
+      );
     }
 
     const pagingRequested =

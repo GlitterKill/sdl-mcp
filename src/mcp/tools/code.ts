@@ -926,28 +926,32 @@ export async function handleCodeNeedWindow(
         if (fileStat.size <= MAX_FILE_BYTES) {
           const fileContent = await readFile(resolvedPath, "utf-8");
           const fileLines = fileContent.replaceAll("\r\n", "\n").split("\n");
-          const idLineNumbers: number[] = [];
+          const firstLineByIdentifier = new Map<string, number>();
           for (
             let ln = symbolRange.startLine;
             ln <= Math.min(symbolRange.endLine, fileLines.length);
             ln++
           ) {
             const line = fileLines[ln - 1];
-            if (
-              line &&
-              findMatchedIdentifiersInWindow(
-                line,
-                request.identifiersToFind,
-              ).length > 0
-            ) {
-              idLineNumbers.push(ln);
+            if (!line) continue;
+            for (const identifier of findMatchedIdentifiersInWindow(
+              line,
+              request.identifiersToFind,
+            )) {
+              if (!firstLineByIdentifier.has(identifier)) {
+                firstLineByIdentifier.set(identifier, ln);
+              }
             }
           }
-          const anchorLine = idLineNumbers[0];
-          if (
-            anchorLine !== undefined &&
-            anchorLine >= symbolRange.startLine + maxLines
-          ) {
+          const initialWindowEnd = symbolRange.startLine + maxLines - 1;
+          const missingIdentifier = request.identifiersToFind.find((identifier) => {
+            const line = firstLineByIdentifier.get(identifier);
+            return line !== undefined && line > initialWindowEnd;
+          });
+          const anchorLine = missingIdentifier
+            ? firstLineByIdentifier.get(missingIdentifier)
+            : undefined;
+          if (anchorLine !== undefined) {
             const halfWindow = Math.floor(maxLines / 2);
             const centeredStart = Math.max(
               symbolRange.startLine,

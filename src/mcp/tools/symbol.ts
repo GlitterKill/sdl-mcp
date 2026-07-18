@@ -673,7 +673,9 @@ export async function handleSymbolSearch(
             return tokens.length >= 2
               ? `No close matches found. Try individual terms: ${tokens.map((t) => `"${t}"`).join(", ")}`
               : tokens.length === 1
-                ? `No close matches found. Try: "${tokens[0]}" or use a wildcard like "${tokens[0]}*".`
+                ? tokens[0]?.toLocaleLowerCase() === query.trim().toLocaleLowerCase()
+                  ? `No close matches found. Try a wildcard like "${tokens[0]}*" or a broader term.`
+                  : `No close matches found. Try: "${tokens[0]}" or use a wildcard like "${tokens[0]}*".`
                 : "No close matches found. Try broader terms or use kinds filter.";
           })()
       : camelFallbackUsed

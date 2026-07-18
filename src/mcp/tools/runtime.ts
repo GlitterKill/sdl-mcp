@@ -178,6 +178,22 @@ function hasUnbalancedQuotes(text: string): boolean {
   return quote !== undefined;
 }
 
+function runtimeExecutableRecovery(
+  request: Pick<RuntimeExecuteRequest, "runtime" | "executable" | "args">,
+): string | undefined {
+  if (
+    request.runtime !== "node" ||
+    !request.executable ||
+    !/\.(?:cmd|bat)$/i.test(request.executable)
+  ) {
+    return undefined;
+  }
+  const command = [request.executable, ...request.args]
+    .map((part) => (/\s/.test(part) ? JSON.stringify(part) : part))
+    .join(" ");
+  return `Retry the same command with { runtime: "shell", code: ${JSON.stringify(command)} }.`;
+}
+
 function detectQuotingWarnings(
   request: RuntimeExecuteRequest,
 ): string[] | undefined {
@@ -220,7 +236,11 @@ function detectQuotingWarnings(
       "Base64 decode/eval command workarounds add token overhead and hide intent; prefer runtime.execute stdin or searchEditPreview identifier/structural/operations[] targeting.",
     );
   }
-  if (!hasStdin && /fs\.writeFileSync|writeFileSync\s*\(/.test(commandText)) {
+  const writesFile = /fs\.writeFileSync|writeFileSync\s*\(/.test(commandText);
+  const hasExplicitLiteralTarget =
+    /(?:fs\.)?writeFileSync\s*\(\s*["'`][^"'\`]+["'`]/.test(commandText);
+  const readsExistingFile = /fs\.readFileSync|readFileSync\s*\(/.test(commandText);
+  if (!hasStdin && writesFile && (readsExistingFile || !hasExplicitLiteralTarget)) {
     warnings.add(
       "Runtime write scripts without stdin are fragile for multiline edits; prefer searchEditPreview identifier/structural/operations[] targeting or pass payloads through runtime.execute stdin.",
     );
@@ -365,7 +385,11 @@ export function generateIntentExcerpts(
   return excerpts.filter((excerpt) => excerpt.content.length > 0);
 }
 
-export const _runtimeToolTesting = { generateIntentExcerpts };
+export const _runtimeToolTesting = {
+  detectQuotingWarnings,
+  generateIntentExcerpts,
+  runtimeExecutableRecovery,
+};
 
 // ============================================================================
 // Excerpt Generation
@@ -608,6 +632,7 @@ export async function handleRuntimeExecute(
   });
 
   if (policyDecision.decision === "deny") {
+    const executableRecovery = runtimeExecutableRecovery(request);
     return finish({
       status: "denied",
       exitCode: null,
@@ -624,7 +649,10 @@ export async function handleRuntimeExecute(
       },
       policyDecision: {
         auditHash: policyDecision.auditHash,
-        deniedReasons: policyDecision.deniedReasons,
+        deniedReasons: [
+          ...(policyDecision.deniedReasons ?? []),
+          ...(executableRecovery ? [executableRecovery] : []),
+        ],
       },
     });
   }

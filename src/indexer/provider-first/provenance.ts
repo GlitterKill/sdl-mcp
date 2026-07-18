@@ -45,10 +45,16 @@ export function providerFactsToSemanticProvenanceRecords(
   );
   const diagnostics = [...directDiagnostics, ...coverageDiagnostics];
   const diagnosticsByRun = countDiagnosticsByRun(diagnostics);
+  const diagnosticSeveritiesByRun = summarizeDiagnosticSeveritiesByRun(diagnostics);
 
   return {
     providerRuns: facts.providerRuns.map((run) =>
-      providerRunFactToSemanticProviderRun(run, facts, diagnosticsByRun),
+      providerRunFactToSemanticProviderRun(
+        run,
+        facts,
+        diagnosticsByRun,
+        diagnosticSeveritiesByRun,
+      ),
     ),
     diagnostics,
   };
@@ -58,6 +64,10 @@ function providerRunFactToSemanticProviderRun(
   run: ProviderRunFact,
   facts: ProviderFactSet,
   diagnosticsByRun: ReadonlyMap<string, number>,
+  diagnosticSeveritiesByRun: ReadonlyMap<
+    string,
+    Record<SemanticDiagnostic["severity"], number>
+  >,
 ): SemanticProviderRunRecord {
   return {
     runId: run.runId,
@@ -79,13 +89,18 @@ function providerRunFactToSemanticProviderRun(
     edgesReplaced: 0,
     edgesSkipped: 0,
     diagnosticsCount: diagnosticsByRun.get(run.runId) ?? run.diagnosticCount,
-    precisionScore: 0,
     cacheHit: false,
     canAffectPass2: run.status === "succeeded",
     selected: true,
     metadataJson: JSON.stringify({
       schemaVersion: 1,
       coverage: summarizeCoverageForProvider(run, facts.coverage),
+      diagnosticsBySeverity: diagnosticSeveritiesByRun.get(run.runId) ?? {
+        error: 0,
+        warning: 0,
+        information: 0,
+        hint: 0,
+      },
     }),
     error: run.errorMessage,
   };
@@ -296,6 +311,26 @@ function countDiagnosticsByRun(
     counts.set(diagnostic.runId, (counts.get(diagnostic.runId) ?? 0) + 1);
   }
   return counts;
+}
+
+function summarizeDiagnosticSeveritiesByRun(
+  diagnostics: readonly SemanticDiagnostic[],
+): Map<string, Record<SemanticDiagnostic["severity"], number>> {
+  const summaries = new Map<
+    string,
+    Record<SemanticDiagnostic["severity"], number>
+  >();
+  for (const diagnostic of diagnostics) {
+    const summary = summaries.get(diagnostic.runId) ?? {
+      error: 0,
+      warning: 0,
+      information: 0,
+      hint: 0,
+    };
+    summary[diagnostic.severity] += 1;
+    summaries.set(diagnostic.runId, summary);
+  }
+  return summaries;
 }
 
 function summarizeCoverageForProvider(

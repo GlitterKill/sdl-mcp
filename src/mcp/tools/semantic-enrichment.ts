@@ -24,6 +24,46 @@ export async function handleSemanticEnrichmentRefresh(
   return refreshSemanticEnrichment(request, loadConfig());
 }
 
+type DiagnosticSeveritySummary = Record<
+  "error" | "warning" | "information" | "hint",
+  number
+>;
+
+function diagnosticSeveritySummary(
+  metadataJson: string | undefined,
+): DiagnosticSeveritySummary | null {
+  if (!metadataJson) return null;
+  try {
+    const parsed: unknown = JSON.parse(metadataJson);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const raw = (parsed as Record<string, unknown>).diagnosticsBySeverity;
+    if (typeof raw !== "object" || raw === null) return null;
+    const record = raw as Record<string, unknown>;
+    const values = [
+      record.error,
+      record.warning,
+      record.information,
+      record.hint,
+    ];
+    if (
+      !values.every(
+        (value) =>
+          typeof value === "number" && Number.isInteger(value) && value >= 0,
+      )
+    ) {
+      return null;
+    }
+    return {
+      error: record.error as number,
+      warning: record.warning as number,
+      information: record.information as number,
+      hint: record.hint as number,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function compactSemanticEnrichmentStatusForAgent(
   result: SemanticEnrichmentStatusResult,
   limit = DEFAULT_SEMANTIC_STATUS_LIMIT,
@@ -59,7 +99,10 @@ export function compactSemanticEnrichmentStatusForAgent(
       symbolsMatched: run.symbolsMatched,
       edgesCreated: run.edgesCreated,
       diagnosticsCount: run.diagnosticsCount,
-      precisionScore: run.precisionScore,
+      diagnosticsBySeverity: diagnosticSeveritySummary(run.metadataJson),
+      precisionScore: run.precisionScore ?? null,
+      precisionMeasurement:
+        run.precisionScore === undefined ? "unmeasured" : "measured",
     })),
   };
 }

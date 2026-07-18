@@ -7127,9 +7127,18 @@ describe("provider-first indexing foundation", () => {
     assert.equal(records.providerRuns.length, 1);
     assert.equal(records.providerRuns[0]?.status, "completed");
     assert.equal(records.providerRuns[0]?.diagnosticsCount, 3);
+    assert.equal(records.providerRuns[0]?.precisionScore, undefined);
     assert.match(
       records.providerRuns[0]?.metadataJson ?? "",
       /callProofUnavailableReferences/,
+    );
+    const metadata = JSON.parse(records.providerRuns[0]?.metadataJson ?? "{}");
+    assert.equal(
+      Object.values(metadata.diagnosticsBySeverity).reduce(
+        (total: number, count) => total + Number(count),
+        0,
+      ),
+      records.diagnostics.length,
     );
     assert.equal(records.diagnostics.length, 3);
     assert.deepEqual(

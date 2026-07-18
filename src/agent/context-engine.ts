@@ -125,12 +125,18 @@ function optimizeEvidenceForResponse(
   mode: EvidenceOptimizationMode | undefined,
   tokenBudget?: number,
 ): Evidence[] {
+  // Empty hot-path probes are control-flow diagnostics, not useful evidence.
+  const usefulEvidence = evidence.filter(
+    (item) =>
+      item.type !== "hotPath" ||
+      !/^Hot path \(0 matches\b/.test(item.summary ?? ""),
+  );
   if (mode !== "dedupe" && mode !== "budgeted" && mode !== "global") {
-    return evidence;
+    return usefulEvidence;
   }
 
   const exactDeduped = dedupeExactEvidence(
-    evidence.map(normalizeEvidenceCandidate),
+    usefulEvidence.map(normalizeEvidenceCandidate),
   );
   const shouldPreserveHotPathCards = mode === "budgeted" || mode === "global";
   const dominated = applyEvidenceDominance(exactDeduped, {
@@ -901,26 +907,17 @@ export class ContextEngine {
       parts.push("Actions: " + actionLines.join("; "));
     }
 
-    if (evidence.length > 0 && extra.compactEvidence) {
+    if (evidence.length > 0) {
       parts.push(
         `Evidence: ${summarizeEvidenceTypeCounts(evidence)}. See finalEvidence for details.`,
       );
     }
 
-    // Build a readable paragraph from evidence summaries when callers want
-    // narrative detail. Global optimization keeps this compact because the
-    // same summaries already live in finalEvidence.
+    // Keep summaries compact and point callers to the canonical evidence bodies.
     if (evidence.length > 0 && !extra.compactEvidence) {
-      const seen = new Set<string>();
-      const snippets: string[] = [];
-      for (const e of evidence) {
-        if (!e.summary || seen.has(e.summary)) continue;
-        seen.add(e.summary);
-        snippets.push(e.summary);
-      }
-      if (snippets.length > 0) {
-        parts.push("Findings: " + snippets.join(". "));
-      }
+      parts.push(
+        "Evidence references: " + evidence.map((item) => item.reference).join(", "),
+      );
     }
 
     return parts.join("\n\n");

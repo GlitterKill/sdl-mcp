@@ -310,7 +310,7 @@ export function scipResultToProviderRun(params: {
     edgesReplaced: params.result.edgesReplaced,
     edgesSkipped: params.result.skippedSymbols,
     diagnosticsCount: 0,
-    precisionScore: edgesTouched > 0 ? precisionScore : 0,
+    ...(edgesTouched > 0 ? { precisionScore } : {}),
     cacheHit,
     canAffectPass2: true,
     selected: true,

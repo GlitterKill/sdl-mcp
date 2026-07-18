@@ -796,7 +796,6 @@ function buildFailedRun(params: {
     edgesReplaced: 0,
     edgesSkipped: params.candidateCount + params.skippedCount,
     diagnosticsCount: 0,
-    precisionScore: 0,
     error:
       params.error instanceof Error
         ? params.error.message
@@ -833,7 +832,6 @@ function buildSkippedRun(params: {
     edgesReplaced: 0,
     edgesSkipped: params.candidateCount + params.skippedCount,
     diagnosticsCount: 0,
-    precisionScore: 0,
     error: params.reason,
   };
 }

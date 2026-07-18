@@ -235,6 +235,20 @@ describe("symbol.search identifier near misses", () => {
     assert.deepEqual(getResultRows(search), []);
     assert.equal(search.nextBestAction, undefined);
   });
+
+  it("does not suggest the same normalized single-token query again", async () => {
+    const search = await handleSymbolSearch({
+      repoId,
+      query: "absenttoken",
+      limit: 5,
+      semantic: false,
+      wireFormat: "json",
+    });
+
+    assert.deepEqual(getResultRows(search), []);
+    assert.doesNotMatch(search.suggestion ?? "", /Try: "absenttoken"/);
+    assert.match(search.suggestion ?? "", /absenttoken\*/);
+  });
 });
 
 function expectedPathRecovery(query: string): {

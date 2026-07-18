@@ -25,7 +25,6 @@ import { sessionContentLedger } from "../session-dedupe.js";
 import { markShortIdsDelivered } from "../wire/packed/short-ids.js";
 import {
   buildAnswerFirstResponse,
-  INSUFFICIENT_SUMMARY_COVERAGE,
   type AnswerFirstCard,
 } from "../context-answer-first.js";
 import {
@@ -679,8 +678,11 @@ export async function handleAgentContext(
       }
 
       if (answerFirst.kind === "fallback") {
-        (enrichedResponse as Record<string, unknown>).answerFirstFallback =
-          INSUFFICIENT_SUMMARY_COVERAGE;
+        Object.assign(enrichedResponse as Record<string, unknown>, {
+          answerFirstFallback: answerFirst.answerFirstFallback,
+          answer: answerFirst.answer,
+          nextBestAction: answerFirst.nextBestAction,
+        });
       }
     }
     const cardDetail = isRecord(request.options)
