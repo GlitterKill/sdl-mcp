@@ -12,6 +12,7 @@ import {
   type RuntimeQueryOutputResponse,
 } from "../tools.js";
 import { queryArtifactContent } from "../../runtime/artifacts.js";
+import { projectRuntimeOutputExcerpts } from "../runtime-output-projection.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
 import { attachRawContext } from "../token-usage.js";
@@ -26,22 +27,34 @@ export async function handleRuntimeQueryOutput(
   const appConfig = loadConfig();
   const runtimeConfig = RuntimeConfigSchema.parse(appConfig.runtime ?? {});
 
+  const artifactResult = await queryArtifactContent(
+    request.artifactHandle,
+    request.queryTerms,
+    {
+      baseDir: runtimeConfig.artifactBaseDir,
+      maxExcerpts: request.maxExcerpts,
+      contextLines: request.contextLines,
+      stream: request.stream,
+      cursor: request.cursor,
+      lineRange: request.lineRange,
+    },
+  );
   const {
-    excerpts,
     totalLines,
     totalBytes,
     searchedStreams,
     matchStatus,
     matchCount,
     nextCursor,
-  } = await queryArtifactContent(request.artifactHandle, request.queryTerms, {
-    baseDir: runtimeConfig.artifactBaseDir,
-    maxExcerpts: request.maxExcerpts,
-    contextLines: request.contextLines,
-    stream: request.stream,
-    cursor: request.cursor,
-    lineRange: request.lineRange,
-  });
+  } = artifactResult;
+  const excerpts =
+    request.view === "raw"
+      ? artifactResult.excerpts
+      : projectRuntimeOutputExcerpts(
+          artifactResult.excerpts,
+          artifactResult.runtime,
+          artifactResult.commandSummary,
+        );
 
   logger.debug("runtime.queryOutput completed", {
     artifactHandle: request.artifactHandle,

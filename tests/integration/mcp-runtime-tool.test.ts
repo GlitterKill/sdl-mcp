@@ -614,4 +614,127 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     assert.strictEqual(parsed.runtime, "rust");
   });
 });
+
+
+  it("projects runtime query output for models while preserving raw recovery", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+    const { handleRuntimeQueryOutput } =
+      await import("../../dist/mcp/tools/runtime-query.js");
+    const { queryArtifactContent } =
+      await import("../../dist/runtime/artifacts.js");
+    const fixture = [
+      String.raw`F:\Claude\projects\sdl-mcp\sdl-mcp>node --test fixture`,
+      "not ok 1 - fails cleanly (12.34ms)",
+      "application retry took (12.34ms)",
+      String.raw`F:\interior>keep this`,
+    ];
+    const code = `console.log(${JSON.stringify(fixture)}.join("\\n"))`;
+    const run = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", code],
+      outputMode: "minimal",
+      persistOutput: true,
+      timeoutMs: 10000,
+    });
+
+    assert.ok(run.artifactHandle);
+    const raw = await handleRuntimeQueryOutput({
+      repoId,
+      artifactHandle: run.artifactHandle,
+      queryTerms: ["not ok"],
+      maxExcerpts: 1,
+      contextLines: 3,
+      stream: "stdout",
+      view: "raw",
+    });
+    const unprojected = await queryArtifactContent(
+      run.artifactHandle,
+      ["not ok"],
+      { maxExcerpts: 1, contextLines: 3, stream: "stdout" },
+    );
+    const { runtime: _runtime, commandSummary: _commandSummary, ...rawResult } =
+      unprojected;
+    const { _rawContext, ...rawResponse } = raw as typeof raw & {
+      _rawContext?: unknown;
+    };
+    assert.deepStrictEqual(rawResponse, {
+      artifactHandle: run.artifactHandle,
+      ...rawResult,
+    });
+
+    const model = await handleRuntimeQueryOutput({
+      repoId,
+      artifactHandle: run.artifactHandle,
+      queryTerms: ["not ok"],
+      maxExcerpts: 1,
+      contextLines: 3,
+      stream: "stdout",
+    });
+    const rawContent = raw.excerpts[0]?.content ?? "";
+    const modelContent = model.excerpts[0]?.content ?? "";
+
+    assert.match(rawContent, /F:\\Claude\\projects\\sdl-mcp\\sdl-mcp>/);
+    assert.match(rawContent, /not ok 1 - fails cleanly \(12\.34ms\)/);
+    assert.doesNotMatch(
+      modelContent,
+      /F:\\Claude\\projects\\sdl-mcp\\sdl-mcp>/,
+    );
+    assert.match(modelContent, /^not ok 1 - fails cleanly$/m);
+    assert.doesNotMatch(
+      modelContent,
+      /not ok 1 - fails cleanly \(12\.34ms\)/,
+    );
+    assert.match(modelContent, /application retry took \(12\.34ms\)/);
+    assert.match(modelContent, /F:\\interior>keep this/);
+    assert.strictEqual(model.excerpts[0]?.lineStart, 2);
+    assert.ok(
+      Buffer.byteLength(JSON.stringify(model)) <=
+        Buffer.byteLength(JSON.stringify(raw)),
+    );
+  });
+
+  it("uses the model projection for runtime summary and intent excerpts", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+    const fixture = [
+      String.raw`F:\Claude\projects\sdl-mcp\sdl-mcp>node --test fixture`,
+      "not ok 1 - fails cleanly (12.34ms)",
+      "application retry took (12.34ms)",
+    ];
+    const code = `console.log(${JSON.stringify(fixture)}.join("\\n"))`;
+    const summary = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", code],
+      outputMode: "summary",
+      persistOutput: false,
+      timeoutMs: 10000,
+    });
+    const intent = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", code],
+      outputMode: "intent",
+      queryTerms: ["fails cleanly"],
+      persistOutput: false,
+      timeoutMs: 10000,
+    });
+    const intentContent = intent.excerpts?.[0]?.content ?? "";
+
+    assert.doesNotMatch(
+      summary.stdoutSummary,
+      /F:\\Claude\\projects\\sdl-mcp\\sdl-mcp>/,
+    );
+    assert.match(summary.stdoutSummary, /^not ok 1 - fails cleanly$/m);
+    assert.match(summary.stdoutSummary, /application retry took \(12\.34ms\)/);
+    assert.doesNotMatch(
+      intentContent,
+      /F:\\Claude\\projects\\sdl-mcp\\sdl-mcp>/,
+    );
+    assert.match(intentContent, /^not ok 1 - fails cleanly$/m);
+    assert.match(intentContent, /application retry took \(12\.34ms\)/);
+  });
+
 });

@@ -3091,6 +3091,13 @@ export const RuntimeQueryOutputLineRangeSchema = z
 export const RuntimeQueryOutputRequestSchema = z
   .object({
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    view: z
+      .enum(["model", "raw"])
+      .optional()
+      .default("model")
+      .describe(
+        "model projects bounded excerpts for agent consumption; raw returns the existing unprojected bounded excerpt of the persisted, already-redacted artifact.",
+      ),
     artifactHandle: z
       .string()
       .min(1)

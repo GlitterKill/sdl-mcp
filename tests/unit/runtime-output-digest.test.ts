@@ -103,3 +103,61 @@ test("failures cap at 20 with truncatedFailures", () => {
   assert.equal(d.truncatedFailures, 5);
   assert.equal(d.summary, "25 errors in 25 files");
 });
+
+
+test("node:test deduplicates the Node 24 failing-tests replay", () => {
+  const stdout = [
+    "TAP version 13",
+    "✖ preserves durable file identity (12.34ms)",
+    "  AssertionError [ERR_ASSERTION]: durable file identity changed",
+    "✖ failing tests:",
+    "not ok 1 - preserves durable file identity (12.34ms)",
+    "ℹ tests 1",
+    "ℹ pass 0",
+    "ℹ fail 1",
+  ].join("\n");
+
+  const digest = buildOutputDigest({
+    command: "node --test",
+    stdout,
+    stderr: "",
+    exitCode: 1,
+  });
+
+  assert.equal(digest.failures.length, 1);
+  assert.deepEqual(digest.failures[0], {
+    name: "preserves durable file identity",
+    message: "AssertionError [ERR_ASSERTION]: durable file identity changed",
+  });
+  assert.equal(digest.summary, "1/1 tests failed");
+});
+
+test("node:test keeps distinct failures in first-seen order", () => {
+  const stdout = [
+    "✖ first failure (1.1ms)",
+    "  AssertionError: first assertion",
+    "✖ second failure (2.2ms)",
+    "  AssertionError: second assertion",
+    "✖ failing tests",
+    "not ok 1 - first failure (1.1ms)",
+    "not ok 2 - second failure (2.2ms)",
+    "ℹ tests 2",
+    "ℹ fail 2",
+  ].join("\n");
+
+  const digest = buildOutputDigest({
+    command: "node --test",
+    stdout,
+    stderr: "",
+    exitCode: 1,
+  });
+
+  assert.deepEqual(
+    digest.failures.map(({ name, message }) => ({ name, message })),
+    [
+      { name: "first failure", message: "AssertionError: first assertion" },
+      { name: "second failure", message: "AssertionError: second assertion" },
+    ],
+  );
+  assert.equal(digest.summary, "2/2 tests failed");
+});

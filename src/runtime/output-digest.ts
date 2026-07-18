@@ -135,13 +135,17 @@ function digestTsc(input: DigestInput): OutputDigest {
 
 function digestNodeTest(input: DigestInput): OutputDigest {
   const lines = `${input.stdout}\n${input.stderr}`.split("\n");
-  const failures: DigestFailure[] = [];
+  const failuresByName = new Map<string, DigestFailure>();
+
   for (let i = 0; i < lines.length; i++) {
     const failMatch =
       NODE_TEST_FAIL_LINE.exec(lines[i]) ??
       NODE_TEST_TAP_FAIL_LINE.exec(lines[i]);
     if (!failMatch) continue;
+
     const name = failMatch[1].replace(/\s*\(\d+(?:\.\d+)?ms\)\s*$/, "").trim();
+    if (/^failing tests:?$/i.test(name)) continue;
+
     let message = "";
     for (let j = i + 1; j < lines.length && j <= i + 20; j++) {
       const candidate = lines[j];
@@ -158,8 +162,23 @@ function digestNodeTest(input: DigestInput): OutputDigest {
         break;
       }
     }
-    failures.push({ name, message: message || `test failed: ${name}` });
+
+    const key = name.toLowerCase();
+    const existing = failuresByName.get(key);
+    if (!existing) {
+      failuresByName.set(key, {
+        name,
+        message: message || `test failed: ${name}`,
+      });
+    } else if (
+      message &&
+      existing.message === `test failed: ${existing.name}`
+    ) {
+      existing.message = message;
+    }
   }
+
+  const failures = [...failuresByName.values()];
   const total = /^ℹ tests (\d+)/m.exec(input.stdout)?.[1];
   const failed = /^ℹ fail (\d+)/m.exec(input.stdout)?.[1];
   const tapPlan = /^1\.\.(\d+)/m.exec(input.stdout)?.[1];

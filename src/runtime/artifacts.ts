@@ -441,6 +441,8 @@ export interface QueryArtifactExcerpt {
 }
 
 export interface QueryArtifactContentResult {
+  runtime?: string;
+  commandSummary?: string;
   excerpts: QueryArtifactExcerpt[];
   totalLines: number;
   totalBytes: number;
@@ -469,6 +471,13 @@ export async function queryArtifactContent(
   const maxExcerpts = options.maxExcerpts ?? 10;
   const contextLines = options.contextLines ?? 3;
   const maxLineLength = options.maxLineLength ?? 500;
+  const manifest = await readArtifactManifest(artifactHandle, options.baseDir);
+  const projectionMetadata = {
+    ...(manifest?.runtime ? { runtime: manifest.runtime } : {}),
+    ...(manifest?.commandSummary
+      ? { commandSummary: manifest.commandSummary }
+      : {}),
+  };
   const streamFilter =
     options.lineRange?.stream ?? options.cursor?.stream ?? options.stream ?? "both";
 
@@ -512,6 +521,7 @@ export async function queryArtifactContent(
     const lines = addStreamTotals(content, options.lineRange.stream);
     if (!lines) {
       return {
+        ...projectionMetadata,
         excerpts,
         totalLines,
         totalBytes,
@@ -536,6 +546,7 @@ export async function queryArtifactContent(
     }
 
     return {
+      ...projectionMetadata,
       excerpts,
       totalLines,
       totalBytes,
@@ -615,6 +626,7 @@ export async function queryArtifactContent(
   }
 
   return {
+    ...projectionMetadata,
     excerpts,
     totalLines,
     totalBytes,

@@ -1,7 +1,14 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  existsSync,
+  readFileSync,
+} from "fs";
 import { join } from "path";
+import { createHash } from "node:crypto";
 import { tmpdir } from "os";
 import { rmSync } from "fs";
 import {
@@ -446,3 +453,49 @@ describe("queryArtifactContent trust metadata", () => {
     assert.strictEqual(result.excerpts[0]?.content, "two\nthree");
   });
 });
+
+
+  it("returns manifest projection metadata without mutating persisted gzip bytes or hashes", async () => {
+    const baseDir = makeTempDir();
+    const artifact = await writeArtifact({
+      repoId: "projection-repo",
+      runtime: "node",
+      argsHash: "args",
+      commandSummary: "node --test [argCount=1]",
+      exitCode: 1,
+      signal: null,
+      durationMs: 10,
+      stdout: Buffer.from("prompt\nnot ok 1 - failure (12.34ms)\n", "utf8"),
+      stderr: Buffer.from("", "utf8"),
+      policyAuditHash: "audit",
+      artifactTtlHours: 1,
+      maxArtifactBytes: 1024 * 1024,
+      artifactBaseDir: baseDir,
+    });
+    const stdoutPath = join(artifact.artifactDir, "stdout.gz");
+    const beforeBytes = readFileSync(stdoutPath);
+    const beforeHash = createHash("sha256").update(beforeBytes).digest("hex");
+    const beforeManifest = await readArtifactManifest(
+      artifact.artifactHandle,
+      baseDir,
+    );
+
+    const result = await queryArtifactContent(
+      artifact.artifactHandle,
+      ["not ok"],
+      { baseDir, stream: "stdout", contextLines: 1 },
+    );
+
+    const afterBytes = readFileSync(stdoutPath);
+    const afterHash = createHash("sha256").update(afterBytes).digest("hex");
+    const afterManifest = await readArtifactManifest(
+      artifact.artifactHandle,
+      baseDir,
+    );
+
+    assert.strictEqual(result.runtime, "node");
+    assert.strictEqual(result.commandSummary, "node --test [argCount=1]");
+    assert.deepStrictEqual(afterBytes, beforeBytes);
+    assert.strictEqual(afterHash, beforeHash);
+    assert.strictEqual(afterManifest?.stdoutSha256, beforeManifest?.stdoutSha256);
+  });

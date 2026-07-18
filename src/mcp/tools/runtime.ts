@@ -45,6 +45,7 @@ import {
 import { writeArtifact } from "../../runtime/artifacts.js";
 import { buildOutputDigest } from "../../runtime/output-digest.js";
 import type { OutputExcerpt, ConcurrencyTracker } from "../../runtime/types.js";
+import { projectRuntimeOutputExcerpts } from "../runtime-output-projection.js";
 import { logRuntimeExecution, logPolicyDecision } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
 import { hashContent } from "../../util/hashing.js";
@@ -332,15 +333,12 @@ export function detectRuntimeHints(
 // Intent-Only Excerpts (for outputMode: "intent")
 // ============================================================================
 
-function isWindowsCmdEchoLine(line: string): boolean {
-  return /^[A-Za-z]:\\[^>]*>/.test(line) || /^\\\\[^>]+>/.test(line);
-}
-
 export function generateIntentExcerpts(
   stdout: string,
   stderr: string,
   queryTerms: string[],
   contextLines = RUNTIME_KEYWORD_CONTEXT_LINES,
+  runtime?: string,
 ): OutputExcerpt[] {
   const excerpts: OutputExcerpt[] = [];
   const lowerTerms = queryTerms.map((t) => t.toLowerCase());
@@ -352,9 +350,6 @@ export function generateIntentExcerpts(
       i < lines.length && excerpts.length < RUNTIME_MAX_KEYWORD_EXCERPTS;
       i++
     ) {
-      if (source === "stdout" && isWindowsCmdEchoLine(lines[i])) {
-        continue;
-      }
       const lower = lines[i].toLowerCase();
       if (lowerTerms.some((t) => lower.includes(t))) {
         const start = Math.max(0, i - boundedContextLines);
@@ -365,13 +360,7 @@ export function generateIntentExcerpts(
         excerpts.push({
           lineStart: start + 1,
           lineEnd: end + 1,
-          content: lines
-            .slice(start, end + 1)
-            .filter(
-              (line) =>
-                !(source === "stdout" && isWindowsCmdEchoLine(line)),
-            )
-            .map(truncateLine)
+          content: lines.slice(start, end + 1).map(truncateLine)
             .join("\n"),
           source,
         });
@@ -382,7 +371,10 @@ export function generateIntentExcerpts(
 
   if (stdout) searchStream(stdout.split("\n"), "stdout");
   if (stderr) searchStream(stderr.split("\n"), "stderr");
-  return excerpts.filter((excerpt) => excerpt.content.length > 0);
+  return projectRuntimeOutputExcerpts(
+    excerpts.filter((excerpt) => excerpt.content.length > 0),
+    runtime,
+  );
 }
 
 export const _runtimeToolTesting = {
@@ -400,6 +392,7 @@ function generateExcerpts(
   stderr: string,
   maxResponseLines: number,
   queryTerms?: string[],
+  runtime?: string,
 ): {
   stdoutSummary: string;
   stderrSummary: string;
@@ -503,7 +496,36 @@ function generateExcerpts(
     }
   }
 
-  return { stdoutSummary, stderrSummary, excerpts };
+  const projectedStdoutSummary =
+    projectRuntimeOutputExcerpts(
+      [
+        {
+          lineStart: 1,
+          lineEnd: stdoutSummary.split("\n").length,
+          content: stdoutSummary,
+          source: "stdout",
+        },
+      ],
+      runtime,
+    )[0]?.content ?? "";
+  const projectedStderrSummary =
+    projectRuntimeOutputExcerpts(
+      [
+        {
+          lineStart: 1,
+          lineEnd: stderrSummary.split("\n").length,
+          content: stderrSummary,
+          source: "stderr",
+        },
+      ],
+      runtime,
+    )[0]?.content ?? "";
+
+  return {
+    stdoutSummary: projectedStdoutSummary,
+    stderrSummary: projectedStderrSummary,
+    excerpts: projectRuntimeOutputExcerpts(excerpts, runtime),
+  };
 }
 
 // ============================================================================
@@ -897,6 +919,7 @@ export async function handleRuntimeExecute(
                 compileStderr,
                 request.queryTerms,
                 request.contextLines,
+                request.runtime,
               ),
             );
           }
@@ -932,6 +955,7 @@ export async function handleRuntimeExecute(
           compileStderr,
           request.maxResponseLines,
           request.queryTerms,
+          request.runtime,
         );
         return finish(
           attachRawContext(
@@ -1150,6 +1174,7 @@ export async function handleRuntimeExecute(
             stderrStr,
             request.queryTerms,
             request.contextLines,
+            request.runtime,
           ),
         );
       }
@@ -1197,6 +1222,7 @@ export async function handleRuntimeExecute(
       stderrStr,
       request.maxResponseLines,
       request.queryTerms,
+      request.runtime,
     );
 
     // 14. Log telemetry
