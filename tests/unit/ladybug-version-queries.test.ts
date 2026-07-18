@@ -305,6 +305,101 @@ describe("LadybugDB Version & Snapshot Queries", () => {
       assert.strictEqual(rows[1]!.summary, null);
     },
   );
+  it(
+    "createVersionAndSnapshot snapshots fresh and partial versions idempotently",
+    { skip: !ladybugAvailable },
+    async () => {
+      const symbolIds = ["merge-snapshot-sym-1", "merge-snapshot-sym-2"];
+      for (const symbolId of symbolIds) {
+        await queries.upsertSymbol(
+          conn as unknown as import("kuzu").Connection,
+          {
+            symbolId,
+            repoId,
+            fileId,
+            kind: "function",
+            name: symbolId,
+            exported: true,
+            visibility: null,
+            language: "typescript",
+            rangeStartLine: 1,
+            rangeStartCol: 0,
+            rangeEndLine: 1,
+            rangeEndCol: 1,
+            astFingerprint: `fp-${symbolId}`,
+            signatureJson: null,
+            summary: null,
+            invariantsJson: null,
+            sideEffectsJson: null,
+            updatedAt: "2026-07-18T00:00:00Z",
+          },
+        );
+      }
+
+      const partialVersionId = "v-merge-partial";
+      await queries.snapshotSymbolVersion(
+        conn as unknown as import("kuzu").Connection,
+        {
+          versionId: partialVersionId,
+          symbolId: symbolIds[0]!,
+          astFingerprint: `fp-${symbolIds[0]}`,
+          signatureJson: null,
+          summary: null,
+          invariantsJson: null,
+          sideEffectsJson: null,
+        },
+      );
+      await conn.close();
+      await db.close();
+
+      const ladybug = await import("../../dist/db/ladybug.js");
+      try {
+        await ladybug.initLadybugDb(TEST_DB_PATH);
+        const snapshotConn = await ladybug.getLadybugConn();
+        const { createVersionAndSnapshot } = await import(
+          "../../dist/indexer/indexer-version.js"
+        );
+        await createVersionAndSnapshot({
+          repoId,
+          versionId: "v-merge-fresh",
+          reason: "fresh-snapshot",
+        });
+        assert.strictEqual(
+          (
+            await queries.getSymbolVersionsAtVersion(
+              snapshotConn,
+              "v-merge-fresh",
+            )
+          ).length,
+          symbolIds.length,
+        );
+
+        for (const reason of ["partial-snapshot", "idempotent-replay"]) {
+          await createVersionAndSnapshot({
+            repoId,
+            versionId: partialVersionId,
+            reason,
+          });
+        }
+        assert.deepStrictEqual(
+          (
+            await queries.getSymbolVersionsAtVersion(
+              snapshotConn,
+              partialVersionId,
+            )
+          )
+            .map((row) => row.symbolId)
+            .sort(),
+          symbolIds,
+        );
+      } finally {
+        await ladybug.closeLadybugDb();
+        for (const target of [TEST_DB_PATH, `${TEST_DB_PATH}.wal`]) {
+          if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+        }
+      }
+    },
+  );
 
   it(
     "getSymbolsByRepoForSnapshotPage pages snapshot rows by symbol id cursor",
