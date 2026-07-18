@@ -451,7 +451,7 @@ export const INTERNAL_TRANSFORMS: Record<string, InternalTransformEntry> = {
       return result;
     },
     description:
-      "Retrieve continuation data from a truncated step result. Use the continuationHandle from truncatedResponse.",
+      "Retrieve continuation data from a truncated step result. Array paths page in items; JSON/text pages in characters; limit capped at 1000. Use the continuationHandle from truncatedResponse.",
   },
 };
 

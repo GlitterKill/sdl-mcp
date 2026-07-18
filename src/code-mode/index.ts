@@ -90,6 +90,7 @@ export const ActionSearchRequestSchema = z.object({
   summaryOnly: z.boolean().default(false),
   excludeDisabled: z.boolean().default(false),
   detail: z.enum(["compact", "full"]).optional().default("compact"),
+  maxTokens: z.number().int().min(500).max(32000).default(4000),
 });
 
 export const ManualRequestSchema = z.object({
@@ -150,7 +151,7 @@ export function handleActionSearch(
     );
   }
   const offset = args.offset ?? 0;
-  const ranked = filteredRanked.slice(offset, offset + args.limit);
+  const candidates = filteredRanked.slice(offset, offset + args.limit);
   const autoEnabled =
     autoIncludeSchemas || autoIncludeExamples
       ? {
@@ -185,6 +186,21 @@ export function handleActionSearch(
     };
   }
 
+  const ranked: ActionCatalogEntry[] =
+    args.detail === "compact" ? [...candidates] : [];
+  if (args.detail === "full") {
+    for (const candidate of candidates) {
+      const next = [...ranked, candidate];
+      if (
+        ranked.length > 0 &&
+        estimateTokens(JSON.stringify(next)) > args.maxTokens
+      ) {
+        break;
+      }
+      ranked.push(candidate);
+    }
+  }
+
   // Compute disabled action hints.
   const disabledActions = args.excludeDisabled ? disabledRanked : ranked.filter((a) => a.disabled);
   const disabledHint =
@@ -213,7 +229,7 @@ export function handleActionSearch(
             "Tip: Add includeSchemas: true to see parameter types and enum values.",
         }
       : {}),
-    hasMore: filteredRanked.length > offset + args.limit,
+    hasMore: filteredRanked.length > offset + ranked.length,
     tokenEstimate: estimateTokens(JSON.stringify(ranked)),
     ...(autoEnabled ? { autoEnabled } : {}),
     ...(nextAction ? { nextAction } : {}),
@@ -765,6 +781,20 @@ function renderMarkdown(catalog: ActionCatalogEntry[]): string {
                 : "";
             lines.push(
               `| ${subField.name} | ${subField.type} | ${subField.required ? "yes" : "no"} | ${defaultValue} | ${subField.description ?? ""} |`,
+            );
+          }
+        }
+        if (field.discriminator && field.variants?.length) {
+          lines.push("");
+          lines.push(
+            `**${field.name}**: discriminated union on ${field.discriminator}`,
+          );
+          lines.push("");
+          lines.push("| Variant | Required fields |");
+          lines.push("|---------|-----------------|");
+          for (const variant of field.variants) {
+            lines.push(
+              `| ${variant.value} | required: ${variant.requiredFields.join(", ")} |`,
             );
           }
         }

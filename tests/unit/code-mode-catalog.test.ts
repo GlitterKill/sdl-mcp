@@ -376,3 +376,65 @@ describe("code-mode action catalog", () => {
     });
   });
 });
+
+
+describe("full schema discovery regressions", () => {
+  it("preserves symbol.edit operation discriminator variants in declaration order", async () => {
+    const { SymbolEditRequestSchema } = await import("../../dist/mcp/tools.js");
+    const operation = zodToSchemaSummary(SymbolEditRequestSchema).fields.find(
+      (field) => field.name === "operation",
+    );
+
+    assert.strictEqual(operation?.discriminator, "kind");
+    assert.deepStrictEqual(operation?.variants, [
+      { value: "replaceSymbol", requiredFields: ["kind", "content"] },
+      { value: "replaceBody", requiredFields: ["kind", "content"] },
+      { value: "replaceSignature", requiredFields: ["kind", "content"] },
+      { value: "insertBefore", requiredFields: ["kind", "content"] },
+      { value: "insertAfter", requiredFields: ["kind", "content"] },
+      { value: "renameLocal", requiredFields: ["kind", "name", "replacement"] },
+    ]);
+  });
+
+  it("keeps dataSort object and object-array fields once", () => {
+    const by = buildCatalog({ includeSchemas: true, detail: "full" })
+      .find((entry) => entry.action === "dataSort")
+      ?.schemaSummary?.fields.find((field) => field.name === "by");
+
+    assert.strictEqual(by?.type, "object | object[]");
+    assert.ok(by?.subFields?.length, "expected shared by fields");
+    assert.strictEqual(
+      new Set(by?.subFields?.map((field) => field.name)).size,
+      by?.subFields?.length,
+    );
+  });
+
+  it("preserves search.edit root union variants without duplicates", () => {
+    const mode = zodToSchemaSummary(SearchEditRequestSchema).fields.find(
+      (field) => field.name === "mode",
+    );
+
+    assert.strictEqual(mode?.discriminator, "mode");
+    assert.deepStrictEqual(mode?.variants?.map((variant) => variant.value), [
+      "preview",
+      "apply",
+    ]);
+    for (const variant of mode?.variants ?? []) {
+      assert.strictEqual(
+        new Set(variant.requiredFields).size,
+        variant.requiredFields.length,
+      );
+    }
+  });
+
+  it("keeps compact schema summaries shallow", () => {
+    const operation = buildCatalog({ includeSchemas: true, detail: "compact" })
+      .find((entry) => entry.action === "symbol.edit")
+      ?.schemaSummary?.fields.find((field) => field.name === "operation");
+
+    assert.ok(!("discriminator" in (operation ?? {})));
+    assert.ok(!("variants" in (operation ?? {})));
+    assert.ok(!("description" in (operation ?? {})));
+    assert.ok(!("subFields" in (operation ?? {})));
+  });
+});

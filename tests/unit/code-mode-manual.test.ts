@@ -270,3 +270,47 @@ describe("code-mode manual generator", () => {
     );
   });
 });
+
+
+describe("bounded schema manual regressions", () => {
+  it("renders full discriminated-union variants without repeating common fields", () => {
+    const result = handleManual({
+      actions: ["symbol.edit"],
+      format: "markdown",
+      includeSchemas: true,
+      detail: "full",
+    }) as { manual: string };
+
+    assert.match(result.manual, /operation.*discriminated union on kind/i);
+    assert.match(result.manual, /replaceBody.*required: kind, content/i);
+    assert.strictEqual(
+      (result.manual.match(/replaceBody.*required: kind, content/gi) ?? []).length,
+      1,
+    );
+  });
+
+  it("keeps variant metadata out of compact manuals", () => {
+    const result = handleManual({
+      actions: ["symbol.edit"],
+      format: "markdown",
+      includeSchemas: true,
+      detail: "compact",
+    }) as { manual: string };
+
+    assert.doesNotMatch(result.manual, /Variants/);
+    assert.doesNotMatch(result.manual, /discriminated union on/);
+  });
+
+  it("documents compact continuation paging units and cap", () => {
+    const result = handleManual({
+      actions: ["workflowContinuationGet"],
+      format: "markdown",
+      includeSchemas: true,
+      detail: "compact",
+    }) as { manual: string };
+
+    assert.match(result.manual, /array paths page in items/i);
+    assert.match(result.manual, /JSON\/text pages in characters/i);
+    assert.match(result.manual, /limit capped at 1000/i);
+  });
+});

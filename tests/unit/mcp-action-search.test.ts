@@ -406,3 +406,107 @@ describe("sdl.action.search behavior", () => {
     });
   });
 });
+
+
+describe("bounded full action search", () => {
+  it("advertises and validates the maxTokens request budget", async () => {
+    const { ActionSearchRequestSchema } = await import("../../dist/code-mode/index.js");
+
+    assert.strictEqual(ActionSearchRequestSchema.parse({ query: "*" }).maxTokens, 4000);
+    assert.strictEqual(
+      ActionSearchRequestSchema.parse({ query: "*", maxTokens: 500 }).maxTokens,
+      500,
+    );
+    assert.throws(() => ActionSearchRequestSchema.parse({ query: "*", maxTokens: 499 }));
+    assert.throws(() => ActionSearchRequestSchema.parse({ query: "*", maxTokens: 32001 }));
+    assert.throws(() => ActionSearchRequestSchema.parse({ query: "*", maxTokens: 500.5 }));
+  });
+
+  it("pages broad full results within budget without duplicate actions", async () => {
+    const { estimateTokens } = await import("../../dist/util/tokenize.js");
+    const seen = new Set<string>();
+    let offset = 0;
+    let pages = 0;
+
+    while (pages < 100) {
+      const page = handleActionSearch({
+        query: "*",
+        offset,
+        limit: 50,
+        includeSchemas: true,
+        includeExamples: true,
+        detail: "full",
+        maxTokens: 2000,
+      }) as {
+        actions: Array<{ action: string }>;
+        total: number;
+        hasMore: boolean;
+        tokenEstimate: number;
+      };
+
+      assert.ok(page.actions.length >= 1, "each non-empty page returns one action");
+      assert.strictEqual(
+        page.tokenEstimate,
+        estimateTokens(JSON.stringify(page.actions)),
+      );
+      assert.ok(
+        page.tokenEstimate <= 2000 || page.actions.length === 1,
+        `page exceeded budget with ${page.actions.length} actions`,
+      );
+      for (const action of page.actions) {
+        assert.ok(!seen.has(action.action), `duplicate action ${action.action}`);
+        seen.add(action.action);
+      }
+
+      offset += page.actions.length;
+      pages++;
+      if (!page.hasMore) {
+        assert.strictEqual(offset, page.total);
+        break;
+      }
+    }
+
+    assert.ok(pages < 100, "paging should terminate");
+    assert.ok(seen.size > 1, "broad query should page multiple actions");
+  });
+
+  it("returns an exact over-budget action and keeps stable compact and summary shapes", () => {
+    const exactSmall = handleActionSearch({
+      query: "symbol.edit",
+      limit: 1,
+      includeSchemas: true,
+      includeExamples: true,
+      detail: "full",
+      maxTokens: 500,
+    }) as Record<string, unknown> & { actions: unknown[] };
+    assert.strictEqual(exactSmall.actions.length, 1);
+
+    const compactSmall = handleActionSearch({
+      query: "repo.status",
+      detail: "compact",
+      maxTokens: 500,
+    });
+    const compactLarge = handleActionSearch({
+      query: "repo.status",
+      detail: "compact",
+      maxTokens: 32000,
+    });
+    assert.deepStrictEqual(compactSmall, compactLarge);
+
+    const summarySmall = handleActionSearch({
+      query: "*",
+      summaryOnly: true,
+      maxTokens: 500,
+    });
+    const summaryLarge = handleActionSearch({
+      query: "*",
+      summaryOnly: true,
+      maxTokens: 32000,
+    });
+    assert.deepStrictEqual(summarySmall, summaryLarge);
+
+    for (const key of ["nextOffset", "warnings", "handle"]) {
+      assert.ok(!(key in exactSmall), `unexpected ${key}`);
+    }
+  });
+});

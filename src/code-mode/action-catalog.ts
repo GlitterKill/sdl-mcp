@@ -63,6 +63,7 @@ export const META_ACTION_SEARCH_SCHEMA = z.object({
   excludeDisabled: z.boolean().optional(),
   summaryOnly: z.boolean().optional(),
   detail: z.enum(["compact", "full"]).optional().default("compact"),
+  maxTokens: z.number().int().min(500).max(32000).optional().default(4000),
 });
 const META_MANUAL_SCHEMA = z.object({
   format: z.enum(["typescript", "markdown", "json"]).optional(),
@@ -155,6 +156,11 @@ export interface SchemaSummaryField {
   nestedFieldCount?: number;
   description?: string;
   subFields?: SchemaSummaryField[];
+  discriminator?: string;
+  variants?: Array<{
+    value: string;
+    requiredFields: string[];
+  }>;
 }
 
 export interface SchemaSummary {
@@ -209,6 +215,14 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
         name === discriminator ||
         (entry.occurrences === validOptionCount &&
           entry.requiredOccurrences === validOptionCount);
+    }
+    const discriminatorField = seen.get(discriminator)?.field;
+    if (discriminatorField) {
+      discriminatorField.discriminator = discriminator;
+      discriminatorField.variants = describeDiscriminatedUnionVariants(
+        inner,
+        discriminator,
+      );
     }
     return { fields };
   }
@@ -394,6 +408,35 @@ function fieldEnumValues(field: SchemaSummaryField): string[] {
   return literal ? [...values, literal] : values;
 }
 
+function describeDiscriminatedUnionVariants(
+  schema: z.ZodType,
+  discriminator: string,
+): NonNullable<SchemaSummaryField["variants"]> {
+  const variants: NonNullable<SchemaSummaryField["variants"]> = [];
+  for (const option of getUnionOptions(schema)) {
+    const shape = getObjectShape(option);
+    const discriminatorSchema = shape?.[discriminator];
+    if (!shape || !discriminatorSchema) continue;
+    const value = literalValuesFor(unwrapZod(discriminatorSchema))[0];
+    if (typeof value !== "string") continue;
+
+    const requiredFields = Object.entries(shape)
+      .filter(([name, fieldSchema]) =>
+        name === discriminator || describeField(name, fieldSchema).required,
+      )
+      .map(([name]) => name);
+    const existing = variants.find((variant) => variant.value === value);
+    if (existing) {
+      existing.requiredFields = [
+        ...new Set([...existing.requiredFields, ...requiredFields]),
+      ];
+    } else {
+      variants.push({ value, requiredFields });
+    }
+  }
+  return variants;
+}
+
 function mergeSchemaSummaryField(
   target: SchemaSummaryField,
   incoming: SchemaSummaryField,
@@ -411,6 +454,30 @@ function mergeSchemaSummaryField(
   }
   if (!target.subFields && incoming.subFields) {
     target.subFields = incoming.subFields;
+  }
+  if (!target.discriminator && incoming.discriminator) {
+    target.discriminator = incoming.discriminator;
+  }
+  if (incoming.variants) {
+    target.variants ??= [];
+    for (const incomingVariant of incoming.variants) {
+      const existing = target.variants.find(
+        (variant) => variant.value === incomingVariant.value,
+      );
+      if (existing) {
+        existing.requiredFields = [
+          ...new Set([
+            ...existing.requiredFields,
+            ...incomingVariant.requiredFields,
+          ]),
+        ];
+      } else {
+        target.variants.push({
+          value: incomingVariant.value,
+          requiredFields: [...incomingVariant.requiredFields],
+        });
+      }
+    }
   }
 }
 
@@ -449,8 +516,13 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
   }
 
   current = unwrapZod(current);
+  const discriminator = getDiscriminator(current);
   const typeName = resolveTypeName(current);
   const field: SchemaSummaryField = { name, type: typeName, required };
+  if (discriminator) {
+    field.discriminator = discriminator;
+    field.variants = describeDiscriminatedUnionVariants(current, discriminator);
+  }
   const description = initialDescription ?? zodDescription(current);
   if (description) {
     field.description = description;
@@ -470,6 +542,33 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) =>
       describeField(subName, subSchema),
     );
+  }
+
+  if (zodKind(current) === "union" && !discriminator) {
+    const options = getUnionOptions(current);
+    const optionTypes = options.map((option) => resolveTypeName(option));
+    const objectShapes = options.map((option) => {
+      const unwrapped = unwrapZod(option);
+      if (zodKind(unwrapped) !== "array") return getObjectShape(unwrapped);
+      const optionDef = zodDef(unwrapped);
+      const element = asZodType(optionDef.element ?? optionDef.innerType);
+      return element ? getObjectShape(element) : undefined;
+    });
+    const sharedShape = objectShapes[0];
+    if (
+      optionTypes.includes("object") &&
+      optionTypes.includes("object[]") &&
+      sharedShape &&
+      objectShapes.every(
+        (shape) =>
+          shape &&
+          Object.keys(shape).join("\\0") === Object.keys(sharedShape).join("\\0"),
+      )
+    ) {
+      field.subFields = Object.entries(sharedShape).map(
+        ([subName, subSchema]) => describeField(subName, subSchema),
+      );
+    }
   }
 
   const def = zodDef(current);
