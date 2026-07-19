@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved in conversation on 2026-07-19.
+Design direction approved in conversation on 2026-07-19; detailed specification pending final review.
 
 ## Context
 
@@ -26,10 +26,10 @@ Allow generic tool-contract QA to use the existing action-seeding projection que
 `buildActionSeedQueries()` evaluates three bounded intent groups before its current early return:
 
 1. Tool-surface intent matches `/\b(?:tools?|schemas?|descriptors?|registr(?:ation|ations|y|ies))\b/i`.
-2. Response-contract intent matches `/\b(?:contracts?|outputs?|responses?|projections?)\b/i`.
+2. Contract-quality intent matches `/\b(?:contracts?|projections?|determinism|deterministic)\b/i`.
 3. Review intent matches `/\b(?:review|reviews|reviewing|audit|audits|auditing|qa|determinism|deterministic)\b/i`.
 
-A generic fallback activates only when all three groups match. Requests such as `debug tool output formatting` and `fix schema response error` remain inactive because they lack review intent.
+A generic fallback activates only when all three groups match. Requests such as `debug tool output formatting` and `fix schema response error` remain inactive because they lack review intent. `review tool output formatting` also remains inactive because output formatting alone is not a contract-quality marker.
 
 When the task names no catalog action, the function returns an empty list unless the narrow generic predicate matches. When it matches, the function continues with an empty ranked-action list and emits exactly the existing projection seed query. The response-test query remains gated on `rankedActions.length > 0`, so generic prompts containing `test` or `tests` still emit one query.
 
@@ -59,7 +59,15 @@ The canonical live request uses:
 - no focus paths;
 - diagnostics disabled.
 
-The top ten are the first ten `symbolCard` entries in `finalEvidence` order. Acceptance compares their symbol names and repository-relative paths. The baseline contains zero of the five expected contract symbols.
+The top ten are the first ten `symbolCard` entries in `finalEvidence` order. Acceptance compares these exact name/path pairs:
+
+- `buildFlatToolDescriptors` — `src/mcp/tools/tool-descriptors.ts`;
+- `registerTool` — `src/server.ts`;
+- `buildToolResponseEnvelope` — `src/server.ts`;
+- `asStructuredContent` — `src/server.ts`;
+- `handleRuntimeQueryOutput` — `src/mcp/tools/runtime-query.ts`.
+
+The baseline contains zero of those five pairs. For the noise exclusion, a seed-evaluator symbol is any `symbolCard` whose repository-relative path is `scripts/evaluate-seed-resolution.ts`; the exclusion is path-based rather than name-based.
 
 A test-first regression passes the literal task text to `buildActionSeedQueries()` and expects the current implementation to return no action seeds. After the change, the prompt returns exactly the existing projection query.
 
@@ -67,17 +75,19 @@ Additional regressions require:
 
 - `debug tool output formatting` returns no generic action seed;
 - `fix schema response error` returns no generic action seed;
-- tool-surface review without response-contract intent returns no generic action seed;
-- contract-output review without tool-surface intent returns no generic action seed;
+- `review tool output formatting` returns no generic action seed;
+- tool-surface review without contract-quality intent returns no generic action seed;
+- contract-quality review without tool-surface intent returns no generic action seed;
 - an activated generic prompt containing `tests` still emits exactly one unchanged projection query;
 - named-action seed output remains deeply equal to its pre-change value;
 - query count, deduplication, and ordering stay deterministic.
 
 The existing ranking suite, context-quality acceptance, and seed-resolution benchmark must not regress. Live verification requires:
 
-- at least four of `buildFlatToolDescriptors`, `registerTool`, `buildToolResponseEnvelope`, `asStructuredContent`, and `handleRuntimeQueryOutput` in the top ten;
-- no `outputs/logos` or seed-evaluator symbols in the top ten;
-- explicit `outputs/logos` and `scripts` focus remains retrievable;
+- at least four of the five exact expected name/path pairs in the top ten;
+- no top-ten `symbolCard` path begins `outputs/logos/`, and none equals `scripts/evaluate-seed-resolution.ts`;
+- an `outputs/logos` focus run uses the canonical task type and text, `contextMode: "precise"`, `focusPaths: ["outputs/logos"]`, `semantic: true`, `includeRetrievalEvidence: true`, `evidenceOptimization: "off"`, `cardDetail: "task"`, and diagnostics disabled; at least one of its first ten `symbolCard` entries must have a path beginning `outputs/logos/`;
+- a separate `scripts` focus run uses the same options with `focusPaths: ["scripts"]`; at least one of its first ten `symbolCard` entries must have a path beginning `scripts/`;
 - graph integrity remains verified.
 
 ## Failure handling
