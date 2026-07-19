@@ -2,7 +2,7 @@
 
 ## Status
 
-The user approved the architecture, testing, and failure behavior on 2026-07-19. The written specification awaits final user review.
+The user approved the architecture, testing, failure behavior, and written specification on 2026-07-19.
 
 ## Context
 
