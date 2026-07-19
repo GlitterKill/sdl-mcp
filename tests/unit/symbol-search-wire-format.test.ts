@@ -6,6 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { SymbolSearchHandlerResponseSchema } from "../../dist/mcp/tools.js";
 import {
   serializeSymbolSearchForWireFormat,
   type SymbolSearchWireInput,
@@ -84,6 +85,7 @@ test("wireFormat=undefined returns json passthrough (no gate)", () => {
   assert.equal(result.format, "json");
   assert.equal(result.gateDecision, undefined);
   assert.deepEqual(result.payload, SMALL_INPUT);
+  SymbolSearchHandlerResponseSchema.parse(result.payload);
 });
 
 test("wireFormat=json returns json passthrough (no gate)", () => {
@@ -123,6 +125,7 @@ test("wireFormat=auto: packed wins on large input → results becomes string", (
     assert.equal(result.format, "packed");
     assert.equal(typeof result.payload, "string");
     assert.equal(result.encoderId, "ss1");
+    SymbolSearchHandlerResponseSchema.parse({ results: result.payload });
   } else {
     assert.equal(result.format, "json");
   }
@@ -150,6 +153,13 @@ test("packed payload round-trips via decodePacked", () => {
   const decoded = decodePacked(result.payload as string);
   assert.equal(decoded.encoderId, "ss1");
   assert.ok(decoded.data);
+});
+
+test("output schema accepts the emitted session-ref variant", () => {
+  SymbolSearchHandlerResponseSchema.parse({
+    ref: { key: "symbol.search:abc123", etag: "etag-1" },
+    unchanged: true,
+  });
 });
 
 test("fallback path also publishes tap (decision=fallback)", () => {

@@ -41,7 +41,7 @@ import {
   SliceRefreshResponseSchema,
   SliceSpilloverGetResponseSchema,
   SymbolGetCardResponseSchema,
-  SymbolSearchResponseSchema,
+  SymbolSearchHandlerResponseSchema,
   UsageStatsResponseSchema,
 } from "../tools.js";
 import { ACTION_DEFINITION_BY_ACTION } from "../../code-mode/action-catalog.js";
@@ -216,7 +216,7 @@ export function buildFlatToolDescriptors(
     {
       action: "symbol.search",
       description: "Search for symbols by name or summary",
-      outputSchema: SymbolSearchResponseSchema,
+      outputSchema: SymbolSearchHandlerResponseSchema,
       handler: handleSymbolSearch,
     },
     {

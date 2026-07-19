@@ -64,7 +64,7 @@ const SymbolSignatureParamSchema = z.object({
 });
 
 const SymbolSignatureSchema = z.object({
-  name: z.string(),
+  name: z.string().optional(),
   params: z.array(SymbolSignatureParamSchema).optional(),
   returns: z.string().optional(),
   generics: z.array(z.string()).optional(),
@@ -1407,6 +1407,11 @@ const SessionContentRefResponseSchema = z.object({
   ref: SessionContentRefSchema,
   unchanged: z.literal(true),
 });
+
+export const SymbolSearchHandlerResponseSchema = z.union([
+  SymbolSearchResponseSchema,
+  SessionContentRefResponseSchema,
+]);
 
 const CardWithETagSchema = SymbolCardSchema.extend({
   etag: z.string(),

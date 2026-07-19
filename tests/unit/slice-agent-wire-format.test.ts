@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { toAgentGraphSlice } from "../../dist/mcp/tools/slice-wire-format.js";
+import {
+  serializeSliceForWireFormat,
+  toAgentGraphSlice,
+} from "../../dist/mcp/tools/slice-wire-format.js";
+import { handleSliceBuild } from "../../dist/mcp/tools/slice.js";
+import { SliceBuildResponseSchema } from "../../dist/mcp/tools.js";
 import type { GraphSlice } from "../../dist/domain/types.js";
 
 function makeMockSlice(overrides?: Partial<GraphSlice>): GraphSlice {
@@ -187,5 +192,25 @@ describe("toAgentGraphSlice", () => {
     assert.equal(card.calls[0].confidence, undefined);
     // imports have confidence 0.8, should include it
     assert.equal(card.imports[0].confidence, 0.8);
+  });
+
+  it("validates readable and packed emitted slices against the output schema", () => {
+    const slice = makeMockSlice();
+    for (const wireFormat of ["readable", "packed"] as const) {
+      const emitted = serializeSliceForWireFormat(slice, wireFormat, undefined, {
+        packedThreshold: 0,
+      });
+      SliceBuildResponseSchema.parse({
+        sliceHandle: "slice-handle",
+        ledgerVersion: slice.versionId,
+        lease: { expiresAt: "2099-01-01T00:00:00.000Z", minVersion: null, maxVersion: slice.versionId },
+        slice: emitted.payload,
+      });
+    }
+  });
+
+  it("validates the handler-produced error variant against the output schema", async () => {
+    const response = await handleSliceBuild({ repoId: "test-repo" });
+    SliceBuildResponseSchema.parse(response);
   });
 });
