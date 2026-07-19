@@ -285,11 +285,11 @@ export function buildActionSeedQueries(taskText: string): string[] {
 }
 
 /**
- * Decide entity-search shaping for context seeding. Tool-QA prompts — task
- * text that names catalog actions (e.g. "QA runtime.execute output modes") —
- * get symbol/fileSummary evidence only and an FTS query anchored on the
- * tool's handler/schema identifiers. Broad-mode cluster/process matches are
- * off-target evidence for tool-surface questions.
+ * Decide entity-search shaping for context seeding. Tool-QA prompts that
+ * name catalog actions (e.g. "QA runtime.execute output modes") or narrowly
+ * review generic tool contracts get symbol/fileSummary evidence only and an
+ * FTS query anchored on handler/schema identifiers or the shared response
+ * projection. Broad-mode cluster/process matches stay out of this evidence.
  */
 export function buildSeedEntitySearchPlan(
   taskText: string,
