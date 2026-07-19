@@ -89,7 +89,6 @@ describe("MCP tool registration", () => {
       "sdl.repo.status",
       "sdl.repo.unregister",
       "sdl.index.refresh",
-      "sdl.repo.overview",
       "sdl.buffer.push",
       "sdl.buffer.checkpoint",
       "sdl.buffer.status",
@@ -112,6 +111,7 @@ describe("MCP tool registration", () => {
       "sdl.runtime.queryOutput",
     ];
     const intentionallyOmittedFlatTools = [
+      "sdl.repo.overview",
       "sdl.symbol.edit",
       "sdl.code.needWindow",
       "sdl.file.read",

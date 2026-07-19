@@ -21,7 +21,6 @@ const provenOutputSchemaTools = new Set([
   "sdl.repo.status",
   "sdl.repo.unregister",
   "sdl.index.refresh",
-  "sdl.repo.overview",
   "sdl.buffer.push",
   "sdl.buffer.checkpoint",
   "sdl.buffer.status",
@@ -49,6 +48,7 @@ const provenOutputSchemaTools = new Set([
 ]);
 
 const intentionalOutputSchemaOmissions = new Map([
+  ["sdl.repo.overview", "Public full and notModified projections are disjoint with no common required root property; faithful union yields invalid root anyOf, while partial+refine weakens converted JSON Schema"],
   ["sdl.symbol.edit", "Preview/apply/applyNow union lacks exported response Zod schema"],
   [
     "sdl.code.needWindow",
@@ -66,6 +66,16 @@ const intentionalOutputSchemaOmissions = new Map([
 
 describe("buildFlatToolDescriptors", () => {
   const descriptors = buildFlatToolDescriptors({} as any);
+
+  it("defers repo.overview instead of advertising a schema that accepts an empty object", () => {
+    const overview = descriptors.find((descriptor) => descriptor.name === "sdl.repo.overview");
+    assert.ok(overview, "expected sdl.repo.overview descriptor");
+    assert.strictEqual(overview.outputSchema, undefined);
+    assert.strictEqual(
+      intentionalOutputSchemaOmissions.get("sdl.repo.overview"),
+      "Public full and notModified projections are disjoint with no common required root property; faithful union yields invalid root anyOf, while partial+refine weakens converted JSON Schema",
+    );
+  });
 
   it("documents the semantic enrichment status schema deferral", () => {
     assert.strictEqual(

@@ -53,6 +53,15 @@ const GRAPH_DB_PATH = join(TEST_ROOT, "graph.lbug");
 const CONFIG_PATH = join(TEST_ROOT, "sdl-determinism.config.json");
 const DIFF_DIR = resolve(process.cwd(), ".determinism-diffs");
 
+const PublicRepoOverviewFullResponseSchema = RepoOverviewResponseSchema.options[0]
+  .pick({
+    repoId: true,
+    stats: true,
+    directories: true,
+    clusters: true,
+  })
+  .strict();
+
 interface ServerHandle {
   client: Client;
   close: () => Promise<void>;
@@ -550,7 +559,7 @@ test("PUBLIC DISPATCH: DB-backed responses conform to exported schemas", async (
   const server = await spawnServer();
   try {
     const overview = parseStructuredContent(
-      RepoOverviewResponseSchema,
+      PublicRepoOverviewFullResponseSchema,
       await callToolStrict(server.client, "sdl.repo.overview", {
         repoId: REPO_ID,
         level: "full",

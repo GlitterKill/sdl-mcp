@@ -30,7 +30,6 @@ import {
   PolicyGetResponseSchema,
   PolicySetResponseSchema,
   PRRiskAnalysisResponseSchema,
-  RepoOverviewResponseSchema,
   RepoRegisterResponseSchema,
   RepoStatusResponseSchema,
   RepoUnregisterResponseSchema,
@@ -189,7 +188,6 @@ export function buildFlatToolDescriptors(
       action: "repo.overview",
       description:
         "Get token-efficient codebase overview with directory summaries and hotspots",
-      outputSchema: RepoOverviewResponseSchema,
       handler: handleRepoOverview,
     },
     {

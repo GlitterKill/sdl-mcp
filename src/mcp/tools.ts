@@ -2251,37 +2251,12 @@ const RepoOverviewPayloadSchema = z.object({
   tokenMetrics: TokenMetricsSchema,
 });
 
-export const RepoOverviewResponseSchema = RepoOverviewPayloadSchema.partial()
-  .extend({
-    notModified: z.literal(true).optional(),
-    etag: z.string().optional(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.notModified) {
-      if (!value.etag) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["etag"],
-          message: "etag is required for a not-modified response",
-        });
-      }
-      return;
-    }
-    if (!value.repoId) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["repoId"],
-        message: "repoId is required for an overview payload",
-      });
-    }
-    if (!value.stats) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["stats"],
-        message: "stats are required for an overview payload",
-      });
-    }
-  });
+export const RepoOverviewResponseSchema = z.union([
+  RepoOverviewPayloadSchema.extend({
+    etag: z.string(),
+  }),
+  ConditionalNotModifiedResponseSchema,
+]);
 
 // ============================================================================
 // Context Summary Schemas
