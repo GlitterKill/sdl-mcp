@@ -253,16 +253,31 @@ export function buildActionSeedQueries(taskText: string): string[] {
   if (hasOutputQaIntent || useGenericToolContractFallback) {
     // Output-contract QA needs the shared response projection in addition to
     // the action handler. Ordinary runtime debugging stays handler-shaped.
+    const projectionTerms = useGenericToolContractFallback
+      ? [
+          "tool",
+          "descriptor",
+          "registration",
+          "response",
+          "envelope",
+          "structured",
+          "content",
+          "output",
+          "schema",
+          "runtime",
+          "query",
+        ]
+      : new Set(
+          rankedActions.flatMap((action) => [
+            action.fn,
+            ...action.action.split("."),
+          ]),
+        );
     const projectionQuery = [
       "context",
       "response",
       "projection",
-      ...new Set(
-        rankedActions.flatMap((action) => [
-          action.fn,
-          ...action.action.split("."),
-        ]),
-      ),
+      ...projectionTerms,
     ].join(" ");
     if (!seen.has(projectionQuery)) queries.push(projectionQuery);
   }
