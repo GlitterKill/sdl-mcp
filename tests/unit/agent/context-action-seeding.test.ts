@@ -3,8 +3,7 @@ import { describe, it } from "node:test";
 
 import { buildActionSeedQueries } from "../../../dist/agent/context-seeding.js";
 
-const PROJECTION_QUERY =
-  "context response projection tool descriptor registration response envelope structured content output schema runtime query";
+const PROJECTION_QUERY = "context response projection";
 const GENERIC_TOOL_QA_TASK =
   "Review the current SDL-MCP tool surface for contracts, output noise, deterministic responses, and safe errors.";
 
