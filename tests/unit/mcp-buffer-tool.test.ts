@@ -5,6 +5,11 @@ import {
   handleBufferPush,
   handleBufferStatus,
 } from "../../dist/mcp/tools/buffer.js";
+import {
+  BufferCheckpointResponseSchema,
+  BufferPushResponseSchema,
+  BufferStatusResponseSchema,
+} from "../../dist/mcp/tools.js";
 
 describe("buffer MCP tools", () => {
   it("pushes buffer updates through the live index coordinator", async () => {
@@ -54,6 +59,7 @@ describe("buffer MCP tools", () => {
         timestamp: "2026-03-07T12:00:00.000Z",
       },
     ]);
+    BufferPushResponseSchema.parse(result);
     assert.strictEqual(result.overlayVersion, 7);
   });
 
@@ -87,6 +93,7 @@ describe("buffer MCP tools", () => {
       },
     );
 
+    BufferStatusResponseSchema.parse(result);
     assert.strictEqual(result.pendingBuffers, 2);
     assert.strictEqual(result.checkpointPending, true);
     assert.strictEqual(result.lastCheckpointResult, "partial");
@@ -123,6 +130,7 @@ describe("buffer MCP tools", () => {
       },
     );
 
+    BufferCheckpointResponseSchema.parse(result);
     assert.deepStrictEqual(calls, [{ repoId: "demo-repo", reason: "manual" }]);
     assert.strictEqual(result.checkpointId, "ckpt-1");
     assert.strictEqual(result.checkpointedFiles, 2);

@@ -18,6 +18,7 @@ import {
 } from "../dist/db/ladybug.js";
 import * as ladybugDb from "../dist/db/ladybug-queries.js";
 import { handleGetSkeleton } from "../dist/mcp/tools/code.js";
+import { GetSkeletonResponseSchema } from "../dist/mcp/tools.js";
 import { attachRawContext } from "../dist/mcp/token-usage.js";
 import { buildConditionalResponse } from "../dist/util/conditional-response.js";
 
@@ -538,6 +539,7 @@ export enum Priority {
       });
 
       assert.deepEqual(response, expectedResponse);
+      assert.doesNotThrow(() => GetSkeletonResponseSchema.parse(expectedPayload));
       assert.ok("skeleton" in response);
       const replayNeutralPayload = structuredClone(response) as Record<
         string,

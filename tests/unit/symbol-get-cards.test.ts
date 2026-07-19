@@ -176,6 +176,33 @@ describe("handleSymbolGetCard", () => {
     }
   });
 
+  it("validates the emitted single-card wire response", async () => {
+    const result = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolId: symbolIdA,
+      refsMode: "off",
+    });
+
+    assert.doesNotThrow(
+      () => SymbolGetCardResponseSchema.parse(result),
+      JSON.stringify(result),
+    );
+    assert.doesNotThrow(() =>
+      SymbolGetCardResponseSchema.parse({
+        card: {
+          symbolId: "provider-symbol",
+          file: "src/typescript/models.ts",
+          range: { startLine: 33, startCol: 7, endLine: 63, endCol: 1 },
+          kind: "class",
+          name: "UserRepository",
+          exported: true,
+          signature: { params: [] },
+          deps: { imports: ["ApiResponse", "UserProfile"] },
+        },
+      }),
+    );
+  });
+
   it("returns one result per symbolId in the input array", async () => {
     const result = await handleSymbolGetCard({
       repoId: REPO_ID,

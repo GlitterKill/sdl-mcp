@@ -913,6 +913,10 @@ describe("code.needWindow policy remediation", () => {
     assert.match(missedIdentifierHint, /keyword/i);
     assert.match(missedIdentifierHint, /sdl\.code\.getSkeleton/);
 
+    const providerResponse = structuredClone(response);
+    delete providerResponse.etag;
+    assert.doesNotThrow(() => GetHotPathResponseSchema.parse(providerResponse));
+
     const parsed = GetHotPathResponseSchema.parse(response) as Record<
       string,
       unknown

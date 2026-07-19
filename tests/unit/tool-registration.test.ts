@@ -80,9 +80,61 @@ describe("MCP tool registration", () => {
     assert.ok(getVersion().length > 0, "package version should resolve");
   });
 
-  it("registers stable tools with output schemas", () => {
+  it("registers only proven flat output schemas", () => {
     const { tools: stableTools, server: stableServer } = makeFakeServer();
     registerTools(stableServer as any);
+
+    const requiredFlatTools = [
+      "sdl.repo.register",
+      "sdl.repo.status",
+      "sdl.repo.unregister",
+      "sdl.index.refresh",
+      "sdl.repo.overview",
+      "sdl.buffer.push",
+      "sdl.buffer.checkpoint",
+      "sdl.buffer.status",
+      "sdl.symbol.search",
+      "sdl.symbol.getCard",
+      "sdl.slice.build",
+      "sdl.slice.refresh",
+      "sdl.slice.spillover.get",
+      "sdl.delta.get",
+      "sdl.code.getSkeleton",
+      "sdl.code.getHotPath",
+      "sdl.policy.get",
+      "sdl.policy.set",
+      "sdl.pr.risk.analyze",
+      "sdl.agent.feedback",
+      "sdl.agent.feedback.query",
+      "sdl.response.get",
+      "sdl.usage.stats",
+      "sdl.runtime.execute",
+      "sdl.runtime.queryOutput",
+    ];
+    const intentionallyOmittedFlatTools = [
+      "sdl.symbol.edit",
+      "sdl.code.needWindow",
+      "sdl.file.read",
+      "sdl.file.write",
+      "sdl.semantic.enrichment.refresh",
+      "sdl.semantic.enrichment.status",
+      "sdl.search.edit",
+    ];
+
+    for (const name of requiredFlatTools) {
+      const tool = stableTools.find((candidate) => candidate.name === name);
+      assert.ok(tool, `expected ${name} to be registered`);
+      assert.ok(tool.outputSchema, `expected ${name} output schema`);
+    }
+    for (const name of intentionallyOmittedFlatTools) {
+      const tool = stableTools.find((candidate) => candidate.name === name);
+      assert.ok(tool, `expected ${name} to be registered`);
+      assert.strictEqual(
+        tool.outputSchema,
+        undefined,
+        `expected ${name} output schema to remain omitted`,
+      );
+    }
 
     const { tools: codeTools, server: codeServer } = makeFakeServer();
     registerTools(
@@ -92,15 +144,11 @@ describe("MCP tool registration", () => {
       { enabled: true, exclusive: true } as any,
     );
 
-    const repoStatus = stableTools.find((tool) => tool.name === "sdl.repo.status");
     const actionSearch = codeTools.find((tool) => tool.name === "sdl.action.search");
     const manual = codeTools.find((tool) => tool.name === "sdl.manual");
-
-    assert.ok(repoStatus?.outputSchema, "expected repo.status output schema");
     assert.ok(actionSearch?.outputSchema, "expected action.search output schema");
     assert.ok(manual?.outputSchema, "expected manual output schema");
   });
-
 
   it("registers live buffer tools alongside existing slice tools", () => {
     const { names, server } = makeFakeServer();

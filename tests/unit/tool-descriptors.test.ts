@@ -16,8 +16,83 @@ const defaultVisibleFlatToolNames = inventory.flatToolNames.filter(
   (name: string) => !name.startsWith("sdl.memory."),
 );
 
+const provenOutputSchemaTools = new Set([
+  "sdl.repo.register",
+  "sdl.repo.status",
+  "sdl.repo.unregister",
+  "sdl.index.refresh",
+  "sdl.repo.overview",
+  "sdl.buffer.push",
+  "sdl.buffer.checkpoint",
+  "sdl.buffer.status",
+  "sdl.symbol.search",
+  "sdl.symbol.getCard",
+  "sdl.slice.build",
+  "sdl.slice.refresh",
+  "sdl.slice.spillover.get",
+  "sdl.delta.get",
+  "sdl.code.getSkeleton",
+  "sdl.code.getHotPath",
+  "sdl.policy.get",
+  "sdl.policy.set",
+  "sdl.pr.risk.analyze",
+  "sdl.agent.feedback",
+  "sdl.agent.feedback.query",
+  "sdl.response.get",
+  "sdl.memory.store",
+  "sdl.memory.query",
+  "sdl.memory.remove",
+  "sdl.memory.surface",
+  "sdl.usage.stats",
+  "sdl.runtime.execute",
+  "sdl.runtime.queryOutput",
+]);
+
+const intentionalOutputSchemaOmissions = new Map([
+  ["sdl.symbol.edit", "Preview/apply/applyNow union lacks exported response Zod schema"],
+  [
+    "sdl.code.needWindow",
+    "Approved/denied/response-artifact union converts to anyOf without the MCP-required root object; see tests/unit/mcp-code-need-window-policy.test.ts",
+  ],
+  ["sdl.file.read", "Inline/read-hint/response-artifact variants lack exported response Zod schema"],
+  ["sdl.file.write", "Typed response lacks exported response Zod schema"],
+  ["sdl.semantic.enrichment.refresh", "Provider result lacks stable exported MCP response Zod schema"],
+  ["sdl.semantic.enrichment.status", "Compact/full response union lacks one exported Zod response schema"],
+  ["sdl.search.edit", "Preview/apply/response-artifact union lacks exported response Zod schema"],
+]);
+
 describe("buildFlatToolDescriptors", () => {
   const descriptors = buildFlatToolDescriptors({} as any);
+
+  it("classifies every flat tool as schema-backed or intentionally omitted", () => {
+    const allDescriptors = buildFlatToolDescriptors({
+      actionAvailability: { memoryTools: true },
+    } as any);
+    const classifiedNames = [
+      ...provenOutputSchemaTools,
+      ...intentionalOutputSchemaOmissions.keys(),
+    ].sort();
+
+    assert.deepStrictEqual(classifiedNames, [...inventory.flatToolNames].sort());
+    for (const descriptor of allDescriptors) {
+      const required = provenOutputSchemaTools.has(descriptor.name);
+      const omissionReason = intentionalOutputSchemaOmissions.get(descriptor.name);
+      assert.notStrictEqual(
+        required,
+        omissionReason !== undefined,
+        `${descriptor.name} must be in exactly one output schema set`,
+      );
+      if (required) {
+        assert.ok(
+          descriptor.outputSchema,
+          `${descriptor.name} requires a proven output schema`,
+        );
+      } else {
+        assert.ok(omissionReason, `${descriptor.name} requires a deferral reason`);
+        assert.strictEqual(descriptor.outputSchema, undefined);
+      }
+    }
+  });
 
   it("returns the expected number of flat tool descriptors", () => {
     assert.strictEqual(

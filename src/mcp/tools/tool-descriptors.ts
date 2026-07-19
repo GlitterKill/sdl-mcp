@@ -14,10 +14,35 @@ import type { ToolServices } from "../../gateway/index.js";
 import type { ToolPresentation } from "../tool-presentation.js";
 
 import {
+  AgentFeedbackQueryResponseSchema,
+  AgentFeedbackResponseSchema,
+  BufferCheckpointResponseSchema,
+  BufferPushResponseSchema,
+  BufferStatusResponseSchema,
+  DeltaGetResponseSchema,
+  GetHotPathResponseSchema,
+  GetSkeletonResponseSchema,
+  IndexRefreshResponseSchema,
+  MemoryQueryResponseSchema,
+  MemoryRemoveResponseSchema,
+  MemoryStoreResponseSchema,
+  MemorySurfaceResponseSchema,
+  PolicyGetResponseSchema,
+  PolicySetResponseSchema,
+  PRRiskAnalysisResponseSchema,
+  RepoOverviewResponseSchema,
+  RepoRegisterResponseSchema,
   RepoStatusResponseSchema,
   RepoUnregisterResponseSchema,
+  ResponseGetResponseSchema,
   RuntimeExecuteResponseSchema,
   RuntimeQueryOutputResponseSchema,
+  SliceBuildResponseSchema,
+  SliceRefreshResponseSchema,
+  SliceSpilloverGetResponseSchema,
+  SymbolGetCardResponseSchema,
+  SymbolSearchResponseSchema,
+  UsageStatsResponseSchema,
 } from "../tools.js";
 import { ACTION_DEFINITION_BY_ACTION } from "../../code-mode/action-catalog.js";
 
@@ -138,6 +163,7 @@ export function buildFlatToolDescriptors(
     {
       action: "repo.register",
       description: "Register a new repository for indexing",
+      outputSchema: RepoRegisterResponseSchema,
       handler: handleRepoRegister,
     },
     {
@@ -156,40 +182,47 @@ export function buildFlatToolDescriptors(
     {
       action: "index.refresh",
       description: "Refresh index for a repository (full or incremental)",
+      outputSchema: IndexRefreshResponseSchema,
       handler: handleIndexRefresh,
     },
     {
       action: "repo.overview",
       description:
         "Get token-efficient codebase overview with directory summaries and hotspots",
+      outputSchema: RepoOverviewResponseSchema,
       handler: handleRepoOverview,
     },
     {
       action: "buffer.push",
       description: "Push editor buffer updates for live draft indexing",
+      outputSchema: BufferPushResponseSchema,
       handler: (args, context) =>
         handleBufferPush(args, context, services.liveIndex),
     },
     {
       action: "buffer.checkpoint",
       description: "Request a live draft checkpoint for a repository",
+      outputSchema: BufferCheckpointResponseSchema,
       handler: (args, context) =>
         handleBufferCheckpoint(args, context, services.liveIndex),
     },
     {
       action: "buffer.status",
       description: "Get live draft buffer status for a repository",
+      outputSchema: BufferStatusResponseSchema,
       handler: (args, context) =>
         handleBufferStatus(args, context, services.liveIndex),
     },
     {
       action: "symbol.search",
       description: "Search for symbols by name or summary",
+      outputSchema: SymbolSearchResponseSchema,
       handler: handleSymbolSearch,
     },
     {
       action: "symbol.getCard",
       description: "Get a single symbol card by ID",
+      outputSchema: SymbolGetCardResponseSchema,
       handler: handleSymbolGetCard,
     },
     {
@@ -205,23 +238,27 @@ export function buildFlatToolDescriptors(
         "to auto-discover relevant symbols via full-text search in a single round trip. " +
         "Providing entrySymbols in addition to taskText improves precision. " +
         "When editedFiles is provided, all symbols in those files plus their immediate callers are included as forced entries regardless of score threshold.",
+      outputSchema: SliceBuildResponseSchema,
       handler: handleSliceBuild,
     },
     {
       action: "slice.refresh",
       description:
         "Refresh an existing slice handle and return incremental delta",
+      outputSchema: SliceRefreshResponseSchema,
       handler: handleSliceRefresh,
     },
     {
       action: "slice.spillover.get",
       description:
         "Fetch overflow symbols via spillover handle with pagination",
+      outputSchema: SliceSpilloverGetResponseSchema,
       handler: handleSliceSpilloverGet,
     },
     {
       action: "delta.get",
       description: "Get delta pack between two versions with blast radius",
+      outputSchema: DeltaGetResponseSchema,
       handler: handleDeltaGet,
     },
     {
@@ -234,40 +271,47 @@ export function buildFlatToolDescriptors(
       action: "code.getSkeleton",
       description:
         "Get skeleton view of code (signatures + control flow + elided bodies)",
+      outputSchema: GetSkeletonResponseSchema,
       handler: handleGetSkeleton,
     },
     {
       action: "code.getHotPath",
       description:
         "Get hot-path excerpt showing only lines matching identifiers with context",
+      outputSchema: GetHotPathResponseSchema,
       handler: handleGetHotPath,
     },
     {
       action: "policy.get",
       description: "Get policy configuration for a repository",
+      outputSchema: PolicyGetResponseSchema,
       handler: handlePolicyGet,
     },
     {
       action: "policy.set",
       description: "Update policy configuration for a repository",
+      outputSchema: PolicySetResponseSchema,
       handler: handlePolicySet,
     },
     {
       action: "pr.risk.analyze",
       description:
         "Analyze PR risk by computing delta between versions, assessing blast radius, and recommending tests",
+      outputSchema: PRRiskAnalysisResponseSchema,
       handler: handlePRRiskAnalysis,
     },
     {
       action: "agent.feedback",
       description:
         "Record feedback about useful and missing symbols for offline tuning",
+      outputSchema: AgentFeedbackResponseSchema,
       handler: handleAgentFeedback,
     },
     {
       action: "agent.feedback.query",
       description:
         "Query feedback records and aggregated statistics for offline tuning pipelines",
+      outputSchema: AgentFeedbackQueryResponseSchema,
       handler: handleAgentFeedbackQuery,
     },
     {
@@ -289,36 +333,42 @@ export function buildFlatToolDescriptors(
       action: "response.get",
       description:
         "Retrieve a stored large tool response by handle, with bounded excerpt or full payload modes",
+      outputSchema: ResponseGetResponseSchema,
       handler: handleResponseGet,
     },
     {
       action: "memory.store",
       description:
         "Store or update an agent memory (decision, bugfix, or task context) with optional symbol and file links",
+      outputSchema: MemoryStoreResponseSchema,
       handler: handleMemoryStore,
     },
     {
       action: "memory.query",
       description:
         "Search and filter agent memories by text, type, tags, or linked symbols",
+      outputSchema: MemoryQueryResponseSchema,
       handler: handleMemoryQuery,
     },
     {
       action: "memory.remove",
       description:
         "Soft-delete a memory from the graph and optionally from disk",
+      outputSchema: MemoryRemoveResponseSchema,
       handler: handleMemoryRemove,
     },
     {
       action: "memory.surface",
       description:
         "Auto-surface relevant memories for a task context based on symbol overlap and recency",
+      outputSchema: MemorySurfaceResponseSchema,
       handler: handleMemorySurface,
     },
     {
       action: "usage.stats",
       description:
         "Get cumulative token savings statistics for the current session and/or historical sessions",
+      outputSchema: UsageStatsResponseSchema,
       handler: handleUsageStats,
     },
     {

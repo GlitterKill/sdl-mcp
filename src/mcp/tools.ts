@@ -1413,6 +1413,16 @@ const CardWithETagSchema = SymbolCardSchema.extend({
   changedSincePrior: z.boolean().optional(),
 });
 
+// Wire compaction omits provider metadata that is not present on every card.
+const WireCardWithETagSchema = CardWithETagSchema.extend({
+  repoId: z.string().min(1).optional(),
+  signature: SymbolSignatureSchema.extend({
+    name: z.string().optional(),
+  }).optional(),
+  etag: z.string().optional(),
+  version: SymbolCardVersionSchema.optional(),
+});
+
 // Batch card response (when symbolIds/symbolRefs used)
 const BatchCardResponseSchema = z.object({
   cards: z.array(
@@ -1458,14 +1468,34 @@ const SingleCardResponseSchema = z.object({
     .optional(),
 });
 
+const WireSingleCardResponseSchema = SingleCardResponseSchema.extend({
+  card: z.union([WireCardWithETagSchema, SessionContentRefResponseSchema]),
+});
+
+const WireBatchCardResponseSchema = BatchCardResponseSchema.extend({
+  cards: z.array(
+    z.union([
+      WireCardWithETagSchema,
+      NotModifiedResponseSchema,
+      SessionContentRefResponseSchema,
+    ]),
+  ),
+});
+
+const SymbolGetCardHandlerResponseSchema = z.union([
+  SingleCardResponseSchema,
+  BatchCardResponseSchema,
+  NotModifiedResponseSchema,
+]);
+
 /**
  * Unified response schema - supports both single and batch responses.
  * Single: { card: CardWithETag, truncation?: {...} }
  * Batch: { cards: [...], partial?: boolean, succeeded?: [...], failed?: [...], failures?: [...] }
  */
 export const SymbolGetCardResponseSchema = z.union([
-  SingleCardResponseSchema,
-  BatchCardResponseSchema,
+  WireSingleCardResponseSchema,
+  WireBatchCardResponseSchema,
   NotModifiedResponseSchema,
 ]);
 
@@ -1945,7 +1975,7 @@ const GetSkeletonPayloadSchema = z.object({
 
 export const GetSkeletonResponseSchema = z.union([
   GetSkeletonPayloadSchema.extend({
-    etag: z.string(),
+    etag: z.string().optional(),
   }),
   ConditionalNotModifiedResponseSchema,
 ]);
@@ -1998,7 +2028,7 @@ const GetHotPathPayloadSchema = z.object({
 
 export const GetHotPathResponseSchema = z.union([
   GetHotPathPayloadSchema.extend({
-    etag: z.string(),
+    etag: z.string().optional(),
   }),
   ConditionalNotModifiedResponseSchema,
 ]);
@@ -2239,7 +2269,9 @@ export type SymbolSearchRequest = z.infer<typeof SymbolSearchRequestSchema>;
 export type SymbolSearchResponse = z.infer<typeof SymbolSearchResponseSchema>;
 export type SymbolRef = z.infer<typeof SymbolRefSchema>;
 export type SymbolGetCardRequest = z.infer<typeof SymbolGetCardRequestSchema>;
-export type SymbolGetCardResponse = z.infer<typeof SymbolGetCardResponseSchema>;
+export type SymbolGetCardResponse = z.infer<
+  typeof SymbolGetCardHandlerResponseSchema
+>;
 export type SliceBuildRequest = z.infer<typeof SliceBuildRequestSchema>;
 export type SliceBuildResponse = z.infer<typeof SliceBuildResponseSchema>;
 export type SliceBuildWireFormat = z.infer<typeof SliceBuildWireFormatSchema>;
