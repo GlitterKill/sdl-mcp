@@ -9,6 +9,9 @@ const { closeLadybugDb, initLadybugDb, withWriteConn } = await import(
 const { getMetricsBySymbolIds, upsertMetricsBatch } = await import(
   "../../../dist/db/ladybug-queries.js"
 );
+const { querySingle, toNumber } = await import(
+  "../../../dist/db/ladybug-core.js"
+);
 
 const makeRow = (index) => ({
   symbolId: `typed-metric-${String(index).padStart(4, "0")}`,
@@ -76,6 +79,16 @@ try {
     counts.push(await countedUpsert(conn, updated));
 
     const allIds = rows.map((row) => row.symbolId);
+    const physicalCount = await querySingle(
+      conn,
+      `MATCH (m:Metrics)
+       WHERE m.symbolId IN $symbolIds
+       RETURN count(m) AS count`,
+      { symbolIds: allIds },
+    );
+    assert.ok(physicalCount);
+    assert.strictEqual(toNumber(physicalCount.count), 640);
+
     const actual = await getMetricsBySymbolIds(conn, allIds);
     assert.strictEqual(actual.size, 640);
 
