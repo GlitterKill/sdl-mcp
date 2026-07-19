@@ -4,7 +4,7 @@ import {
   serializeSliceForWireFormat,
   toAgentGraphSlice,
 } from "../../dist/mcp/tools/slice-wire-format.js";
-import { handleSliceBuild } from "../../dist/mcp/tools/slice.js";
+
 import { SliceBuildResponseSchema } from "../../dist/mcp/tools.js";
 import type { GraphSlice } from "../../dist/domain/types.js";
 
@@ -194,23 +194,65 @@ describe("toAgentGraphSlice", () => {
     assert.equal(card.imports[0].confidence, 0.8);
   });
 
-  it("validates readable and packed emitted slices against the output schema", () => {
-    const slice = makeMockSlice();
-    for (const wireFormat of ["readable", "packed"] as const) {
-      const emitted = serializeSliceForWireFormat(slice, wireFormat, undefined, {
-        packedThreshold: 0,
-      });
-      SliceBuildResponseSchema.parse({
-        sliceHandle: "slice-handle",
-        ledgerVersion: slice.versionId,
-        lease: { expiresAt: "2099-01-01T00:00:00.000Z", minVersion: null, maxVersion: slice.versionId },
-        slice: emitted.payload,
-      });
-    }
-  });
 
-  it("validates the handler-produced error variant against the output schema", async () => {
-    const response = await handleSliceBuild({ repoId: "test-repo" });
-    SliceBuildResponseSchema.parse(response);
+  it("validates readable and packed handler responses against the output schema", async (t) => {
+    const slice = makeMockSlice();
+    const actualLadybug = await import("../../dist/db/ladybug.js");
+
+
+    t.mock.module("../../dist/db/ladybug.js", {
+      namedExports: {
+        ...actualLadybug,
+        getLadybugConn: async () => ({}),
+        withWriteConn: async (fn: (conn: object) => Promise<unknown>) => fn({}),
+        getPoolStats: () => ({}),
+      },
+    });
+    t.mock.module("../../dist/db/ladybug-queries.js", {
+      namedExports: {
+
+        getRepo: async () => ({ configJson: "{}" }),
+        getLatestVersion: async () => ({ versionId: slice.versionId }),
+        upsertSliceHandle: async () => undefined,
+        getSymbolsByIds: async () => [],
+      },
+    });
+    t.mock.module("../../dist/graph/slice.js", {
+      namedExports: {
+        buildSlice: async () => ({ slice, hybridSearchItems: [] }),
+      },
+    });
+    t.mock.module("../../dist/util/resolve-symbol-id.js", {
+      namedExports: {
+        resolveSymbolId: async (_conn: object, _repoId: string, symbolId: string) => ({ symbolId }),
+      },
+    });
+    t.mock.module("../../dist/policy/code-access.js", {
+      namedExports: {
+        decideCodeAccess: () => ({ kind: "approve", reason: "test" }),
+        toLegacyPolicyDecision: () => ({ action: "allow", reason: "test" }),
+      },
+    });
+    t.mock.module("../../dist/graph/prefetch.js", {
+      namedExports: {
+        consumePrefetchedKey: () => undefined,
+        prefetchSliceFrontier: () => undefined,
+      },
+    });
+    t.mock.module("../../dist/graph/prefetch-model.js", {
+      namedExports: { recordToolTrace: () => undefined },
+    });
+
+    const { handleSliceBuild } = await import("../../dist/mcp/tools/slice.js");
+    for (const wireFormat of ["readable", "packed"] as const) {
+      const response = await handleSliceBuild({
+        repoId: slice.repoId,
+        entrySymbols: [slice.startSymbols[0]],
+        wireFormat,
+      });
+      SliceBuildResponseSchema.parse(response);
+    }
+
+    SliceBuildResponseSchema.parse(await handleSliceBuild({ repoId: slice.repoId }));
   });
 });

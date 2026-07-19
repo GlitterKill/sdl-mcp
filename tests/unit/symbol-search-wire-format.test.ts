@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SymbolSearchHandlerResponseSchema } from "../../dist/mcp/tools.js";
+import { SymbolSearchResponseSchema } from "../../dist/mcp/tools.js";
 import {
   serializeSymbolSearchForWireFormat,
   type SymbolSearchWireInput,
@@ -85,7 +85,6 @@ test("wireFormat=undefined returns json passthrough (no gate)", () => {
   assert.equal(result.format, "json");
   assert.equal(result.gateDecision, undefined);
   assert.deepEqual(result.payload, SMALL_INPUT);
-  SymbolSearchHandlerResponseSchema.parse(result.payload);
 });
 
 test("wireFormat=json returns json passthrough (no gate)", () => {
@@ -125,7 +124,6 @@ test("wireFormat=auto: packed wins on large input → results becomes string", (
     assert.equal(result.format, "packed");
     assert.equal(typeof result.payload, "string");
     assert.equal(result.encoderId, "ss1");
-    SymbolSearchHandlerResponseSchema.parse({ results: result.payload });
   } else {
     assert.equal(result.format, "json");
   }
@@ -155,11 +153,87 @@ test("packed payload round-trips via decodePacked", () => {
   assert.ok(decoded.data);
 });
 
-test("output schema accepts the emitted session-ref variant", () => {
-  SymbolSearchHandlerResponseSchema.parse({
-    ref: { key: "symbol.search:abc123", etag: "etag-1" },
-    unchanged: true,
+test("actual handler JSON and packed responses satisfy the output schema", async (t) => {
+  const conn = {};
+  const rows = Array.from({ length: 50 }, (_, i) => ({
+    symbolId: `symbol-${i.toString().padStart(58, "0")}`,
+    name: "sharedResult",
+    filePath: `src/result-${i}.ts`,
+    fileId: `file-${i}`,
+    kind: "function",
+  }));
+
+  t.mock.module("../../dist/db/ladybug.js", {
+    namedExports: {
+      getLadybugConn: async () => conn,
+      withWriteConn: async (callback: (writeConn: object) => Promise<unknown>) => callback(conn),
+    },
   });
+  t.mock.module("../../dist/db/ladybug-queries.js", {
+    namedExports: {
+      getRepo: async () => ({
+        repoId: "test-repo",
+        rootPath: "C:/repo",
+        configJson: "{}",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    },
+  });
+  t.mock.module("../../dist/live-index/overlay-reader.js", {
+    namedExports: {
+      clearSnapshotCache: () => undefined,
+      getOverlaySnapshot: (repoId: string) => ({
+        repoId,
+        touchedFileIds: new Set(),
+        symbolsById: new Map(),
+        filesById: new Map(),
+        outgoingEdgesBySymbolId: new Map(),
+      }),
+      getOverlaySymbol: () => null,
+      getShadowedDurableSymbol: async () => null,
+      getTargetNamesWithOverlay: async () => new Map(),
+      mergeEdgeMapWithOverlay: (_snapshot: object, _symbolIds: string[], edges: Map<string, unknown>) => edges,
+      mergeSymbolRowsWithOverlay: (_snapshot: object, _symbolIds: string[], symbols: Map<string, unknown>) => symbols,
+      resolveSymbolsWithOverlay: async () => ({ items: [] }),
+      searchSymbolsHybridWithOverlay: async () => ({ rows, evidence: {} }),
+      searchSymbolsWithOverlay: async () => rows,
+    },
+  });
+  t.mock.module("../../dist/graph/prefetch.js", {
+    namedExports: {
+      consumePrefetchedKey: () => false,
+      prefetchCardsForSymbols: () => undefined,
+      prefetchSliceFrontier: () => undefined,
+    },
+  });
+  t.mock.module("../../dist/graph/prefetch-model.js", {
+    namedExports: { recordToolTrace: () => undefined },
+  });
+  t.mock.module("../../dist/retrieval/index.js", {
+    namedExports: {
+      checkRetrievalHealth: async () => ({ healthy: true }),
+      shouldFallbackToLegacy: () => false,
+    },
+  });
+
+  const { handleSymbolSearch } = await import("../../dist/mcp/tools/symbol.js");
+  const jsonResponse = await handleSymbolSearch({
+    repoId: "test-repo",
+    query: "sharedResult",
+    semantic: false,
+    wireFormat: "json",
+  });
+  const packedResponse = await handleSymbolSearch({
+    repoId: "test-repo",
+    query: "sharedResult",
+    semantic: false,
+    wireFormat: "packed",
+    limit: 50,
+  });
+
+  SymbolSearchResponseSchema.parse(jsonResponse);
+  SymbolSearchResponseSchema.parse(packedResponse);
+  assert.equal(typeof packedResponse.results, "string");
 });
 
 test("fallback path also publishes tap (decision=fallback)", () => {

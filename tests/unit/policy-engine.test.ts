@@ -2,6 +2,10 @@ import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert";
 
 import { PolicyEngine } from "../../dist/policy/engine.js";
+import {
+  PolicyGetResponseSchema,
+  PolicySetResponseSchema,
+} from "../../dist/mcp/tools.js";
 import type { PolicyRequestContext } from "../../dist/policy/types.js";
 
 /**
@@ -55,5 +59,45 @@ describe("Policy Engine - Priority Evaluation", () => {
     const decision = engine.evaluate(context);
 
     assert.strictEqual(decision.decision, "downgrade-to-hotpath");
+  });
+
+  it("validates actual policy handler responses against their output schemas", async (t) => {
+    const conn = {};
+    let configJson = JSON.stringify({ policy: {} });
+    const repo = {
+      repoId: "test-repo",
+      rootPath: "C:/repo",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      get configJson() {
+        return configJson;
+      },
+    };
+
+    t.mock.module("../../dist/db/ladybug.js", {
+      namedExports: {
+        getLadybugConn: async () => conn,
+        withWriteConn: async (callback: (writeConn: object) => Promise<void>) => callback(conn),
+      },
+    });
+    t.mock.module("../../dist/db/ladybug-queries.js", {
+      namedExports: {
+        getRepo: async () => repo,
+        upsertRepo: async (_conn: object, row: { configJson: string }) => {
+          configJson = row.configJson;
+        },
+      },
+    });
+
+    const { handlePolicyGet, handlePolicySet } = await import(
+      "../../dist/mcp/tools/policy.js"
+    );
+    const getResponse = await handlePolicyGet({ repoId: "test-repo" });
+    const setResponse = await handlePolicySet({
+      repoId: "test-repo",
+      policyPatch: { maxWindowLines: 240 },
+    });
+
+    PolicyGetResponseSchema.parse(getResponse);
+    PolicySetResponseSchema.parse(setResponse);
   });
 });

@@ -1408,11 +1408,6 @@ const SessionContentRefResponseSchema = z.object({
   unchanged: z.literal(true),
 });
 
-export const SymbolSearchHandlerResponseSchema = z.union([
-  SymbolSearchResponseSchema,
-  SessionContentRefResponseSchema,
-]);
-
 const CardWithETagSchema = SymbolCardSchema.extend({
   etag: z.string(),
   changedSincePrior: z.boolean().optional(),
