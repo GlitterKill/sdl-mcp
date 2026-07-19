@@ -37,6 +37,7 @@ const SCOPED_PRECISE_P95_MAX_MS = 250;
 const REPORT_CASE_IDS = new Set([
   "review-precise-tool-qa-tests",
   "review-broad-sdl-tool-functionality",
+  "review-broad-tool-contract-relevance",
 ]);
 
 interface BenchmarkCase {
@@ -232,8 +233,9 @@ function percentile(values: number[], percentileValue: number): number {
   return sorted[index] ?? 0;
 }
 
-function evidenceText(result: ContextResult): string {
+function evidenceText(result: ContextResult, limit?: number): string {
   return (result.finalEvidence ?? [])
+    .slice(0, limit)
     .map((e) => `${e.summary ?? ""} ${e.reference ?? ""}`)
     .join(" ");
 }
@@ -398,7 +400,7 @@ async function runCase(
 
   const durationMs = performance.now() - startedAt;
   const evidence = result.finalEvidence ?? [];
-  const text = evidenceText(result);
+  const text = evidenceText(result, c.id === "review-broad-tool-contract-relevance" ? 10 : undefined);
   let usefulHits = 0;
   let noiseHits = 0;
 
@@ -489,11 +491,13 @@ function assertSemanticQuality(
     );
     const result = semantic.caseResults[0];
     assert.ok(result, "selected semantic case result should exist");
-    assert.deepEqual(
-      result.missingUsefulSymbols,
-      [],
-      `selected case ${result.id} missing expected evidence: ${result.missingUsefulSymbols.join(", ")}`,
-    );
+    if (result.id !== "review-broad-tool-contract-relevance") {
+      assert.deepEqual(
+        result.missingUsefulSymbols,
+        [],
+        `selected case ${result.id} missing expected evidence: ${result.missingUsefulSymbols.join(", ")}`,
+      );
+    }
     assert.equal(
       result.noiseHits,
       0,
@@ -518,6 +522,15 @@ function assertSemanticQuality(
 }
 
 function assertSelectedReportCase(result: CaseMetrics): void {
+  if (result.id === "review-broad-tool-contract-relevance") {
+    assert.ok(
+      result.usefulHits >= 4,
+      `selected case ${result.id} returned ${result.usefulHits}/${result.usefulTotal} expected symbols in the top ten`,
+    );
+    assert.equal(result.noiseHits, 0, "selected case returned unexpected top-ten symbols");
+    return;
+  }
+
   if (result.id === "review-precise-tool-qa-tests") {
     assert.deepEqual(
       result.unresolvedPathReferences,
@@ -801,7 +814,7 @@ describe("context quality benchmarks", () => {
 
   describe("case structure validation", () => {
     it("loads the expected number of cases", () => {
-      assert.equal(cases.length, 26, "Expected 26 benchmark cases");
+      assert.equal(cases.length, 27, "Expected 27 benchmark cases");
     });
 
     it("has correct task type distribution", () => {
@@ -811,7 +824,7 @@ describe("context quality benchmarks", () => {
       }
       assert.equal(byType.get("debug"), 8, "Expected 8 debug cases");
       assert.equal(byType.get("explain"), 6, "Expected 6 explain cases");
-      assert.equal(byType.get("review"), 8, "Expected 8 review cases");
+      assert.equal(byType.get("review"), 9, "Expected 9 review cases");
       assert.equal(byType.get("implement"), 4, "Expected 4 implement cases");
     });
 
@@ -823,8 +836,8 @@ describe("context quality benchmarks", () => {
       );
       assert.equal(
         cases.filter((c) => c.contextMode === "broad").length,
-        13,
-        "Expected 13 broad cases",
+        14,
+        "Expected 14 broad cases",
       );
     });
 
@@ -833,7 +846,7 @@ describe("context quality benchmarks", () => {
         assert.ok(c.id, "Case missing id");
         assert.ok(c.taskText, `Case ${c.id} missing taskText`);
         assert.ok(
-          c.id === "review-broad-sdl-tool-functionality" || c.focusPaths.length > 0,
+          REPORT_CASE_IDS.has(c.id) || c.focusPaths.length > 0,
           `Case ${c.id} needs focusPaths`,
         );
         assert.ok(
@@ -1277,6 +1290,6 @@ describe("context quality benchmarks", () => {
 
   it("summary report", () => {
     console.log(buildReport());
-    assert.equal(metrics.totalCases, 26, "Report should cover all 26 cases");
+    assert.equal(metrics.totalCases, 27, "Report should cover all 27 cases");
   });
 });

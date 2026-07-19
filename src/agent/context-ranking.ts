@@ -351,6 +351,11 @@ function scoreGenericModulePenalty(
 const SCRIPT_INTENT = /\bscripts?\b/;
 const DIST_INTENT = /\bdist\b|\bbuild output\b|\bcompiled\b/;
 const TEST_INTENT = /\btests?\b|\bspecs?\b|\btesting\b/;
+const GENERATED_OUTPUT_PATH_INTENT = /\boutputs[\\/]/;
+
+function isTopLevelGeneratedOutputPath(relPath: string): boolean {
+  return caseFoldedPathKey(relPath).startsWith("outputs/");
+}
 
 export function explicitFocusPaths(
   options: TaskOptions | undefined,
@@ -386,6 +391,7 @@ export function scorePathAffinity(
   if (!sym.fileId) return 0;
 
   const relPath = sym.fileId.slice(sym.fileId.indexOf(":") + 1);
+  // Explicit focus wins before category penalties so generated artifacts remain retrievable.
   if (scope.explicit.length > 0) {
     return pathMatchesFocus(relPath, scope.explicit) ? 10 : -8;
   }
@@ -394,6 +400,8 @@ export function scorePathAffinity(
   let categoryScore = 0;
   if (pathMatchesFocus(relPath, ["scripts"])) {
     categoryScore = SCRIPT_INTENT.test(taskTextLower) ? 0 : -6;
+  } else if (isTopLevelGeneratedOutputPath(relPath)) {
+    categoryScore = GENERATED_OUTPUT_PATH_INTENT.test(taskTextLower) ? 0 : -6;
   } else if (pathMatchesFocus(relPath, ["dist"])) {
     categoryScore = DIST_INTENT.test(taskTextLower) ? 0 : -6;
   } else if (isTestLikePath(relPath)) {

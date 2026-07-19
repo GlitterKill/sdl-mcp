@@ -549,5 +549,27 @@
       "runContextQualityBenchmark",
       "computeClustersTS"
     ]
+  },
+  {
+    "id": "review-broad-tool-contract-relevance",
+    "taskType": "review",
+    "contextMode": "broad",
+    "taskText": "Review the current SDL-MCP tool surface for contracts, output noise, deterministic responses, and safe errors.",
+    "focusPaths": [],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "buildFlatToolDescriptors",
+      "registerTool",
+      "buildToolResponseEnvelope",
+      "asStructuredContent",
+      "handleRuntimeQueryOutput"
+    ],
+    "unexpectedSymbols": [
+      "renderMeta",
+      "renderGrid",
+      "evaluateSeedResolution",
+      "evaluateCase"
+    ]
   }
 ]
