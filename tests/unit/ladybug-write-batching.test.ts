@@ -1,5 +1,7 @@
 import assert from "node:assert";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -27,6 +29,7 @@ import {
   insertKnownSymbolEdges,
   insertSymbolReferences,
   replaceMetricsForRepoCopy,
+  upsertMetricsBatch,
   upsertKnownFileSymbols,
   withTransaction,
 } from "../../dist/db/ladybug-queries.js";
@@ -313,6 +316,264 @@ describe("LadybugDB write batching", () => {
       versionsSource,
       /resolveLadybugWriteChunkSize\(\s*"symbolVersions"/,
     );
+  });
+
+  it("keeps keyed Metrics upserts on bounded typed MERGE batches", () => {
+    const source = readFileSync(
+      join(__dirname, "../../src/db/ladybug-metrics.ts"),
+      "utf8",
+    );
+    const start = source.indexOf("export async function upsertMetricsBatch");
+    const end = source.indexOf("function dedupeMetricsRows", start);
+
+    assert.ok(start >= 0 && end > start);
+    const keyedUpsert = source.slice(start, end);
+    assert.doesNotMatch(keyedUpsert, /COPY Metrics/);
+    assert.doesNotMatch(keyedUpsert, /getExistingMetricSymbolIds/);
+    assert.match(
+      keyedUpsert,
+      /for \(let i = 0; i < dedupedRows\.length; i \+= CHUNK\)/,
+    );
+    assert.match(keyedUpsert, /const rowsByNullShape: Array<typeof chunk>/);
+    assert.match(
+      keyedUpsert,
+      /\(row\.testRefsJsonIsNull \? 2 : 0\) \|\s*\(row\.canonicalTestJsonIsNull \? 1 : 0\)/,
+    );
+    assert.match(keyedUpsert, /METRICS_MERGE_QUERIES\[nullShape\]/);
+    assert.doesNotMatch(keyedUpsert, /CASE|coalesce/i);
+    assert.strictEqual(
+      (source.match(/CAST\(row\.pageRankValue AS DOUBLE\)/g) ?? []).length,
+      4,
+    );
+  });
+
+  it("binds Metrics batches with one concrete type per member", async () => {
+    const statements: string[] = [];
+    const paramsLog: Record<string, unknown>[] = [];
+    const rows: MetricsRow[] = Array.from({ length: 512 }, (_, index) => ({
+      symbolId: `metric-${index}`,
+      fanIn: index,
+      fanOut: index + 1,
+      churn30d: index + 2,
+      testRefsJson: null,
+      canonicalTestJson: null,
+      pageRank: index % 2 === 0 ? index : index + 0.5,
+      kCore: index % 7,
+      updatedAt: "2026-07-18T00:00:00.000Z",
+    }));
+
+    await upsertMetricsBatch(createFakeConnection(statements, paramsLog), rows);
+
+    const mergeParams = paramsLog.filter((params) => Array.isArray(params.rows));
+    assert.deepStrictEqual(
+      mergeParams.map((params) => (params.rows as unknown[]).length),
+      [256, 256],
+    );
+    const boundRows = mergeParams.flatMap(
+      (params) => params.rows as Array<Record<string, unknown>>,
+    );
+    assert.strictEqual(boundRows.length, rows.length);
+    for (const [index, row] of boundRows.entries()) {
+      assert.strictEqual(row.testRefsJsonValue, "null");
+      assert.strictEqual(row.testRefsJsonIsNull, true);
+      assert.strictEqual(row.canonicalTestJsonValue, "null");
+      assert.strictEqual(row.canonicalTestJsonIsNull, true);
+      assert.strictEqual(row.pageRankValue, String(rows[index]!.pageRank));
+      assert.strictEqual(typeof row.pageRankValue, "string");
+      assert.strictEqual(row.kCore, rows[index]!.kCore);
+      assert.ok(!("testRefsJson" in row));
+      assert.ok(!("canonicalTestJson" in row));
+      assert.ok(!("pageRank" in row));
+    }
+
+    const mergeStatements = statements.filter((statement) =>
+      statement.includes("MERGE (m:Metrics"),
+    );
+    assert.strictEqual(mergeStatements.length, 2);
+    for (const statement of mergeStatements) {
+      assert.match(statement, /m\.testRefsJson = null/);
+      assert.match(statement, /m\.canonicalTestJson = null/);
+      assert.match(
+        statement,
+        /m\.pageRank = CAST\(row\.pageRankValue AS DOUBLE\)/,
+      );
+      assert.doesNotMatch(statement, /CASE|coalesce/i);
+    }
+  });
+
+  it("selects fixed Metrics queries for all nullable JSON shapes", async () => {
+    const rows: MetricsRow[] = [
+      {
+        symbolId: "empty-json",
+        fanIn: 1,
+        fanOut: 2,
+        churn30d: 3,
+        testRefsJson: "",
+        canonicalTestJson: "",
+        pageRank: 0,
+        kCore: 1,
+        updatedAt: "2026-07-18T00:00:00.000Z",
+      },
+      {
+        symbolId: "literal-null-json",
+        fanIn: 2,
+        fanOut: 3,
+        churn30d: 4,
+        testRefsJson: "null",
+        canonicalTestJson: "null",
+        pageRank: 1.5,
+        kCore: 2,
+        updatedAt: "2026-07-18T00:00:00.000Z",
+      },
+      {
+        symbolId: "test-null-only",
+        fanIn: 3,
+        fanOut: 4,
+        churn30d: 5,
+        testRefsJson: null,
+        canonicalTestJson: "{}",
+        pageRank: 2,
+        kCore: 3,
+        updatedAt: "2026-07-18T00:00:00.000Z",
+      },
+      {
+        symbolId: "canonical-null-only",
+        fanIn: 4,
+        fanOut: 5,
+        churn30d: 6,
+        testRefsJson: "[]",
+        canonicalTestJson: null,
+        pageRank: 3.5,
+        kCore: 4,
+        updatedAt: "2026-07-18T00:00:00.000Z",
+      },
+      {
+        symbolId: "both-null",
+        fanIn: 5,
+        fanOut: 6,
+        churn30d: 7,
+        testRefsJson: null,
+        canonicalTestJson: null,
+        pageRank: 4,
+        kCore: 5,
+        updatedAt: "2026-07-18T00:00:00.000Z",
+      },
+    ];
+    const statements: string[] = [];
+    const paramsLog: Record<string, unknown>[] = [];
+
+    await upsertMetricsBatch(createFakeConnection(statements, paramsLog), rows);
+
+    const boundGroups = paramsLog.filter((params) => Array.isArray(params.rows));
+    assert.strictEqual(boundGroups.length, 4);
+    for (const params of boundGroups) {
+      for (const row of params.rows as Array<Record<string, unknown>>) {
+        assert.strictEqual(typeof row.testRefsJsonValue, "string");
+        assert.strictEqual(typeof row.testRefsJsonIsNull, "boolean");
+        assert.strictEqual(typeof row.canonicalTestJsonValue, "string");
+        assert.strictEqual(typeof row.canonicalTestJsonIsNull, "boolean");
+        assert.strictEqual(typeof row.pageRankValue, "string");
+        assert.ok(!("testRefsJson" in row));
+        assert.ok(!("canonicalTestJson" in row));
+        assert.ok(!("pageRank" in row));
+      }
+    }
+
+    const valueRows = boundGroups
+      .flatMap((params) => params.rows as Array<Record<string, unknown>>)
+      .filter((row) => row.testRefsJsonIsNull === false)
+      .filter((row) => row.canonicalTestJsonIsNull === false);
+    assert.deepStrictEqual(
+      valueRows.map((row) => [
+        row.testRefsJsonValue,
+        row.testRefsJsonIsNull,
+        row.canonicalTestJsonValue,
+        row.canonicalTestJsonIsNull,
+      ]),
+      [
+        ["", false, "", false],
+        ["null", false, "null", false],
+      ],
+    );
+
+    const mergeStatements = statements.filter((statement) =>
+      statement.includes("MERGE (m:Metrics"),
+    );
+    assert.strictEqual(new Set(mergeStatements).size, 4);
+    for (const statement of mergeStatements) {
+      assert.match(
+        statement,
+        /m\.pageRank = CAST\(row\.pageRankValue AS DOUBLE\)/,
+      );
+      assert.doesNotMatch(statement, /CASE|coalesce/i);
+    }
+    assert.ok(
+      mergeStatements.some(
+        (statement) =>
+          statement.includes("m.testRefsJson = row.testRefsJsonValue") &&
+          statement.includes(
+            "m.canonicalTestJson = row.canonicalTestJsonValue",
+          ),
+      ),
+    );
+    assert.ok(
+      mergeStatements.some(
+        (statement) =>
+          statement.includes("m.testRefsJson = row.testRefsJsonValue") &&
+          statement.includes("m.canonicalTestJson = null"),
+      ),
+    );
+    assert.ok(
+      mergeStatements.some(
+        (statement) =>
+          statement.includes("m.testRefsJson = null") &&
+          statement.includes(
+            "m.canonicalTestJson = row.canonicalTestJsonValue",
+          ),
+      ),
+    );
+    assert.ok(
+      mergeStatements.some(
+        (statement) =>
+          statement.includes("m.testRefsJson = null") &&
+          statement.includes("m.canonicalTestJson = null"),
+      ),
+    );
+  });
+
+  it("keeps typed Metrics replay isolated from native process aborts", () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "sdl-metrics-batch-"));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          join(
+            __dirname,
+            "../fixtures/ladybug/metrics-batch-idempotence-child.mjs",
+          ),
+          join(fixtureRoot, "graph.lbug"),
+        ],
+        {
+          cwd: join(__dirname, "../.."),
+          encoding: "utf8",
+          env: process.env,
+          timeout: 60_000,
+        },
+      );
+
+      assert.ifError(result.error);
+      assert.strictEqual(result.signal, null, result.stderr);
+      assert.strictEqual(result.status, 0, result.stderr);
+      assert.deepStrictEqual(JSON.parse(result.stdout.trim()), {
+        ok: true,
+        count: 640,
+        fullBatchChunks: [256, 256, 128],
+        statementCounts: [1, 3, 3, 2],
+        updated: 64,
+      });
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it("buffers full-repo Metrics COPY rows before writing to disk", () => {

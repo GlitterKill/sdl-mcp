@@ -277,7 +277,7 @@ describe("LadybugDB Metrics Queries", () => {
       assert.strictEqual(result.canonicalTestJson, '{"key": "value"}');
     });
 
-    it("copies missing incremental metrics rows and updates existing rows", async () => {
+    it("merges incremental metrics rows idempotently", async () => {
       await queries.upsertMetrics(
         conn as unknown as import("kuzu").Connection,
         {
@@ -332,7 +332,6 @@ describe("LadybugDB Metrics Queries", () => {
           },
         ],
         {
-          copyMissingThresholdRows: 2,
           measurePhase: async (phaseName, fn) => {
             phases.push(phaseName);
             return await fn();
@@ -342,9 +341,7 @@ describe("LadybugDB Metrics Queries", () => {
 
       assert.deepEqual(phases, [
         "prepareRows",
-        "probeExisting",
-        "copyMissing.csvMaterialize",
-        "copyMissing.copyFrom",
+        "mergeExisting",
         "mergeExisting",
       ]);
       const existing = await queries.getMetrics(

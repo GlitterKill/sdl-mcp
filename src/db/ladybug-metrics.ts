@@ -37,7 +37,6 @@ const METRICS_COPY_COLUMNS = [
 ] as const;
 const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
 const METRICS_CSV_WRITE_BATCH_SIZE = 4096;
-const DEFAULT_METRICS_MISSING_COPY_THRESHOLD_ROWS = 512;
 const METRICS_EXISTING_PROBE_CHUNK_SIZE = 8192;
 const CENTRALITY_UPDATE_CHUNK_SIZE = 4096;
 
@@ -201,24 +200,14 @@ export interface ReplaceMetricsForRepoCopyOptions {
   ) => Promise<T>;
 }
 
-export type UpsertMetricsBatchPhaseName =
-  | "prepareRows"
-  | "probeExisting"
-  | "copyMissing.csvMaterialize"
-  | "copyMissing.copyFrom"
-  | "createMissing"
-  | "mergeExisting";
+export type UpsertMetricsBatchPhaseName = "prepareRows" | "mergeExisting";
 
 export interface UpsertMetricsBatchStats {
   chunks: number;
-  missingRows: number;
-  existingRows: number;
-  copyMissingRows: number;
-  createMissingRows: number;
+  mergedRows: number;
 }
 
 export interface UpsertMetricsBatchOptions {
-  copyMissingThresholdRows?: number;
   measurePhase?: <T>(
     phaseName: UpsertMetricsBatchPhaseName,
     fn: () => Promise<T> | T,
@@ -301,6 +290,49 @@ export async function upsertMetrics(
   );
 }
 
+const METRICS_MERGE_QUERIES = [
+  `UNWIND $rows AS row
+   MERGE (m:Metrics {symbolId: row.symbolId})
+   SET m.fanIn = row.fanIn,
+       m.fanOut = row.fanOut,
+       m.churn30d = row.churn30d,
+       m.testRefsJson = row.testRefsJsonValue,
+       m.canonicalTestJson = row.canonicalTestJsonValue,
+       m.pageRank = CAST(row.pageRankValue AS DOUBLE),
+       m.kCore = row.kCore,
+       m.updatedAt = row.updatedAt`,
+  `UNWIND $rows AS row
+   MERGE (m:Metrics {symbolId: row.symbolId})
+   SET m.fanIn = row.fanIn,
+       m.fanOut = row.fanOut,
+       m.churn30d = row.churn30d,
+       m.testRefsJson = row.testRefsJsonValue,
+       m.canonicalTestJson = null,
+       m.pageRank = CAST(row.pageRankValue AS DOUBLE),
+       m.kCore = row.kCore,
+       m.updatedAt = row.updatedAt`,
+  `UNWIND $rows AS row
+   MERGE (m:Metrics {symbolId: row.symbolId})
+   SET m.fanIn = row.fanIn,
+       m.fanOut = row.fanOut,
+       m.churn30d = row.churn30d,
+       m.testRefsJson = null,
+       m.canonicalTestJson = row.canonicalTestJsonValue,
+       m.pageRank = CAST(row.pageRankValue AS DOUBLE),
+       m.kCore = row.kCore,
+       m.updatedAt = row.updatedAt`,
+  `UNWIND $rows AS row
+   MERGE (m:Metrics {symbolId: row.symbolId})
+   SET m.fanIn = row.fanIn,
+       m.fanOut = row.fanOut,
+       m.churn30d = row.churn30d,
+       m.testRefsJson = null,
+       m.canonicalTestJson = null,
+       m.pageRank = CAST(row.pageRankValue AS DOUBLE),
+       m.kCore = row.kCore,
+       m.updatedAt = row.updatedAt`,
+] as const;
+
 /**
  * Batch-upsert metrics rows via UNWIND-batched MERGE within a single
  * transaction. Side-effect mode (no RETURN) avoids LadybugDB issue #285.
@@ -311,6 +343,7 @@ export async function upsertMetricsBatch(
   options?: UpsertMetricsBatchOptions,
 ): Promise<void> {
   if (rows.length === 0) return;
+
   const CHUNK = 256;
   const measurePhase =
     options?.measurePhase ??
@@ -318,90 +351,36 @@ export async function upsertMetricsBatch(
       _phaseName: UpsertMetricsBatchPhaseName,
       fn: () => Promise<T> | T,
     ): Promise<T> => await fn());
-  const copyMissingThresholdRows =
-    options?.copyMissingThresholdRows ??
-    DEFAULT_METRICS_MISSING_COPY_THRESHOLD_ROWS;
-  rows = await measurePhase("prepareRows", () => dedupeMetricsRows(rows));
+
+  const dedupedRows = await measurePhase("prepareRows", () =>
+    dedupeMetricsRows(rows),
+  );
+
+  if (options?.stats) {
+    options.stats.chunks += Math.ceil(dedupedRows.length / CHUNK);
+    options.stats.mergedRows += dedupedRows.length;
+  }
+
   await withTransaction(conn, async (txConn) => {
-    const existingSymbolIds = await measurePhase("probeExisting", () =>
-      getExistingMetricSymbolIds(txConn, rows.map((row) => row.symbolId)),
-    );
-    const missingRows: MetricsRow[] = [];
-    const existingRows: MetricsRow[] = [];
-    for (const row of rows) {
-      if (existingSymbolIds.has(row.symbolId)) {
-        existingRows.push(row);
-      } else {
-        missingRows.push(row);
-      }
-    }
-    if (options?.stats) {
-      options.stats.chunks += Math.ceil(rows.length / CHUNK);
-      options.stats.missingRows += missingRows.length;
-      options.stats.existingRows += existingRows.length;
-    }
+    for (let i = 0; i < dedupedRows.length; i += CHUNK) {
+      const chunk = toMetricsParamRows(dedupedRows.slice(i, i + CHUNK));
+      const rowsByNullShape: Array<typeof chunk> = [[], [], [], []];
 
-    if (missingRows.length >= copyMissingThresholdRows) {
-      if (options?.stats) options.stats.copyMissingRows += missingRows.length;
-      const tempDir = await mkdtemp(join(tmpdir(), "sdl-metrics-missing-"));
-      const filePath = join(tempDir, "metrics.csv");
-      try {
-        await measurePhase("copyMissing.csvMaterialize", () =>
-          writeMetricsCsv(filePath, missingRows),
-        );
-        await measurePhase("copyMissing.copyFrom", () =>
-          execDdl(
-            txConn,
-            `COPY Metrics FROM '${escapeCopyPath(filePath)}' ` +
-              `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
-          ),
-        );
-      } finally {
-        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      for (const row of chunk) {
+        const nullShape =
+          (row.testRefsJsonIsNull ? 2 : 0) |
+          (row.canonicalTestJsonIsNull ? 1 : 0);
+        rowsByNullShape[nullShape].push(row);
       }
-    } else if (missingRows.length > 0) {
-      if (options?.stats) options.stats.createMissingRows += missingRows.length;
-      for (let i = 0; i < missingRows.length; i += CHUNK) {
-        const chunk = toMetricsParamRows(missingRows.slice(i, i + CHUNK));
-        await measurePhase("createMissing", () =>
-          exec(
-            txConn,
-            `UNWIND $rows AS row
-             CREATE (:Metrics {
-               symbolId: row.symbolId,
-               fanIn: row.fanIn,
-               fanOut: row.fanOut,
-               churn30d: row.churn30d,
-               testRefsJson: row.testRefsJson,
-               canonicalTestJson: row.canonicalTestJson,
-               pageRank: row.pageRank,
-               kCore: row.kCore,
-               updatedAt: row.updatedAt
-             })`,
-            { rows: chunk },
-          ),
-        );
-      }
-    }
 
-    for (let i = 0; i < existingRows.length; i += CHUNK) {
-      const chunk = toMetricsParamRows(existingRows.slice(i, i + CHUNK));
-      await measurePhase("mergeExisting", () =>
-        exec(
-          txConn,
-          `UNWIND $rows AS row
-           MATCH (m:Metrics {symbolId: row.symbolId})
-           SET m.fanIn = row.fanIn,
-               m.fanOut = row.fanOut,
-               m.churn30d = row.churn30d,
-               m.testRefsJson = row.testRefsJson,
-               m.canonicalTestJson = row.canonicalTestJson,
-               m.pageRank = row.pageRank,
-               m.kCore = row.kCore,
-               m.updatedAt = row.updatedAt`,
-          { rows: chunk },
-        ),
-      );
+      for (let nullShape = 0; nullShape < rowsByNullShape.length; nullShape += 1) {
+        const shapedRows = rowsByNullShape[nullShape];
+        if (shapedRows.length === 0) continue;
+
+        await measurePhase("mergeExisting", () =>
+          exec(txConn, METRICS_MERGE_QUERIES[nullShape], { rows: shapedRows }),
+        );
+      }
     }
   });
 }
@@ -419,9 +398,11 @@ function toMetricsParamRows(rows: readonly MetricsRow[]): Array<{
   fanIn: number;
   fanOut: number;
   churn30d: number;
-  testRefsJson: string | null;
-  canonicalTestJson: string | null;
-  pageRank: number;
+  testRefsJsonValue: string;
+  testRefsJsonIsNull: boolean;
+  canonicalTestJsonValue: string;
+  canonicalTestJsonIsNull: boolean;
+  pageRankValue: string;
   kCore: number;
   updatedAt: string;
 }> {
@@ -430,9 +411,11 @@ function toMetricsParamRows(rows: readonly MetricsRow[]): Array<{
     fanIn: m.fanIn,
     fanOut: m.fanOut,
     churn30d: m.churn30d,
-    testRefsJson: m.testRefsJson,
-    canonicalTestJson: m.canonicalTestJson,
-    pageRank: m.pageRank ?? 0,
+    testRefsJsonValue: m.testRefsJson ?? "null",
+    testRefsJsonIsNull: m.testRefsJson === null,
+    canonicalTestJsonValue: m.canonicalTestJson ?? "null",
+    canonicalTestJsonIsNull: m.canonicalTestJson === null,
+    pageRankValue: String(m.pageRank ?? 0),
     kCore: m.kCore ?? 0,
     updatedAt: m.updatedAt,
   }));
