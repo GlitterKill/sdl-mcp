@@ -64,6 +64,8 @@ The existing named-action prompt `Review runtime.queryOutput output contract tes
 2. `context response projection runtimeQueryOutput runtime queryOutput`
 3. `response runtime queryOutput`
 
+The unit comparison surface is that exact three-element action-seed array for the named-action prompt. The benchmark comparison surface is separate: for every existing case ID in `devdocs/benchmarks/seed-resolution-evaluation-v1.json`, `cases[*].contextAssembly.ftsQuery` must equal the pre-change artifact value. The vocabulary experiment must not change either surface.
+
 Existing negative prompts remain inactive:
 
 - `debug tool output formatting`
@@ -72,6 +74,8 @@ Existing negative prompts remain inactive:
 - `review tool registration safety`
 - `debug tool contract formatting`
 - `audit response contracts for application output`
+
+Each negative prompt must return exactly `[]` from `buildActionSeedQueries()`.
 
 ## Verification
 
@@ -88,7 +92,27 @@ After implementation:
 - autopilot explicit-scope recall remains `1`;
 - every existing named-action FTS query remains byte-identical.
 
-Live verification uses the same canonical broad request as the prior probe: review task type, broad mode, semantic retrieval and retrieval evidence enabled, evidence optimization off, task-detail cards, no focus paths, and diagnostics disabled.
+Before the benchmark writer runs, read and retain `devdocs/benchmarks/seed-resolution-evaluation-v1.json`. Run `npm.cmd run benchmark:seed-resolution`, inspect the named quality and FTS-query fields against the retained artifact, then run `node --experimental-strip-types scripts/evaluate-seed-resolution.ts --check`. Restore the retained artifact with `sdl.file.write` and stop if any gate fails.
+
+The pre-change live baseline is repository version `v1784483895766`, graph integrity `verified`, and `buildActionSeedQueries` ending at line 285. After restart and fresh indexing, `repo.status` must report a different latest version, `stale: false`, `graphIntegrityState: "verified"`, and a graph-integrity version equal to the latest version. `symbol.getCard` for `buildActionSeedQueries` must report that same ledger version. The canonical result below proves that the restarted server executes the new query behavior.
+
+Live verification calls `sdl.context` with this exact canonical request:
+
+```json
+{
+  "repoId": "sdl-mcp",
+  "taskType": "review",
+  "taskText": "Review the current SDL-MCP tool surface for contracts, output noise, deterministic responses, and safe errors.",
+  "options": {
+    "contextMode": "broad",
+    "semantic": true,
+    "includeRetrievalEvidence": true,
+    "evidenceOptimization": "off",
+    "cardDetail": "task"
+  },
+  "includeDiagnostics": false
+}
+```
 
 The first ten `symbolCard` entries must contain at least four exact name/path pairs:
 
@@ -100,7 +124,7 @@ The first ten `symbolCard` entries must contain at least four exact name/path pa
 
 No first-ten path may begin `outputs/logos/` or equal `scripts/evaluate-seed-resolution.ts`.
 
-Two precise focus guards use the same request and change only `contextMode` plus `focusPaths`:
+Copy the canonical request twice. Set `options.contextMode` to `"precise"`, add the listed `options.focusPaths`, and preserve every other field:
 
 - `focusPaths: ["outputs/logos"]` returns a first-ten path beginning `outputs/logos/`.
 - `focusPaths: ["scripts"]` returns a first-ten path beginning `scripts/`.
@@ -109,12 +133,14 @@ Graph integrity must remain `verified`, and the fresh index must contain the edi
 
 ## Failure handling
 
-If the live canonical request returns fewer than four expected pairs, revert only the static vocabulary change through a normal corrective commit. Keep the previously verified generic fallback, tests, benchmark artifact, and design history.
+If the live canonical request returns fewer than four expected pairs, create a normal corrective commit that restores the production generic query to `context response projection`. Restore the generic positive test expectation to that prior query while retaining the generic activation, generic-`tests`, negative-boundary, and named-action regressions. The focused suite must pass after correction.
 
-Record the failed vocabulary experiment in the ignored local QA report. Do not add more vocabulary, a second query, ranking changes, thresholds, or diagnostics during the same implementation cycle.
+Restore the retained pre-experiment benchmark artifact and verify it with `node --experimental-strip-types scripts/evaluate-seed-resolution.ts --check`. Keep the experiment and corrective commits in design history.
+
+Record the failed experiment in `devdocs/qaplans/2026-07-18-sdl-tool-qa-live-v0-12-4.md`. `git check-ignore -v` must identify the `devdocs/*` rule; preserve the updated local file and never force-add it. Do not add more vocabulary, a second query, ranking changes, thresholds, or diagnostics during the same implementation cycle.
 
 If a named-action byte comparison, negative boundary, noise exclusion, focus guard, benchmark floor, or graph-integrity check fails, stop and fix or revert the vocabulary change before acceptance.
 
 ## Documentation impact
 
-Update the ignored local QA report with the vocabulary, automated results, live first-ten evidence, focus guards, and final accepted or reverted status. Public tool documentation and response fixtures remain unchanged because the tool surface does not change.
+Update the ignored local report `devdocs/qaplans/2026-07-18-sdl-tool-qa-live-v0-12-4.md` with the vocabulary, automated results, live first-ten evidence, focus guards, and final accepted or reverted status. Preserve it outside tracked Git state under the existing `devdocs/*` ignore rule. Public tool documentation and response fixtures remain unchanged because the tool surface does not change.
