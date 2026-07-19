@@ -527,7 +527,7 @@ const TrimmedSetSchema = z.object({
 });
 
 const DeltaPackSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).optional(),
   fromVersion: z.string(),
   toVersion: z.string(),
   changedSymbols: z.array(DeltaSymbolChangeSchema),
@@ -593,7 +593,7 @@ export const RepoRegisterRequestSchema = z.object({
 
 export const RepoRegisterResponseSchema = z.object({
   ok: z.boolean(),
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).optional(),
   dryRun: z.boolean().optional(),
   changed: z.boolean().optional(),
   requiresUpdateExisting: z.boolean().optional(),
@@ -834,7 +834,7 @@ export const IndexRefreshRequestSchema = z.object({
 
 export const IndexRefreshResponseSchema = z.object({
   ok: z.boolean(),
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).optional(),
   versionId: z.string().optional(),
   changedFiles: z.number().int().optional(),
   async: z.boolean().optional(),
@@ -1662,13 +1662,28 @@ const SliceErrorResponseSchema = z.object({
   }),
 });
 
+const ProjectedSliceSymbolCardSchema = SliceSymbolCardSchema.extend({
+  version: SliceSymbolCardSchema.shape.version.optional(),
+});
+
+const ProjectedGraphSliceSchema = GraphSliceSchema.pick({
+  startSymbols: true,
+  cards: true,
+  edges: true,
+  frontier: true,
+  truncation: true,
+}).extend({
+  cards: z.array(ProjectedSliceSymbolCardSchema),
+});
+
 export const SliceBuildResponseSchema = z.union([
   z.object({
     sliceHandle: z.string(),
-    ledgerVersion: z.string(),
-    lease: SliceLeaseSchema,
+    ledgerVersion: z.string().optional(),
+    lease: SliceLeaseSchema.optional(),
     sliceEtag: SliceEtagSchema.optional(),
     slice: z.union([
+      ProjectedGraphSliceSchema,
       GraphSliceSchema,
       CompactGraphSliceV3Schema,
       z.object({
@@ -1756,7 +1771,7 @@ const AmplifierSummaryItemSchema = z.object({
 
 export const DeltaGetResponseSchema = z.object({
   delta: DeltaPackSchema,
-  amplifiers: z.array(AmplifierSummaryItemSchema),
+  amplifiers: z.array(AmplifierSummaryItemSchema).optional(),
   blastRadiusTruncated: z.boolean().optional(),
 });
 
@@ -2236,12 +2251,37 @@ const RepoOverviewPayloadSchema = z.object({
   tokenMetrics: TokenMetricsSchema,
 });
 
-export const RepoOverviewResponseSchema = z.union([
-  RepoOverviewPayloadSchema.extend({
-    etag: z.string(),
-  }),
-  ConditionalNotModifiedResponseSchema,
-]);
+export const RepoOverviewResponseSchema = RepoOverviewPayloadSchema.partial()
+  .extend({
+    notModified: z.literal(true).optional(),
+    etag: z.string().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.notModified) {
+      if (!value.etag) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["etag"],
+          message: "etag is required for a not-modified response",
+        });
+      }
+      return;
+    }
+    if (!value.repoId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["repoId"],
+        message: "repoId is required for an overview payload",
+      });
+    }
+    if (!value.stats) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["stats"],
+        message: "stats are required for an overview payload",
+      });
+    }
+  });
 
 // ============================================================================
 // Context Summary Schemas

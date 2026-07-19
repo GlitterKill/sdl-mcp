@@ -7,6 +7,7 @@
  * polyglot fixture repo.
  */
 
+
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { registerCodeModeTools } from "../../dist/code-mode/index.js";
@@ -14,10 +15,20 @@ import { getContinuation } from "../../dist/code-mode/workflow-truncation.js";
 import type { CodeModeConfig } from "../../dist/config/types.js";
 import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
 import type { MCPServer } from "../../dist/server.js";
+import {
+  DeltaGetResponseSchema,
+  IndexRefreshResponseSchema,
+  RepoOverviewResponseSchema,
+  RepoRegisterResponseSchema,
+  SliceBuildResponseSchema,
+  SliceRefreshResponseSchema,
+} from "../../dist/mcp/tools.js";
 import { z } from "zod";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  cpSync,
+  readFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -35,8 +46,9 @@ import fixtures from "./determinism.fixtures.json" with { type: "json" };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ID = fixtures.repoId;
-const FIXTURE_REPO = resolve(__dirname, fixtures.fixtureRepo);
+const SOURCE_FIXTURE_REPO = resolve(__dirname, fixtures.fixtureRepo);
 const TEST_ROOT = mkdtempSync(join(tmpdir(), "sdl-determinism-"));
+const FIXTURE_REPO = join(TEST_ROOT, "fixture-repo");
 const GRAPH_DB_PATH = join(TEST_ROOT, "graph.lbug");
 const CONFIG_PATH = join(TEST_ROOT, "sdl-determinism.config.json");
 const DIFF_DIR = resolve(process.cwd(), ".determinism-diffs");
@@ -46,9 +58,16 @@ interface ServerHandle {
   close: () => Promise<void>;
 }
 
+interface FixtureSetupResults {
+  registrationChanged: unknown;
+  registrationIdempotent: unknown;
+  indexRefresh: unknown;
+}
+
 interface Leg {
   toolsCanonical: string;
   results: Map<string, string[]>;
+  setupResults?: FixtureSetupResults;
 }
 
 interface VolatileFinding {
@@ -183,28 +202,86 @@ async function callToolStrict(
   }
   return response;
 }
+function parseStructuredContent<T>(
+  schema: z.ZodType<T>,
+  response: unknown,
+): T {
+  const structuredContent = (response as { structuredContent?: unknown })
+    .structuredContent;
+  assert.notStrictEqual(
+    structuredContent,
+    undefined,
+    "public tool response must include structuredContent",
+  );
+  const parsed = schema.safeParse(structuredContent);
+  assert.ok(
+    parsed.success,
+    `structuredContent schema mismatch: ${JSON.stringify({
+      structuredContentKeys:
+        structuredContent && typeof structuredContent === "object"
+          ? Object.keys(structuredContent)
+          : [],
+      nestedSliceKeys:
+        structuredContent &&
+        typeof structuredContent === "object" &&
+        "slice" in structuredContent &&
+        structuredContent.slice &&
+        typeof structuredContent.slice === "object"
+          ? Object.keys(structuredContent.slice)
+          : [],
+      selectedValues:
+        structuredContent && typeof structuredContent === "object"
+          ? Object.fromEntries(
+              ["notModified", "knownVersion", "currentVersion"].flatMap((key) =>
+                key in structuredContent
+                  ? [[key, structuredContent[key as keyof typeof structuredContent]]]
+                  : [],
+              ),
+            )
+          : {},
+      nestedDeltaKeys:
+        structuredContent &&
+        typeof structuredContent === "object" &&
+        "delta" in structuredContent &&
+        structuredContent.delta &&
+        typeof structuredContent.delta === "object"
+          ? Object.keys(structuredContent.delta)
+          : [],
+      issues: parsed.error?.issues,
+    })}`,
+  );
+  return parsed.data;
+}
 
-async function setupFixtureRepo(client: Client): Promise<void> {
-  await callToolStrict(client, "sdl.repo.register", {
+async function setupFixtureRepo(client: Client): Promise<FixtureSetupResults> {
+  const registrationArgs = {
     repoId: REPO_ID,
     rootPath: FIXTURE_REPO,
     updateExisting: true,
     languages: ["ts", "tsx", "js", "jsx", "py", "go", "java", "cs", "c", "cpp", "rs", "kt", "php", "sh"],
     maxFileBytes: 2_000_000,
-  });
+  };
+  const registrationChanged = await callToolStrict(client, "sdl.repo.register", registrationArgs);
+  const registrationIdempotent = await callToolStrict(
+    client,
+    "sdl.repo.register",
+    registrationArgs,
+  );
 
-  await callToolStrict(client, "sdl.index.refresh", {
+  const indexRefresh = await callToolStrict(client, "sdl.index.refresh", {
     repoId: REPO_ID,
     mode: "full",
   });
+
+  return { registrationChanged, registrationIdempotent, indexRefresh };
 }
 
 async function runLeg(repeats: number, options: { setup: boolean }): Promise<Leg> {
   const server = await spawnServer();
   try {
-    if (options.setup) {
-      await setupFixtureRepo(server.client);
-    }
+    const setupResults = options.setup
+      ? await setupFixtureRepo(server.client)
+      : undefined;
 
     const tools = await server.client.listTools();
     const results = new Map<string, string[]>();
@@ -219,7 +296,7 @@ async function runLeg(repeats: number, options: { setup: boolean }): Promise<Leg
       results.set(key, runs);
     }
 
-    return { toolsCanonical: canonical(tools), results };
+    return { toolsCanonical: canonical(tools), results, setupResults };
   } finally {
     await server.close();
   }
@@ -296,6 +373,7 @@ let legB: Leg;
 
 before(async () => {
   ensureBuiltServer();
+  cpSync(SOURCE_FIXTURE_REPO, FIXTURE_REPO, { recursive: true });
   writeConfig();
   rmSync(DIFF_DIR, { recursive: true, force: true });
   rmSync(GRAPH_DB_PATH, { recursive: true, force: true });
@@ -441,4 +519,134 @@ test("INVARIANT 3: covered outputs contain no fatal volatile content", () => {
   }
 
   assert.equal(fatal.length, 0, "\n" + fatal.join("\n"));
+});
+
+test("PUBLIC DISPATCH: DB-backed responses conform to exported schemas", async () => {
+  assert.ok(legA.setupResults, "leg A must capture setup responses");
+  const registrationChanged = parseStructuredContent(
+    RepoRegisterResponseSchema,
+    legA.setupResults.registrationChanged,
+  );
+  assert.equal(registrationChanged.ok, true);
+  assert.equal(registrationChanged.changed, true);
+
+  const registrationIdempotent = parseStructuredContent(
+    RepoRegisterResponseSchema,
+    legA.setupResults.registrationIdempotent,
+  );
+  assert.equal(registrationIdempotent.ok, true);
+  assert.equal(registrationIdempotent.changed, false);
+
+  const initialRefresh = parseStructuredContent(
+    IndexRefreshResponseSchema,
+    legA.setupResults.indexRefresh,
+  );
+  assert.equal(initialRefresh.ok, true);
+  assert.ok((initialRefresh.changedFiles ?? 0) > 0);
+
+
+
+
+  const server = await spawnServer();
+  try {
+    const overview = parseStructuredContent(
+      RepoOverviewResponseSchema,
+      await callToolStrict(server.client, "sdl.repo.overview", {
+        repoId: REPO_ID,
+        level: "full",
+      }),
+    );
+    assert.equal(overview.repoId, REPO_ID);
+
+    const sliceBuild = parseStructuredContent(
+      SliceBuildResponseSchema,
+      await callToolStrict(server.client, "sdl.slice.build", {
+        repoId: REPO_ID,
+        taskText: "Inspect UserRepository findById behavior",
+        budget: { maxCards: 8, maxEstimatedTokens: 4_000 },
+        wireFormat: "readable",
+      }),
+    );
+    if (!("sliceHandle" in sliceBuild)) {
+      assert.fail("slice.build returned an error response");
+    }
+
+
+    const initialSliceRefresh = parseStructuredContent(
+      SliceRefreshResponseSchema,
+      await callToolStrict(server.client, "sdl.slice.refresh", {
+        repoId: REPO_ID,
+        sliceHandle: sliceBuild.sliceHandle,
+      }),
+    );
+    const sliceVersion = initialSliceRefresh.currentVersion;
+
+    const notModified = parseStructuredContent(
+      SliceRefreshResponseSchema,
+      await callToolStrict(server.client, "sdl.slice.refresh", {
+        repoId: REPO_ID,
+        sliceHandle: sliceBuild.sliceHandle,
+        knownVersion: sliceVersion,
+      }),
+    );
+    assert.equal(notModified.notModified, true);
+    assert.equal(notModified.currentVersion, sliceVersion);
+    assert.equal(notModified.delta, null);
+
+    const mutationFile = join(
+      FIXTURE_REPO,
+      "src",
+      "typescript",
+      "models.ts",
+    );
+    const originalSource = readFileSync(mutationFile, "utf8");
+    const mutatedSource = originalSource.replace(
+      "return this.users.get(id);",
+      "return id.length > 0 ? this.users.get(id) : undefined;",
+    );
+    assert.notEqual(
+      mutatedSource,
+      originalSource,
+      "controlled fixture mutation must change findById",
+    );
+    writeFileSync(mutationFile, mutatedSource, "utf8");
+
+    const changedRefresh = parseStructuredContent(
+      IndexRefreshResponseSchema,
+      await callToolStrict(server.client, "sdl.index.refresh", {
+        repoId: REPO_ID,
+        mode: "incremental",
+      }),
+    );
+    assert.equal(changedRefresh.ok, true);
+    assert.ok((changedRefresh.changedFiles ?? 0) > 0);
+
+    const changedSlice = parseStructuredContent(
+      SliceRefreshResponseSchema,
+      await callToolStrict(server.client, "sdl.slice.refresh", {
+        repoId: REPO_ID,
+        sliceHandle: sliceBuild.sliceHandle,
+        knownVersion: sliceVersion,
+      }),
+    );
+    assert.equal(changedSlice.notModified, false);
+    assert.notEqual(changedSlice.currentVersion, sliceVersion);
+    assert.ok(changedSlice.delta);
+    assert.ok(changedSlice.delta.changedSymbols.length > 0);
+
+    const delta = parseStructuredContent(
+      DeltaGetResponseSchema,
+      await callToolStrict(server.client, "sdl.delta.get", {
+        repoId: REPO_ID,
+        fromVersion: sliceVersion,
+        toVersion: changedSlice.currentVersion,
+        includeBlastRadius: true,
+      }),
+    );
+    assert.equal(delta.delta.fromVersion, sliceVersion);
+    assert.equal(delta.delta.toVersion, changedSlice.currentVersion);
+    assert.ok(delta.delta.changedSymbols.length > 0);
+  } finally {
+    await server.close();
+  }
 });
