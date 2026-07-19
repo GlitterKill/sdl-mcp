@@ -2,7 +2,7 @@
 
 ## Status
 
-Design direction approved in conversation on 2026-07-19; detailed specification pending final review.
+Approved by the user on 2026-07-19.
 
 ## Context
 
