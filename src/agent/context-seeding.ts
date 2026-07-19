@@ -205,7 +205,23 @@ export function buildActionSeedQueries(taskText: string): string[] {
       normalizedTaskText.includes(fnPhrase)
     );
   });
-  if (mentionedActions.length === 0) return [];
+  // Generic tool-surface reviews have no catalog action name, but still need
+  // the existing shared response-projection seed.
+  const useGenericToolContractFallback =
+    mentionedActions.length === 0 &&
+    /\b(?:tools?|schemas?|descriptors?|registr(?:ation|ations|y|ies))\b/i.test(
+      taskText,
+    ) &&
+    /\b(?:contracts?|projections?|determinism|deterministic)\b/i.test(
+      taskText,
+    ) &&
+    /\b(?:review|reviews|reviewing|audit|audits|auditing|qa|determinism|deterministic)\b/i.test(
+      taskText,
+    );
+
+  if (mentionedActions.length === 0 && !useGenericToolContractFallback) {
+    return [];
+  }
 
   const rankedActions = rankCatalog(mentionedActions, taskText).slice(
     0,
@@ -234,7 +250,7 @@ export function buildActionSeedQueries(taskText: string): string[] {
     /\b(?:contract|display|format|formatting|output|projection|qa|response|tests?|visibility)\b/i.test(
       taskText,
     );
-  if (hasOutputQaIntent) {
+  if (hasOutputQaIntent || useGenericToolContractFallback) {
     // Output-contract QA needs the shared response projection in addition to
     // the action handler. Ordinary runtime debugging stays handler-shaped.
     const projectionQuery = [
@@ -251,7 +267,11 @@ export function buildActionSeedQueries(taskText: string): string[] {
     if (!seen.has(projectionQuery)) queries.push(projectionQuery);
   }
 
-  if (hasOutputQaIntent && /\btests?\b/i.test(taskText)) {
+  if (
+    rankedActions.length > 0 &&
+    hasOutputQaIntent &&
+    /\btests?\b/i.test(taskText)
+  ) {
     const responseTestQuery = [
       "response",
       ...new Set(
