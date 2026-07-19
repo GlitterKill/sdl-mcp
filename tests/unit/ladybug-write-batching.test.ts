@@ -298,17 +298,20 @@ describe("LadybugDB write batching", () => {
     assert.strictEqual(paramsLog[0]?.limit, 32768);
   });
 
-  it("buffers fresh SymbolVersion COPY rows before writing to disk", () => {
-    const source = readFileSync(
+  it("writes version snapshot pages through bounded MERGE batches", () => {
+    const indexerSource = readFileSync(
+      join(__dirname, "../../src/indexer/indexer-version.ts"),
+      "utf8",
+    );
+    const versionsSource = readFileSync(
       join(__dirname, "../../src/db/ladybug-versions.ts"),
       "utf8",
     );
 
-    assert.match(source, /SYMBOL_VERSION_CSV_WRITE_BATCH_SIZE/);
-    assert.match(source, /buffer\.join\(""\)/);
-    assert.doesNotMatch(
-      source,
-      /for \(const row of rows\) \{\s*await writeCsvLine\(stream,/s,
+    assert.match(indexerSource, /snapshotSymbolVersionsBatch\(wConn, rows\)/);
+    assert.match(
+      versionsSource,
+      /resolveLadybugWriteChunkSize\(\s*"symbolVersions"/,
     );
   });
 
