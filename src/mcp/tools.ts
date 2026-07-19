@@ -1666,14 +1666,29 @@ const ProjectedSliceSymbolCardSchema = SliceSymbolCardSchema.extend({
   version: SliceSymbolCardSchema.shape.version.optional(),
 });
 
+const ProjectedSliceTruncationSchema = SliceTruncationSchema.extend({
+  reason: z.string().optional(),
+  suggestion: z.string().optional(),
+  budgetUsed: z
+    .object({
+      cards: z.number().int().min(0),
+      maxCards: z.number().int().min(0),
+      maxTokens: z.number().int().min(0),
+    })
+    .strict()
+    .optional(),
+}).strict();
+
 const ProjectedGraphSliceSchema = GraphSliceSchema.pick({
   startSymbols: true,
   cards: true,
   edges: true,
   frontier: true,
   truncation: true,
+  memories: true,
 }).extend({
   cards: z.array(ProjectedSliceSymbolCardSchema),
+  truncation: ProjectedSliceTruncationSchema.optional(),
 });
 
 export const SliceBuildResponseSchema = z.union([
@@ -1794,11 +1809,19 @@ export const SliceSpilloverGetRequestSchema = z
     message: "Either spilloverHandle or sliceHandle is required",
   });
 
+const StrictSpilloverSymbolCardSchema = SymbolCardSchema.strict();
+const ProjectedSpilloverSymbolCardSchema = SymbolCardSchema.extend({
+  repoId: SymbolCardSchema.shape.repoId.optional(),
+  version: SymbolCardSchema.shape.version.optional(),
+}).strict();
+
 export const SliceSpilloverGetResponseSchema = z.object({
   spilloverHandle: z.string(),
   cursor: z.string().optional(),
   hasMore: z.boolean(),
-  symbols: z.array(SymbolCardSchema),
+  symbols: z.array(
+    z.union([StrictSpilloverSymbolCardSchema, ProjectedSpilloverSymbolCardSchema]),
+  ),
 });
 
 export const CodeNeedWindowRequestObjectSchema = z.object({

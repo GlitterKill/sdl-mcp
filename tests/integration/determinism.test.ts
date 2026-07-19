@@ -217,49 +217,15 @@ function parseStructuredContent<T>(
 ): T {
   const structuredContent = (response as { structuredContent?: unknown })
     .structuredContent;
-  assert.notStrictEqual(
-    structuredContent,
-    undefined,
-    "public tool response must include structuredContent",
-  );
-  const parsed = schema.safeParse(structuredContent);
   assert.ok(
-    parsed.success,
-    `structuredContent schema mismatch: ${JSON.stringify({
-      structuredContentKeys:
-        structuredContent && typeof structuredContent === "object"
-          ? Object.keys(structuredContent)
-          : [],
-      nestedSliceKeys:
-        structuredContent &&
-        typeof structuredContent === "object" &&
-        "slice" in structuredContent &&
-        structuredContent.slice &&
-        typeof structuredContent.slice === "object"
-          ? Object.keys(structuredContent.slice)
-          : [],
-      selectedValues:
-        structuredContent && typeof structuredContent === "object"
-          ? Object.fromEntries(
-              ["notModified", "knownVersion", "currentVersion"].flatMap((key) =>
-                key in structuredContent
-                  ? [[key, structuredContent[key as keyof typeof structuredContent]]]
-                  : [],
-              ),
-            )
-          : {},
-      nestedDeltaKeys:
-        structuredContent &&
-        typeof structuredContent === "object" &&
-        "delta" in structuredContent &&
-        structuredContent.delta &&
-        typeof structuredContent.delta === "object"
-          ? Object.keys(structuredContent.delta)
-          : [],
-      issues: parsed.error?.issues,
-    })}`,
+    structuredContent &&
+      typeof structuredContent === "object" &&
+      !Array.isArray(structuredContent),
+    "public tool response must include object structuredContent",
   );
-  return parsed.data;
+  const parsed = schema.parse(structuredContent);
+  assert.deepStrictEqual(parsed, structuredContent);
+  return parsed;
 }
 
 async function setupFixtureRepo(client: Client): Promise<FixtureSetupResults> {

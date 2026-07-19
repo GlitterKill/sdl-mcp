@@ -5,8 +5,17 @@ import {
   toAgentGraphSlice,
 } from "../../dist/mcp/tools/slice-wire-format.js";
 
+import { buildToolResponseEnvelope } from "../../dist/server.js";
 import { SliceBuildResponseSchema } from "../../dist/mcp/tools.js";
 import type { GraphSlice } from "../../dist/domain/types.js";
+
+function toStructuredContent(
+  toolName: string,
+  result: unknown,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  return buildToolResponseEnvelope(result, null, "", toolName, args).structuredContent;
+}
 
 function makeMockSlice(overrides?: Partial<GraphSlice>): GraphSlice {
   return {
@@ -250,9 +259,26 @@ describe("toAgentGraphSlice", () => {
         entrySymbols: [slice.startSymbols[0]],
         wireFormat,
       });
-      SliceBuildResponseSchema.parse(response);
+      const payload = JSON.parse(
+        JSON.stringify(
+          toStructuredContent("sdl.slice.build", response, {
+            repoId: slice.repoId,
+            entrySymbols: [slice.startSymbols[0]],
+            wireFormat,
+          }),
+        ),
+      );
+      assert.deepStrictEqual(SliceBuildResponseSchema.parse(payload), payload);
     }
 
-    SliceBuildResponseSchema.parse(await handleSliceBuild({ repoId: slice.repoId }));
+    const errorResponse = await handleSliceBuild({ repoId: slice.repoId });
+    const errorPayload = JSON.parse(
+      JSON.stringify(
+        toStructuredContent("sdl.slice.build", errorResponse, {
+          repoId: slice.repoId,
+        }),
+      ),
+    );
+    assert.deepStrictEqual(SliceBuildResponseSchema.parse(errorPayload), errorPayload);
   });
 });

@@ -97,7 +97,9 @@ describe("Policy Engine - Priority Evaluation", () => {
       policyPatch: { maxWindowLines: 240 },
     });
 
-    PolicyGetResponseSchema.parse(getResponse);
-    PolicySetResponseSchema.parse(setResponse);
+    const getPayload = JSON.parse(JSON.stringify(getResponse));
+    const setPayload = JSON.parse(JSON.stringify(setResponse));
+    assert.deepStrictEqual(PolicyGetResponseSchema.parse(getPayload), getPayload);
+    assert.deepStrictEqual(PolicySetResponseSchema.parse(setPayload), setPayload);
   });
 });

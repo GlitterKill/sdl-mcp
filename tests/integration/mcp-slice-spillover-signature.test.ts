@@ -7,8 +7,17 @@ import { fileURLToPath } from "node:url";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { buildToolResponseEnvelope } from "../../dist/server.js";
 import { handleSliceSpilloverGet } from "../../dist/mcp/tools/slice.js";
 import { SliceSpilloverGetResponseSchema } from "../../dist/mcp/tools.js";
+
+function toStructuredContent(
+  toolName: string,
+  result: unknown,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  return buildToolResponseEnvelope(result, null, "", toolName, args).structuredContent;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -109,7 +118,15 @@ describe("MCP slice spillover signatures", () => {
   it("preserves stored signature details even when signatureJson omits name", async () => {
     const response = await handleSliceSpilloverGet({ repoId, spilloverHandle });
 
-    SliceSpilloverGetResponseSchema.parse(response);
+    const payload = JSON.parse(
+      JSON.stringify(
+        toStructuredContent("sdl.slice.spillover.get", response, {
+          repoId,
+          spilloverHandle,
+        }),
+      ),
+    );
+    assert.deepStrictEqual(SliceSpilloverGetResponseSchema.parse(payload), payload);
     assert.equal(response.hasMore, false);
     assert.equal(response.symbols.length, 1);
     assert.deepStrictEqual(response.symbols[0]?.signature, {

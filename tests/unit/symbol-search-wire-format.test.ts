@@ -6,6 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { buildToolResponseEnvelope } from "../../dist/server.js";
 import { SymbolSearchResponseSchema } from "../../dist/mcp/tools.js";
 import {
   serializeSymbolSearchForWireFormat,
@@ -19,6 +20,14 @@ import {
   type ObservabilityTap,
   type PackedWireTapEvent,
 } from "../../dist/observability/event-tap.js";
+
+function toStructuredContent(
+  toolName: string,
+  result: unknown,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  return buildToolResponseEnvelope(result, null, "", toolName, args).structuredContent;
+}
 
 const SMALL_INPUT: SymbolSearchWireInput = {
   query: "foo",
@@ -231,8 +240,29 @@ test("actual handler JSON and packed responses satisfy the output schema", async
     limit: 50,
   });
 
-  SymbolSearchResponseSchema.parse(jsonResponse);
-  SymbolSearchResponseSchema.parse(packedResponse);
+  const jsonPayload = JSON.parse(
+    JSON.stringify(
+      toStructuredContent("sdl.symbol.search", jsonResponse, {
+        repoId: "test-repo",
+        query: "sharedResult",
+        semantic: false,
+        wireFormat: "json",
+      }),
+    ),
+  );
+  const packedPayload = JSON.parse(
+    JSON.stringify(
+      toStructuredContent("sdl.symbol.search", packedResponse, {
+        repoId: "test-repo",
+        query: "sharedResult",
+        semantic: false,
+        wireFormat: "packed",
+        limit: 50,
+      }),
+    ),
+  );
+  assert.deepStrictEqual(SymbolSearchResponseSchema.parse(jsonPayload), jsonPayload);
+  assert.deepStrictEqual(SymbolSearchResponseSchema.parse(packedPayload), packedPayload);
   assert.equal(typeof packedResponse.results, "string");
 });
 
