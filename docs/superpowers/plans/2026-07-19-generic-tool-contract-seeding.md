@@ -15,7 +15,7 @@
 - Create `tests/unit/agent/context-action-seeding.test.ts`: direct pure-function regressions for generic activation, negative boundaries, test-query suppression, and named-action preservation.
 - Modify `src/agent/context-seeding.ts`: add the bounded no-action predicate and reuse the existing projection branch.
 - Modify `devdocs/benchmarks/seed-resolution-evaluation-v1.json`: regenerate the existing source-hash-backed benchmark artifact after the source change.
-- Modify `devdocs/qaplans/2026-07-18-sdl-tool-qa-live-v0-12-4.md`: record the root cause and live acceptance evidence after the restarted server passes.
+- Modify `devdocs/qaplans/2026-07-18-sdl-tool-qa-live-v0-12-4.md`: record the root cause and live acceptance evidence. This private QA artifact is intentionally ignored by `devdocs/*`; verify it locally and do not force-add it.
 - Do not change public tool documentation, response fixtures, schemas, ranking weights, or catalog metadata.
 
 ## Chunk 1: Test-first implementation and local verification
@@ -339,13 +339,15 @@ Record:
 
 Do not add telemetry, durations, absolute machine paths, or token-savings claims.
 
-- [ ] **Step 2: Commit the QA report**
+- [ ] **Step 2: Preserve the local QA report**
+
+Run:
 
 ```powershell
-git add devdocs/qaplans/2026-07-18-sdl-tool-qa-live-v0-12-4.md
-git diff --cached --check
-git commit -m "Document generic context seeding verification"
+git check-ignore -v devdocs/qaplans/2026-07-18-sdl-tool-qa-live-v0-12-4.md
 ```
+
+Expected: `.gitignore` reports the `devdocs/*` rule. Re-read the updated section with `sdl.file.read`, keep the local artifact, and do not use `git add -f`.
 
 ### Task 6: Final verification
 
@@ -369,4 +371,4 @@ Expected: all tests pass and the benchmark artifact is current.
 
 - [ ] **Step 3: Inspect Git scope**
 
-Verify the worktree is clean and the commits touch only the planned source, test, benchmark artifact, design/plan documents, and QA report. Do not push or alter unrelated changes.
+Verify the tracked worktree is clean and commits touch only the planned source, test, benchmark artifact, and design/plan documents. Confirm the QA report remains ignored and locally updated. Do not push or alter unrelated changes.
