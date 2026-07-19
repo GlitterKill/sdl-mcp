@@ -2370,11 +2370,12 @@ const PRRiskAnalysisSchema = z.object({
   toVersion: z.string(),
   riskScore: z.number().int().min(0).max(100),
   riskLevel: z.enum(["low", "medium", "high"]),
-  changedSymbols: ChangedSymbolsSectionSchema,
-  blastRadius: PaginatedSectionSchema(EnrichedBlastRadiusItemSchema),
-  findings: PaginatedSectionSchema(FindingSchema),
-  evidence: PaginatedSectionSchema(EvidenceSchema),
-  recommendedTests: PaginatedSectionSchema(RecommendedTestSchema),
+  // Compact responses keep counts but omit expanded collections.
+  changedSymbols: ChangedSymbolsSectionSchema.optional(),
+  blastRadius: PaginatedSectionSchema(EnrichedBlastRadiusItemSchema).optional(),
+  findings: PaginatedSectionSchema(FindingSchema).optional(),
+  evidence: PaginatedSectionSchema(EvidenceSchema).optional(),
+  recommendedTests: PaginatedSectionSchema(RecommendedTestSchema).optional(),
   changedSymbolsCount: z.number().int().min(0),
   blastRadiusCount: z.number().int().min(0),
   preflight: z

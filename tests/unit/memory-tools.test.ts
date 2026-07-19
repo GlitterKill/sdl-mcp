@@ -35,6 +35,12 @@ import {
   handleMemoryRemove,
   handleMemorySurface,
 } from "../../dist/mcp/tools/memory.js";
+import {
+  MemoryQueryResponseSchema,
+  MemoryRemoveResponseSchema,
+  MemoryStoreResponseSchema,
+  MemorySurfaceResponseSchema,
+} from "../../dist/mcp/tools.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
 // ---------------------------------------------------------------------------
@@ -290,6 +296,8 @@ describe("handleMemoryStore", () => {
     assert.strictEqual(first.created, true);
 
     const second = await handleMemoryStore(args);
+    MemoryStoreResponseSchema.parse(first);
+    MemoryStoreResponseSchema.parse(second);
     assert.strictEqual(second.ok, true);
     assert.strictEqual(second.created, false);
     assert.strictEqual(second.deduplicated, true);
@@ -434,6 +442,7 @@ describe("handleMemoryQuery", () => {
     let result: Awaited<ReturnType<typeof handleMemoryQuery>>;
     try {
       result = await handleMemoryQuery({ repoId: REPO_ID });
+      MemoryQueryResponseSchema.parse(result);
       // If it succeeds, verify shape
       assert.strictEqual(result.repoId, REPO_ID);
       assert.ok(Array.isArray(result.memories));
@@ -607,6 +616,7 @@ describe("handleMemoryRemove", () => {
       repoId: REPO_ID,
       memoryId: stored.memoryId,
     });
+    MemoryRemoveResponseSchema.parse(result);
 
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.memoryId, stored.memoryId);
@@ -733,6 +743,7 @@ describe("handleMemorySurface", () => {
 
   it("returns empty memories when no memories stored", async () => {
     const result = await handleMemorySurface({ repoId: REPO_ID });
+    MemorySurfaceResponseSchema.parse(result);
 
     assert.strictEqual(result.repoId, REPO_ID);
     assert.ok(Array.isArray(result.memories));
@@ -748,6 +759,7 @@ describe("handleMemorySurface", () => {
     });
 
     const result = await handleMemorySurface({ repoId: REPO_ID });
+    MemorySurfaceResponseSchema.parse(result);
 
     assert.strictEqual(result.repoId, REPO_ID);
     assert.ok(result.memories.length >= 1);

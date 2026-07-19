@@ -1,7 +1,10 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert";
 
-import { UsageStatsRequestSchema } from "../../dist/mcp/tools.js";
+import {
+  UsageStatsRequestSchema,
+  UsageStatsResponseSchema,
+} from "../../dist/mcp/tools.js";
 import { tokenAccumulator } from "../../dist/mcp/token-accumulator.js";
 import { wasteLedger } from "../../dist/mcp/waste-ledger.js";
 
@@ -172,6 +175,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
     tokenAccumulator.reset();
 
     const result = (await handleUsageStats({ scope: "session", detail: "full" })) as Record<string, unknown>;
+    UsageStatsResponseSchema.parse(result);
     assert.ok(result, "should return a response");
     assert.ok(result.session, "should have session data");
 
@@ -189,6 +193,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
     tokenAccumulator.recordUsage("sdl.symbol.search", 100, 500);
 
     const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    UsageStatsResponseSchema.parse(result);
 
     assert.ok(typeof result.formattedSummary === "string", "should have formattedSummary");
     assert.strictEqual(result.session, undefined);

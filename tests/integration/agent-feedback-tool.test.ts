@@ -11,6 +11,10 @@ import {
   handleAgentFeedbackQuery,
   resetAgentFeedbackRateLimitForTests,
 } from "../../dist/mcp/tools/agent-feedback.js";
+import {
+  AgentFeedbackQueryResponseSchema,
+  AgentFeedbackResponseSchema,
+} from "../../dist/mcp/tools.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -115,6 +119,7 @@ describe("Agent Feedback Tool", () => {
       };
 
       const response = await handleAgentFeedback(request);
+      AgentFeedbackResponseSchema.parse(response);
 
       assert.strictEqual(response.ok, true);
       assert.strictEqual(response.repoId, repoId);
@@ -254,6 +259,7 @@ describe("Agent Feedback Tool", () => {
         repoId,
         limit: 10,
       });
+      AgentFeedbackQueryResponseSchema.parse(response);
 
       assert.strictEqual(response.repoId, repoId);
       assert.strictEqual(response.feedback.length, 3);

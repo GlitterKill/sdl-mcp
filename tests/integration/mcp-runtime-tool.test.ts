@@ -10,6 +10,10 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+import {
+  RuntimeExecuteResponseSchema,
+  RuntimeQueryOutputResponseSchema,
+} from "../../dist/mcp/tools.js";
 
 /**
  * Integration tests for the sdl.runtime.execute MCP tool handler.
@@ -143,6 +147,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
       outputMode: "summary",
     });
 
+    RuntimeExecuteResponseSchema.parse(result);
     assert.ok(result, "Expected a response object");
     assert.strictEqual(
       result.status,
@@ -494,6 +499,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
       stream: "stdout",
     });
 
+    RuntimeQueryOutputResponseSchema.parse(query);
     assert.strictEqual(query.matchStatus, "noMatchFallback");
     assert.strictEqual(query.matchCount, 0);
   });
@@ -511,6 +517,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
       timeoutMs: 30000,
     });
 
+    RuntimeExecuteResponseSchema.parse(run);
     assert.notStrictEqual(run.status, "success");
     assert.ok(run.artifactHandle, "compile failures should persist stderr/stdout artifacts");
     const query = await handleRuntimeQueryOutput({

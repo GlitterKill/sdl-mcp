@@ -57,12 +57,22 @@ const intentionalOutputSchemaOmissions = new Map([
   ["sdl.file.read", "Inline/read-hint/response-artifact variants lack exported response Zod schema"],
   ["sdl.file.write", "Typed response lacks exported response Zod schema"],
   ["sdl.semantic.enrichment.refresh", "Provider result lacks stable exported MCP response Zod schema"],
-  ["sdl.semantic.enrichment.status", "Compact/full response union lacks one exported Zod response schema"],
+  [
+    "sdl.semantic.enrichment.status",
+    "Compact/full response union lacks one exported Zod response schema; Chunk 8 stabilizes both variants but does not invent a broad schema in this remediation",
+  ],
   ["sdl.search.edit", "Preview/apply/response-artifact union lacks exported response Zod schema"],
 ]);
 
 describe("buildFlatToolDescriptors", () => {
   const descriptors = buildFlatToolDescriptors({} as any);
+
+  it("documents the semantic enrichment status schema deferral", () => {
+    assert.strictEqual(
+      intentionalOutputSchemaOmissions.get("sdl.semantic.enrichment.status"),
+      "Compact/full response union lacks one exported Zod response schema; Chunk 8 stabilizes both variants but does not invent a broad schema in this remediation",
+    );
+  });
 
   it("classifies every flat tool as schema-backed or intentionally omitted", () => {
     const allDescriptors = buildFlatToolDescriptors({

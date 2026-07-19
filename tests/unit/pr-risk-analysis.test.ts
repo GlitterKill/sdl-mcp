@@ -11,6 +11,7 @@ import {
   handlePRRiskAnalysis,
   selectBlastRadiusSeedSymbols,
 } from "../../dist/mcp/tools/prRisk.js";
+import { PRRiskAnalysisResponseSchema } from "../../dist/mcp/tools.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -200,6 +201,7 @@ describe("PR Risk Analysis Tool", () => {
     };
 
     const response = await handlePRRiskAnalysis(request);
+    PRRiskAnalysisResponseSchema.parse(response);
 
     assert.ok(response.analysis, "Expected analysis to be present");
     assert.ok(
@@ -225,6 +227,7 @@ describe("PR Risk Analysis Tool", () => {
     };
 
     const response = await handlePRRiskAnalysis(request);
+    PRRiskAnalysisResponseSchema.parse(response);
 
     assert.ok(
       response.analysis.findings &&

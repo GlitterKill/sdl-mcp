@@ -16,7 +16,10 @@ import {
   _setResponseRepoExistsForTesting,
   handleResponseGet,
 } from "../../dist/mcp/tools/response.js";
-import { ResponseGetRequestSchema } from "../../dist/mcp/tools.js";
+import {
+  ResponseGetRequestSchema,
+  ResponseGetResponseSchema,
+} from "../../dist/mcp/tools.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { ValidationError } from "../../dist/domain/errors.js";
 
@@ -543,6 +546,7 @@ describe("response artifact storage", () => {
       handle: stored.payload.handle,
       jsonPath: "finalEvidence[0]",
     });
+    ResponseGetResponseSchema.parse(response);
     const serialized = JSON.stringify(response);
     const internalUsage = getHiddenTokenUsage(response);
 
@@ -943,6 +947,7 @@ describe("response artifact storage", () => {
       handle: stored.payload.handle,
       maxBytes: 5,
     });
+    ResponseGetResponseSchema.parse(response);
 
     assert.strictEqual(response.handle, stored.payload.handle);
     assert.strictEqual(response.content, "large");
