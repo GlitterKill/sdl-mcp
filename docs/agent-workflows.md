@@ -158,7 +158,7 @@ Use this order unless task constraints force escalation:
 - **Context retrieval** _(Code Mode)_: use `sdl.context` for task-shaped explain/debug/review/implement context, `sdl.retrieve` for one exact retrieval step, `symbol.search`/`symbol.getCard` for exact symbols, and `slice.build` for graph/file frontiers. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, batch mutations, and retrieval ladders after the first SDL discovery surface. Do not wrap a single `sdl.context` call in workflow.
 - **Symbol-scoped edits** _(Code Mode)_: `sdl.file` with `op: "symbolEditPreview"` -> review `planHandle` -> `op: "symbolEditApply"`. Use `symbolEditApplyNow` only when you already hold the current `astFingerprint` and range from a fresh card.
-- **Search edits** _(Code Mode)_: `sdl.file` with `op: "searchEditPreview"` -> review `planHandle`, snippets, and `defaultCreateBackup` -> `op: "searchEditApply"` with the same backup value. On the flat `sdl.search.edit` surface, copy preview `applyArgs` directly.
+- **Search edits** _(Code Mode)_: `sdl.file` with `op: "searchEditPreview"` -> review `planHandle`, snippets, and `defaultCreateBackup` -> `op: "searchEditApply"` with the same backup value. On the flat `sdl.search.edit` surface, copy preview `applyArgs` directly. `file.write` retains its default sibling `.bak`; `symbol.edit` and `search.edit` remove temporary rollback copies after a successful apply.
 
 ### 3) Token controls by tool
 
@@ -166,6 +166,8 @@ Use this order unless task constraints force escalation:
   - `level: "stats"` is cheapest.
   - `level: "full"` auto-enables hotspots unless overridden.
   - Use `directories`, `maxDirectories`, and `maxExportsPerDirectory` to bound payload.
+- `sdl.semantic.enrichment.status`:
+  - `precisionScore`, when present, is the operational composite of file coverage, symbol-match rate, edge resolution, provider tier, diagnostics availability, and pass-two skip rate. It is not labeled statistical precision; unavailable runs omit the score and basis.
 - `sdl.symbol.search`:
   - Keep `limit` low (5–20) to start. Increase only if no results match.
   - `semantic: true` adds ~50ms latency but dramatically improves relevance for conceptual queries.
@@ -273,6 +275,7 @@ Then, if needed:
 - Use `code` to run inline code or `args` to invoke a file.
 - `queryTerms` extracts only matching lines from output (like a built-in grep). In `"intent"` mode, only matched excerpts are returned.
 - `persistOutput: true` (default) saves full output to an artifact handle for later retrieval via `sdl.runtime.queryOutput`.
+- Stored artifacts retain their configured-redaction result byte-for-byte. The default `view: "model"` removes only leading command-prompt echoes and recognized Node test-duration suffixes; `view: "raw"` returns the unprojected, already-redacted excerpt.
 - Per-line truncation caps each output line at 500 characters.
 
 ### 7) Code Mode (`sdl.context`, `sdl.retrieve`, `sdl.workflow`, `sdl.file`)
@@ -293,9 +296,11 @@ Routing guidance:
 
 Workflow guidance:
 
-- Start with `sdl.action.search` when the right action is unclear.
+- Start with `sdl.action.search` when the right action is unclear. Use `maxTokens` to bound a catalog page and `offset` to request the next page.
+- When `codeSkeleton` returns a continuation, repeat the original target and arguments, changing only `skeletonOffset`.
 - Use `sdl.manual(query|actions)` to avoid loading the full manual when a subset is enough.
-- Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based).
+- Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based). `$N` piping uses raw step data even when a returned page is model-projected.
+- Retrieve a truncated step with `workflowContinuationGet`: array paths page in items, JSON/text values page in characters, and `limit` is capped at `1000`.
 - Set `budget`: `{ maxTotalTokens, maxSteps, maxDurationMs }`; `maxTokens` is accepted as an alias for `maxTotalTokens`.
 - `onError`: `"continue"` (default, skip only dependency-blocked steps), `"continueAll"` (legacy run-every-later-step behavior), or `"stop"` (halt on first error).
 - The workflow enforces the same context-ladder escalation rules as individual tools.
