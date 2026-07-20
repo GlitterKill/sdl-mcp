@@ -219,7 +219,7 @@ Use SDL file and edit tools instead of native read/write paths.
 - If preview snippets are insufficient, use plan-bound `previewWindow` or `sourceWindow` with the `planHandle`, `symbolId`, `reason`, `expectedLines`, and `identifiersToFind`; do not fall back to `file.read`.
 - `file.write` can make a targeted single-file write, including indexed files, but treat it as fallback for indexed source when `symbol.edit` cannot anchor the change and `search.edit` would be broader than necessary.
 - Use `sdl.workflow` plus `runtimeExecute` for a targeted script only when SDL edit tools cannot express the edit; pass multiline payloads through `stdin`.
-- `file.write` retains a sibling `.bak` by default and returns its path; remove that backup after verification if it is no longer needed. `symbol.edit` and `search.edit` use temporary rollback copies only and remove them after a successful apply, so they do not return a retained backup path. Do not run broad native cleanup commands.
+- `file.write` retains a sibling `.bak` by default and returns `backupPath` when it creates that backup; remove the backup after verification if it is no longer needed. With `createBackup: false`, no backup is created and `backupPath` is absent. `symbol.edit` and `search.edit` use temporary rollback copies only and remove them after a successful apply, so they do not return a retained backup path. Do not run broad native cleanup commands.
 
 ### Non-Indexed Reads
 
