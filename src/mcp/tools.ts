@@ -1219,7 +1219,12 @@ const SymbolEditPreviewRequestSchema = z
     symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
     symbolRef: SymbolRefSchema.optional(),
     operation: SymbolEditOperationSchema,
-    createBackup: z.boolean().optional(),
+    createBackup: z
+      .boolean()
+      .optional()
+      .describe(
+        "Create temporary rollback copies that are removed after full success; no retained backup path is returned",
+      ),
   })
   .superRefine((value, ctx) => {
     const targetCount =
@@ -1238,7 +1243,9 @@ const SymbolEditApplyRequestSchema = z.object({
   mode: z.literal("apply"),
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   planHandle: z.string().min(1).max(200),
-  createBackup: z.boolean().optional(),
+  createBackup: z.boolean().optional().describe(
+    "Create temporary rollback copies that are removed after full success; no retained backup path is returned",
+  ),
 });
 
 const SymbolEditApplyNowRequestSchema = z.object({
@@ -1248,7 +1255,9 @@ const SymbolEditApplyNowRequestSchema = z.object({
   expectedAstFingerprint: z.string().min(1),
   expectedRange: RangeSchema,
   operation: SymbolEditOperationSchema,
-  createBackup: z.boolean().optional(),
+  createBackup: z.boolean().optional().describe(
+    "Create temporary rollback copies that are removed after full success; no retained backup path is returned",
+  ),
 });
 
 export const SymbolEditRequestSchema = z.discriminatedUnion("mode", [
@@ -3754,7 +3763,9 @@ export const FileWriteRequestSchema = z.object({
     .boolean()
     .optional()
     .default(true)
-    .describe("Create .bak backup before modifying (default: true)"),
+    .describe(
+      "Create a retained sibling .bak backup before modifying; successful responses return backupPath (default: true)",
+    ),
   createIfMissing: z
     .boolean()
     .optional()
@@ -3974,7 +3985,12 @@ const SearchEditPreviewRequestSchema = z
     maxFiles: z.number().int().min(1).max(500).optional(),
     maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
     maxTotalMatches: z.number().int().min(1).max(50000).optional(),
-    createBackup: z.boolean().optional(),
+    createBackup: z
+      .boolean()
+      .optional()
+      .describe(
+        "Create temporary rollback copies that are removed after full success; no retained backup path is returned",
+      ),
     responseMode: z
       .enum(["inline", "auto", "handle"])
       .optional()
@@ -4059,7 +4075,9 @@ const SearchEditApplyRequestSchema = z.object({
   mode: z.literal("apply"),
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   planHandle: z.string().min(1).max(200),
-  createBackup: z.boolean().optional(),
+  createBackup: z.boolean().optional().describe(
+    "Create temporary rollback copies that are removed after full success; no retained backup path is returned",
+  ),
 });
 
 export const SearchEditRequestSchema = z.discriminatedUnion("mode", [

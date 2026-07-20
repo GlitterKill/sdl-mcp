@@ -226,7 +226,7 @@ export function buildFlatToolDescriptors(
     {
       action: "symbol.edit",
       description:
-        "Symbol-scoped edit preview/apply/applyNow with astFingerprint, range, file sha, draft preconditions, and parse-after validation.",
+        "Symbol-scoped edit preview/apply/applyNow with astFingerprint, range, file sha, draft preconditions, and parse-after validation. createBackup uses temporary rollback copies that are removed after full success and does not retain a user backup.",
       handler: handleSymbolEdit,
     },
     {
@@ -378,7 +378,7 @@ export function buildFlatToolDescriptors(
     {
       action: "file.write",
       description:
-        "Write to a single file (indexed or non-indexed) with targeted modes; use sdl.search.edit for cross-file batching: full content, line replacement, pattern replacement, JSON path update, insert, or append",
+        "Write to a single file (indexed or non-indexed) with targeted modes; use sdl.search.edit for cross-file batching: full content, line replacement, pattern replacement, JSON path update, insert, or append. createBackup defaults to true, retains a sibling .bak, and successful responses return backupPath.",
       handler: handleFileWrite,
     },
     {
@@ -390,13 +390,13 @@ export function buildFlatToolDescriptors(
     {
       action: "semantic.enrichment.status",
       description:
-        "Report semantic enrichment provider selection, skipped providers, last runs, and precision scores.",
+        "Report semantic enrichment provider selection, skipped providers, last runs, and operational enrichment scores.",
       handler: handleSemanticEnrichmentStatus,
     },
     {
       action: "search.edit",
       description:
-        'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Supports text, symbol, identifier, and structural tree-sitter targeting for safer edits across supported structural languages. Also supports targeting:"rename" (graph-scoped symbol rename) and targeting:"signature" (TS/JS signature change with AST-based callsite propagation). Preview responses default to responseMode:"auto". Prefer this over composing repeated file.write calls.',
+        'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Supports text, symbol, identifier, and structural tree-sitter targeting for safer edits across supported structural languages. Also supports targeting:"rename" (graph-scoped symbol rename) and targeting:"signature" (TS/JS signature change with AST-based callsite propagation). Preview responses default to responseMode:"auto". createBackup uses temporary rollback copies that are removed after full success and does not retain a user backup. Prefer this over composing repeated file.write calls.',
       handler: handleSearchEdit,
     },
   ];

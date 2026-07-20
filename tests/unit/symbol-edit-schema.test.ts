@@ -70,4 +70,23 @@ describe("SymbolEditRequestSchema", () => {
     });
     assert.equal(applyNow.op, "symbolEditApplyNow");
   });
+
+  it("accepts temporary rollback backup options without changing request defaults", () => {
+    const direct = SymbolEditRequestSchema.parse({
+      mode: "preview",
+      repoId: "repo-1",
+      symbolId: "sym-1",
+      operation: { kind: "replaceBody", content: "return true;\n" },
+      createBackup: true,
+    });
+    const wrapped = FileGatewayRequestSchema.parse({
+      op: "symbolEditApply",
+      repoId: "repo-1",
+      planHandle: "se-abc",
+      createBackup: true,
+    });
+
+    assert.equal(direct.createBackup, true);
+    assert.equal(wrapped.createBackup, true);
+  });
 });

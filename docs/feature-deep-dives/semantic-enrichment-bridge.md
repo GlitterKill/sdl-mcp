@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-The semantic enrichment bridge keeps tree-sitter as SDL-MCP's base syntax layer and enriches graph precision from one provider per language. Provider priority is fixed:
+The semantic enrichment bridge keeps tree-sitter as SDL-MCP's base syntax layer and enriches graph relationships from one provider per language. Provider priority is fixed:
 
 1. SCIP
 2. LSP
@@ -23,12 +23,12 @@ flowchart LR
 
 ## Relationship To `semantic`
 
-`semantic` config still means embeddings, generated summaries, and hybrid retrieval. The bridge uses a separate `semanticEnrichment` section because SCIP and LSP change graph precision and provenance rather than vector search behavior.
+`semantic` config still means embeddings, generated summaries, and hybrid retrieval. The bridge uses a separate `semanticEnrichment` section because SCIP and LSP change graph relationships and provenance rather than vector search behavior.
 
 ## Current Behavior
 
 - `sdl.semantic.enrichment.refresh` reports selected providers explicitly only when `semanticEnrichment.enabled` is true.
-- `sdl.semantic.enrichment.status` reports source selection, skipped providers, last runs, and precision scores even when refresh is disabled.
+- `sdl.semantic.enrichment.status` reports source selection, skipped providers, last runs, and operational enrichment scores even when refresh is disabled.
 - SCIP and LSP graph facts are materialized only by provider-first indexing. Refresh returns skipped-provider diagnostics that direct users to `sdl.index.refresh` with provider inputs enabled.
 - Combined SCIP indexes are still valid provider-first inputs. Language-scoped refresh can report source selection, but it does not filter or ingest provider documents.
 - `dryRun` and `force` remain accepted for compatibility but do not cause graph writes.
@@ -99,9 +99,9 @@ For V2, configure TypeScript and JavaScript LSP enrichment with the SDL language
 
 LSIF support was removed because known LSIF-producing ecosystems also have SCIP indexers. Keeping LSIF would duplicate the lower-priority index path without expanding language coverage.
 
-## Precision Score
+## Operational enrichment score
 
-Precision score combines:
+The operational enrichment score combines six weighted inputs:
 
 - file coverage
 - symbol match rate
@@ -109,5 +109,7 @@ Precision score combines:
 - provider tier
 - diagnostics availability
 - pass-2 skip coverage
+
+The score is an operational composite. It is not labeled precision, recall, or a general quality measure.
 
 SCIP has the highest provider tier and is the only source allowed to affect pass-2 scheduling. LSP stays as post-index enrichment until coverage can be measured per file and is comparable to SCIP.

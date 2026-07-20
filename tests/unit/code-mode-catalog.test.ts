@@ -11,7 +11,11 @@ import {
 } from "../../dist/code-mode/action-catalog.js";
 import { handleActionSearch } from "../../dist/code-mode/index.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
-import { SearchEditRequestSchema } from "../../dist/mcp/tools.js";
+import {
+  FileWriteRequestSchema,
+  SearchEditRequestSchema,
+  SymbolEditRequestSchema,
+} from "../../dist/mcp/tools.js";
 import { z } from "zod";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
@@ -58,6 +62,23 @@ describe("code-mode action catalog", () => {
         metaTools.map((d) => d.action).sort(),
         ["action.search", "context", "file", "manual", "retrieve", "workflow"],
       );
+    });
+
+    it("distinguishes retained file backups from temporary edit rollback copies", () => {
+      const backupField = (schema: Parameters<typeof zodToSchemaSummary>[0]) =>
+        zodToSchemaSummary(schema).fields.find((summaryField) => summaryField.name === "createBackup");
+      const fileBackup = backupField(FileWriteRequestSchema);
+      const symbolBackup = backupField(SymbolEditRequestSchema);
+      const searchBackup = backupField(SearchEditRequestSchema);
+
+      assert.equal(fileBackup?.default, true);
+      assert.match(fileBackup?.description ?? "", /retained sibling \.bak/);
+      for (const rollbackBackup of [symbolBackup, searchBackup]) {
+        assert.match(rollbackBackup?.description ?? "", /temporary rollback copies/);
+        assert.match(rollbackBackup?.description ?? "", /removed after.*success/);
+        assert.match(rollbackBackup?.description ?? "", /no retained backup path/);
+      }
+
     });
 
     it("each descriptor has action, fn, description, tags, kind", () => {

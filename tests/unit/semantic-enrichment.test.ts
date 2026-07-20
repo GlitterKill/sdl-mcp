@@ -16,6 +16,7 @@ import {
 } from "../../dist/semantic/enrichment.js";
 import type { SemanticEdge } from "../../dist/semantic/types.js";
 import type { AppConfig } from "../../dist/config/types.js";
+import * as semanticTools from "../../dist/mcp/tools/semantic-enrichment.js";
 
 describe("semantic enrichment bridge core", () => {
   it("defaults to enabled enrichment separate from semantic retrieval", () => {
@@ -257,5 +258,90 @@ describe("semantic enrichment bridge core", () => {
     assert.equal(run.canAffectPass2, true);
     assert.equal(run.selected, true);
     assert.equal("precisionScore" in run, false);
+  });
+
+  it("projects semantic score availability identically in compact and full modes", () => {
+    const projectRun = Reflect.get(semanticTools, "projectSemanticEnrichmentRun");
+    assert.equal(typeof projectRun, "function");
+    if (typeof projectRun !== "function") return;
+
+    const baseRun = {
+      runId: "run-unavailable",
+      repoId: "repo-1",
+      providerType: "scip" as const,
+      providerId: "scip-typescript",
+      languages: ["typescript"],
+      status: "completed" as const,
+      startedAt: "2026-07-19T00:00:00.000Z",
+      finishedAt: "2026-07-19T00:00:01.000Z",
+      documentsProcessed: 1,
+      symbolsMatched: 2,
+      edgesCreated: 3,
+      edgesUpgraded: 0,
+      edgesReplaced: 0,
+      edgesSkipped: 0,
+      diagnosticsCount: 0,
+      cacheHit: false,
+      canAffectPass2: true,
+      selected: true,
+    };
+    const runs = [
+      baseRun,
+      { ...baseRun, runId: "run-zero", precisionScore: 0 },
+      { ...baseRun, runId: "run-positive", precisionScore: 0.75 },
+    ];
+    const fullRuns = runs.map((run) => projectRun(run) as Record<string, unknown>);
+    const projectedStatus = {
+      ok: true,
+      repoId: "repo-1",
+      enabled: true,
+      autoRunOnIndexRefresh: false,
+      installPolicy: "never" as const,
+      selections: [],
+      lastRuns: fullRuns,
+    } as unknown as Parameters<typeof semanticTools.compactSemanticEnrichmentStatusForAgent>[0];
+    const compact = semanticTools.compactSemanticEnrichmentStatusForAgent(
+      projectedStatus,
+      runs.length,
+    ) as { lastRuns: Array<Record<string, unknown>> };
+
+    assert.equal("precisionScore" in fullRuns[0], false);
+    assert.equal("precisionBasis" in fullRuns[0], false);
+    assert.equal(fullRuns[0].precisionMeasurement, "unavailable");
+    assert.equal(compact.lastRuns[0].precisionMeasurement, "unavailable");
+    assert.equal("precisionScore" in compact.lastRuns[0], false);
+    assert.equal("precisionBasis" in compact.lastRuns[0], false);
+
+    for (const index of [1, 2]) {
+      assert.equal(fullRuns[index].precisionMeasurement, "measured");
+      assert.equal(fullRuns[index].precisionBasis, "operational-composite");
+      assert.equal(compact.lastRuns[index].precisionScore, fullRuns[index].precisionScore);
+      assert.equal(compact.lastRuns[index].precisionMeasurement, fullRuns[index].precisionMeasurement);
+      assert.equal(compact.lastRuns[index].precisionBasis, fullRuns[index].precisionBasis);
+    }
+    assert.equal(fullRuns[1].precisionScore, 0);
+    assert.equal(fullRuns.some((run) => run.precisionScore === null), false);
+    assert.equal(compact.lastRuns.some((run) => run.precisionScore === null), false);
+
+    const measuredFullKeys = Object.keys(fullRuns[1]);
+    assert.ok(measuredFullKeys.indexOf("precisionScore") < measuredFullKeys.indexOf("precisionMeasurement"));
+    assert.ok(measuredFullKeys.indexOf("precisionMeasurement") < measuredFullKeys.indexOf("precisionBasis"));
+    assert.ok(measuredFullKeys.indexOf("precisionBasis") < measuredFullKeys.indexOf("cacheHit"));
+    const measuredCompactKeys = Object.keys(compact.lastRuns[1]);
+    assert.equal(
+      measuredCompactKeys.indexOf("precisionBasis"),
+      measuredCompactKeys.indexOf("precisionMeasurement") + 1,
+    );
+
+    assert.equal(
+      JSON.stringify(fullRuns),
+      JSON.stringify(runs.map((run) => projectRun(run))),
+    );
+    assert.equal(
+      JSON.stringify(compact),
+      JSON.stringify(
+        semanticTools.compactSemanticEnrichmentStatusForAgent(projectedStatus, runs.length),
+      ),
+    );
   });
 });

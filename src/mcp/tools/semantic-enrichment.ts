@@ -6,6 +6,7 @@ import {
   getSemanticEnrichmentStatus,
   type SemanticEnrichmentStatusResult,
 } from "../../semantic/enrichment.js";
+import type { PersistedSemanticProviderRun } from "../../semantic/types.js";
 import {
   SemanticEnrichmentRefreshRequestSchema,
   SemanticEnrichmentStatusRequestSchema,
@@ -64,8 +65,56 @@ function diagnosticSeveritySummary(
   }
 }
 
+type ProjectedSemanticEnrichmentRun = Omit<
+  PersistedSemanticProviderRun,
+  "precisionScore"
+> & {
+  precisionScore?: number;
+  precisionMeasurement: "unavailable" | "measured";
+  precisionBasis?: "operational-composite";
+};
+
+type ProjectedSemanticEnrichmentStatusResult = Omit<
+  SemanticEnrichmentStatusResult,
+  "lastRuns"
+> & {
+  lastRuns: ProjectedSemanticEnrichmentRun[];
+};
+
+export function projectSemanticEnrichmentRun(
+  run: PersistedSemanticProviderRun,
+): ProjectedSemanticEnrichmentRun {
+  const {
+    precisionScore,
+    cacheHit,
+    canAffectPass2,
+    selected,
+    metadataJson,
+    error,
+    ...beforePrecision
+  } = run;
+  const measurement =
+    precisionScore === undefined
+      ? { precisionMeasurement: "unavailable" as const }
+      : {
+          precisionScore,
+          precisionMeasurement: "measured" as const,
+          precisionBasis: "operational-composite" as const,
+        };
+
+  return {
+    ...beforePrecision,
+    ...measurement,
+    ...(cacheHit === undefined ? {} : { cacheHit }),
+    ...(canAffectPass2 === undefined ? {} : { canAffectPass2 }),
+    ...(selected === undefined ? {} : { selected }),
+    ...(metadataJson === undefined ? {} : { metadataJson }),
+    ...(error === undefined ? {} : { error }),
+  };
+}
+
 export function compactSemanticEnrichmentStatusForAgent(
-  result: SemanticEnrichmentStatusResult,
+  result: ProjectedSemanticEnrichmentStatusResult,
   limit = DEFAULT_SEMANTIC_STATUS_LIMIT,
 ): object {
   const languagesWithSelection = result.selections
@@ -100,9 +149,13 @@ export function compactSemanticEnrichmentStatusForAgent(
       edgesCreated: run.edgesCreated,
       diagnosticsCount: run.diagnosticsCount,
       diagnosticsBySeverity: diagnosticSeveritySummary(run.metadataJson),
-      precisionScore: run.precisionScore ?? null,
-      precisionMeasurement:
-        run.precisionScore === undefined ? "unmeasured" : "measured",
+      ...(run.precisionScore === undefined
+        ? { precisionMeasurement: run.precisionMeasurement }
+        : {
+            precisionScore: run.precisionScore,
+            precisionMeasurement: run.precisionMeasurement,
+            precisionBasis: run.precisionBasis,
+          }),
     })),
   };
 }
@@ -116,7 +169,11 @@ export async function handleSemanticEnrichmentStatus(
     args,
   );
   const status = await getSemanticEnrichmentStatus(request, loadConfig());
+  const projectedStatus = {
+    ...status,
+    lastRuns: status.lastRuns.map(projectSemanticEnrichmentRun),
+  };
   return request.detail === "full"
-    ? status
-    : compactSemanticEnrichmentStatusForAgent(status, request.limit);
+    ? projectedStatus
+    : compactSemanticEnrichmentStatusForAgent(projectedStatus, request.limit);
 }

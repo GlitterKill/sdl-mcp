@@ -19,7 +19,7 @@ The `file.write` tool provides token-efficient file writing with six targeted wr
 
 ---
 
-MCP responses are human-first: visible `content` summarizes the write and includes bounded before/after previews when available. Machine-readable task data remains in `structuredContent`, including `filePath`, `mode`, `etag`, write counts, and error details. Backup paths, precondition snapshots, index-update internals, timings, and other SDL-MCP bookkeeping are hidden from normal visible/model-facing output unless diagnostics are explicitly requested.
+MCP responses are human-first: visible `content` summarizes the write and includes bounded before/after previews when available. Machine-readable task data remains in `structuredContent`, including `filePath`, `mode`, `etag`, write counts, error details, and `backupPath` when a retained sibling backup is created. Precondition snapshots, index-update internals, timings, and other SDL-MCP bookkeeping are hidden from normal visible/model-facing output unless diagnostics are explicitly requested.
 
 
 ## Overview
@@ -486,7 +486,7 @@ flowchart LR
 
 ## Backup Behavior
 
-By default, `file.write` creates a backup before modifying any existing file:
+By default, `file.write` creates and retains a sibling `.bak` file before modifying an existing file. A successful response returns that retained path as `backupPath`. This differs from `symbol.edit` and `search.edit`, which use temporary rollback copies and remove them after full success.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%

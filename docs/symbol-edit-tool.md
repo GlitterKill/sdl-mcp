@@ -45,6 +45,10 @@ For TypeScript, TSX, JavaScript, and JSX, preview uses the TypeScript-family Tre
 
 If a saved-file write succeeds but graph or live-index sync fails, SDL-MCP keeps the file write and returns the existing `indexUpdate.applied = false` guidance instead of rolling the file back.
 
+## Backup behavior
+
+When `createBackup` is enabled, `symbol.edit` creates temporary rollback copies for internal safety. SDL-MCP removes those copies after full success and does not retain or return a user backup path. Use `file.write` when you need a retained sibling `.bak` and a successful `backupPath` response.
+
 ## Draft Behavior
 
 When a live draft exists for the target file, preview plans against the draft content. Applying that plan updates the live overlay through the buffer pipeline and does not write the saved file.

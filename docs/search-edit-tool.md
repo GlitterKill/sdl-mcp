@@ -342,6 +342,10 @@ sha256 differs from the preview snapshot, apply throws a
 `ValidationError` listing the drifted files, writes nothing, and the
 handle remains usable only after producing a fresh preview.
 
+## Backup behavior
+
+When `createBackup` is enabled, `search.edit` creates temporary rollback copies for internal safety. SDL-MCP removes those copies after full success and does not retain or return a user backup path. Use `file.write` when you need a retained sibling `.bak` and a successful `backupPath` response.
+
 ## Rollback semantics
 
 - Sequential writes — serialized to respect the LadybugDB write pool
