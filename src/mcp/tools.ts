@@ -3764,7 +3764,7 @@ export const FileWriteRequestSchema = z.object({
     .optional()
     .default(true)
     .describe(
-      "Create a retained sibling .bak backup before modifying; successful responses return backupPath (default: true)",
+      "Create a retained sibling .bak backup before modifying; successful responses return backupPath when a backup is created (default: true)",
     ),
   createIfMissing: z
     .boolean()

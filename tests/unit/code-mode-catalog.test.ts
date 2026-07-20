@@ -73,6 +73,17 @@ describe("code-mode action catalog", () => {
 
       assert.equal(fileBackup?.default, true);
       assert.match(fileBackup?.description ?? "", /retained sibling \.bak/);
+      assert.match(
+        fileBackup?.description ?? "",
+        /successful responses return backupPath when a backup is created/,
+      );
+      const withoutBackup = FileWriteRequestSchema.parse({
+        repoId: "repo-1",
+        filePath: "src/new-file.ts",
+        content: "export const value = 1;\n",
+        createBackup: false,
+      });
+      assert.equal(withoutBackup.createBackup, false);
       for (const rollbackBackup of [symbolBackup, searchBackup]) {
         assert.match(rollbackBackup?.description ?? "", /temporary rollback copies/);
         assert.match(rollbackBackup?.description ?? "", /removed after.*success/);

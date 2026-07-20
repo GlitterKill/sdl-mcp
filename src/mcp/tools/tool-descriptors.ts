@@ -378,7 +378,7 @@ export function buildFlatToolDescriptors(
     {
       action: "file.write",
       description:
-        "Write to a single file (indexed or non-indexed) with targeted modes; use sdl.search.edit for cross-file batching: full content, line replacement, pattern replacement, JSON path update, insert, or append. createBackup defaults to true, retains a sibling .bak, and successful responses return backupPath.",
+        "Write to a single file (indexed or non-indexed) with targeted modes; use sdl.search.edit for cross-file batching: full content, line replacement, pattern replacement, JSON path update, insert, or append. createBackup defaults to true, retains a sibling .bak, and successful responses return backupPath when a backup is created.",
       handler: handleFileWrite,
     },
     {
