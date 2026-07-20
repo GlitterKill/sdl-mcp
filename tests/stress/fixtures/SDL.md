@@ -37,6 +37,7 @@ retrieval also preserves bounded per-concept and named-action coverage, so do
 not replace one focused call with several broad searches.
 
 Use `sdl.workflow` only when steps need fields from earlier results, transforms, runtime execution, batch operations, mutations, or result piping. With `onError: "continueAll"`, failed and policy-denied gateway results continue execution but retain `status: "error"` and count as errors in the workflow summary.
+Workflow continuations return the same model-projected data as their first page, while internal `$N` piping retains raw step data. When a `codeSkeleton` response is truncated, repeat the original target and all original arguments, then change only `skeletonOffset` to the returned value. `workflowContinuationGet` pages array paths in items and JSON/text values in characters; its `limit` is capped at `1000`.
 
 Escalate through `sdl.retrieve` in this order:
 
@@ -194,6 +195,7 @@ Use the cheapest rung that answers the task. Static price tags in `sdl.manual` a
   ```
 - Dedupe refs: `{ "ref": { "key": "card:<repo>:<symbol>", "etag": "..." }, "unchanged": true }` means SDL already delivered the content in this session. Do not re-request it; set `refsMode: "off"` only after compaction or lost context to recover full content.
 - Short IDs: packed payloads may introduce `s1`, `s2`, ... aliases with an `@ids=s1:<full-symbol-id>` line. Use `sN` anywhere a symbol ID is accepted; if an alias is unknown, re-run the producing call or use the full ID from the introducing `@ids` line.
+- Action discovery: set `sdl.action.search` `maxTokens` to bound a catalog page; use its `offset` to request the next page rather than increasing the first response.
 - Search misses: when `symbol.search` returns `nearMisses`, retry with one listed `name` instead of inventing broader queries.
 - Answer first: for explain/debug, call `sdl.context` with `options.answerFirst: true`; expand with `symbol.getCard` or a normal context call on the returned evidence IDs only if needed.
 - Targeted files: if `file.read` returns the large-read hint, retry with `search` plus `searchContext`, `offset` plus `limit`, `jsonPath`, `maxTokens`, or `maxBytes`.
@@ -217,7 +219,7 @@ Use SDL file and edit tools instead of native read/write paths.
 - If preview snippets are insufficient, use plan-bound `previewWindow` or `sourceWindow` with the `planHandle`, `symbolId`, `reason`, `expectedLines`, and `identifiersToFind`; do not fall back to `file.read`.
 - `file.write` can make a targeted single-file write, including indexed files, but treat it as fallback for indexed source when `symbol.edit` cannot anchor the change and `search.edit` would be broader than necessary.
 - Use `sdl.workflow` plus `runtimeExecute` for a targeted script only when SDL edit tools cannot express the edit; pass multiline payloads through `stdin`.
-- Track backup paths returned by edit/write tools and remove created `.bak` files after verification through SDL-governed runtime cleanup. Do not run broad native cleanup commands.
+- `file.write` retains a sibling `.bak` by default and returns `backupPath` when it creates that backup; remove the backup after verification if it is no longer needed. With `createBackup: false`, no backup is created and `backupPath` is absent. `symbol.edit` and `search.edit` use temporary rollback copies only and remove them after a successful apply, so they do not return a retained backup path. Do not run broad native cleanup commands.
 
 ### Non-Indexed Reads
 
@@ -362,6 +364,8 @@ Run repo-local commands through `runtimeExecute` inside `sdl.workflow`.
 
 
 Default to `outputMode: "digest"` for build, test, lint, and other noisy diagnostics; use `outputMode: "minimal"` when exit status is enough. Always set `persistOutput: true` and an explicit `timeoutMs`. Use `stdin` for multiline scripts/input instead of PowerShell here-strings, quote-heavy `node -e`, or base64 decode/eval workarounds. Query stored logs only when needed with `runtimeQueryOutput` and focused `queryTerms`. Use `outputMode: "intent"` when the command intent is already tied to known terms such as `FAIL`, `Error`, or a test name; set `contextLines: 0` when exact matched lines are cleaner than surrounding context.
+
+Persisted runtime artifacts preserve the redacted command output byte-for-byte. Default model excerpts remove only leading command-prompt echoes and recognized Node test-duration suffixes; use `view: "raw"` when the unprojected, already-redacted artifact excerpt is required.
 
 Do not use runtime execution to print indexed source. Use the retrieval ladder instead.
 
