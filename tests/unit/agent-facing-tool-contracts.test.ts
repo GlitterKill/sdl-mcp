@@ -106,6 +106,10 @@ describe("agent-facing SDL tool contracts", () => {
         },
       ],
       finalEvidence: [{ reference: "symbol:abc", timestamp }],
+      retrievalEvidence: {
+        sources: ["fts", "vector:jinacode"],
+        fusionLatencyMs: durationMs,
+      },
     });
 
     const first = stripDefaultContextOperationalFields(
@@ -118,6 +122,7 @@ describe("agent-facing SDL tool contracts", () => {
     assert.deepEqual(first, second);
     assert.equal(JSON.stringify(first).includes("ms"), false);
     assert.equal(JSON.stringify(first).includes("timestamp"), false);
+    assert.equal("fusionLatencyMs" in first.retrievalEvidence, false);
   });
 
   it("compact pr risk responses omit verbose analysis arrays", () => {
@@ -190,6 +195,7 @@ describe("agent-facing SDL tool contracts", () => {
           edgesReplaced: 0,
           edgesSkipped: 0,
           diagnosticsCount: 3,
+          precisionMeasurement: "unavailable",
           metadataJson: "{\"diagnosticsBySeverity\":{\"error\":1,\"warning\":2,\"information\":0,\"hint\":0}}",
         },
         {
@@ -218,9 +224,11 @@ describe("agent-facing SDL tool contracts", () => {
     assert.equal("metadataJson" in compact.lastRuns[0], false);
     assert.equal("documentsProcessed" in compact.lastRuns[0], false);
     assert.equal(compact.lastRuns.length, 1);
-    assert.equal(compact.lastRuns[0]?.precisionScore, null);
-    assert.equal(compact.lastRuns[0]?.precisionMeasurement, "unmeasured");
-    assert.deepEqual(compact.lastRuns[0]?.diagnosticsBySeverity, {
+    const latestRun = compact.lastRuns[0];
+    assert.ok(latestRun);
+    assert.equal("precisionScore" in latestRun, false);
+    assert.equal(latestRun.precisionMeasurement, "unavailable");
+    assert.deepEqual(latestRun.diagnosticsBySeverity, {
       error: 1,
       warning: 2,
       information: 0,

@@ -1,7 +1,6 @@
 import type { Connection } from "kuzu";
 import { basename } from "node:path";
 
-import * as ladybugDb from "../db/ladybug-queries.js";
 import { searchSymbolsWithOverlay } from "../live-index/overlay-reader.js";
 import { normalizePath } from "./paths.js";
 import { splitCamelSubwords, computeRelevance } from "./symbol-relevance.js";
@@ -109,21 +108,14 @@ export async function resolveSymbolRef(
     };
   }
 
-  const symbolMap = await ladybugDb.getSymbolsByIds(
-    conn,
-    rows.map((row) => row.symbolId),
-  );
+  // Overlay-only rows are repo-scoped but intentionally have no durable Symbol record.
   const normalizedFile = symbolRef.file ? normalizePath(symbolRef.file) : undefined;
   const ranked = rows
     .map((row) => {
-      const symbol = symbolMap.get(row.symbolId);
-      if (!symbol || symbol.repoId !== repoId) {
-        return null;
-      }
       if (symbolRef.kind && row.kind !== symbolRef.kind) {
         return null;
       }
-      if (symbolRef.exportedOnly === true && !symbol.exported) {
+      if (symbolRef.exportedOnly === true && !row.exported) {
         return null;
       }
 
@@ -142,7 +134,7 @@ export async function resolveSymbolRef(
         name: row.name,
         file: row.filePath,
         kind: row.kind,
-        exported: symbol.exported,
+        exported: row.exported,
         score: scoreCandidate({
           nameMatchLevel,
           fileMatchLevel,
@@ -150,7 +142,7 @@ export async function resolveSymbolRef(
           exportedMatched:
             symbolRef.exportedOnly === undefined
               ? false
-              : symbol.exported === symbolRef.exportedOnly,
+              : row.exported === symbolRef.exportedOnly,
         }),
         nameMatchLevel,
         fileMatchLevel,
@@ -163,19 +155,15 @@ export async function resolveSymbolRef(
     const qualifier = normalizedFile ? ` in file "${normalizedFile}"` : "";
     // We had search results but none passed filters — use original rows as fuzzy suggestions
     const fuzzyCandidates = rows
-      .map((row) => {
-        const symbol = symbolMap.get(row.symbolId);
-        if (!symbol || symbol.repoId !== repoId) return null;
-        return {
-          symbolId: row.symbolId,
-          name: row.name,
-          file: row.filePath,
-          kind: row.kind,
-          exported: symbol.exported,
-          score: Math.round(computeRelevance(row.name, symbolRef.name) * 100) / 100,
-        };
-      })
-      .filter((c): c is SymbolRefCandidate => c !== null && c.score >= 0.1)
+      .map((row) => ({
+        symbolId: row.symbolId,
+        name: row.name,
+        file: row.filePath,
+        kind: row.kind,
+        exported: row.exported,
+        score: Math.round(computeRelevance(row.name, symbolRef.name) * 100) / 100,
+      }))
+      .filter((candidate) => candidate.score >= 0.1)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);
     const hint = fuzzyCandidates.length > 0

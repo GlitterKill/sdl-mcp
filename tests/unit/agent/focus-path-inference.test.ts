@@ -7,6 +7,8 @@ import {
 } from "../../../dist/agent/context-seeding.js";
 
 describe("inferFocusPathsFromTaskText", () => {
+
+
   it("infers src/graph/ for beam search queries", () => {
     const paths = inferFocusPathsFromTaskText(
       "How does the beam search algorithm work in buildGraphSlice?",
@@ -182,7 +184,19 @@ describe("inferFocusPathsFromTaskText", () => {
   });
 });
 
+
+
 describe("buildContextFtsQuery", () => {
+  it("retains later domain terms from generic review prompts", () => {
+    const query = buildContextFtsQuery(
+      "Review the current SDL-MCP tool surface for contracts, output noise, deterministic responses, and safe errors.",
+    );
+    assert.strictEqual(
+      query,
+      "current SDL MCP tool surface contracts output noise deterministic responses safe errors",
+    );
+  });
+
   it("drops filler words before context FTS retrieval", () => {
     const query = buildContextFtsQuery(
       "how does tool latency observability work?",

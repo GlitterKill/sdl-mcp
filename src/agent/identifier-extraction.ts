@@ -12,7 +12,7 @@
 // =============================================================================
 /** Injectable gate evaluator for testability. */
 
-export const MAX_IDENTIFIERS = 10;
+export const MAX_IDENTIFIERS = 16;
 
 const ALWAYS_STOP_WORDS = new Set([
   "the",
@@ -286,20 +286,37 @@ export function extractIdentifiersFromText(
   );
   const primarySet = new Set(primary);
   const secondary = [...new Set(words)].filter((w) => !primarySet.has(w));
+  const secondarySet = new Set(secondary);
+  const singularVariants = secondary
+    .flatMap((word) => {
+      const lower = word.toLowerCase();
+      if (lower.endsWith("ies") && lower.length > 4) {
+        return [`${word.slice(0, -3)}y`];
+      }
+      if (
+        lower.endsWith("s") &&
+        lower.length > 3 &&
+        !lower.endsWith("ss") &&
+        !lower.endsWith("us") &&
+        !lower.endsWith("is")
+      ) {
+        return [word.slice(0, -1)];
+      }
+      return [];
+    })
+    .filter((word) => !primarySet.has(word) && !secondarySet.has(word));
 
   // Generate compound identifiers from adjacent word pairs.
   // "graph slice" → "graphSlice", "graph_slice"
   // "barrel re-exports" → "barrelReExports", "barrel_re_exports", "reExport"
   const compounds = generateCompoundIdentifiers(bounded);
-  const allSet = new Set([...primary, ...secondary]);
+  const allSet = new Set([...primary, ...secondary, ...singularVariants]);
   const compoundsFiltered = compounds.filter((c) => !allSet.has(c));
 
-  // Preserve explicit code identifiers first, then adjacent-word compounds.
-  // Natural-language prompts often say "hybrid search" or "context ladder"
-  // while the indexed symbols are `hybridSearch` or `ContextLadder`; placing
-  // compounds ahead of generic single words lets bounded search terms carry
-  // the most code-shaped signal.
-  return [...primary, ...compoundsFiltered, ...secondary].slice(
+  // Preserve explicit code identifiers first. Natural-language terms and their
+  // singular variants come next; compound variants fill any remaining slots
+  // for code-shaped matching.
+  return [...primary, ...secondary, ...singularVariants, ...compoundsFiltered].slice(
     0,
     MAX_IDENTIFIERS,
   );

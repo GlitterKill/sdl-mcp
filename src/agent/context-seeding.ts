@@ -6,8 +6,8 @@
  *   2. Hybrid/lexical fallback (searchSymbols — keyword matching)
  *   3. Feedback boosting (queryFeedbackBoosts — historically useful symbols)
  *
- * Each stage produces scored candidates that are deduplicated and capped
- * so no single source dominates the final candidate set.
+ * Each stage produces bounded scored candidates. Duplicate identities merge here;
+ * relevance, diversity, scope, and response limits belong to the final selector.
  *
  * @module agent/context-seeding
  */
@@ -17,16 +17,14 @@ import type {
   ContextSeedCandidate,
   ContextSeedResult,
 } from "./types.js";
+import { mergeContextSeedCandidates } from "./context-ranking.js";
 import { entitySearch } from "../retrieval/index.js";
 import {
-  extractIdentifiersFromText,
   generateCompoundIdentifiers,
   IDENTIFIER_STOP_WORDS,
 } from "./identifier-extraction.js";
 import {
-  getFilesByIds,
   getScopedSearchSymbolPool,
-  getSymbolsByIds,
   searchSymbols,
   searchSymbolsLiteQueriesInPool,
 } from "../db/ladybug-queries.js";
@@ -35,7 +33,7 @@ import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { buildCatalog, rankCatalog } from "../code-mode/action-catalog.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
-import { explicitFocusPaths, pathMatchesFocus } from "./context-ranking.js";
+import { explicitFocusPaths } from "./context-ranking.js";
 
 // ---------------------------------------------------------------------------
 // Tuning constants
@@ -44,17 +42,16 @@ import { explicitFocusPaths, pathMatchesFocus } from "./context-ranking.js";
 /** Minimum normalized entity score to keep from semantic search. */
 const MIN_ENTITY_NORMALIZED_SCORE = 0.3;
 
-/** Max seed candidates by context mode. */
+/** Maximum precise concept queries before the general lexical lane. */
 const MAX_SEEDS_PRECISE = 12;
-const MAX_SEEDS_BROAD = 24;
 
 /** Per-term keyword search limit by mode. */
 const PER_TERM_LIMIT_PRECISE = 5;
-const PER_TERM_LIMIT_BROAD = 8;
+const PER_TERM_LIMIT_BROAD = 75;
 
 /** Max individual keyword terms to search. */
 const MAX_INDIVIDUAL_TERMS_PRECISE = 3;
-const MAX_INDIVIDUAL_TERMS_BROAD = 6;
+const MAX_INDIVIDUAL_TERMS_BROAD = 12;
 
 /** Compound search limit by mode. */
 const COMPOUND_LIMIT_PRECISE = 8;
@@ -67,9 +64,8 @@ interface SeedSymbolResult {
   symbolId: string;
 }
 
-/** Slots reserved so a secondary source can still appear when one lane dominates. */
+/** Capacity reserved in the precise query plan for non-concept searches. */
 const DIVERSITY_RESERVE_PRECISE = 3;
-const DIVERSITY_RESERVE_BROAD = 4;
 
 function recordTiming(
   timings: Map<string, number>,
@@ -188,9 +184,9 @@ function toPascalCaseIdentifier(identifier: string): string {
     : identifier[0].toUpperCase() + identifier.slice(1);
 }
 
-export function buildActionSeedQueries(taskText: string): string[] {
+function findMentionedCatalogActions(taskText: string) {
   const normalizedTaskText = taskText.toLowerCase();
-  const mentionedActions = buildCatalog().filter((action) => {
+  return buildCatalog().filter((action) => {
     const actionPhrase = action.action.toLowerCase().replaceAll(".", " ");
     const fnPhrase = action.fn
       .replace(
@@ -205,21 +201,11 @@ export function buildActionSeedQueries(taskText: string): string[] {
       normalizedTaskText.includes(fnPhrase)
     );
   });
-  // Generic tool-surface reviews have no catalog action name, but still need
-  // the existing shared response-projection seed.
-  const useGenericToolContractFallback =
-    mentionedActions.length === 0 &&
-    /\b(?:tools?|schemas?|descriptors?|registr(?:ation|ations|y|ies))\b/i.test(
-      taskText,
-    ) &&
-    /\b(?:contracts?|projections?|determinism|deterministic)\b/i.test(
-      taskText,
-    ) &&
-    /\b(?:review|reviews|reviewing|audit|audits|auditing|qa|determinism|deterministic)\b/i.test(
-      taskText,
-    );
+}
 
-  if (mentionedActions.length === 0 && !useGenericToolContractFallback) {
+export function buildActionSeedQueries(taskText: string): string[] {
+  const mentionedActions = findMentionedCatalogActions(taskText);
+  if (mentionedActions.length === 0) {
     return [];
   }
 
@@ -250,7 +236,7 @@ export function buildActionSeedQueries(taskText: string): string[] {
     /\b(?:contract|display|format|formatting|output|projection|qa|response|tests?|visibility)\b/i.test(
       taskText,
     );
-  if (hasOutputQaIntent || useGenericToolContractFallback) {
+  if (hasOutputQaIntent) {
     // Output-contract QA needs the shared response projection in addition to
     // the action handler. Ordinary runtime debugging stays handler-shaped.
     const projectionQuery = [
@@ -475,7 +461,6 @@ const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
 
 /** Maximum number of inferred focus paths to return. */
 const MAX_INFERRED_PATHS = 3;
-
 /**
  * Infer likely focus paths from task text when no explicit focusPaths
  * are provided.  Scans for known concept keywords and returns the
@@ -486,7 +471,6 @@ const MAX_INFERRED_PATHS = 3;
  */
 export function inferFocusPathsFromTaskText(taskText: string): string[] {
   const textLower = taskText.toLowerCase();
-
   // Score each mapping entry by how many of its keywords appear in the text
   const scored: Array<{ paths: string[]; score: number }> = [];
   for (const entry of CONCEPT_DIRECTORY_MAP) {
@@ -506,9 +490,10 @@ export function inferFocusPathsFromTaskText(taskText: string): string[] {
 
   // Sort by score descending, collect unique paths
   scored.sort((a, b) => b.score - a.score);
+  const pathGroups = scored.map(({ paths }) => paths);
   const seen = new Set<string>();
   const result: string[] = [];
-  for (const { paths } of scored) {
+  for (const paths of pathGroups) {
     for (const p of paths) {
       if (!seen.has(p) && result.length < MAX_INFERRED_PATHS) {
         seen.add(p);
@@ -520,25 +505,8 @@ export function inferFocusPathsFromTaskText(taskText: string): string[] {
   return result;
 }
 
-/**
- * Keep only candidates whose resolved repository path matches explicit scope.
- * This runs before source and final caps so out-of-scope results cannot starve
- * lower-ranked scoped candidates.
- */
-export function filterSeedCandidatesToScope(
-  candidates: ContextSeedCandidate[],
-  candidatePaths: ReadonlyMap<string, string>,
-  scopePaths: string[],
-): ContextSeedCandidate[] {
-  if (scopePaths.length === 0) return candidates;
-  return candidates.filter((candidate) => {
-    const candidatePath = candidatePaths.get(candidate.contextRef);
-    return (
-      candidatePath !== undefined &&
-      pathMatchesFocus(candidatePath, scopePaths)
-    );
-  });
-}
+
+
 
 /**
  * Split a multi-topic precise request into bounded lexical queries. Single-topic
@@ -620,35 +588,6 @@ export function tagExistingSeedCandidate(
   return true;
 }
 
-/** Keep named/action seeds inside a bounded deterministic score ranking. */
-export function selectPreservedSeedCandidates(
-  candidates: ContextSeedCandidate[],
-  preservedRefs: ReadonlySet<string>,
-  limit: number,
-): ContextSeedCandidate[] {
-  if (limit <= 0) return [];
-  const ranked = [...candidates].sort(
-    (a, b) =>
-      b.score - a.score ||
-      a.sourceRank - b.sourceRank ||
-      a.contextRef.localeCompare(b.contextRef),
-  );
-  const preserved = ranked
-    .filter((candidate) => preservedRefs.has(candidate.contextRef))
-    .slice(0, limit);
-  const selectedRefs = new Set(
-    preserved.map((candidate) => candidate.contextRef),
-  );
-  const remaining = ranked
-    .filter((candidate) => !selectedRefs.has(candidate.contextRef))
-    .slice(0, limit - preserved.length);
-  return [...preserved, ...remaining].sort(
-    (a, b) =>
-      b.score - a.score ||
-      a.sourceRank - b.sourceRank ||
-      a.contextRef.localeCompare(b.contextRef),
-  );
-}
 
 /**
  * Preserve a successful scoped result, including an empty result set, and use
@@ -662,62 +601,21 @@ export async function useScopedResultsOrFallback<T>(
   return scopedResults === undefined ? fallback() : scopedResults;
 }
 
-async function resolveSeedCandidatePaths(
-  candidates: ContextSeedCandidate[],
-): Promise<Map<string, string>> {
-  if (candidates.length === 0) return new Map<string, string>();
 
-  const symbolRefs = new Map<string, string>();
-  const fileSummaryRefs = new Map<string, string>();
-  for (const candidate of candidates) {
-    if (candidate.contextRef.startsWith("symbol:")) {
-      symbolRefs.set(
-        candidate.contextRef.slice("symbol:".length),
-        candidate.contextRef,
-      );
-    } else if (candidate.contextRef.startsWith("fileSummary:")) {
-      fileSummaryRefs.set(
-        candidate.contextRef.slice("fileSummary:".length),
-        candidate.contextRef,
-      );
-    }
-  }
-
-  const conn = await getLadybugConn();
-  const symbols = await getSymbolsByIds(conn, [...symbolRefs.keys()]);
-  // Resolve symbol and direct file-summary IDs through one shared file fetch.
-  const fileIds = new Set(fileSummaryRefs.keys());
-  for (const symbol of symbols.values()) fileIds.add(symbol.fileId);
-  const files = await getFilesByIds(conn, [...fileIds]);
-
-  const candidatePaths = new Map<string, string>();
-  for (const [symbolId, contextRef] of symbolRefs) {
-    const symbol = symbols.get(symbolId);
-    const file = symbol ? files.get(symbol.fileId) : undefined;
-    if (file) candidatePaths.set(contextRef, file.relPath);
-  }
-  for (const [fileId, contextRef] of fileSummaryRefs) {
-    const file = files.get(fileId);
-    if (file) candidatePaths.set(contextRef, file.relPath);
-  }
-  return candidatePaths;
-}
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Run the 3-stage seeding pipeline and return scored, deduplicated candidates.
- * Run the 3-stage seeding pipeline and return scored, deduplicated candidates.
+ * Run the three bounded retrieval lanes and return merged candidates.
  *
  * Stage 1 — Semantic retrieval (entitySearch)
- * Stage 2 — Hybrid/lexical fallback (searchSymbols) when retrieval still has
- *           room before feedback slots are reserved
+ * Stage 2 — Lexical retrieval (searchSymbols)
  * Stage 3 — Feedback boosting (queryFeedbackBoosts)
  *
- * The dominant lane can use most of the cap, but diversity reserve slots keep
- * secondary lexical/semantic and feedback evidence available for final ranking.
+ * Retrieval limits remain safety bounds. Relevance, diversity, explicit scope,
+ * per-file limits, and the response-card budget are applied by the final selector.
  */
 export async function buildSeedContext(
   task: AgentTask,
@@ -737,11 +635,10 @@ export async function buildSeedContext(
 
   const isBroad = task.options?.contextMode !== "precise";
   const scopePaths = explicitFocusPaths(task.options);
-  const collectBeforeCaps = scopePaths.length > 0;
   // Explicit precise scope still needs per-concept lexical coverage when the
   // caller forces semantic retrieval; otherwise one semantic topic can crowd
   // out the other named subsystems before final ranking.
-  const useScopedPreciseLexical = collectBeforeCaps && !isBroad;
+  const useScopedPreciseLexical = scopePaths.length > 0 && !isBroad;
   const seedPlan = buildSeedEntitySearchPlan(task.taskText, isBroad);
   const useSemanticEntitySearch =
     forceSemanticEntitySearch || (!semanticDisabled && isBroad);
@@ -749,18 +646,13 @@ export async function buildSeedContext(
   // so forced semantic calls get diversity without paying for a second hybrid
   // retrieval pass over the same query.
   const useHybridLexical = false;
-  const maxSeeds = isBroad ? MAX_SEEDS_BROAD : MAX_SEEDS_PRECISE;
-  const halfMax = Math.ceil(maxSeeds / 2);
-  const diversityReserve = isBroad
-    ? DIVERSITY_RESERVE_BROAD
-    : DIVERSITY_RESERVE_PRECISE;
-  const primarySourceCap = Math.max(halfMax, maxSeeds - diversityReserve);
-  const feedbackCap = Math.min(FEEDBACK_LIMIT, diversityReserve);
-  const preFeedbackCap = maxSeeds - feedbackCap;
 
-  const seen = new Set<string>();
+  const seenBySource = {
+    semantic: new Set<string>(),
+    lexical: new Set<string>(),
+    feedback: new Set<string>(),
+  };
   const allCandidates: ContextSeedCandidate[] = [];
-  const sourceCounts = { semantic: 0, lexical: 0, feedback: 0 };
 
   // ------------------------------------------------------------------
   // Stage 1: Semantic retrieval (hybrid FTS + vector via orchestrator).
@@ -803,15 +695,12 @@ export async function buildSeedContext(
         const norm = maxScore > 0 ? maxScore : 1;
 
         for (let i = 0; i < rawSemanticCandidates.length; i++) {
-          if (!collectBeforeCaps && sourceCounts.semantic >= primarySourceCap) {
-            break;
-          }
           const r = rawSemanticCandidates[i];
           const normalizedScore = r.score / norm;
           if (normalizedScore < MIN_ENTITY_NORMALIZED_SCORE) continue;
           const ref = `${r.entityType}:${r.entityId}`;
-          if (seen.has(ref)) continue;
-          seen.add(ref);
+          if (seenBySource.semantic.has(ref)) continue;
+          seenBySource.semantic.add(ref);
           allCandidates.push({
             contextRef: ref,
             source: "semantic",
@@ -820,7 +709,6 @@ export async function buildSeedContext(
             entityType: r.entityType as ContextSeedCandidate["entityType"],
             sourceRank: i,
           });
-          sourceCounts.semantic++;
         }
       }
     } catch (err) {
@@ -838,15 +726,9 @@ export async function buildSeedContext(
   // exact names and domain terms are not crowded out by semantic vectors,
   // including when callers explicitly force semantic retrieval.
   // ------------------------------------------------------------------
-  const lexicalTargetCap = semanticDisabled
-    ? preFeedbackCap
-    : Math.min(
-        primarySourceCap,
-        Math.max(diversityReserve, preFeedbackCap - sourceCounts.semantic),
-      );
-
   const actionSeedQueries = seedPlan.actionSeedQueries;
-  const terms = extractIdentifiersFromText(task.taskText, task.taskText);
+  const compoundQuery = buildContextFtsQuery(task.taskText);
+  const terms = compoundQuery.split(/\s+/).filter(Boolean);
   const conceptQueries = useScopedPreciseLexical
     ? buildScopedPreciseConceptQueries(task.taskText)
     : [];
@@ -859,12 +741,12 @@ export async function buildSeedContext(
   const maxIndividualTerms = isBroad
     ? MAX_INDIVIDUAL_TERMS_BROAD
     : MAX_INDIVIDUAL_TERMS_PRECISE;
-  const compoundQuery = terms.slice(0, 6).join(" ");
   const individualTerms = terms.slice(0, maxIndividualTerms);
   const lexicalQueryPlan = [
     ...(compoundQuery ? [{ query: compoundQuery, limit: compoundLimit }] : []),
     ...individualTerms.map((query) => ({ query, limit: perTermLimit })),
   ];
+
   let scopedLexicalResults:
     | {
         concept: SeedSymbolResult[][];
@@ -916,7 +798,6 @@ export async function buildSeedContext(
   }
   const usingScopedLexicalPool =
     useScopedPreciseLexical && scopedLexicalResults !== undefined;
-  let completeScopedConceptRefs: Set<string> | undefined;
   const preservedScopedSeedRefs = new Set<string>();
 
   if (usingScopedLexicalPool) {
@@ -927,18 +808,13 @@ export async function buildSeedContext(
     for (const ref of conceptSelection.resolvedRefs) {
       preservedScopedSeedRefs.add(ref);
     }
-    if (conceptQueries.length > 0 && conceptSelection.complete) {
-      // Completeness controls only redundant lexical pruning. Resolved concept
-      // seeds remain preserved independently of whether every query matched.
-      completeScopedConceptRefs = new Set(conceptSelection.resolvedRefs);
-    }
     for (let conceptRank = 0; conceptRank < conceptSeeds.length; conceptRank++) {
       const ref = `symbol:${conceptSeeds[conceptRank].symbolId}`;
-      if (seen.has(ref)) {
+      if (seenBySource.lexical.has(ref)) {
         tagExistingSeedCandidate(allCandidates, ref, "namedConcept");
         continue;
       }
-      seen.add(ref);
+      seenBySource.lexical.add(ref);
       allCandidates.push({
         contextRef: ref,
         source: "lexical",
@@ -946,7 +822,6 @@ export async function buildSeedContext(
         sourceRank: conceptRank,
         expansionReason: "namedConcept",
       });
-      sourceCounts.lexical++;
     }
 
     const actionSelection = selectFirstUnseenPerBatch(
@@ -958,10 +833,7 @@ export async function buildSeedContext(
     }
   }
 
-  if (
-    actionSeedQueries.length > 0 &&
-    (collectBeforeCaps || sourceCounts.lexical < lexicalTargetCap)
-  ) {
+  if (actionSeedQueries.length > 0) {
     const actionStartedAt = performance.now();
     try {
       const conn = await getLadybugConn();
@@ -969,9 +841,6 @@ export async function buildSeedContext(
 
       for (let queryIndex = 0; queryIndex < actionSeedQueries.length; queryIndex++) {
         const query = actionSeedQueries[queryIndex];
-        if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
-          break;
-        }
         const results = await useScopedResultsOrFallback(
           usingScopedLexicalPool
             ? (scopedLexicalResults?.action[queryIndex] ?? [])
@@ -984,15 +853,12 @@ export async function buildSeedContext(
             )
           : results;
         for (const r of selectedResults) {
-          if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
-            break;
-          }
           const ref = `symbol:${r.symbolId}`;
-          if (seen.has(ref)) {
+          if (seenBySource.lexical.has(ref)) {
             tagExistingSeedCandidate(allCandidates, ref, "actionCatalog");
             continue;
           }
-          seen.add(ref);
+          seenBySource.lexical.add(ref);
           allCandidates.push({
             contextRef: ref,
             source: "lexical",
@@ -1000,7 +866,6 @@ export async function buildSeedContext(
             sourceRank: actionRank,
             expansionReason: "actionCatalog",
           });
-          sourceCounts.lexical++;
           actionRank++;
         }
       }
@@ -1014,7 +879,7 @@ export async function buildSeedContext(
     }
   }
 
-  if (collectBeforeCaps || sourceCounts.lexical < lexicalTargetCap) {
+  {
     const lexicalStartedAt = performance.now();
     try {
       const conn = await getLadybugConn();
@@ -1053,12 +918,9 @@ export async function buildSeedContext(
         );
         recordTiming(timings, "seed.lexicalCompound", compoundStartedAt);
         for (const r of compoundResults) {
-          if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
-            break;
-          }
           const ref = `symbol:${r.symbolId}`;
-          if (seen.has(ref)) continue;
-          seen.add(ref);
+          if (seenBySource.lexical.has(ref)) continue;
+          seenBySource.lexical.add(ref);
           // Score lexical results on a 0-1 scale based on rank.
           // Note: cross-batch scores (compound vs individual) aren't perfectly
           // comparable because denominators differ, but the final sort + cap
@@ -1073,7 +935,6 @@ export async function buildSeedContext(
             score,
             sourceRank: lexicalRank,
           });
-          sourceCounts.lexical++;
           lexicalRank++;
         }
       }
@@ -1082,9 +943,6 @@ export async function buildSeedContext(
       const termResultOffset = compoundQuery ? 1 : 0;
       for (let termIndex = 0; termIndex < individualTerms.length; termIndex++) {
         const term = individualTerms[termIndex];
-        if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
-          break;
-        }
         const termStartedAt = performance.now();
         const results = await useScopedResultsOrFallback(
           usingScopedLexicalPool
@@ -1110,12 +968,9 @@ export async function buildSeedContext(
         );
         recordTiming(timings, "seed.lexicalTermSearch", termStartedAt);
         for (const r of results) {
-          if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
-            break;
-          }
           const ref = `symbol:${r.symbolId}`;
-          if (seen.has(ref)) continue;
-          seen.add(ref);
+          if (seenBySource.lexical.has(ref)) continue;
+          seenBySource.lexical.add(ref);
           const score = Math.max(
             0,
             1 - lexicalRank / Math.max(results.length + lexicalRank, 1),
@@ -1126,7 +981,6 @@ export async function buildSeedContext(
             score,
             sourceRank: lexicalRank,
           });
-          sourceCounts.lexical++;
           lexicalRank++;
         }
       }
@@ -1143,123 +997,57 @@ export async function buildSeedContext(
   // Stage 3: Feedback boosting
   // ------------------------------------------------------------------
   const feedbackStartedAt = performance.now();
-  const taskMentionsFeedback = /\bfeedback\b/i.test(task.taskText);
-  const shouldQueryFeedbackBoosts =
-    collectBeforeCaps ||
-    !forceSemanticEntitySearch ||
-    taskMentionsFeedback ||
-    sourceCounts.semantic < diversityReserve;
-  if (shouldQueryFeedbackBoosts) {
-    try {
-      const conn = await getLadybugConn();
-      const { boosts } = await queryFeedbackBoosts(conn, {
-        repoId: task.repoId,
-        query: task.taskText,
-        limit: FEEDBACK_LIMIT,
-      });
+  try {
+    const conn = await getLadybugConn();
+    const { boosts } = await queryFeedbackBoosts(conn, {
+      repoId: task.repoId,
+      query: task.taskText,
+      limit: FEEDBACK_LIMIT,
+    });
 
-      if (boosts.size > 0) {
-        let feedbackRank = 0;
-        for (const [symbolId, boostScore] of boosts) {
-          if (!collectBeforeCaps && sourceCounts.feedback >= feedbackCap) {
-            break;
-          }
-          const ref = `symbol:${symbolId}`;
-          if (seen.has(ref)) continue;
-          seen.add(ref);
-          allCandidates.push({
-            contextRef: ref,
-            source: "feedback",
-            score: boostScore,
-            sourceRank: feedbackRank,
-          });
-          sourceCounts.feedback++;
-          feedbackRank++;
-        }
+    if (boosts.size > 0) {
+      let feedbackRank = 0;
+      for (const [symbolId, boostScore] of boosts) {
+        const ref = `symbol:${symbolId}`;
+        if (seenBySource.feedback.has(ref)) continue;
+        seenBySource.feedback.add(ref);
+        allCandidates.push({
+          contextRef: ref,
+          source: "feedback",
+          score: boostScore,
+          sourceRank: feedbackRank,
+        });
+        feedbackRank++;
       }
-    } catch (err) {
-      logger.debug("Feedback boost for context seeding failed (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      recordTiming(timings, "seed.feedbackBoost", feedbackStartedAt);
     }
-  } else {
-    recordTiming(timings, "seed.feedbackBoost.skipped", feedbackStartedAt);
+  } catch (err) {
+    logger.debug("Feedback boost for context seeding failed (non-fatal)", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    recordTiming(timings, "seed.feedbackBoost", feedbackStartedAt);
   }
 
   // ------------------------------------------------------------------
-  // Final: sort by score descending and cap at maxSeeds
+  // Final: merge lane duplicates and keep deterministic candidate order.
   // ------------------------------------------------------------------
   const finalizeStartedAt = performance.now();
-  let candidatesForFinalCap = allCandidates;
-  if (collectBeforeCaps) {
-    // Lexical candidates from the scoped fast path were loaded by file first;
-    // only feedback still needs path resolution before source caps apply.
-    const candidatesNeedingScopeResolution = usingScopedLexicalPool
-      ? allCandidates.filter((candidate) => candidate.source !== "lexical")
-      : allCandidates;
-    const candidatePaths = await resolveSeedCandidatePaths(
-      candidatesNeedingScopeResolution,
-    );
-    const resolvedScopedCandidates = filterSeedCandidatesToScope(
-      candidatesNeedingScopeResolution,
-      candidatePaths,
-      scopePaths,
-    );
-    const scopeFilteredCandidates = usingScopedLexicalPool
-      ? [
-          ...allCandidates.filter((candidate) => candidate.source === "lexical"),
-          ...resolvedScopedCandidates,
-        ]
-      : resolvedScopedCandidates;
-    const semanticCandidates = scopeFilteredCandidates
-      .filter((candidate) => candidate.source === "semantic")
-      .slice(0, primarySourceCap);
-    const lexicalTargetCap = semanticDisabled
-      ? preFeedbackCap
-      : Math.min(
-          primarySourceCap,
-          Math.max(
-            diversityReserve,
-            preFeedbackCap - semanticCandidates.length,
-          ),
-        );
-    const lexicalCandidates = scopeFilteredCandidates
-      .filter(
-        (candidate) =>
-          candidate.source === "lexical" &&
-          (!completeScopedConceptRefs ||
-            preservedScopedSeedRefs.has(candidate.contextRef)),
-      )
-      .slice(
-        0,
-        Math.max(lexicalTargetCap, preservedScopedSeedRefs.size),
-      );
-    const feedbackCandidates = scopeFilteredCandidates
-      .filter((candidate) => candidate.source === "feedback")
-      .slice(0, feedbackCap);
-    candidatesForFinalCap = [
-      ...semanticCandidates,
-      ...lexicalCandidates,
-      ...feedbackCandidates,
-    ];
-  }
-  const finalCandidates =
-    preservedScopedSeedRefs.size > 0
-      ? selectPreservedSeedCandidates(
-          candidatesForFinalCap,
-          preservedScopedSeedRefs,
-          maxSeeds,
-        )
-      : candidatesForFinalCap
-          .sort((a, b) => b.score - a.score)
-          .slice(0, maxSeeds);
+  const finalCandidates = mergeContextSeedCandidates(allCandidates).sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.sourceRank - b.sourceRank ||
+      a.contextRef.localeCompare(b.contextRef),
+  );
 
-  // Recount sources after capping
+  // Recount sources after merging
   const finalSources = { semantic: 0, lexical: 0, feedback: 0 };
-  for (const c of finalCandidates) {
-    finalSources[c.source]++;
+  for (const candidate of finalCandidates) {
+    const contributingSources = new Set(
+      candidate.provenance?.map(({ source }) => source) ?? [candidate.source],
+    );
+    for (const source of contributingSources) {
+      if (source !== "graph") finalSources[source]++;
+    }
   }
   recordTiming(timings, "seed.finalize", finalizeStartedAt);
 

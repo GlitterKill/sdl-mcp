@@ -7,12 +7,12 @@
     "caseCount": 4
   },
   "baseline": {
-    "gitHead": "da22b06adfa9e3364235140dde4604befeea3bb0",
-    "evaluatedSourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "gitHead": "30063f31d0e567740bfef6925cd50a69ff8bbd83",
+    "evaluatedSourceDiffSha256": "c0a945da4a625037bb62858906ffa544d61ebb049b9bd5f242959949fbeca6da",
     "sourceHashes": {
-      "src/agent/context-seeding.ts": "e774c0cef98a5e4554010dc1643bb3fc42f0a44557315f7b9315bb5998bfec0d",
+      "src/agent/context-seeding.ts": "5dbf9032e78f6638aab15cf2fcd1be74da829c3d5b6b942c526cd54a7ef7482e",
       "src/agent/planner.ts": "2c6a8a3f7ad57248a0dc5261d05d5c4f99c59baac8759a35cae89b2a802adecd",
-      "src/agent/executor.ts": "2d30628bd155d9f8e68a3c138671b354afd12fa8183ffa038a6e5ff421a9ff2d",
+      "src/agent/executor.ts": "e414160930e7d2d2ec8ffed5914e7416271026cc690d74abf46401b678a664e7",
       "src/graph/slice/start-node-resolver.ts": "9584d711965a144bf56ade8668be759ffb7d5e4619333e903f1c8407327d6ea0",
       "src/retrieval/seed-resolver.ts": "f2429719b1ae16e02e9b3f296ca09f67240d3ac71bce5d3c42c7295f80b1c672"
     },
@@ -39,12 +39,12 @@
         "autoMentions": [
           "queryFeedbackBoosts",
           "FeedbackBoosts",
-          "queryfeedbackboostsReturns",
-          "QueryfeedbackboostsReturns",
-          "queryfeedbackboosts_returns",
-          "returnsStale",
-          "ReturnsStale",
-          "returns_stale"
+          "returns",
+          "stale",
+          "boost",
+          "scores",
+          "after",
+          "feedback"
         ],
         "ftsQuery": "queryFeedbackBoosts returns stale boost scores after feedback entries soft deleted still influences handleContext ContextRequestSchema ContextResponseSchema context context",
         "entityTypes": [
@@ -144,10 +144,10 @@
           "selectTopSymbols",
           "CardRung",
           "TopSymbols",
-          "executecardrungFails",
-          "ExecutecardrungFails",
-          "executecardrung_fails",
-          "failsSilently"
+          "fails",
+          "silently",
+          "returns",
+          "empty"
         ],
         "ftsQuery": "executeCardRung fails silently selectTopSymbols returns empty array control flow leads zero evidence",
         "entityTypes": [
@@ -249,10 +249,10 @@
           "maxTokens",
           "hotPath",
           "ForBudget",
-          "adjustforbudgetTrims",
-          "AdjustforbudgetTrims",
-          "adjustforbudget_trims",
-          "trimsRungs"
+          "trims",
+          "rungs",
+          "incorrectly",
+          "budget"
         ],
         "ftsQuery": "adjustForBudget trims rungs incorrectly budget maxTokens very small leaving only card even",
         "entityTypes": [
@@ -350,10 +350,10 @@
           "buildContext",
           "extractIdentifiersFromText",
           "IdentifiersFromText",
-          "entitysearchReturns",
-          "EntitysearchReturns",
-          "entitysearch_returns",
-          "returnsZero"
+          "returns",
+          "zero",
+          "results",
+          "task"
         ],
         "ftsQuery": "entitySearch returns zero query keyword fallback buildContext uses extractIdentifiersFromText filters out domain handleContext ContextRequestSchema ContextResponseSchema context context",
         "entityTypes": [
@@ -472,9 +472,9 @@
     "autopilotExplicitScopeRecall": 1
   },
   "observedMedianPolicyLatencyMs": {
-    "contextAssembly": 0.1512,
-    "sliceStartNodes": 0.0101,
-    "autopilotExecution": 0.631
+    "contextAssembly": 0.1618,
+    "sliceStartNodes": 0.0113,
+    "autopilotExecution": 0.6917
   },
   "interfaces": {
     "contextAssembly": "task text/options -> entity query plan + mixed entity candidates -> context refs",

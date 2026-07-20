@@ -47,4 +47,10 @@ describe("run-tests script parallel suites", () => {
     assert.match(runnerSource, /const testGraphDbPath = join\(testTempDir, `test-\$\{index\}-graph`\)/);
     assert.match(runnerSource, /SDL_GRAPH_DB_PATH: testGraphDbPath/);
   });
+
+  it("enables experimental module mocks only for tests that use them", () => {
+    assert.match(runnerSource, /function needsExperimentalModuleMocks/);
+    assert.match(runnerSource, /needsExperimentalModuleMocks\(testFile\)/);
+    assert.match(runnerSource, /--experimental-test-module-mocks/);
+  });
 });

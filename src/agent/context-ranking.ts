@@ -11,6 +11,7 @@
 import type {
   AgentTask,
   ContextSeedCandidate,
+  ContextSeedEntityType,
   ScoredSymbol,
   SymbolRankingResult,
   ConfidenceTier,
@@ -38,6 +39,7 @@ const BEHAVIORAL_KINDS = new Set([
   "class",
   "constructor",
 ]);
+const EXECUTABLE_KINDS = new Set(["function", "method", "constructor"]);
 const GENERIC_MODULE_NAMES = new Set(["index", "main", "mod", "module"]);
 
 // ---------------------------------------------------------------------------
@@ -441,7 +443,12 @@ function scoreStructuralBonus(
     // Explain tasks benefit from types, interfaces, enums — definitions
     if (DECLARATIVE_KINDS.has(sym.kind)) score += 3;
   } else if (taskType === "review") {
-    // Review tasks benefit from functions that have side effects or do I/O.
+    // Reviews primarily need executable behavior; exported data shapes remain
+    // useful through the base export bonus, but should not outrank an equally
+    // relevant function or method solely because they are exported.
+    if (EXECUTABLE_KINDS.has(sym.kind)) score += 3;
+
+    // Side-effecting functions deserve an additional boost.
     // Heuristic: summary mentions write/send/delete/execute/spawn/emit.
     if (sym.summary) {
       const sLower = sym.summary.toLowerCase();
@@ -497,6 +504,24 @@ function computeSourceAgreement(scored: ScoredSymbol): number {
 // Main ranking function
 // ---------------------------------------------------------------------------
 
+function contextSeedCategory(candidate: {
+  entityType?: ContextSeedEntityType;
+  expandedFrom?: string;
+  expansionReason?: string;
+}): ContextSeedEntityType {
+  const origin = candidate.expandedFrom ?? "";
+  if (candidate.expansionReason === "fileSummary" || origin.startsWith("fileSummary:")) {
+    return "fileSummary";
+  }
+  if (candidate.expansionReason === "cluster" || origin.startsWith("cluster:")) {
+    return "cluster";
+  }
+  if (candidate.expansionReason === "process" || origin.startsWith("process:")) {
+    return "process";
+  }
+  return candidate.entityType ?? "symbol";
+}
+
 /**
  * Rank symbols by multi-factor composite score (0-100).
  *
@@ -520,16 +545,23 @@ export function rankSymbols(
   const inferredPaths = task.options?.inferredFocusPaths ?? [];
   const affinityExtensions = detectLanguageAffinity(taskTextLower);
 
-  // Build seed score lookup: contextRef "symbol:<id>" -> normalized score
+  // Build per-symbol retrieval scores and retain every expansion category.
   const seedMap = new Map<string, number>();
+  const seedCategoryMap = new Map<string, Set<ContextSeedEntityType>>();
   if (options?.seedCandidates) {
-    for (const c of options.seedCandidates) {
-      if (c.contextRef.startsWith("symbol:")) {
-        const id = c.contextRef.slice("symbol:".length);
-        const existing = seedMap.get(id) ?? 0;
-        // Take the max score across sources for the same symbol
-        seedMap.set(id, Math.max(existing, c.score));
+    for (const candidate of options.seedCandidates) {
+      if (!candidate.contextRef.startsWith("symbol:")) continue;
+      const symbolId = candidate.contextRef.slice("symbol:".length);
+      const existing = seedMap.get(symbolId) ?? 0;
+      seedMap.set(symbolId, Math.max(existing, candidate.score));
+
+      const categories =
+        seedCategoryMap.get(symbolId) ?? new Set<ContextSeedEntityType>();
+      categories.add(contextSeedCategory(candidate));
+      for (const contribution of candidate.provenance ?? []) {
+        categories.add(contextSeedCategory(contribution));
       }
+      seedCategoryMap.set(symbolId, categories);
     }
   }
 
@@ -561,6 +593,7 @@ export function rankSymbols(
         pathAffinity: 0,
         languageAffinity: 0,
         genericModulePenalty: 0,
+        candidateCategories: Array.from(seedCategoryMap.get(symbolId) ?? []).sort(),
       });
       continue;
     }
@@ -621,6 +654,7 @@ export function rankSymbols(
       pathAffinity,
       languageAffinity,
       genericModulePenalty,
+      candidateCategories: Array.from(seedCategoryMap.get(symbolId) ?? []).sort(),
     });
   }
 
@@ -657,6 +691,45 @@ export function rankSymbols(
 // Adaptive cutoff
 // ---------------------------------------------------------------------------
 
+function getAdaptiveCandidatePool(
+  ranking: SymbolRankingResult,
+  maxCount: number,
+  isPrecise: boolean,
+  hasScope: boolean,
+): {
+  candidateIds: string[];
+  selectedCount: number;
+  threshold: number;
+  effectiveMax: number;
+} {
+  const threshold =
+    isPrecise && !hasScope
+      ? Math.max(10, ranking.topScore * 0.5)
+      : Math.max(5, ranking.topScore * 0.25);
+  const effectiveMax =
+    isPrecise && !hasScope
+      ? Math.min(5, maxCount)
+      : isPrecise && hasScope
+        ? Math.min(10, maxCount)
+        : hasScope
+          ? maxCount
+          : Math.min(20, maxCount);
+  const relevantIds = ranking.ranked
+    .filter((scored) => scored.totalScore >= threshold)
+    .map((scored) => scored.symbolId);
+  const selectedCount = Math.max(1, Math.min(relevantIds.length, effectiveMax));
+  const candidateIds =
+    relevantIds.length > 0
+      ? relevantIds
+      : ranking.ranked.slice(0, 1).map((scored) => scored.symbolId);
+  return {
+    candidateIds,
+    selectedCount,
+    threshold,
+    effectiveMax,
+  };
+}
+
 /**
  * Apply adaptive cutoff to a ranking result, returning the selected symbol IDs.
  *
@@ -674,38 +747,437 @@ export function applyAdaptiveCutoff(
 ): string[] {
   if (ranking.ranked.length === 0) return [];
 
-  const { topScore } = ranking;
-
-  // Precise mode is strict by default, but when the user has explicitly
-  // provided focus paths/symbols (hasScope), trust them: use the broader
-  // threshold + a moderate cap so we keep coverage of the named paths
-  // instead of dropping them on a high score floor.
-  const threshold =
-    isPrecise && !hasScope
-      ? Math.max(10, topScore * 0.5)
-      : Math.max(5, topScore * 0.25);
-
-  const effectiveMax =
-    isPrecise && !hasScope
-      ? Math.min(5, maxCount)
-      : isPrecise && hasScope
-        ? Math.min(10, maxCount)
-        : hasScope
-          ? maxCount
-          : Math.min(20, maxCount);
-
-  const relevant = ranking.ranked.filter((s) => s.totalScore >= threshold);
-  const count = Math.max(1, Math.min(relevant.length, effectiveMax));
-
+  const cutoff = getAdaptiveCandidatePool(
+    ranking,
+    maxCount,
+    isPrecise,
+    hasScope,
+  );
   logger.debug("Adaptive cutoff applied", {
     total: ranking.ranked.length,
-    topScore,
-    threshold,
-    selected: count,
-    effectiveMax,
+    topScore: ranking.topScore,
+    threshold: cutoff.threshold,
+    selected: cutoff.selectedCount,
+    effectiveMax: cutoff.effectiveMax,
     isPrecise,
     hasScope,
   });
+  return cutoff.candidateIds.slice(0, cutoff.selectedCount);
+}
 
-  return ranking.ranked.slice(0, count).map((s) => s.symbolId);
+const FINAL_SELECTION_PER_FILE_LIMIT = 2;
+
+function repositoryRelativeSymbolPath(symbol: RankableSymbol | undefined): string {
+  const fileId = symbol?.fileId ?? "";
+  return fileId.includes(":") ? fileId.slice(fileId.indexOf(":") + 1) : fileId;
+}
+
+function declarationPenalty(symbol: RankableSymbol | undefined): number {
+  switch (symbol?.kind) {
+    case "module":
+      return 8;
+    case "variable":
+    case "parameter":
+      return 12;
+    default:
+      return 0;
+  }
+}
+
+function extractTaskCoverageTerms(taskText: string): string[] {
+  const terms = taskText.toLowerCase().match(/[a-z][a-z0-9]{2,}/g) ?? [];
+  return [...new Set(terms)].filter(
+    (term) => term !== "the" && term !== "for" && term !== "and",
+  );
+}
+
+function taskCoverageTerms(
+  symbol: RankableSymbol | undefined,
+  identifiers: string[],
+): Set<string> {
+  if (!symbol || identifiers.length === 0) return new Set();
+  const searchable = [
+    symbol.name,
+    repositoryRelativeSymbolPath(symbol),
+    symbol.summary ?? "",
+    symbol.searchText ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  return new Set(
+    identifiers.filter(
+      (identifier) =>
+        identifier.length >= 3 && searchable.includes(identifier.toLowerCase()),
+    ),
+  );
+}
+
+/**
+ * Prefer candidates that add task coverage and avoid letting one broad file
+ * consume all cards. Retrieval ranks remain the base relevance signal.
+ */
+function selectDiverseFinalCandidates(
+  candidateIds: string[],
+  symbolMap: Map<string, RankableSymbol>,
+  ranking: SymbolRankingResult | undefined,
+  identifiers: string[],
+): string[] {
+  const scoreById = new Map(
+    ranking?.ranked.map(({ symbolId, totalScore }) => [symbolId, totalScore]) ?? [],
+  );
+  const categoriesById = new Map(
+    ranking?.ranked.map(({ symbolId, candidateCategories }) => [
+      symbolId,
+      candidateCategories?.length ? candidateCategories : ["symbol" as const],
+    ]) ?? [],
+  );
+  const remaining = [...new Set(candidateIds)];
+  const selected: string[] = [];
+  const coveredTerms = new Set<string>();
+  const coveredCategories = new Set<ContextSeedEntityType>();
+  const countByFile = new Map<string, number>();
+
+  while (remaining.length > 0) {
+    let bestIndex = -1;
+    let bestAdjustedScore = Number.NEGATIVE_INFINITY;
+    let bestSymbolId = "";
+
+    for (let index = 0; index < remaining.length; index++) {
+      const symbolId = remaining[index];
+      const symbol = symbolMap.get(symbolId);
+      const path = repositoryRelativeSymbolPath(symbol);
+      if (path && (countByFile.get(path) ?? 0) >= FINAL_SELECTION_PER_FILE_LIMIT) {
+        continue;
+      }
+
+      const terms = taskCoverageTerms(symbol, identifiers);
+      let novelTermCount = 0;
+      for (const term of terms) {
+        if (!coveredTerms.has(term)) novelTermCount++;
+      }
+      const categories = categoriesById.get(symbolId) ?? ["symbol" as const];
+      const novelCategoryCount = categories.filter(
+        (category) => !coveredCategories.has(category),
+      ).length;
+      const adjustedScore =
+        (scoreById.get(symbolId) ?? 0) -
+        declarationPenalty(symbol) +
+        Math.min(12, novelTermCount * 3) +
+        Math.min(6, novelCategoryCount * 2);
+
+      if (
+        adjustedScore > bestAdjustedScore ||
+        (adjustedScore === bestAdjustedScore &&
+          (bestIndex < 0 || symbolId.localeCompare(bestSymbolId) < 0))
+      ) {
+        bestIndex = index;
+        bestAdjustedScore = adjustedScore;
+        bestSymbolId = symbolId;
+      }
+    }
+
+    if (bestIndex < 0) break;
+    remaining.splice(bestIndex, 1);
+    selected.push(bestSymbolId);
+
+    const symbol = symbolMap.get(bestSymbolId);
+    const path = repositoryRelativeSymbolPath(symbol);
+    if (path) countByFile.set(path, (countByFile.get(path) ?? 0) + 1);
+    for (const term of taskCoverageTerms(symbol, identifiers)) {
+      coveredTerms.add(term);
+    }
+    for (const category of categoriesById.get(bestSymbolId) ?? ["symbol" as const]) {
+      coveredCategories.add(category);
+    }
+  }
+
+  return selected;
+}
+
+/** Applies the final card-selection policy after ranking and before hydration. */
+export function selectFinalSymbols(
+  ranking: SymbolRankingResult | undefined,
+  symbolMap: Map<string, RankableSymbol>,
+  task: AgentTask,
+  maxCount: number,
+  fallbackCandidates: string[] = ranking?.ranked.map(({ symbolId }) => symbolId) ?? [],
+): string[] {
+  const rankedIds = ranking?.ranked.map(({ symbolId }) => symbolId) ?? fallbackCandidates;
+  const isPrecise = task.options?.contextMode === "precise";
+  const hasScope = !!(
+    task.options?.focusPaths?.length || task.options?.focusSymbols?.length
+  );
+  const adaptive = ranking
+    ? getAdaptiveCandidatePool(ranking, maxCount, isPrecise, hasScope)
+    : undefined;
+  const explicitPaths = explicitFocusPaths(task.options);
+  const inferredPaths = task.options?.inferredFocusPaths ?? [];
+
+  // Let the final diversity pass inspect every materialized candidate. The
+  // adaptive threshold still determines standalone cutoffs, but must not act
+  // as a hidden pre-selector here.
+  const defaultEligibleIds = rankedIds.filter((symbolId) => {
+    const symbol = symbolMap.get(symbolId);
+    if (!symbol) return true;
+    return (
+      scorePathAffinity(
+        symbol,
+        { explicit: [], inferred: inferredPaths },
+        task.taskText.toLowerCase(),
+        task.options?.includeTests,
+      ) >= 0
+    );
+  });
+  const rankedCandidates =
+    explicitPaths.length === 0 && defaultEligibleIds.length > 0
+      ? defaultEligibleIds
+      : rankedIds;
+  const selectionCount = Math.min(
+    adaptive?.effectiveMax ?? maxCount,
+    rankedCandidates.length,
+  );
+  const matchesPath = (symbolId: string, focusPath: string): boolean =>
+    pathMatchesFocus(repositoryRelativeSymbolPath(symbolMap.get(symbolId)), [focusPath]);
+  const candidates =
+    explicitPaths.length === 0
+      ? selectDiverseFinalCandidates(
+          rankedCandidates,
+          symbolMap,
+          ranking,
+          extractTaskCoverageTerms(task.taskText),
+        ).slice(0, selectionCount)
+      : rankedCandidates.slice(0, selectionCount);
+
+  if (explicitPaths.length > 0) {
+    const matchesExplicit = (symbolId: string): boolean =>
+      explicitPaths.some((focusPath) => matchesPath(symbolId, focusPath));
+    const inFocus = rankedIds.filter(matchesExplicit);
+
+    if (isPrecise) return inFocus.slice(0, maxCount);
+    if (inFocus.length > 0) {
+      return [
+        ...inFocus,
+        ...candidates.filter((symbolId) => !matchesExplicit(symbolId)),
+      ].slice(0, maxCount);
+    }
+    return candidates;
+  }
+
+  if (inferredPaths.length === 0 || candidates.length === 0) return candidates;
+
+  const selected = new Set(candidates);
+  const additions: string[] = [];
+  const selectedFocusCount = candidates.filter((symbolId) =>
+    inferredPaths.some((focusPath) => matchesPath(symbolId, focusPath)),
+  ).length;
+  const maxTotalFocusSymbols =
+    task.options?.semantic === true ? Math.ceil(maxCount / 2) : Number.POSITIVE_INFINITY;
+  const perPathLimit = inferredPaths.some((path) => path.split("/").pop()?.includes("."))
+    ? 4
+    : 2;
+
+  // Walk inferred paths round-robin so the first matching path cannot consume
+  // the entire soft-coverage budget before other inferred areas contribute.
+  const rankingById = new Map(
+    ranking?.ranked.map((entry) => [entry.symbolId, entry] as const) ?? [],
+  );
+  const inferredCoverageScore = (symbolId: string): number => {
+    const entry = rankingById.get(symbolId);
+    if (!entry) return 0;
+    return (
+      entry.lexicalOverlap +
+      entry.summarySupport +
+      entry.feedbackPrior +
+      entry.structuralBonus +
+      entry.pathAffinity +
+      entry.languageAffinity +
+      entry.genericModulePenalty
+    );
+  };
+
+  // The inferred path already supplies the scope signal. Order within that
+  // scope by task relevance, without letting global retrieval or graph priors
+  // crowd out a lower-prior behavioral declaration.
+  const pathQueues = inferredPaths.map((focusPath) =>
+    rankedCandidates
+      .filter((symbolId) => matchesPath(symbolId, focusPath))
+      .sort(
+        (a, b) =>
+          inferredCoverageScore(b) - inferredCoverageScore(a) ||
+          a.localeCompare(b),
+      ),
+  );
+  for (let round = 0; round < perPathLimit; round++) {
+    for (const queue of pathQueues) {
+      if (selectedFocusCount + additions.length >= maxTotalFocusSymbols) break;
+      let symbolId = queue.shift();
+      while (symbolId !== undefined && selected.has(symbolId)) {
+        symbolId = queue.shift();
+      }
+      if (symbolId === undefined) continue;
+      selected.add(symbolId);
+      additions.push(symbolId);
+    }
+    if (selectedFocusCount + additions.length >= maxTotalFocusSymbols) break;
+  }
+
+  if (additions.length === 0) return candidates;
+
+  const focusSet = new Set(
+    rankedCandidates.filter((symbolId) =>
+      inferredPaths.some((focusPath) => matchesPath(symbolId, focusPath)),
+    ),
+  );
+  const merged = [...candidates];
+  if (task.options?.semantic === true) {
+    // Preserve the strongest retrieval prefix, then surface bounded inferred
+    // coverage while it is still actionable instead of hiding it at the tail.
+    const insertionPoint = Math.max(1, Math.ceil(merged.length / 4));
+    return [
+      ...merged.slice(0, insertionPoint),
+      ...additions,
+      ...merged.slice(insertionPoint),
+    ].slice(0, maxCount);
+  }
+
+  for (const symbolId of additions) {
+    if (merged.length < maxCount) {
+      merged.push(symbolId);
+      continue;
+    }
+    const replaceIndex = merged.findLastIndex((symbolId) => !focusSet.has(symbolId));
+    if (replaceIndex < 0) break;
+    merged[replaceIndex] = symbolId;
+  }
+
+  return merged;
+}
+
+/**
+ * Coalesce every retrieval and graph contribution for a symbol before ranking.
+ *
+ * The representative keeps the strongest score and earliest source rank, while
+ * provenance retains every distinct contribution for diagnostics and tests.
+ */
+export function mergeContextSeedCandidates(
+  candidates: ContextSeedCandidate[],
+): ContextSeedCandidate[] {
+  type Provenance = NonNullable<ContextSeedCandidate["provenance"]>[number];
+  type SourceAggregate = {
+    score: number;
+    rawScore?: number;
+    sourceRank: number;
+    labels: Map<
+      string,
+      Pick<Provenance, "expandedFrom" | "expansionReason">
+    >;
+  };
+
+  const candidateContribution = (
+    candidate: ContextSeedCandidate,
+  ): Provenance => ({
+    source: candidate.source,
+    score: candidate.score,
+    sourceRank: candidate.sourceRank,
+    ...(candidate.rawScore === undefined ? {} : { rawScore: candidate.rawScore }),
+    ...(candidate.expandedFrom === undefined
+      ? {}
+      : { expandedFrom: candidate.expandedFrom }),
+    ...(candidate.expansionReason === undefined
+      ? {}
+      : { expansionReason: candidate.expansionReason }),
+  });
+
+  const compareRepresentative = (
+    left: ContextSeedCandidate,
+    right: ContextSeedCandidate,
+  ): number =>
+    right.score - left.score ||
+    left.sourceRank - right.sourceRank ||
+    left.source.localeCompare(right.source);
+
+  const merged = new Map<string, ContextSeedCandidate>();
+  const provenanceByRef = new Map<
+    string,
+    Map<Provenance["source"], SourceAggregate>
+  >();
+
+  for (const candidate of candidates) {
+    const key = candidate.contextRef;
+    const bySource = provenanceByRef.get(key) ??
+      new Map<Provenance["source"], SourceAggregate>();
+    const contributions = [candidateContribution(candidate), ...(candidate.provenance ?? [])];
+
+    for (const contribution of contributions) {
+      const aggregate: SourceAggregate = bySource.get(contribution.source) ?? {
+        score: 0,
+        sourceRank: Number.POSITIVE_INFINITY,
+        labels: new Map(),
+      };
+      aggregate.score = Math.max(aggregate.score, contribution.score);
+      aggregate.sourceRank = Math.min(aggregate.sourceRank, contribution.sourceRank);
+      if (contribution.rawScore !== undefined) {
+        aggregate.rawScore = Math.max(
+          aggregate.rawScore ?? Number.NEGATIVE_INFINITY,
+          contribution.rawScore,
+        );
+      }
+      const labelKey = [
+        contribution.expandedFrom ?? "",
+        contribution.expansionReason ?? "",
+      ].join("\u0000");
+      aggregate.labels.set(labelKey, {
+        ...(contribution.expandedFrom === undefined
+          ? {}
+          : { expandedFrom: contribution.expandedFrom }),
+        ...(contribution.expansionReason === undefined
+          ? {}
+          : { expansionReason: contribution.expansionReason }),
+      });
+      bySource.set(contribution.source, aggregate);
+    }
+    provenanceByRef.set(key, bySource);
+
+    const previous = merged.get(key);
+    if (!previous || compareRepresentative(candidate, previous) < 0) {
+      merged.set(key, candidate);
+    }
+  }
+
+  return Array.from(merged.entries())
+    .sort(([leftRef], [rightRef]) => leftRef.localeCompare(rightRef))
+    .map(([contextRef, candidate]) => {
+      const bySource = provenanceByRef.get(contextRef) ??
+        new Map<Provenance["source"], SourceAggregate>();
+      const representativeSource = bySource.get(candidate.source);
+      const provenance = Array.from(bySource.entries())
+        .sort(([leftSource], [rightSource]) =>
+          leftSource.localeCompare(rightSource),
+        )
+        .flatMap(([source, aggregate]) =>
+          Array.from(aggregate.labels.entries())
+            .sort(([leftLabel], [rightLabel]) =>
+              leftLabel.localeCompare(rightLabel),
+            )
+            .map(([, label]) => ({
+              source,
+              score: aggregate.score,
+              sourceRank: aggregate.sourceRank,
+              ...(aggregate.rawScore === undefined
+                ? {}
+                : { rawScore: aggregate.rawScore }),
+              ...label,
+            })),
+        );
+
+      return {
+        ...candidate,
+        score: Math.max(...Array.from(bySource.values(), ({ score }) => score)),
+        sourceRank: representativeSource?.sourceRank ?? candidate.sourceRank,
+        ...(representativeSource?.rawScore === undefined
+          ? {}
+          : { rawScore: representativeSource.rawScore }),
+        provenance,
+      };
+    });
 }

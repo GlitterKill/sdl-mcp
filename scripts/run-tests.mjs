@@ -194,6 +194,11 @@ function needsPreinitializedDb(testFile) {
   return /\bgetLadybugConn\b/.test(source) && !/\binitLadybugDb\b/.test(source);
 }
 
+function needsExperimentalModuleMocks(testFile) {
+  const source = readFileSync(resolve(repoRoot, testFile), "utf8");
+  return /\.mock\.module\s*\(/.test(source);
+}
+
 function runProcess(command, args, { cwd, env, maxOutputBytes = MAX_TEST_OUTPUT_BYTES }) {
   return new Promise((resolveResult) => {
     const child = spawn(command, args, {
@@ -277,6 +282,10 @@ async function runTestFile(testFile, index, baseTestEnv, testTempDir) {
   const result = await runProcess(
     process.execPath,
     [
+      // Node keeps module mocking behind an experimental flag in v24.
+      ...(needsExperimentalModuleMocks(testFile)
+        ? ["--experimental-test-module-mocks"]
+        : []),
       "--test-concurrency=1",
       "--test-reporter=tap",
       "--test",

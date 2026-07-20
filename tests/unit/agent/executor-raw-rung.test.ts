@@ -287,6 +287,50 @@ describe("executor card fallback", () => {
     return executor;
   }
 
+  it("preserves inferred lexical representatives inside repeated-file card caps", async () => {
+    const fileId = "test-repo:src/tool-surface.ts";
+    const symbols = [
+      createCardSymbol("module", fileId),
+      createCardSymbol("variable", fileId),
+      createCardSymbol("class", fileId),
+      createCardSymbol("inferred", fileId),
+    ];
+    const executor = createCardExecutor(() => [], symbols);
+
+    const result = await executor.execute(
+      {
+        taskType: "review",
+        taskText:
+          "Review the current SDL-MCP tool surface for contracts, output noise, deterministic responses, and safe errors.",
+        repoId: "test-repo",
+        options: {
+          contextMode: "broad",
+          semantic: true,
+          inferredFocusPaths: ["src/tool-surface.ts"],
+        },
+      },
+      ["card"],
+      symbols.map(({ symbolId }) => `symbol:${symbolId}`),
+      [
+        {
+          contextRef: "symbol:inferred",
+          source: "lexical",
+          score: 0,
+          sourceRank: 3,
+          expansionReason: "inferredFocus",
+        },
+      ],
+    );
+
+    const cardRefs = result.evidence
+      .filter(({ type }) => type === "symbolCard")
+      .map(({ reference }) => reference);
+    assert.ok(
+      cardRefs.includes("symbol:inferred"),
+      `expected inferred representative, got ${JSON.stringify(cardRefs)}`,
+    );
+  });
+
   it("does not repopulate strict precise scope with fallback symbols", async () => {
     let searchCalls = 0;
     const executor = createCardExecutor(() => {
@@ -650,14 +694,14 @@ describe("executor identifier extraction (via raw rung)", () => {
     );
   });
 
-  it("caps identifiers at MAX_IDENTIFIERS (10)", async () => {
+  it("caps identifiers at MAX_IDENTIFIERS (16)", async () => {
     const { gate, captured } = createCapturingGate();
     const executor = new Executor(gate);
     const task: AgentTask = {
       taskType: "debug",
-      // 12 distinct camelCase identifiers — should be capped at 10
+      // 18 distinct camelCase identifiers — should be capped at 16
       taskText:
-        "fix handleAlpha handleBeta handleGamma handleDelta handleEpsilon handleZeta handleEta handleTheta handleIota handleKappa handleLambda handleMu",
+        "fix handleAlpha handleBeta handleGamma handleDelta handleEpsilon handleZeta handleEta handleTheta handleIota handleKappa handleLambda handleMu handleNu handleXi handleOmicron handlePi handleRho handleSigma",
       repoId: "test-repo",
     };
 
@@ -666,8 +710,8 @@ describe("executor identifier extraction (via raw rung)", () => {
     assert.ok(captured.length > 0, "Gate should have been called");
     const ids = captured[0];
     assert.ok(
-      ids.length <= 10,
-      `Should cap at 10 identifiers, got ${ids.length}`,
+      ids.length <= 16,
+      `Should cap at 16 identifiers, got ${ids.length}`,
     );
   });
 
@@ -690,6 +734,6 @@ describe("executor identifier extraction (via raw rung)", () => {
       ids.includes("handleRequest"),
       "Should extract handleRequest from bounded text",
     );
-    assert.ok(ids.length <= 10, "Should respect MAX_IDENTIFIERS cap");
+    assert.ok(ids.length <= 16, "Should respect MAX_IDENTIFIERS cap");
   });
 });

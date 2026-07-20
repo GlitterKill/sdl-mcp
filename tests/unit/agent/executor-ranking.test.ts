@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   rankSymbols,
   applyAdaptiveCutoff,
+  selectFinalSymbols,
 } from "../../../dist/agent/context-ranking.js";
 import type {
   AgentTask,
@@ -467,13 +468,6 @@ describe("Executor focus selection", () => {
       maxCount: number,
       seedCandidates?: ContextSeedCandidate[],
     ): Promise<string[]>;
-    finalizeSelection(
-      candidates: string[],
-      rankedIds: string[],
-      symbolMap: Map<string, ReturnType<typeof createExecutorSymbol>>,
-      task: AgentTask,
-      maxCount: number,
-    ): string[];
     buildRelatedSymbolNameMap(
       conn: unknown,
       selectedSymbols: Array<ReturnType<typeof createExecutorSymbol>>,
@@ -832,7 +826,7 @@ describe("Executor focus selection", () => {
     assertOnlyTests(selected, symbolMap);
   });
 
-  it("preserves the max count and ordering for unscoped early returns", async () => {
+  it("applies default path eligibility for unscoped empty tasks", async () => {
     const { privateExecutor, symbolIds } = createSelectionFixture();
 
     const selected = await privateExecutor.selectTopSymbols(
@@ -841,7 +835,7 @@ describe("Executor focus selection", () => {
       4,
     );
 
-    assert.deepEqual(selected, symbolIds.slice(0, 4));
+    assert.deepEqual(selected, ["src-alpha", "src-beta", "src-gamma"]);
   });
 
   it("caps inferred early returns without hard-filtering their soft scope", async () => {
@@ -861,7 +855,6 @@ describe("Executor focus selection", () => {
         taskText: "-",
         options: {
           contextMode: "precise",
-          focusPaths: ["tests"],
           inferredFocusPaths: ["tests"],
         },
       }),
@@ -908,16 +901,14 @@ describe("Executor focus selection", () => {
       "test-beta",
       "test-gamma",
     ];
-    const selected = ranked.slice(0, 3);
     const inferredFocusPaths = [
       "tests/alpha.test.ts",
       "tests/beta.test.ts",
       "tests/gamma.test.ts",
     ];
     const finalize = (semantic: boolean | undefined) =>
-      privateExecutor.finalizeSelection(
-        selected,
-        ranked,
+      selectFinalSymbols(
+        undefined,
         symbolMap,
         createTask({
           options: {
@@ -927,6 +918,7 @@ describe("Executor focus selection", () => {
           },
         }),
         3,
+        ranked,
       );
 
     const forced = finalize(true);
@@ -1122,7 +1114,218 @@ describe("Executor seed expansion", () => {
       task: AgentTask,
       seedCandidates: ContextSeedCandidate[],
     ): Promise<{ symbolIds: string[]; seedCandidates: ContextSeedCandidate[] }>;
+    resolveFileSymbols(filePaths: string[], repoId: string): Promise<string[]>;
+    selectTopSymbols(
+      symbolIds: string[],
+      task: AgentTask,
+      maxCount: number,
+      seedCandidates?: ContextSeedCandidate[],
+    ): Promise<string[]>;
   }
+
+  it("materializes every symbol from an exact file context before final selection", async () => {
+    const exactSymbolIds = Array.from(
+      { length: 10 },
+      (_, index) => `sym-exact-${index}`,
+    );
+    const dbQueries: ExecutorDbQueries = {
+      getFileByRepoPath: async () => ({
+        fileId: "file-exact",
+        repoId: "repo-1",
+        relPath: "src/server.ts",
+        contentHash: "hash",
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: null,
+        directory: "src",
+      }),
+      getSymbolIdsByFile: async () => exactSymbolIds,
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () => [],
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async () => new Map(),
+      getFilesByIds: async () => new Map(),
+      searchSymbols: async () => [],
+    };
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as ExecutorPrivate;
+    privateExecutor.connPromise = Promise.resolve({});
+
+    const result = await privateExecutor.resolveContextToSymbols(
+      ["file:src/server.ts"],
+      createTask(),
+      [],
+    );
+
+    assert.deepEqual(result.symbolIds, exactSymbolIds);
+  });
+
+  it("materializes every symbol from a directory context before final selection", async () => {
+    const files = Array.from({ length: 12 }, (_, index) => ({
+      fileId: `file-${index}`,
+      repoId: "repo-1",
+      relPath: `src/mcp/tools/tool-${index}.ts`,
+      contentHash: `hash-${index}`,
+      language: "ts",
+      byteSize: 1,
+      lastIndexedAt: null,
+      directory: "src/mcp/tools",
+    }));
+    const dbQueries: ExecutorDbQueries = {
+      getFileByRepoPath: async () =>
+        null as Awaited<ReturnType<ExecutorDbQueries["getFileByRepoPath"]>>,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () =>
+        files as Awaited<ReturnType<ExecutorDbQueries["getFilesByPrefix"]>>,
+      getSymbolsByFile: async (_conn, fileId) =>
+        Array.from({ length: 6 }, (_, index) => ({
+          symbolId: `${fileId}-symbol-${index}`,
+          repoId: "repo-1",
+          fileId,
+          kind: "function",
+          name: `fileSymbol${index}`,
+          exported: true,
+          visibility: null,
+          language: "ts",
+          rangeStartLine: index + 1,
+          rangeStartCol: 0,
+          rangeEndLine: index + 1,
+          rangeEndCol: 1,
+          astFingerprint: `${fileId}-${index}`,
+          signatureJson: null,
+          summary: null,
+          invariantsJson: null,
+          sideEffectsJson: null,
+          roleTagsJson: null,
+          searchText: null,
+          external: undefined,
+          packageName: null,
+          packageVersion: null,
+          scipSymbol: null,
+          updatedAt: "now",
+        })) as Awaited<ReturnType<ExecutorDbQueries["getSymbolsByFile"]>>,
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async () => new Map(),
+      getFilesByIds: async () => new Map(),
+      searchSymbols: async () => [],
+    };
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as ExecutorPrivate;
+    privateExecutor.connPromise = Promise.resolve({});
+
+    const symbolIds = await privateExecutor.resolveFileSymbols(
+      ["src/mcp/tools/"],
+      "repo-1",
+    );
+
+    assert.equal(symbolIds.length, 72);
+    assert.ok(symbolIds.includes("file-11-symbol-5"));
+  });
+
+  it("adds inferred-path symbols to the sole final selector", async () => {
+    const makeSymbol = (symbolId: string, fileId: string, name: string) => ({
+      symbolId,
+      repoId: "repo-1",
+      fileId,
+      kind: "function",
+      name,
+      exported: true,
+      visibility: null,
+      language: "ts",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 1,
+      astFingerprint: symbolId,
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      roleTagsJson: null,
+      searchText: null,
+      external: undefined,
+      packageName: null,
+      packageVersion: null,
+      scipSymbol: null,
+      updatedAt: "now",
+    });
+    const semantic = makeSymbol("semantic-noise", "file-noise", "unrelatedCandidate");
+    const inferred = makeSymbol("inferred-target", "file-inferred", "reviewBehavior");
+    const fileRows = new Map([
+      [
+        "file-noise",
+        {
+          fileId: "file-noise",
+          repoId: "repo-1",
+          relPath: "src/unrelated.ts",
+          contentHash: "noise",
+          language: "ts",
+          byteSize: 1,
+          lastIndexedAt: null,
+          directory: "src",
+        },
+      ],
+      [
+        "file-inferred",
+        {
+          fileId: "file-inferred",
+          repoId: "repo-1",
+          relPath: "src/review/behavior.ts",
+          contentHash: "inferred",
+          language: "ts",
+          byteSize: 1,
+          lastIndexedAt: null,
+          directory: "src/review",
+        },
+      ],
+    ]);
+    const dbQueries: ExecutorDbQueries = {
+      getFileByRepoPath: async () =>
+        null as Awaited<ReturnType<ExecutorDbQueries["getFileByRepoPath"]>>,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () => [fileRows.get("file-inferred")!],
+      getSymbolsByFile: async () => [inferred],
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async () =>
+        new Map([
+          [semantic.symbolId, semantic],
+          [inferred.symbolId, inferred],
+        ]) as Awaited<ReturnType<ExecutorDbQueries["getSymbolsByIds"]>>,
+      getFilesByIds: async () =>
+        fileRows as Awaited<ReturnType<ExecutorDbQueries["getFilesByIds"]>>,
+      searchSymbols: async () => [],
+    };
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as ExecutorPrivate;
+    privateExecutor.connPromise = Promise.resolve({});
+
+    const selected = await privateExecutor.selectTopSymbols(
+      [semantic.symbolId],
+      createTask({
+        taskType: "review",
+        taskText: "Review behavior.",
+        options: {
+          contextMode: "broad",
+          semantic: true,
+          inferredFocusPaths: ["src/review/"],
+        },
+      }),
+      10,
+      [
+        {
+          contextRef: `symbol:${semantic.symbolId}`,
+          source: "semantic",
+          score: 1,
+          sourceRank: 0,
+        },
+      ],
+    );
+
+    assert.ok(selected.includes(inferred.symbolId));
+  });
 
   it("expands fileSummary, cluster, and process candidates into weighted symbol seeds", async () => {
     const dbQueries: ExecutorDbQueries = {
@@ -1131,67 +1334,45 @@ describe("Executor seed expansion", () => {
       getSymbolIdsByFile: async () => ["sym-file-a", "sym-file-b"],
       getFilesByPrefix: async () => [],
       getSymbolsByFile: async () =>
-        [
-          {
-            symbolId: "sym-file-a",
-            repoId: "repo-1",
-            fileId: "file-1",
-            kind: "function",
-            name: "fileSymbolA",
-            exported: true,
-            visibility: null,
-            language: "ts",
-            rangeStartLine: 1,
-            rangeStartCol: 0,
-            rangeEndLine: 2,
-            rangeEndCol: 0,
-            astFingerprint: "a",
-            signatureJson: null,
-            summary: null,
-            invariantsJson: null,
-            sideEffectsJson: null,
-            roleTagsJson: null,
-            searchText: null,
-            external: undefined,
-            packageName: null,
-            packageVersion: null,
-            scipSymbol: null,
-            updatedAt: "now",
-          },
-          {
-            symbolId: "sym-file-b",
-            repoId: "repo-1",
-            fileId: "file-1",
-            kind: "function",
-            name: "fileSymbolB",
-            exported: true,
-            visibility: null,
-            language: "ts",
-            rangeStartLine: 3,
-            rangeStartCol: 0,
-            rangeEndLine: 4,
-            rangeEndCol: 0,
-            astFingerprint: "b",
-            signatureJson: null,
-            summary: null,
-            invariantsJson: null,
-            sideEffectsJson: null,
-            roleTagsJson: null,
-            searchText: null,
-            external: undefined,
-            packageName: null,
-            packageVersion: null,
-            scipSymbol: null,
-            updatedAt: "now",
-          },
-        ] as Awaited<ReturnType<ExecutorDbQueries["getSymbolsByFile"]>>,
+        Array.from({ length: 10 }, (_, index) => ({
+          symbolId: `sym-file-${index}`,
+          repoId: "repo-1",
+          fileId: "file-1",
+          kind: "function",
+          name: `fileSymbol${index}`,
+          exported: true,
+          visibility: null,
+          language: "ts",
+          rangeStartLine: index + 1,
+          rangeStartCol: 0,
+          rangeEndLine: index + 1,
+          rangeEndCol: 1,
+          astFingerprint: `file-${index}`,
+          signatureJson: null,
+          summary: null,
+          invariantsJson: null,
+          sideEffectsJson: null,
+          roleTagsJson: null,
+          searchText: null,
+          external: undefined,
+          packageName: null,
+          packageVersion: null,
+          scipSymbol: null,
+          updatedAt: "now",
+        })) as Awaited<ReturnType<ExecutorDbQueries["getSymbolsByFile"]>>,
       getClusterMembers: async () =>
-        [
-          { symbolId: "sym-cluster", membershipScore: 0.95 },
-        ] as Awaited<ReturnType<ExecutorDbQueries["getClusterMembers"]>>,
+        Array.from({ length: 10 }, (_, index) => ({
+          symbolId: `sym-cluster-${index}`,
+          membershipScore: 1 - index / 100,
+        })) as Awaited<ReturnType<ExecutorDbQueries["getClusterMembers"]>>,
       getProcessStepsByIds: async () =>
         [
-          { processId: "proc-1", symbolId: "sym-process", stepOrder: 1, role: "step" },
+          ...Array.from({ length: 10 }, (_, index) => ({
+            processId: "proc-1",
+            symbolId: `sym-process-${index}`,
+            stepOrder: index + 1,
+            role: "step",
+          })),
           { processId: "other", symbolId: "sym-other", stepOrder: 1, role: "step" },
         ] as Awaited<ReturnType<ExecutorDbQueries["getProcessStepsByIds"]>>,
       getSymbolsByIds: async () =>
@@ -1236,16 +1417,14 @@ describe("Executor seed expansion", () => {
       seeds,
     );
 
-    assert.deepEqual(result.symbolIds, [
-      "sym-file-a",
-      "sym-file-b",
-      "sym-cluster",
-      "sym-process",
-    ]);
+    assert.equal(result.symbolIds.length, 30);
+    assert.ok(result.symbolIds.includes("sym-file-9"));
+    assert.ok(result.symbolIds.includes("sym-cluster-9"));
+    assert.ok(result.symbolIds.includes("sym-process-9"));
     assert.ok(
       result.seedCandidates.some(
         (candidate) =>
-          candidate.contextRef === "symbol:sym-file-a" &&
+          candidate.contextRef === "symbol:sym-file-9" &&
           candidate.expandedFrom === "fileSummary:file-1" &&
           candidate.score === 0.92,
       ),
@@ -1253,14 +1432,14 @@ describe("Executor seed expansion", () => {
     assert.ok(
       result.seedCandidates.some(
         (candidate) =>
-          candidate.contextRef === "symbol:sym-cluster" &&
+          candidate.contextRef === "symbol:sym-cluster-9" &&
           candidate.expandedFrom === "cluster:cluster-1",
       ),
     );
     assert.ok(
       result.seedCandidates.some(
         (candidate) =>
-          candidate.contextRef === "symbol:sym-process" &&
+          candidate.contextRef === "symbol:sym-process-9" &&
           candidate.expandedFrom === "process:proc-1",
       ),
     );

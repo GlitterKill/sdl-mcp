@@ -28,8 +28,8 @@ describe("Executor selectTopSymbols precise mode cap", () => {
     // Also verify executor delegates to ranking module
     const executorSrc = readFileSync("src/agent/executor.ts", "utf8");
     assert.ok(
-      executorSrc.includes("applyAdaptiveCutoff"),
-      "executor.ts should delegate to applyAdaptiveCutoff from context-ranking",
+      executorSrc.includes("selectFinalSymbols"),
+      "executor.ts should delegate to the sole final selector in context-ranking",
     );
     assert.ok(
       !executorSrc.includes("isPrecise ? 1 : maxCount"),

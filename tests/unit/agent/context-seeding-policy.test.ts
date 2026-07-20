@@ -7,6 +7,8 @@ const source = () =>
   readFileSync(join(process.cwd(), "src/agent/context-seeding.ts"), "utf8");
 const symbolSource = () =>
   readFileSync(join(process.cwd(), "src/db/ladybug-symbols.ts"), "utf8");
+const rankingSource = () =>
+  readFileSync(join(process.cwd(), "src/agent/context-ranking.ts"), "utf8");
 
 describe("context seeding policy", () => {
   it("keeps Stage 2 lexical-only after the hybrid entity lane", () => {
@@ -42,34 +44,25 @@ describe("context seeding policy", () => {
     );
   });
 
-  it("keeps lexical diversity slots even when semantic fills its lane", () => {
+  it("carries bounded retrieval lanes into one merged candidate set", () => {
     const src = source();
+    const pipeline = src.slice(src.indexOf("export async function buildSeedContext"));
 
-    assert.match(src, /const lexicalTargetCap = semanticDisabled/);
-    assert.match(
-      src,
-      /Math\.max\(diversityReserve, preFeedbackCap - sourceCounts\.semantic\)/,
-    );
-    assert.match(src, /sourceCounts\.lexical < lexicalTargetCap/);
-    assert.match(src, /sourceCounts\.lexical >= lexicalTargetCap/);
+    assert.match(pipeline, /mergeContextSeedCandidates\(allCandidates\)/);
+    assert.doesNotMatch(pipeline, /collectBeforeCaps/);
+    assert.doesNotMatch(pipeline, /lexicalTargetCap/);
+    assert.doesNotMatch(pipeline, /primarySourceCap/);
   });
 
-  it("filters scoped candidates before source and final caps", () => {
+  it("defers explicit scope and card caps to the final selector", () => {
     const src = source();
-    const scopeFilter = src.indexOf(
-      "const resolvedScopedCandidates = filterSeedCandidatesToScope(",
-    );
-    const primaryCap = src.indexOf(".slice(0, primarySourceCap)", scopeFilter);
-    const lexicalCap = src.indexOf(
-      "Math.max(lexicalTargetCap, preservedScopedSeedRefs.size)",
-      scopeFilter,
-    );
-    const finalCap = src.indexOf(".slice(0, maxSeeds)", scopeFilter);
+    const seedPipeline = src.slice(src.indexOf("export async function buildSeedContext"));
+    const ranking = rankingSource();
 
-    assert.ok(scopeFilter >= 0, "expected production scope-filter call");
-    assert.ok(primaryCap > scopeFilter, "semantic cap must follow scope filter");
-    assert.ok(lexicalCap > scopeFilter, "lexical cap must follow scope filter");
-    assert.ok(finalCap > scopeFilter, "final cap must follow scope filter");
+    assert.doesNotMatch(seedPipeline, /filterSeedCandidatesToScope\(/);
+    assert.doesNotMatch(seedPipeline, /selectPreservedSeedCandidates\(/);
+    assert.match(ranking, /export function selectFinalSymbols/);
+    assert.match(ranking, /const inFocus = rankedIds\.filter\(matchesExplicit\)/);
   });
 
   it("loads precise lexical candidates through one scope-first symbol pool", () => {
@@ -87,26 +80,25 @@ describe("context seeding policy", () => {
 
     assert.match(
       src,
-      /const useScopedPreciseLexical =\s*collectBeforeCaps && !isBroad;/,
+      /const useScopedPreciseLexical =\s*scopePaths\.length > 0 && !isBroad;/,
     );
   });
 
-  it("uses only complete concept coverage instead of redundant scoped seeds", () => {
+  it("preserves resolved scoped concepts without an early candidate cap", () => {
     const src = source();
 
-    assert.match(src, /completeScopedConceptRefs/);
-    assert.match(src, /conceptSelection\.complete/);
-    assert.match(src, /preservedScopedSeedRefs\.has\(candidate\.contextRef\)/);
+    assert.match(src, /conceptSelection\.resolvedRefs/);
+    assert.match(src, /preservedScopedSeedRefs\.add\(ref\)/);
+    assert.doesNotMatch(src, /completeScopedConceptRefs/);
   });
 
-  it("keeps general scoped feedback behavior", () => {
+  it("keeps bounded feedback evidence available for the final selector", () => {
     const src = source();
+    const pipeline = src.slice(src.indexOf("export async function buildSeedContext"));
 
-    assert.match(
-      src,
-      /const shouldQueryFeedbackBoosts =\s*collectBeforeCaps \|\|\s*!forceSemanticEntitySearch \|\|\s*taskMentionsFeedback \|\|/,
-    );
-    assert.doesNotMatch(src, /!useScopedPreciseLexical \|\| taskMentionsFeedback/);
+    assert.match(pipeline, /await queryFeedbackBoosts/);
+    assert.doesNotMatch(pipeline, /shouldQueryFeedbackBoosts/);
+    assert.doesNotMatch(pipeline, /sourceCounts\.feedback >= feedbackCap/);
   });
 
   it("falls back to global lexical lanes only when the scoped pool query fails", () => {
@@ -118,15 +110,9 @@ describe("context seeding policy", () => {
     assert.match(src, /\(\) => searchSymbols\(conn, task\.repoId, query, 4\)/);
     assert.match(src, /: searchSymbols\(\s*conn,[\s\S]*?compoundQuery/);
     assert.match(src, /: searchSymbols\(conn, task\.repoId, term, perTermLimit\)/);
-    assert.match(src, /const candidatesNeedingScopeResolution = usingScopedLexicalPool/);
   });
 
-  it("short-circuits path resolution when no candidates need filtering", () => {
-    assert.match(
-      source(),
-      /if \(candidates\.length === 0\) return new Map<string, string>\(\)/,
-    );
-  });
+
 
   it("keeps the scope pool to one deterministic unbounded DB query", () => {
     const src = symbolSource().replaceAll("\r\n", "\n");

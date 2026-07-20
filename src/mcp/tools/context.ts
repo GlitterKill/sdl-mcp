@@ -69,7 +69,12 @@ function stripVolatileEvidenceFields(value: unknown): unknown {
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
     const stableEntries = Object.entries(record)
-      .filter(([key]) => key !== "timestamp" && key !== "durationMs")
+      .filter(
+        ([key]) =>
+          key !== "timestamp" &&
+          key !== "durationMs" &&
+          key !== "fusionLatencyMs",
+      )
       .map(([key, entryValue]) => [
         key,
         stripVolatileEvidenceFields(entryValue),

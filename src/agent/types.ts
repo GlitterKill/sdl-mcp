@@ -170,6 +170,16 @@ export interface Diagnostic {
 /** Source kind for context seed candidates. */
 export type SeedSourceKind = "semantic" | "lexical" | "feedback";
 
+/** Source recorded for an individual retained candidate contribution. */
+export type ContextSeedProvenanceSource = SeedSourceKind | "graph";
+
+/** Internal category retained across seed expansion for final diversity. */
+export type ContextSeedEntityType =
+  | "symbol"
+  | "cluster"
+  | "process"
+  | "fileSummary";
+
 /** A single candidate from the seeding pipeline. */
 export interface ContextSeedCandidate {
   contextRef: string; // e.g. "symbol:abc123", "cluster:xyz", "file:path"
@@ -177,9 +187,18 @@ export interface ContextSeedCandidate {
   score: number; // normalized 0-1
   sourceRank: number; // rank within source (0 = best)
   rawScore?: number;
-  entityType?: "symbol" | "cluster" | "process" | "fileSummary";
+  entityType?: ContextSeedEntityType;
   expandedFrom?: string;
   expansionReason?: string;
+  // All distinct inputs for this contextRef, sorted deterministically at merge.
+  provenance?: Array<{
+    source: ContextSeedProvenanceSource;
+    score: number;
+    sourceRank: number;
+    rawScore?: number;
+    expandedFrom?: string;
+    expansionReason?: string;
+  }>;
 }
 
 /** Result of the seeding pipeline. */
@@ -212,6 +231,7 @@ export interface ScoredSymbol {
   pathAffinity: number; // -10 to 10
   languageAffinity: number; // 0-4
   genericModulePenalty: number; // -8 or 0
+  candidateCategories?: readonly ContextSeedEntityType[];
 }
 
 /** Result of symbol ranking with confidence metadata. */

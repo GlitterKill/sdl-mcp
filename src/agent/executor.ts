@@ -14,7 +14,7 @@ import type {
   //   Types:
   //     - GateEvaluator (= signature of defaultGateEvaluator: decide → enforce)
   //
-  // Internal-only constants: BEHAVIORAL_KINDS, ALWAYS_STOP_WORDS, DOMAIN_STOP_WORDS,
+  // Internal-only constants: ALWAYS_STOP_WORDS, DOMAIN_STOP_WORDS,
   // COMPOUND_STOP_WORDS, RUNG_ESCALATION_ORDER, RUNG_TO_ACTION_TYPE, MAX_ESCALATIONS.
   // =============================================================================
 
@@ -56,7 +56,8 @@ import {
 } from "../live-index/overlay-reader.js";
 import {
   rankSymbols,
-  applyAdaptiveCutoff,
+  mergeContextSeedCandidates,
+  selectFinalSymbols,
   explicitFocusPaths,
   pathMatchesFocus,
 } from "./context-ranking.js";
@@ -120,13 +121,6 @@ export const defaultGateEvaluator: GateEvaluator = async (request, options) => {
   const loader = new LadybugWindowLoader();
   return enforceCodeWindow(request, accessDecision, loader, options ?? {});
 };
-
-const BEHAVIORAL_KINDS = new Set([
-  "function",
-  "method",
-  "class",
-  "constructor",
-]);
 
 const RUNG_ESCALATION_ORDER: RungType[] = [
   "card",
@@ -320,7 +314,8 @@ function highConfidenceNamedSymbolIds(
       .filter(
         (candidate) =>
           (candidate.expansionReason === "namedConcept" ||
-            candidate.expansionReason === "actionCatalog") &&
+            candidate.expansionReason === "actionCatalog" ||
+            candidate.expansionReason === "inferredFocus") &&
           candidate.contextRef.startsWith("symbol:"),
       )
       .map((candidate) => candidate.contextRef.slice("symbol:".length)),
@@ -652,12 +647,12 @@ export class Executor {
             conn,
             file.fileId,
           );
-          results.push(symbolIds.slice(0, 5));
+          // Preserve the full exact-file candidate set for the sole final selector.
+          results.push(symbolIds);
           continue;
         }
 
         // If exact match fails, treat as directory prefix and find files under it.
-        const MAX_DIR_SYMBOLS = 30;
         const normalizedPrefix = relPath.endsWith("/")
           ? relPath
           : relPath + "/";
@@ -668,16 +663,12 @@ export class Executor {
         );
         if (filesUnderDir.length > 0) {
           const symbolResults: string[][] = [];
-          for (const f of filesUnderDir.slice(0, 10)) {
+          for (const f of filesUnderDir) {
             const symbols = await this.dbQueries.getSymbolsByFile(conn, f.fileId);
-            const beh = symbols.filter((s) => BEHAVIORAL_KINDS.has(s.kind));
-            symbolResults.push(
-              (beh.length > 0 ? beh : symbols)
-                .slice(0, 5)
-                .map((sym) => sym.symbolId),
-            );
+            symbolResults.push(symbols.map((sym) => sym.symbolId));
           }
-          results.push(symbolResults.flat().slice(0, MAX_DIR_SYMBOLS));
+          // Preserve the complete directory candidate set for the sole final selector.
+          results.push(symbolResults.flat());
           continue;
         }
       } catch (err) {
@@ -732,17 +723,20 @@ export class Executor {
       resolvedSymbols = await this.resolveFileSymbols(filePaths, repoId);
     }
 
-    const seedByRef = new Map(seedCandidates.map((c) => [c.contextRef, c]));
+    const seedByRef = new Map<string, ContextSeedCandidate[]>();
+    for (const candidate of seedCandidates) {
+      const contributions = seedByRef.get(candidate.contextRef) ?? [];
+      contributions.push(candidate);
+      seedByRef.set(candidate.contextRef, contributions);
+    }
     const expandedSeedCandidates = seedCandidates.filter((c) =>
       c.contextRef.startsWith("symbol:"),
     );
-    const expandedRefs = new Set(
-      expandedSeedCandidates.map((c) => c.contextRef),
-    );
     for (const [index, symbolId] of directSymbols.entries()) {
       const symbolRef = `symbol:${symbolId}`;
-      if (expandedRefs.has(symbolRef)) continue;
-      expandedRefs.add(symbolRef);
+      // Seeded symbols already carry their retrieval score and provenance.
+      // Add a direct-context prior only for unscored refs introduced by another rung.
+      if (seedByRef.has(symbolRef)) continue;
       expandedSeedCandidates.push({
         contextRef: symbolRef,
         source: "lexical",
@@ -759,58 +753,27 @@ export class Executor {
       scoreScale: number,
       expansionReason: string,
     ): void => {
-      const source = seedByRef.get(sourceRef);
-      if (!source) return;
+      const sources = seedByRef.get(sourceRef);
+      if (!sources) return;
       const symbolRef = `symbol:${symbolId}`;
-      if (expandedRefs.has(symbolRef)) return;
-      expandedRefs.add(symbolRef);
-      expandedSeedCandidates.push({
-        ...source,
-        contextRef: symbolRef,
-        entityType: "symbol",
-        expandedFrom: sourceRef,
-        expansionReason,
-        score: Math.max(0, Math.min(1, source.score * scoreScale)),
-        sourceRank: source.sourceRank + index + 1,
-      });
+      for (const source of sources) {
+        expandedSeedCandidates.push({
+          ...source,
+          contextRef: symbolRef,
+          entityType: "symbol",
+          expandedFrom: sourceRef,
+          expansionReason,
+          score: Math.max(0, Math.min(1, source.score * scoreScale)),
+          sourceRank: source.sourceRank + index + 1,
+        });
+      }
     };
 
     if (fileSummaryIds.length > 0 || clusterIds.length > 0 || processIds.length > 0) {
       const conn = await this.getConn();
-      const identifiers = this.extractIdentifiersFromTask(task);
-      const rankExpandedFileSymbols = (
-        fileId: string,
-        symbols: Awaited<ReturnType<ExecutorDbQueries["getSymbolsByFile"]>>,
-      ): string[] => {
-        if (symbols.length === 0) return [];
-        const source = seedByRef.get(`fileSummary:${fileId}`);
-        const symbolIds = symbols.map((symbol) => symbol.symbolId);
-        if (identifiers.length === 0 || !source) {
-          return symbolIds.slice(0, 8);
-        }
-        const symbolMap = new Map(
-          symbols.map((symbol) => [symbol.symbolId, symbol]),
-        );
-        const fileSeedCandidates = symbols.map((symbol, index) => ({
-          ...source,
-          contextRef: `symbol:${symbol.symbolId}`,
-          entityType: "symbol" as const,
-          expandedFrom: `fileSummary:${fileId}`,
-          expansionReason: "fileSummary",
-          score: Math.max(0, Math.min(1, source.score * 0.92)),
-          sourceRank: source.sourceRank + index + 1,
-        }));
-        return rankSymbols(symbolIds, symbolMap, identifiers, task, {
-          seedCandidates: fileSeedCandidates,
-          anchorSymbolIds: directSymbols,
-        })
-          .ranked.slice(0, 8)
-          .map((ranked) => ranked.symbolId);
-      };
-
       for (const fileId of fileSummaryIds.slice(0, 8)) {
         const symbols = await this.dbQueries.getSymbolsByFile(conn, fileId);
-        const symbolIds = rankExpandedFileSymbols(fileId, symbols);
+        const symbolIds = symbols.map((symbol) => symbol.symbolId);
         resolvedSymbols.push(...symbolIds);
         symbolIds.forEach((symbolId, index) =>
           addExpandedSeed(
@@ -825,8 +788,11 @@ export class Executor {
 
       for (const clusterId of clusterIds.slice(0, 8)) {
         const members = (await this.dbQueries.getClusterMembers(conn, clusterId))
-          .sort((a, b) => b.membershipScore - a.membershipScore)
-          .slice(0, 8);
+          .sort(
+            (a, b) =>
+              b.membershipScore - a.membershipScore ||
+              a.symbolId.localeCompare(b.symbolId),
+          );
         resolvedSymbols.push(...members.map((m) => m.symbolId));
         members.forEach((member, index) =>
           addExpandedSeed(
@@ -847,17 +813,18 @@ export class Executor {
             [...wantedProcesses],
           ))
           .filter((step) => wantedProcesses.has(step.processId))
-          .sort((a, b) => a.stepOrder - b.stepOrder);
-        const countByProcess = new Map<string, number>();
+          .sort(
+            (a, b) =>
+              a.processId.localeCompare(b.processId) ||
+              a.stepOrder - b.stepOrder ||
+              a.symbolId.localeCompare(b.symbolId),
+          );
         for (const step of steps) {
-          const count = countByProcess.get(step.processId) ?? 0;
-          if (count >= 8) continue;
-          countByProcess.set(step.processId, count + 1);
           resolvedSymbols.push(step.symbolId);
           addExpandedSeed(
             step.symbolId,
             `process:${step.processId}`,
-            count,
+            step.stepOrder,
             0.88,
             "processStep",
           );
@@ -866,7 +833,8 @@ export class Executor {
     }
 
     const symbolIds = [...new Set([...directSymbols, ...resolvedSymbols])];
-    return { symbolIds, filePaths, seedCandidates: expandedSeedCandidates };
+    const mergedSeedCandidates = mergeContextSeedCandidates(expandedSeedCandidates);
+    return { symbolIds, filePaths, seedCandidates: mergedSeedCandidates };
   }
 
   /**
@@ -880,7 +848,16 @@ export class Executor {
     seedCandidates: ContextSeedCandidate[] = [],
     feedbackBoosts?: Map<string, number>,
   ): Promise<string[]> {
-    const resolved = await this.resolveVisibleSymbols(task.repoId, symbolIds);
+    const inferredPaths =
+      task.options?.semantic === true ? task.options.inferredFocusPaths ?? [] : [];
+    const inferredSymbolIds =
+      inferredPaths.length > 0
+        ? await this.resolveFileSymbols(inferredPaths, task.repoId)
+        : [];
+    const candidateSymbolIds = [
+      ...new Set([...symbolIds, ...inferredSymbolIds]),
+    ];
+    const resolved = await this.resolveVisibleSymbols(task.repoId, candidateSymbolIds);
     // Persisted file IDs are opaque hashes. Clone only the ranking view so
     // path affinity and explicit-scope finalization receive repo-relative paths.
     const symbolMap = new Map<string, SymbolRow>();
@@ -892,13 +869,13 @@ export class Executor {
       );
     }
 
-    if (!task.taskText || symbolIds.length === 0) {
-      return this.finalizeSelection(
-        symbolIds,
-        symbolIds,
+    if (!task.taskText || candidateSymbolIds.length === 0) {
+      return selectFinalSymbols(
+        undefined,
         symbolMap,
         task,
         maxCount,
+        candidateSymbolIds,
       );
     }
 
@@ -908,12 +885,12 @@ export class Executor {
       seedCandidates.length === 0 &&
       !feedbackBoosts?.size
     ) {
-      return this.finalizeSelection(
-        symbolIds,
-        symbolIds,
+      return selectFinalSymbols(
+        undefined,
         symbolMap,
         task,
         maxCount,
+        candidateSymbolIds,
       );
     }
 
@@ -940,137 +917,13 @@ export class Executor {
           },
         }
       : task;
-    const ranking = rankSymbols(symbolIds, symbolMap, identifiers, rankingTask, {
+    const ranking = rankSymbols(candidateSymbolIds, symbolMap, identifiers, rankingTask, {
       seedCandidates,
       anchorSymbolIds,
       feedbackBoosts,
     });
 
-    const isPrecise = task.options?.contextMode === "precise";
-    const hasScope = !!(
-      task.options?.focusPaths?.length || task.options?.focusSymbols?.length
-    );
-
-    const selected = applyAdaptiveCutoff(ranking, maxCount, isPrecise, hasScope);
-    return this.finalizeSelection(
-      selected,
-      ranking.ranked.map((ranked) => ranked.symbolId),
-      symbolMap,
-      task,
-      maxCount,
-    );
-  }
-
-  /** Apply explicit hard scope or inferred best-effort coverage at one exit point. */
-  private finalizeSelection(
-    candidates: string[],
-    rankedIds: string[],
-    symbolMap: Map<string, SymbolRow>,
-    task: AgentTask,
-    maxCount: number,
-  ): string[] {
-    const explicitPaths = explicitFocusPaths(task.options);
-    const inferredPaths = task.options?.inferredFocusPaths ?? [];
-
-    if (explicitPaths.length > 0) {
-      const matchesFocus = (symbolId: string): boolean =>
-        explicitPaths.some((focusPath) =>
-          this.symbolMatchesFocusPath(symbolMap.get(symbolId), focusPath),
-        );
-      const pool = rankedIds.length > 0 ? rankedIds : candidates;
-      const inFocus = pool.filter(matchesFocus);
-
-      if (task.options?.contextMode === "precise") {
-        return inFocus.slice(0, maxCount);
-      }
-      if (inFocus.length > 0) {
-        return [
-          ...inFocus,
-          ...candidates.filter((symbolId) => !matchesFocus(symbolId)),
-        ].slice(0, maxCount);
-      }
-      return candidates.slice(0, maxCount);
-    }
-
-    return this.ensureFocusPathCoverage(
-      candidates.slice(0, maxCount),
-      rankedIds,
-      symbolMap,
-      inferredPaths,
-      maxCount,
-      task.options?.semantic === true
-        ? Math.ceil(maxCount / 2)
-        : Number.POSITIVE_INFINITY,
-    );
-  }
-
-  private ensureFocusPathCoverage(
-    selected: string[],
-    rankedSymbolIds: string[],
-    symbolMap: Map<string, SymbolRow>,
-    focusPaths: string[],
-    maxCount: number,
-    maxTotalFocusSymbols: number,
-  ): string[] {
-    if (focusPaths.length === 0 || selected.length === 0) return selected;
-
-    const selectedSet = new Set(selected);
-    const additions: string[] = [];
-    const matchesAnyFocusPath = (symbolId: string): boolean => {
-      const symbol = symbolMap.get(symbolId);
-      return focusPaths.some((focusPath) =>
-        this.symbolMatchesFocusPath(symbol, focusPath),
-      );
-    };
-    const selectedFocusCount = selected.filter(matchesAnyFocusPath).length;
-    const perPathLimit = focusPaths.some((path) => path.split("/").pop()?.includes("."))
-      ? 4
-      : 2;
-
-    for (const focusPath of focusPaths) {
-      if (selectedFocusCount + additions.length >= maxTotalFocusSymbols) break;
-      let addedForPath = 0;
-      for (const symbolId of rankedSymbolIds) {
-        if (selectedSet.has(symbolId)) continue;
-        const symbol = symbolMap.get(symbolId);
-        if (!this.symbolMatchesFocusPath(symbol, focusPath)) continue;
-        selectedSet.add(symbolId);
-        additions.push(symbolId);
-        addedForPath++;
-        if (
-          addedForPath >= perPathLimit ||
-          selectedFocusCount + additions.length >= maxTotalFocusSymbols
-        ) {
-          break;
-        }
-      }
-    }
-
-    if (additions.length === 0) return selected;
-
-    const focusSet = new Set<string>();
-    for (const symbolId of rankedSymbolIds) {
-      const symbol = symbolMap.get(symbolId);
-      if (focusPaths.some((focusPath) => this.symbolMatchesFocusPath(symbol, focusPath))) {
-        focusSet.add(symbolId);
-      }
-    }
-
-    const merged = [...selected];
-    for (const symbolId of additions) {
-      if (merged.length < maxCount) {
-        merged.push(symbolId);
-        continue;
-      }
-
-      const replaceIndex = merged.findLastIndex(
-        (existing) => !focusSet.has(existing),
-      );
-      if (replaceIndex < 0) break;
-      merged[replaceIndex] = symbolId;
-    }
-
-    return merged;
+    return selectFinalSymbols(ranking, symbolMap, task, maxCount);
   }
 
   private async buildRelatedSymbolNameMap(
@@ -1175,7 +1028,6 @@ export class Executor {
         relatedByFile.set(fileId, names);
       }
     }
-
     const getDependencies =
       this.dbQueries.getBoundedDependencySymbolsFromSources;
     if (

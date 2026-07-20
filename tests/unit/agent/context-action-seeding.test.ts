@@ -8,16 +8,12 @@ const GENERIC_TOOL_QA_TASK =
   "Review the current SDL-MCP tool surface for contracts, output noise, deterministic responses, and safe errors.";
 
 describe("generic tool-contract action seeding", () => {
-  it("reuses the projection seed for the canonical generic review", () => {
-    assert.deepEqual(buildActionSeedQueries(GENERIC_TOOL_QA_TASK), [
-      PROJECTION_QUERY,
-    ]);
+  it("does not special-case the canonical generic review", () => {
+    assert.deepEqual(buildActionSeedQueries(GENERIC_TOOL_QA_TASK), []);
   });
 
-  it("uses determinism itself as bounded review intent", () => {
-    assert.deepEqual(buildActionSeedQueries("tool determinism"), [
-      PROJECTION_QUERY,
-    ]);
+  it("does not treat generic determinism words as action names", () => {
+    assert.deepEqual(buildActionSeedQueries("tool determinism"), []);
   });
 
   it("does not activate for partial or ordinary formatting intent", () => {
@@ -37,12 +33,12 @@ describe("generic tool-contract action seeding", () => {
     }
   });
 
-  it("does not emit an empty response-test query for generic reviews", () => {
+  it("does not emit response-test queries without a named action", () => {
     assert.deepEqual(
       buildActionSeedQueries(
         "Review SDL-MCP tool schemas, contracts, deterministic responses, and tests.",
       ),
-      [PROJECTION_QUERY],
+      [],
     );
   });
 
