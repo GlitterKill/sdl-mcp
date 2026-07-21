@@ -317,7 +317,8 @@ export async function listPendingGraphIntegrityRevisions(): Promise<
   const rows = await queryAll<Record<string, unknown>>(
     conn,
     `MATCH (d:DerivedState)
-     WHERE d.graphIntegrityVersionId IS NOT NULL
+     WHERE d.graphIntegrityState = 'verifying'
+       AND d.graphIntegrityVersionId IS NOT NULL
        AND d.graphIntegrityRevision IS NOT NULL
        AND (
          d.graphIntegrityVerifiedRevision IS NULL

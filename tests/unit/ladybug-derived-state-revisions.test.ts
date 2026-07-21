@@ -143,7 +143,7 @@ describe(
       assert.equal(advanced?.graphIntegrityDigest, digest);
     });
 
-    it("orders pending revisions by repo and isolates repositories", async () => {
+    it("returns only verifying revision gaps ordered by repo", async () => {
       const conn = await getLadybugConn();
       const digest = "b".repeat(64);
       await api.beginGraphIntegrityVersion(conn, "repo-b", "v2", digest, true);
@@ -165,8 +165,19 @@ describe(
         conn,
         `CREATE (d:DerivedState {
           repoId: 'repo-c',
+          graphIntegrityState: 'unknown',
           graphIntegrityVersionId: 'v0',
           graphIntegrityRevision: 0
+        })`,
+      );
+      await exec(
+        conn,
+        `CREATE (d:DerivedState {
+          repoId: 'repo-d',
+          graphIntegrityState: 'failed',
+          graphIntegrityVersionId: 'v0',
+          graphIntegrityRevision: 1,
+          graphIntegrityVerifiedRevision: 0
         })`,
       );
 
@@ -182,12 +193,6 @@ describe(
           versionId: "v2",
           revision: 1,
           verifiedRevision: 0,
-        },
-        {
-          repoId: "repo-c",
-          versionId: "v0",
-          revision: 0,
-          verifiedRevision: null,
         },
       ]);
     });
@@ -420,6 +425,7 @@ describe(
         conn,
         `CREATE (d:DerivedState {
           repoId: 'unsafe-verified',
+          graphIntegrityState: 'verifying',
           graphIntegrityVersionId: 'v1',
           graphIntegrityRevision: 0,
           graphIntegrityVerifiedRevision: $verifiedRevision

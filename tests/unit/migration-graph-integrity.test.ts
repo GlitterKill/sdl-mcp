@@ -77,12 +77,20 @@ async function createVersion22Database(
   }
   for (const statement of [
     "CREATE (r:Repo {repoId: 'repo', rootPath: '.', configJson: '{}', createdAt: '2026-07-21T00:00:00.000Z'})",
+    "CREATE (r:Repo {repoId: 'repo-b', rootPath: './b', configJson: '{}', createdAt: '2026-07-21T00:00:00.000Z'})",
     `CREATE (d:DerivedState {
       repoId: 'repo',
       graphIntegrityState: 'verified',
       graphIntegrityVersionId: 'legacy-v1',
       graphIntegrityDigest: '${"a".repeat(64)}',
       graphIntegrityError: 'history'
+    })`,
+    `CREATE (d:DerivedState {
+      repoId: 'repo-b',
+      graphIntegrityState: 'failed',
+      graphIntegrityVersionId: 'legacy-v2',
+      graphIntegrityDigest: '${"b".repeat(64)}',
+      graphIntegrityError: 'older failure'
     })`,
     `CREATE (sv:SchemaVersion {
       id: 'current',
@@ -109,23 +117,50 @@ describe("migration: graph integrity revisions and manifest", () => {
     root = "";
   });
 
-  it("migrates m022 rows to unknown nullable revision state", async () => {
+  it("migrates all m022 rows to unknown nullable revision state", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-integrity-m023-"));
     const dbPath = join(root, "v22.lbug");
     await createVersion22Database(dbPath);
 
     await initLadybugDb(dbPath);
-    const row = await getDerivedState("repo");
+    const rows = await Promise.all([
+      getDerivedState("repo"),
+      getDerivedState("repo-b"),
+    ]);
     const summary = await getDerivedStateSummary("repo");
 
     assert.equal(LADYBUG_SCHEMA_VERSION, 23);
-    assert.equal(row?.graphIntegrityState, "unknown");
-    assert.equal(row?.graphIntegrityRevision, null);
-    assert.equal(row?.graphIntegrityVerifiedRevision, null);
-    assert.equal(row?.graphIntegrityFilelessPruningSupported, null);
-    assert.equal(row?.graphIntegrityVersionId, "legacy-v1");
-    assert.equal(row?.graphIntegrityDigest, "a".repeat(64));
-    assert.equal(row?.graphIntegrityError, "history");
+    assert.deepEqual(
+      rows.map((row) => ({
+        state: row?.graphIntegrityState,
+        revision: row?.graphIntegrityRevision,
+        verifiedRevision: row?.graphIntegrityVerifiedRevision,
+        pruningSupported: row?.graphIntegrityFilelessPruningSupported,
+        versionId: row?.graphIntegrityVersionId,
+        digest: row?.graphIntegrityDigest,
+        error: row?.graphIntegrityError,
+      })),
+      [
+        {
+          state: "unknown",
+          revision: null,
+          verifiedRevision: null,
+          pruningSupported: null,
+          versionId: "legacy-v1",
+          digest: "a".repeat(64),
+          error: "history",
+        },
+        {
+          state: "unknown",
+          revision: null,
+          verifiedRevision: null,
+          pruningSupported: null,
+          versionId: "legacy-v2",
+          digest: "b".repeat(64),
+          error: "older failure",
+        },
+      ],
+    );
     assert.equal(summary?.graphIntegrityRevision, null);
   });
 
