@@ -9,7 +9,8 @@ const testDbBase = join(tmpdir(), ".test-kuzu-db");
 
 let getLadybugDb: (dbPath?: string) => Promise<unknown>;
 let getLadybugConn: () => Promise<unknown>;
-let closeLadybugDb: () => Promise<void>;
+let closeLadybugDb: (options?: { preserveCloseHooks?: boolean }) => Promise<void>;
+let registerDbCloseHook: (fn: () => void) => void;
 let initLadybugDb: (dbPath: string) => Promise<void>;
 let isLadybugAvailable: () => boolean;
 let getLadybugDbPath: () => string | null;
@@ -36,6 +37,7 @@ await import("../../dist/db/ladybug.js")
     getLadybugDb = kuzu.getLadybugDb;
     getLadybugConn = kuzu.getLadybugConn;
     closeLadybugDb = kuzu.closeLadybugDb;
+    registerDbCloseHook = kuzu.registerDbCloseHook;
     initLadybugDb = kuzu.initLadybugDb;
     isLadybugAvailable = kuzu.isLadybugAvailable;
     getLadybugDbPath = kuzu.getLadybugDbPath;
@@ -51,6 +53,7 @@ await import("../../dist/db/ladybug.js")
       throw new Error("Module not built");
     };
     closeLadybugDb = async () => {};
+    registerDbCloseHook = () => {};
     initLadybugDb = async () => {
       throw new Error("Module not built");
     };
@@ -451,6 +454,70 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
       await closeLadybugDb();
       await closeLadybugDb();
     });
+
+    it("clears close hooks when either concurrent caller requests it", async () => {
+      for (const [firstPreserves, secondPreserves] of [
+        [true, false],
+        [false, true],
+      ] as const) {
+        const name = `concurrent-close-${String(firstPreserves)}-${String(secondPreserves)}`;
+        const testPath = getTestDbPath(name);
+        cleanupTestDb(name);
+        await initLadybugDb(testPath);
+
+        let hookCalls = 0;
+        registerDbCloseHook(() => {
+          hookCalls += 1;
+        });
+        const entered = deferred();
+        const release = deferred();
+        const lease = withExclusiveReadConnection(async () => {
+          entered.resolve();
+          await release.promise;
+        });
+        await entered.promise;
+
+        let closeCompleted = false;
+        const firstClose = closeLadybugDb({
+          preserveCloseHooks: firstPreserves,
+        });
+        const firstCloseObserved = firstClose.then(() => {
+          closeCompleted = true;
+        });
+        const secondClose = closeLadybugDb({
+          preserveCloseHooks: secondPreserves,
+        });
+
+        try {
+          assert.strictEqual(firstClose, secondClose);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          assert.strictEqual(closeCompleted, false);
+
+          release.resolve();
+          await Promise.all([
+            lease,
+            firstClose,
+            firstCloseObserved,
+            secondClose,
+          ]);
+          assert.strictEqual(hookCalls, 1);
+
+          await initLadybugDb(testPath);
+          await closeLadybugDb();
+          assert.strictEqual(hookCalls, 1);
+        } finally {
+          release.resolve();
+          await Promise.allSettled([
+            lease,
+            firstClose,
+            firstCloseObserved,
+            secondClose,
+          ]);
+          await closeLadybugDb();
+          cleanupTestDb(name);
+        }
+      }
+    });
   });
 
   describe("initLadybugDb", () => {
@@ -537,6 +604,23 @@ describe("withReadOnlyTransaction", () => {
       "callback:end",
       "COMMIT",
     ]);
+  });
+
+  it("propagates begin failure without invoking the callback or cleanup statements", async () => {
+    const beginFailure = new Error("begin failed");
+    const { conn, statements } = recordingConnection({
+      fail: new Map([["BEGIN TRANSACTION READ ONLY", beginFailure]]),
+    });
+    let callbackCalled = false;
+
+    await assert.rejects(
+      withReadOnlyTransaction(conn, async () => {
+        callbackCalled = true;
+      }),
+      /Query execution failed: begin failed/,
+    );
+    assert.strictEqual(callbackCalled, false);
+    assert.deepStrictEqual(statements, ["BEGIN TRANSACTION READ ONLY"]);
   });
 
   it("rolls back callback cancellation and preserves the original error", async () => {

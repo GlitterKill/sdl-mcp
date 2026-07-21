@@ -92,62 +92,67 @@ describe("background graph integrity snapshot", () => {
       }),
     );
 
-    await firstPageRead.promise;
-    await withWriteConn((conn) =>
-      withTransaction(conn, async () => {
-        await exec(
-          conn,
-          "MATCH (n:SnapshotProbe {id: $id}) SET n.value = $value",
-          { id: 4, value: "four-updated" },
-        );
-        await exec(
-          conn,
-          "CREATE (n:SnapshotProbe {id: $id, value: $value})",
-          { id: 5, value: "five" },
-        );
-      }),
-    );
-    continueSnapshot.resolve();
+    try {
+      await Promise.race([firstPageRead.promise, snapshot]);
+      await withWriteConn((conn) =>
+        withTransaction(conn, async () => {
+          await exec(
+            conn,
+            "MATCH (n:SnapshotProbe {id: $id}) SET n.value = $value",
+            { id: 4, value: "four-updated" },
+          );
+          await exec(
+            conn,
+            "CREATE (n:SnapshotProbe {id: $id, value: $value})",
+            { id: 5, value: "five" },
+          );
+        }),
+      );
+      continueSnapshot.resolve();
 
-    const pages = await snapshot;
-    assert.deepStrictEqual(
-      pages.first.map((row) => [Number(row.id), row.value]),
-      [
-        [1, "one"],
-        [2, "two"],
-      ],
-    );
-    assert.deepStrictEqual(
-      pages.second.map((row) => [Number(row.id), row.value]),
-      [
-        [3, "three"],
-        [4, "four"],
-      ],
-    );
+      const pages = await snapshot;
+      assert.deepStrictEqual(
+        pages.first.map((row) => [Number(row.id), row.value]),
+        [
+          [1, "one"],
+          [2, "two"],
+        ],
+      );
+      assert.deepStrictEqual(
+        pages.second.map((row) => [Number(row.id), row.value]),
+        [
+          [3, "three"],
+          [4, "four"],
+        ],
+      );
 
-    const nextSnapshot = await withExclusiveReadConnection((conn) =>
-      withReadOnlyTransaction(conn, () =>
-        queryAll<SnapshotRow>(
-          conn,
-          `MATCH (n:SnapshotProbe)
-           RETURN n.id AS id, n.value AS value
-           ORDER BY n.id`,
+      const nextSnapshot = await withExclusiveReadConnection((conn) =>
+        withReadOnlyTransaction(conn, () =>
+          queryAll<SnapshotRow>(
+            conn,
+            `MATCH (n:SnapshotProbe)
+             RETURN n.id AS id, n.value AS value
+             ORDER BY n.id`,
+          ),
         ),
-      ),
-    );
-    assert.deepStrictEqual(
-      nextSnapshot.map((row) => [Number(row.id), row.value]),
-      [
-        [1, "one"],
-        [2, "two"],
-        [3, "three"],
-        [4, "four-updated"],
-        [5, "five"],
-      ],
-    );
+      );
+      assert.deepStrictEqual(
+        nextSnapshot.map((row) => [Number(row.id), row.value]),
+        [
+          [1, "one"],
+          [2, "two"],
+          [3, "three"],
+          [4, "four-updated"],
+          [5, "five"],
+        ],
+      );
+    } finally {
+      continueSnapshot.resolve();
+      await Promise.allSettled([snapshot]);
+    }
   });
 
-  it("starts publication only after the read-only transaction ends", async () => {
+  it("composes publication after a held read-only snapshot releases", async () => {
     const events: string[] = [];
     const snapshotHeld = deferred();
     const releaseSnapshot = deferred();
@@ -178,22 +183,27 @@ describe("background graph integrity snapshot", () => {
       });
     })();
 
-    await snapshotHeld.promise;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.deepStrictEqual(events, [
-      "snapshot:started",
-      "snapshot:page-complete",
-    ]);
+    try {
+      await Promise.race([snapshotHeld.promise, scanThenPublication]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepStrictEqual(events, [
+        "snapshot:started",
+        "snapshot:page-complete",
+      ]);
 
-    releaseSnapshot.resolve();
-    await scanThenPublication;
-    assert.deepStrictEqual(events, [
-      "snapshot:started",
-      "snapshot:page-complete",
-      "snapshot:ended",
-      "publication:started",
-      "publication:completed",
-    ]);
+      releaseSnapshot.resolve();
+      await scanThenPublication;
+      assert.deepStrictEqual(events, [
+        "snapshot:started",
+        "snapshot:page-complete",
+        "snapshot:ended",
+        "publication:started",
+        "publication:completed",
+      ]);
+    } finally {
+      releaseSnapshot.resolve();
+      await Promise.allSettled([scanThenPublication]);
+    }
   });
 
   it("allows a delayed checkpoint to succeed after the snapshot releases", async () => {
@@ -207,19 +217,27 @@ describe("background graph integrity snapshot", () => {
       }),
     );
 
-    await snapshotStarted.promise;
-    let checkpointCompleted = false;
-    const checkpoint = runWalCheckpoint("held-graph-integrity-snapshot").then(
-      (result) => {
-        checkpointCompleted = true;
-        return result;
-      },
-    );
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.strictEqual(checkpointCompleted, false);
+    let checkpoint: Promise<boolean> | undefined;
+    try {
+      await Promise.race([snapshotStarted.promise, snapshot]);
+      let checkpointCompleted = false;
+      checkpoint = runWalCheckpoint("held-graph-integrity-snapshot").then(
+        (result) => {
+          checkpointCompleted = true;
+          return result;
+        },
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.strictEqual(checkpointCompleted, false);
 
-    releaseSnapshot.resolve();
-    await snapshot;
-    assert.strictEqual(await checkpoint, true);
+      releaseSnapshot.resolve();
+      await snapshot;
+      assert.strictEqual(await checkpoint, true);
+    } finally {
+      releaseSnapshot.resolve();
+      await Promise.allSettled(
+        checkpoint ? [snapshot, checkpoint] : [snapshot],
+      );
+    }
   });
 });

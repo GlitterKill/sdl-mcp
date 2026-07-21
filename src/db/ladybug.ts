@@ -233,6 +233,7 @@ let readPoolIndex = 0;
 let writeConn: LadybugConnection | null = null;
 let writeLimiter: ConcurrencyLimiter | null = null;
 let dbClosePromise: Promise<void> | null = null;
+let preserveCloseHooksForCurrentClose = false;
 const activeExclusiveReadLeases = new Set<Promise<void>>();
 const sessionWriteBodyLimiters = new WeakMap<
   LadybugConnection,
@@ -1403,16 +1404,20 @@ export function closeLadybugDb(
   options: CloseLadybugDbOptions = {},
 ): Promise<void> {
   if (!dbClosePromise) {
-    dbClosePromise = closeLadybugDbImpl(options).finally(() => {
+    preserveCloseHooksForCurrentClose = options.preserveCloseHooks === true;
+    dbClosePromise = closeLadybugDbImpl().finally(() => {
       dbClosePromise = null;
+      preserveCloseHooksForCurrentClose = false;
     });
+  } else if (!options.preserveCloseHooks) {
+    // Concurrent close callers share one operation. Clearing wins so a caller
+    // cannot accidentally retain hooks requested for disposal by another.
+    preserveCloseHooksForCurrentClose = false;
   }
   return dbClosePromise;
 }
 
-async function closeLadybugDbImpl(
-  options: CloseLadybugDbOptions,
-): Promise<void> {
+async function closeLadybugDbImpl(): Promise<void> {
   await Promise.allSettled([...activeExclusiveReadLeases]);
 
   // Best-effort flush of any audit events queued by the post-index buffer
@@ -1577,7 +1582,7 @@ async function closeLadybugDbImpl(
       });
     }
   }
-  if (!options.preserveCloseHooks) {
+  if (!preserveCloseHooksForCurrentClose) {
     closeHooks.length = 0;
   }
   logger.debug("LadybugDB closed");
