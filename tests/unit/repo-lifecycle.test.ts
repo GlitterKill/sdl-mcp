@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, it } from "node:test";
 
 import {
@@ -21,6 +22,25 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 describe("per-repository lifecycle barrier", () => {
   beforeEach(() => {
     resetRepoLifecycleForTests();
+  });
+
+  it("cancels verification before full-index shadow activation closes the active DB", () => {
+    const source = readFileSync(
+      new URL("../../src/indexer/indexer.ts", import.meta.url),
+      "utf8",
+    );
+    const activation = source.indexOf("activateProviderFirstShadowDbWithHandoff({");
+    const cancel = source.indexOf(
+      "await cancelAndWaitForGraphIntegrityVerifier(repoId)",
+      activation,
+    );
+    const close = source.indexOf(
+      "closeLadybugDb({ preserveCloseHooks: true })",
+      activation,
+    );
+
+    assert.ok(activation >= 0 && cancel > activation);
+    assert.ok(cancel < close, "verification must release its read lease before DB close");
   });
 
   it("drains accepted mutations and rejects work arriving after removal starts", async () => {

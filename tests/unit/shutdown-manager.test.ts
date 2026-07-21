@@ -234,6 +234,19 @@ describe("main.ts shutdown wiring", () => {
     assert.ok(stdinIndex < initIndex, "stdin monitoring must precede DB init");
   });
 
+  it("cancels graph verification before DB cleanup", () => {
+    const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
+    const verifierCleanup = source.indexOf(
+      'shutdownMgr.addCleanup("graphIntegrityVerifier"',
+    );
+    const dbCleanup = source.indexOf(
+      'shutdownMgr.addCleanup("db", () => closeLadybugDb())',
+    );
+
+    assert.ok(verifierCleanup >= 0, "main.ts should register verifier cleanup");
+    assert.ok(verifierCleanup < dbCleanup, "verifier cleanup must run before DB cleanup");
+  });
+
   it("closes LadybugDB when startup fails after DB init", () => {
     const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
     const closeIndex = source.indexOf("await closeDbAfterStartupFailure()");
@@ -343,6 +356,22 @@ describe("serve.ts shutdown wiring", () => {
     assert.ok(cleanupIndex < initIndex, "DB cleanup must precede DB init");
     assert.ok(signalsIndex < initIndex, "signals must precede DB init");
     assert.ok(stdinIndex < initIndex, "stdin monitoring must precede DB init");
+  });
+
+  it("cancels graph verification before serve DB cleanup", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    const verifierCleanup = source.indexOf(
+      'shutdownMgr.addCleanup("graphIntegrityVerifier"',
+    );
+    const dbCleanup = source.indexOf(
+      'shutdownMgr.addCleanup("db", () => closeLadybugDb())',
+    );
+
+    assert.ok(verifierCleanup >= 0, "serve.ts should register verifier cleanup");
+    assert.ok(verifierCleanup < dbCleanup, "verifier cleanup must run before DB cleanup");
   });
 
   it("checks for early stdio shutdown before opening LadybugDB", () => {

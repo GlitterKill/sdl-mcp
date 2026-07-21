@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { recoverStaleDerivedStateOnStartup } from "../../dist/startup/derived-state-recovery.js";
 
 describe("recoverStaleDerivedStateOnStartup", () => {
+  it("starts pending graph revision recovery only after DB migration and repository bootstrap", () => {
+    for (const relativePath of ["src/main.ts", "src/cli/commands/serve.ts"]) {
+      const source = readFileSync(new URL(`../../${relativePath}`, import.meta.url), "utf8");
+      const migration = source.indexOf("await initGraphDb(");
+      const bootstrap = source.indexOf("await ensureConfiguredReposRegistered(");
+      const recovery = source.indexOf("await recoverStaleDerivedStateOnStartup(");
+      assert.ok(migration >= 0 && bootstrap > migration, relativePath);
+      assert.ok(recovery > bootstrap, relativePath);
+    }
+  });
   it("re-enqueues stale persisted derived state and reports recovery", async () => {
     const enqueued: Array<{ repoId: string; targetVersionId: string }> = [];
     const logs: string[] = [];

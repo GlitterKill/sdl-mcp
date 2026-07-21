@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -82,6 +82,22 @@ describe("repo.unregister integration", () => {
       }),
     );
   }
+
+  it("cancels graph verification after closing mutation admission and before deleting graph state", () => {
+    const source = readFileSync(
+      new URL("../../src/mcp/tools/repo.ts", import.meta.url),
+      "utf8",
+    );
+    const begin = source.indexOf("await beginRepoRemoval(repoId)");
+    const cancel = source.indexOf(
+      "await cancelAndWaitForGraphIntegrityVerifier(repoId)",
+      begin,
+    );
+    const deletion = source.indexOf("await ladybugDb.deleteRepo(writeConn, repoId)", begin);
+
+    assert.ok(begin >= 0 && cancel > begin);
+    assert.ok(cancel < deletion, "verification must stop before repository deletion");
+  });
 
   async function waitForRepoInactive(repoId: string): Promise<void> {
     const deadline = Date.now() + 5_000;

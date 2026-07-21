@@ -451,6 +451,41 @@ test("INVARIANT 2b: registered workflow uses resolved projection options determi
   assert.equal(await run(), first);
 });
 
+test("INVARIANT 2c: repo status revision fields are ordered without changing normal retrieval", () => {
+  const status = projectToolResultForModelContent("sdl.repo.status", {
+    repoId: REPO_ID,
+    rootAvailability: { status: "available" },
+    latestVersionId: "v2",
+    filesIndexed: 1,
+    symbolsIndexed: 1,
+    derivedState: {
+      stale: false,
+      graphIntegrityState: "verifying",
+      graphIntegrityVersionId: "v2",
+      graphIntegrityRevision: 2,
+      graphIntegrityVerifiedRevision: 1,
+      graphIntegrityDigest: "a".repeat(64),
+    },
+  }) as { derivedState: Record<string, unknown> };
+  assert.deepEqual(Object.keys(status.derivedState), [
+    "stale",
+    "graphIntegrityState",
+    "graphIntegrityVersionId",
+    "graphIntegrityRevision",
+    "graphIntegrityVerifiedRevision",
+    "graphIntegrityDigest",
+  ]);
+
+  const retrieval = {
+    matches: [{ symbolId: "symbol-1", name: "stable" }],
+    total: 1,
+  };
+  assert.equal(
+    canonical(projectToolResultForModelContent("sdl.symbol.search", retrieval)),
+    canonical(retrieval),
+  );
+});
+
 test("INVARIANT 2b: covered outputs are deterministic within and across processes", () => {
   const failures: string[] = [];
 

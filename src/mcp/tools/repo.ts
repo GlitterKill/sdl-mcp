@@ -84,9 +84,11 @@ import {
 } from "../../services/repo-lifecycle.js";
 import {
   getDerivedStateSummary,
+  graphIntegrityIsAvailableForVersion,
   graphIntegrityIsVerifiedForVersion,
   graphIntegrityNextBestAction,
 } from "../../db/ladybug-derived-state.js";
+import { cancelAndWaitForGraphIntegrityVerifier } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
 
 // Health snapshot cache with 30s TTL to avoid expensive recomputation.
 // lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
@@ -633,6 +635,8 @@ export async function handleRepoUnregister(
       );
     }
 
+    await cancelAndWaitForGraphIntegrityVerifier(repoId);
+
     await withWriteConn(async (writeConn) => {
       if (!(await ladybugDb.getRepo(writeConn, repoId))) {
         throw new NotFoundError(`Repository not found: ${repoId}`);
@@ -865,13 +869,17 @@ function compactPrefetchStatsForStatus(
         error: err instanceof Error ? err.message : String(err),
       });
     }
-    const graphIntegrityReady = graphIntegrityIsVerifiedForVersion(
+    const graphIntegrityAvailable = graphIntegrityIsAvailableForVersion(
+      derivedState,
+      latestVersion?.versionId ?? null,
+    );
+    const latestGraphRevisionVerified = graphIntegrityIsVerifiedForVersion(
       derivedState,
       latestVersion?.versionId ?? null,
     );
     if (
       derivedState?.graphIntegrityState === "verified" &&
-      !graphIntegrityReady
+      !latestGraphRevisionVerified
     ) {
       derivedState = {
         ...derivedState,
@@ -885,7 +893,7 @@ function compactPrefetchStatsForStatus(
         nextBestAction: rootRecoveryAction,
       };
     }
-    const effectiveHealth = rootAvailable && graphIntegrityReady
+    const effectiveHealth = rootAvailable && graphIntegrityAvailable
       ? health
       : unavailableHealth.snapshot;
 
@@ -946,7 +954,7 @@ function compactPrefetchStatsForStatus(
             healthNote:
               'Health omitted because detail:"minimal" skips health computation. Use detail:"standard" to inspect health.',
           }
-        : !graphIntegrityReady
+        : !graphIntegrityAvailable
           ? {
               healthNote:
                 derivedState?.nextBestAction ??
