@@ -5,7 +5,6 @@ export type PublicGraphRetrievalAdmission =
 const GRAPH_ACTIONS = new Set([
   "symbol.search",
   "symbol.getCard",
-  "symbol.getCards",
   "slice.build",
   "slice.refresh",
   "slice.spillover.get",
@@ -20,7 +19,6 @@ const GRAPH_ACTIONS = new Set([
 const GRAPH_FLAT_TOOLS = new Set([
   "sdl.symbol.search",
   "sdl.symbol.getCard",
-  "sdl.symbol.getCards",
   "sdl.slice.build",
   "sdl.slice.refresh",
   "sdl.slice.spillover.get",
@@ -54,7 +52,6 @@ const GRAPH_WORKFLOW_STEPS = new Set([
   ...GRAPH_ACTIONS,
   "symbolSearch",
   "symbolGetCard",
-  "symbolGetCards",
   "sliceBuild",
   "sliceRefresh",
   "sliceSpilloverGet",

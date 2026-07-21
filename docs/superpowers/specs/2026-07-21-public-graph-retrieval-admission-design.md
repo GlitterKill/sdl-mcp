@@ -14,8 +14,9 @@ surfaces available.
 validated arguments are known, but before dispatch. A pure declarative
 classifier returns the repository ID only for versioned code-graph reads:
 
-- Flat and gateway actions: symbol search/cards, slice build/refresh/spillover,
-  delta, PR risk, code window/skeleton/hot path, and repository overview.
+- Registered flat and gateway actions: symbol search/single-card lookup, slice
+  build/refresh/spillover, delta, PR risk, code window/skeleton/hot path, and
+  repository overview.
 - Code-mode tools: context and all six retrieve operations.
 - Workflows containing any of those graph-backed actions.
 - File gateway preview/source window operations.

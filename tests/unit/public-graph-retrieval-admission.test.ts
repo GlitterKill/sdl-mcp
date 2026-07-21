@@ -101,7 +101,6 @@ const ACTION_AUDIT = [
 const REGISTERED_GRAPH_ACTIONS = new Set(
   ACTION_AUDIT.filter((entry) => entry[3]).map((entry) => entry[0]),
 );
-const GRAPH_ACTIONS = new Set([...REGISTERED_GRAPH_ACTIONS, "symbol.getCards"]);
 const REGISTERED_GRAPH_FLAT_TOOLS = new Set(
   ACTION_AUDIT.filter((entry) => entry[3]).map((entry) => entry[2]),
 );
@@ -161,6 +160,14 @@ const TOOL_INVENTORY = JSON.parse(
   gatewayToolNames: string[];
 };
 
+const ALWAYS_GATED_CODE_MODE_TOOLS = new Set(["sdl.context"]);
+const CONDITIONAL_CODE_MODE_TOOLS = new Set([
+  "sdl.file",
+  "sdl.retrieve",
+  "sdl.workflow",
+]);
+const EXCLUDED_CODE_MODE_TOOLS = new Set(["sdl.action.search", "sdl.manual"]);
+
 const gatewayToolByAction = new Map<string, string>([
   ...QUERY_ACTIONS.map((action) => [action, "sdl.query"] as const),
   ...CODE_ACTIONS.map((action) => [action, "sdl.code"] as const),
@@ -219,11 +226,22 @@ describe("public graph retrieval admission classifier", () => {
       new Set(["sdl.action.search", "sdl.info"]),
     );
     assertClosedRegistry(
+      ACTION_DEFINITIONS.filter(
+        (definition) => definition.kind === "meta",
+      ).flatMap((definition) =>
+        definition.toolName ? [definition.toolName] : [],
+      ),
+      "meta action definitions",
+      ALWAYS_GATED_CODE_MODE_TOOLS,
+      CONDITIONAL_CODE_MODE_TOOLS,
+      EXCLUDED_CODE_MODE_TOOLS,
+    );
+    assertClosedRegistry(
       TOOL_INVENTORY.codeModeToolNames,
       "code-mode tools",
-      new Set(["sdl.context"]),
-      new Set(["sdl.file", "sdl.retrieve", "sdl.workflow"]),
-      new Set(["sdl.action.search", "sdl.manual"]),
+      ALWAYS_GATED_CODE_MODE_TOOLS,
+      CONDITIONAL_CODE_MODE_TOOLS,
+      EXCLUDED_CODE_MODE_TOOLS,
     );
     assertClosedRegistry(
       TOOL_INVENTORY.gatewayToolNames,
@@ -272,25 +290,18 @@ describe("public graph retrieval admission classifier", () => {
   it("classifies every registered flat action by exact tool name", () => {
     for (const definition of GATEWAY_ACTION_DEFINITIONS) {
       assert.ok(definition.toolName);
-      const required = GRAPH_ACTIONS.has(definition.action);
+      const required = REGISTERED_GRAPH_ACTIONS.has(definition.action);
       assert.deepEqual(
         classifyPublicGraphRetrieval(definition.toolName, { repoId: REPO_ID }),
         expected(required),
         definition.toolName,
       );
     }
-
-    assert.deepEqual(
-      classifyPublicGraphRetrieval("sdl.symbol.getCards", {
-        repoId: REPO_ID,
-      }),
-      expected(true),
-    );
   });
 
   it("classifies every canonical gateway action through its registered gateway", () => {
     for (const [action, toolName] of gatewayToolByAction) {
-      const required = GRAPH_ACTIONS.has(action);
+      const required = REGISTERED_GRAPH_ACTIONS.has(action);
       assert.deepEqual(
         classifyPublicGraphRetrieval(toolName, {
           repoId: REPO_ID,
@@ -300,14 +311,6 @@ describe("public graph retrieval admission classifier", () => {
         `${toolName}:${action}`,
       );
     }
-
-    assert.deepEqual(
-      classifyPublicGraphRetrieval("sdl.query", {
-        repoId: REPO_ID,
-        action: "symbol.getCards",
-      }),
-      expected(true),
-    );
   });
 
   it("classifies every registered public top-level tool", () => {
@@ -382,18 +385,6 @@ describe("public graph retrieval admission classifier", () => {
         toolName,
       );
     }
-
-    const registeredDefinitionTools = ACTION_DEFINITIONS.flatMap(
-      (definition) => (definition.toolName ? [definition.toolName] : []),
-    );
-    assert.deepEqual(
-      new Set(TOOL_INVENTORY.codeModeToolNames),
-      new Set(
-        registeredDefinitionTools.filter((toolName) =>
-          TOOL_INVENTORY.codeModeToolNames.includes(toolName),
-        ),
-      ),
-    );
   });
 
   it("classifies every sdl.retrieve operation", () => {
@@ -423,7 +414,7 @@ describe("public graph retrieval admission classifier", () => {
 
   it("classifies every canonical workflow action and function name", () => {
     for (const definition of GATEWAY_ACTION_DEFINITIONS) {
-      const required = GRAPH_ACTIONS.has(definition.action);
+      const required = REGISTERED_GRAPH_ACTIONS.has(definition.action);
       assert.deepEqual(
         classifyPublicGraphRetrieval("sdl.workflow", {
           repoId: REPO_ID,
@@ -461,17 +452,6 @@ describe("public graph retrieval admission classifier", () => {
           steps: [{ fn, args: {} }],
         }),
         expected(false),
-        fn,
-      );
-    }
-
-    for (const fn of ["symbolGetCards", "symbol.getCards"]) {
-      assert.deepEqual(
-        classifyPublicGraphRetrieval("sdl.workflow", {
-          repoId: REPO_ID,
-          steps: [{ fn, args: {} }],
-        }),
-        expected(true),
         fn,
       );
     }
@@ -525,6 +505,16 @@ describe("public graph retrieval admission classifier", () => {
         },
       ],
       ["sdl.context.extra", { repoId: REPO_ID }],
+      ["sdl.symbol.getCards", { repoId: REPO_ID }],
+      ["sdl.query", { repoId: REPO_ID, action: "symbol.getCards" }],
+      [
+        "sdl.workflow",
+        { repoId: REPO_ID, steps: [{ fn: "symbol.getCards", args: {} }] },
+      ],
+      [
+        "sdl.workflow",
+        { repoId: REPO_ID, steps: [{ fn: "symbolGetCards", args: {} }] },
+      ],
       ["sdl.context", null],
     ];
 
