@@ -1384,6 +1384,236 @@ describe("persisted graph integrity", () => {
     await session.complete("v2");
   });
 
+  it("attributes and later removes a new pass-2 call from an unchanged importer", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-pass2-importer-"));
+    await initLadybugDb(join(root, "pass2-importer.lbug"));
+    const capture = capturePersistedGraphIntegrity;
+    const Session = PersistedGraphIntegritySession as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+      applyFile: (file: Record<string, unknown>) => void;
+      applyPass2EdgeWrite: (write: Record<string, unknown>) => Promise<void>;
+      prepareForPlaceholderPruning: (conn: unknown) => Promise<boolean>;
+      stageManifest: (versionId: string) => Promise<number | undefined>;
+      complete: (versionId: string) => Promise<void>;
+    };
+    const changedSource = symbolRow();
+    const importerSource = symbolRow({
+      symbolId: "sym:importer",
+      fileId: "repo:src/importer.ts",
+      name: "importer",
+      astFingerprint: "fingerprint-importer",
+      signatureJson: '{"name":"importer"}',
+    });
+    const targetId = "unresolved:call:lateTarget";
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId: changedSource.fileId,
+        repoId: "repo",
+        relPath: "src/alpha.ts",
+        contentHash: "a".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId: importerSource.fileId,
+        repoId: "repo",
+        relPath: "src/importer.ts",
+        contentHash: "b".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertKnownFileSymbols(conn, [
+        changedSource,
+        importerSource,
+      ]);
+      await ladybugDb.createVersion(conn, {
+        versionId: "v1",
+        repoId: "repo",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        reason: "verified baseline",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+    });
+    const baseline = await capture(await getLadybugConn(), "repo");
+    await withWriteConn((conn) =>
+      ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, "repo", {
+        files: [
+          createGraphIntegrityFileState(
+            "repo",
+            changedSource.fileId,
+            "src/alpha.ts",
+            [changedSource],
+            [],
+          ),
+          createGraphIntegrityFileState(
+            "repo",
+            importerSource.fileId,
+            "src/importer.ts",
+            [importerSource],
+            [],
+          ),
+        ],
+        fileless: [],
+      }),
+    );
+    await derivedState.markGraphIntegrityVerified(
+      "repo",
+      "v1",
+      baseline.digest,
+    );
+    assert.deepEqual(
+      await ladybugDb.getPersistedGraphIntegritySourceReferenceCounts(
+        await getLadybugConn(),
+        "repo",
+        [importerSource.symbolId, importerSource.symbolId],
+        "call",
+      ),
+      [{
+        sourceSymbolId: importerSource.symbolId,
+        fileId: importerSource.fileId,
+        symbolId: null,
+        edgeType: "call",
+        referenceCount: 0,
+      }],
+    );
+
+    const addReference = new Session("repo", "incremental", true);
+    await addReference.begin("v2");
+    addReference.applyFile(
+      createGraphIntegrityFileDigest({
+        fileId: changedSource.fileId,
+        relPath: "src/alpha.ts",
+        symbols: [changedSource],
+      }) as Record<string, unknown>,
+    );
+    const newCall = callEdge(importerSource.symbolId, targetId);
+    await addReference.applyPass2EdgeWrite({
+      symbolIdsToRefresh: [importerSource.symbolId],
+      edges: [newCall],
+    });
+    await withWriteConn(async (conn) => {
+      await ladybugDb.insertEdges(conn, [newCall]);
+      await ladybugDb.normalizeDependencyPlaceholderSymbols(conn, "repo");
+      await ladybugDb.createVersion(conn, {
+        versionId: "v2",
+        repoId: "repo",
+        createdAt: "2026-07-16T00:00:01.000Z",
+        reason: "refresh another file and its importer",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+    });
+    assert.equal(await addReference.stageManifest("v2"), 1);
+
+    const importerManifest = await ladybugDb.getGraphIntegrityFileState(
+      await getLadybugConn(),
+      "repo",
+      importerSource.fileId,
+    );
+    const importerReferences = parseGraphIntegrityFilelessReferences(
+      importerManifest?.filelessReferencesJson ?? "[]",
+    );
+    assert.equal(importerReferences.length, 1);
+    assert.equal(importerReferences[0]?.[0], targetId);
+    assert.equal(importerReferences[0]?.[2], importerSource.symbolId);
+    assert.equal(importerReferences[0]?.[3], "call");
+    assert.equal(importerReferences[0]?.[4], "incoming");
+    assert.equal(importerReferences[0]?.[5], 1);
+    const stagedFileStates = await ladybugDb.listGraphIntegrityFileStates(
+      await getLadybugConn(),
+      "repo",
+    );
+    const stagedFilelessStates = await ladybugDb.listGraphIntegrityFilelessStates(
+      await getLadybugConn(),
+      "repo",
+    );
+    assert.equal(
+      compareGraphIntegrityExpectations(
+        createGraphIntegrityExpectationFromManifest(
+          stagedFileStates,
+          stagedFilelessStates,
+        ),
+        await capture(await getLadybugConn(), "repo"),
+      ),
+      null,
+    );
+    await addReference.complete("v2");
+    let fileless = await ladybugDb.listGraphIntegrityFilelessStates(
+      await getLadybugConn(),
+      "repo",
+    );
+    assert.deepEqual(
+      fileless.map((row) => [row.symbolId, row.referenceCount]),
+      [[targetId, 1]],
+    );
+    let state = await derivedState.getDerivedState("repo");
+    assert.equal(state?.graphIntegrityState, "verified");
+    assert.equal(state?.graphIntegrityRevision, 1);
+    assert.equal(state?.graphIntegrityVerifiedRevision, 1);
+
+    const removeReference = new Session("repo", "incremental", true);
+    await removeReference.begin("v2");
+    await removeReference.applyPass2EdgeWrite({
+      symbolIdsToRefresh: [importerSource.symbolId],
+      edges: [],
+    });
+    await withWriteConn((conn) =>
+      ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+        conn,
+        [importerSource.symbolId],
+        "call",
+      ),
+    );
+    assert.equal(
+      await removeReference.prepareForPlaceholderPruning(
+        await getLadybugConn(),
+      ),
+      true,
+    );
+    assert.equal(
+      await ladybugDb.pruneIsolatedPlaceholderSymbols(
+        await getLadybugConn(),
+        "repo",
+      ),
+      1,
+    );
+    await removeReference.complete("v2");
+
+    const prunedImporterManifest = await ladybugDb.getGraphIntegrityFileState(
+      await getLadybugConn(),
+      "repo",
+      importerSource.fileId,
+    );
+    assert.deepEqual(
+      parseGraphIntegrityFilelessReferences(
+        prunedImporterManifest?.filelessReferencesJson ?? "[]",
+      ),
+      [],
+    );
+    fileless = await ladybugDb.listGraphIntegrityFilelessStates(
+      await getLadybugConn(),
+      "repo",
+    );
+    assert.deepEqual(fileless, []);
+    state = await derivedState.getDerivedState("repo");
+    assert.equal(state?.graphIntegrityState, "verified");
+    assert.equal(state?.graphIntegrityRevision, 2);
+    assert.equal(state?.graphIntegrityVerifiedRevision, 2);
+  });
+
   for (const transition of ["provider", "legacy"] as const) {
     it(`removes inherited fileless membership when ${transition} rows promote a symbol`, async () => {
       root = mkdtempSync(join(tmpdir(), `sdl-graph-integrity-${transition}-promotion-`));

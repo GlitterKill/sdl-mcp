@@ -1034,13 +1034,31 @@ export class PersistedGraphIntegritySession {
         chunk,
         edgeType,
       );
+      const ambiguousSources = new Set<string>();
       for (const row of rows) {
-        this.filelessLiveness.seedCurrentSourceReference(
-          row.sourceSymbolId,
-          row,
-        );
+        const knownFileId = this.sourceFileIdBySymbolId.get(row.sourceSymbolId);
+        if (knownFileId && knownFileId !== row.fileId) {
+          ambiguousSources.add(row.sourceSymbolId);
+        } else {
+          this.sourceFileIdBySymbolId.set(row.sourceSymbolId, row.fileId);
+        }
+        if (row.symbolId !== null && row.referenceCount > 0) {
+          this.filelessLiveness.seedCurrentSourceReference(
+            row.sourceSymbolId,
+            { ...row, symbolId: row.symbolId },
+          );
+        }
       }
       for (const symbolId of chunk) {
+        if (
+          ambiguousSources.has(symbolId) ||
+          !this.sourceFileIdBySymbolId.has(symbolId)
+        ) {
+          // Without exact file ownership, retaining placeholders is safer than
+          // persisting an aggregate reference that a later file refresh cannot remove.
+          this.filelessLiveness.disablePruning();
+          continue;
+        }
         this.filelessLiveness.markCurrentSourcePrepared(symbolId, edgeType);
       }
     }

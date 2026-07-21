@@ -59,8 +59,10 @@ export interface PersistedGraphIntegrityFileReferenceCount
 }
 
 export interface PersistedGraphIntegritySourceReferenceCount
-  extends PersistedGraphIntegrityReferenceCount {
+  extends Omit<PersistedGraphIntegrityReferenceCount, "symbolId"> {
   sourceSymbolId: string;
+  fileId: string;
+  symbolId: string | null;
 }
 
 export interface GraphIntegrityFileStateRecord {
@@ -693,7 +695,11 @@ export async function getPersistedGraphIntegrityFileReferenceCounts(
   }));
 }
 
-/** Read exact pre-write liveness for pass-2 sources that were not reindexed. */
+/**
+ * Read exact pre-write liveness and file ownership for pass-2 sources that
+ * were not reindexed. A source with no matching edge returns one null-target
+ * ownership row so its first new fileless reference remains attributable.
+ */
 export async function getPersistedGraphIntegritySourceReferenceCounts(
   conn: Connection,
   repoId: string,
@@ -703,15 +709,19 @@ export async function getPersistedGraphIntegritySourceReferenceCounts(
   if (sourceSymbolIds.length === 0) return [];
   const rows = await queryAll<RawPersistedGraphIntegritySourceReferenceCount>(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)-[:SYMBOL_IN_REPO]->(r)
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[:SYMBOL_IN_FILE]->(f:File)-[:FILE_IN_REPO]->(r)
      WHERE a.symbolId IN $sourceSymbolIds
-       AND coalesce(d.edgeType, '') = $edgeType
+     WITH DISTINCT r, a, f
+     OPTIONAL MATCH (a)-[d:DEPENDS_ON]->(b:Symbol)-[:SYMBOL_IN_REPO]->(r)
+     WHERE coalesce(d.edgeType, '') = $edgeType
        AND NOT (b)-[:SYMBOL_IN_FILE]->(:File)
+     WITH DISTINCT a, f, b, d
      RETURN a.symbolId AS sourceSymbolId,
+            f.fileId AS fileId,
             b.symbolId AS symbolId,
-            coalesce(d.edgeType, '') AS edgeType,
-            count(*) AS referenceCount
-     ORDER BY sourceSymbolId ASC, symbolId ASC, edgeType ASC`,
+            $edgeType AS edgeType,
+            count(d) AS referenceCount
+     ORDER BY sourceSymbolId ASC, fileId ASC, coalesce(symbolId, '') ASC, edgeType ASC`,
     { repoId, sourceSymbolIds, edgeType },
   );
   return rows.map((row) => ({
