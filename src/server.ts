@@ -7,6 +7,8 @@ import {
   type ServerNotification,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { getLadybugConn } from "./db/ladybug.js";
+import { IndexError } from "./domain/errors.js";
 import { errorToMcpResponse } from "./mcp/errors.js";
 import { runToolDispatch } from "./mcp/dispatch-limiter.js";
 import { logToolCall } from "./mcp/telemetry.js";
@@ -54,6 +56,8 @@ import {
 } from "./mcp/timing-diagnostics.js";
 import { SDL_MCP_SERVER_INSTRUCTIONS } from "./mcp/server-instructions.js";
 import { markActionArgsParsed } from "./gateway/dispatch-spine.js";
+import { classifyPublicGraphRetrieval } from "./mcp/public-graph-retrieval-admission.js";
+import { assertGraphRetrievalAvailable } from "./services/graph-retrieval-availability.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -664,17 +668,30 @@ export class MCPServer {
             tool.inputSchema,
             parseResult.data,
           );
-          if (toolContext.sessionId && isRecordValue(parsedArgs)) {
-            const referencedSymbolIds = extractReferencedSymbolIds(parsedArgs);
-            if (referencedSymbolIds.length > 0) {
-              wasteLedger.recordReferenced(
-                toolContext.sessionId,
-                referencedSymbolIds,
-              );
-            }
-          }
-
           try {
+            const graphAdmission = classifyPublicGraphRetrieval(
+              toolName,
+              parsedArgs,
+            );
+            if (graphAdmission.mode === "central") {
+              if (!graphAdmission.repoId) {
+                throw new IndexError(
+                  'Graph retrieval requires an explicit repoId. Provide repoId. Run sdl.index.refresh with mode:"full" if the graph must be rebuilt and verified.',
+                );
+              }
+              const conn = await getLadybugConn();
+              await assertGraphRetrievalAvailable(conn, graphAdmission.repoId);
+            }
+            if (toolContext.sessionId && isRecordValue(parsedArgs)) {
+              const referencedSymbolIds = extractReferencedSymbolIds(parsedArgs);
+              if (referencedSymbolIds.length > 0) {
+                wasteLedger.recordReferenced(
+                  toolContext.sessionId,
+                  referencedSymbolIds,
+                );
+              }
+            }
+
             // Pass the parsed (validated + coerced) data to the handler
             const dispatchStartedAt = timer.start();
             const result = shouldBypassToolDispatch(toolName, parsedArgs)

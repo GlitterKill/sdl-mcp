@@ -12,7 +12,7 @@ surfaces available.
 
 `MCPServer` applies one admission check after the canonical tool name and
 validated arguments are known, but before dispatch. A pure declarative
-classifier returns the repository ID only for versioned code-graph reads:
+classifier marks each versioned code-graph read as central or conditional:
 
 - Registered flat and gateway actions: symbol search/single-card lookup, slice
   build/refresh/spillover, delta, PR risk, code window/skeleton/hot path, and
@@ -21,16 +21,22 @@ classifier returns the repository ID only for versioned code-graph reads:
 - Workflows containing any of those graph-backed actions.
 - File gateway preview/source window operations.
 
-The classifier explicitly excludes raw file reads, policy, repository status,
-registration/index administration, writes/edits, runtime/response/usage,
-buffer, feedback, semantic-enrichment status, and memory records. It uses exact
-canonical names and exact validated action/op values, never prefixes or
-substrings. A classified call without a repository ID fails closed with the
-same typed deterministic full-refresh guidance.
+The classifier explicitly marks each surface as centrally gated,
+conditionally gated, or excluded. `slice.refresh` is the only conditional
+operation: its stable public schema is handle-only, so the existing
+slice-handle lookup resolves the repository before applying the same shared
+availability assertion. Every other graph read is centrally gated from its
+validated top-level `repoId`. The classifier excludes raw file reads, policy,
+repository status, registration/index administration, writes/edits,
+runtime/response/usage, buffer, feedback, semantic-enrichment status, and
+memory records. It uses exact canonical names and exact validated action/op
+values, never prefixes or substrings. A centrally classified call without a
+repository ID fails closed with typed deterministic full-refresh guidance.
 
-Existing symbol and slice handler-local guards are removed after real MCP
-dispatch tests prove the shared boundary. This prevents duplicate database
-queries and leaves internal handler composition unchanged.
+Existing symbol and centrally gated slice handler-local guards are removed
+after real MCP dispatch tests prove the shared boundary. The conditional
+`slice.refresh` guard remains at the handle-resolution boundary. This prevents
+duplicate database queries and leaves internal handler composition unchanged.
 
 ## Full-index quiescence
 

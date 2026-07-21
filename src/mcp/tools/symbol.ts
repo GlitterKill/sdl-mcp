@@ -43,7 +43,6 @@ import { autoExtractMentions } from "../../retrieval/seed-resolver.js";
 import { logger } from "../../util/logger.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
 import { createSymbolSearchFallback } from "../../services/symbol-search-fallback.js";
-import { assertGraphRetrievalAvailable } from "../../services/graph-retrieval-availability.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import { SDL_SOURCE_EXTENSIONS } from "./file-read.js";
 import {
@@ -330,7 +329,6 @@ export async function handleSymbolSearch(
   if (!repo) {
     throw new NotFoundError(`Repository not found: ${request.repoId}`);
   }
-  await assertGraphRetrievalAvailable(conn, request.repoId);
 
   // Determine retrieval mode
   const retrievalConfig = semanticConfig?.retrieval;
@@ -1032,7 +1030,6 @@ export async function handleSymbolGetCard(
   if (!repo) {
     throw new NotFoundError(`Repository not found: ${request.repoId}`);
   }
-  await assertGraphRetrievalAvailable(conn, request.repoId);
 
   const {
     repoId,
@@ -1103,7 +1100,6 @@ async function handleBatchCards(
   if (!repo) {
     throw new NotFoundError(`Repository not found: ${repoId}`);
   }
-  await assertGraphRetrievalAvailable(conn, repoId);
 
   if (symbolIds) {
     const { cards, symbolMap, succeeded, failures } =

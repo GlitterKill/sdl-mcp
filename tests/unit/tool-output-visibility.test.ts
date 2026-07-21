@@ -362,16 +362,14 @@ describe("visible tool output", () => {
     assert.equal(envelope.content[0]?.text, full);
   });
 
-  it("projects sdl.context structured fields after compact visible projection", async () => {
-    const server = new MCPServer();
-    server.registerTool(
+  it("projects sdl.context structured fields after compact visible projection", () => {
+    const result = buildVisibleEnvelope(
       "sdl.context",
-      "Context test tool",
-      z.object({
-        includeDiagnostics: z.boolean().optional(),
-        options: z.object({ includeRetrievalEvidence: z.boolean().optional() }).optional(),
-      }),
-      async () => ({
+      {
+        includeDiagnostics: true,
+        options: { includeRetrievalEvidence: true },
+      },
+      {
         taskType: "debug",
         success: true,
         answer: "Debug answer",
@@ -379,25 +377,6 @@ describe("visible tool output", () => {
         etag: "context-etag",
         diagnostics: { timings: { totalMs: 12 } },
         retrievalEvidence: { fusionLatencyMs: 7 },
-      }),
-    );
-
-    const handler = getCallToolHandler(server);
-    const result = await handler(
-      {
-        method: "tools/call",
-        params: {
-          name: "sdl.context",
-          arguments: {
-            includeDiagnostics: true,
-            options: { includeRetrievalEvidence: true },
-          },
-        },
-      },
-      {
-        _meta: {},
-        sendNotification: async () => {},
-        signal: new AbortController().signal,
       },
     );
 

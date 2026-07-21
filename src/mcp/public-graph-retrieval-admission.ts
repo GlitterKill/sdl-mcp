@@ -1,12 +1,12 @@
 export type PublicGraphRetrievalAdmission =
-  | { required: false }
-  | { required: true; repoId: string | undefined };
+  | { mode: "excluded" }
+  | { mode: "conditional" }
+  | { mode: "central"; repoId: string | undefined };
 
 const GRAPH_ACTIONS = new Set([
   "symbol.search",
   "symbol.getCard",
   "slice.build",
-  "slice.refresh",
   "slice.spillover.get",
   "delta.get",
   "pr.risk.analyze",
@@ -20,7 +20,6 @@ const GRAPH_FLAT_TOOLS = new Set([
   "sdl.symbol.search",
   "sdl.symbol.getCard",
   "sdl.slice.build",
-  "sdl.slice.refresh",
   "sdl.slice.spillover.get",
   "sdl.delta.get",
   "sdl.pr.risk.analyze",
@@ -53,7 +52,6 @@ const GRAPH_WORKFLOW_STEPS = new Set([
   "symbolSearch",
   "symbolGetCard",
   "sliceBuild",
-  "sliceRefresh",
   "sliceSpilloverGet",
   "deltaGet",
   "prRiskAnalyze",
@@ -63,29 +61,39 @@ const GRAPH_WORKFLOW_STEPS = new Set([
   "repoOverview",
 ]);
 
+const CONDITIONAL_FLAT_TOOLS = new Set(["sdl.slice.refresh"]);
+const CONDITIONAL_GATEWAY_ACTIONS = new Set(["slice.refresh"]);
+const CONDITIONAL_WORKFLOW_STEPS = new Set([
+  "slice.refresh",
+  "sliceRefresh",
+]);
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
 }
 
-function hasGraphWorkflowStep(args: Record<string, unknown>): boolean {
+function hasWorkflowStep(
+  args: Record<string, unknown>,
+  admittedSteps: ReadonlySet<string>,
+): boolean {
   if (!Array.isArray(args.steps)) return false;
   return args.steps.some((step) => {
     const record = asRecord(step);
     return (
-      typeof record?.fn === "string" && GRAPH_WORKFLOW_STEPS.has(record.fn)
+      typeof record?.fn === "string" && admittedSteps.has(record.fn)
     );
   });
 }
 
-/** Exact public-surface allowlist; validated calls never infer a repository. */
+/** Exact public-surface allowlist; central calls never infer a repository. */
 export function classifyPublicGraphRetrieval(
   toolName: string,
   args: unknown,
 ): PublicGraphRetrievalAdmission {
   const request = asRecord(args);
-  const required =
+  const central =
     GRAPH_FLAT_TOOLS.has(toolName) ||
     toolName === "sdl.context" ||
     (request !== undefined &&
@@ -98,14 +106,27 @@ export function classifyPublicGraphRetrieval(
         (toolName === "sdl.file" &&
           typeof request.op === "string" &&
           FILE_WINDOW_OPS.has(request.op)) ||
-        (toolName === "sdl.workflow" && hasGraphWorkflowStep(request))));
+        (toolName === "sdl.workflow" &&
+          hasWorkflowStep(request, GRAPH_WORKFLOW_STEPS))));
 
-  if (!required) return { required: false };
-  return {
-    required: true,
-    repoId:
-      request !== undefined && typeof request.repoId === "string"
-        ? request.repoId
-        : undefined,
-  };
+  if (central) {
+    return {
+      mode: "central",
+      repoId:
+        request !== undefined && typeof request.repoId === "string"
+          ? request.repoId
+          : undefined,
+    };
+  }
+
+  const conditional =
+    CONDITIONAL_FLAT_TOOLS.has(toolName) ||
+    (request !== undefined &&
+      ((GATEWAY_TOOLS.has(toolName) &&
+        typeof request.action === "string" &&
+        CONDITIONAL_GATEWAY_ACTIONS.has(request.action)) ||
+        (toolName === "sdl.workflow" &&
+          hasWorkflowStep(request, CONDITIONAL_WORKFLOW_STEPS))));
+
+  return conditional ? { mode: "conditional" } : { mode: "excluded" };
 }

@@ -101,8 +101,20 @@ const ACTION_AUDIT = [
 const REGISTERED_GRAPH_ACTIONS = new Set(
   ACTION_AUDIT.filter((entry) => entry[3]).map((entry) => entry[0]),
 );
+const CONDITIONAL_GRAPH_ACTIONS = new Set(["slice.refresh"]);
+const CENTRAL_GRAPH_ACTIONS = new Set(
+  [...REGISTERED_GRAPH_ACTIONS].filter(
+    (action) => !CONDITIONAL_GRAPH_ACTIONS.has(action),
+  ),
+);
 const REGISTERED_GRAPH_FLAT_TOOLS = new Set(
   ACTION_AUDIT.filter((entry) => entry[3]).map((entry) => entry[2]),
+);
+const CONDITIONAL_GRAPH_FLAT_TOOLS = new Set(["sdl.slice.refresh"]);
+const CENTRAL_GRAPH_FLAT_TOOLS = new Set(
+  [...REGISTERED_GRAPH_FLAT_TOOLS].filter(
+    (toolName) => !CONDITIONAL_GRAPH_FLAT_TOOLS.has(toolName),
+  ),
 );
 const EXCLUDED_FLAT_TOOLS = new Set(
   ACTION_AUDIT.filter((entry) => !entry[3]).map((entry) => entry[2]),
@@ -117,6 +129,12 @@ const EXCLUDED_ACTION_DEFINITION_ACTIONS = new Set(
 );
 const REGISTERED_GRAPH_WORKFLOW_FNS = new Set(
   ACTION_AUDIT.filter((entry) => entry[3]).map((entry) => entry[1]),
+);
+const CONDITIONAL_GRAPH_WORKFLOW_FNS = new Set(["sliceRefresh"]);
+const CENTRAL_GRAPH_WORKFLOW_FNS = new Set(
+  [...REGISTERED_GRAPH_WORKFLOW_FNS].filter(
+    (fn) => !CONDITIONAL_GRAPH_WORKFLOW_FNS.has(fn),
+  ),
 );
 const EXCLUDED_WORKFLOW_FNS = new Set(
   ACTION_AUDIT.filter((entry) => !entry[3]).map((entry) => entry[1]),
@@ -175,8 +193,11 @@ const gatewayToolByAction = new Map<string, string>([
   ...AGENT_ACTIONS.map((action) => [action, "sdl.agent"] as const),
 ]);
 
-function expected(required: boolean) {
-  return required ? { required: true, repoId: REPO_ID } : { required: false };
+function expected(required: boolean, conditional = false) {
+  if (!required) return { mode: "excluded" };
+  return conditional
+    ? { mode: "conditional" }
+    : { mode: "central", repoId: REPO_ID };
 }
 
 function assertClosedRegistry(
@@ -210,13 +231,15 @@ describe("public graph retrieval admission classifier", () => {
     assertClosedRegistry(
       liveFlatToolNames,
       "live flat tools",
-      REGISTERED_GRAPH_FLAT_TOOLS,
+      CENTRAL_GRAPH_FLAT_TOOLS,
+      CONDITIONAL_GRAPH_FLAT_TOOLS,
       EXCLUDED_FLAT_TOOLS,
     );
     assertClosedRegistry(
       TOOL_INVENTORY.flatToolNames,
       "flat tools",
-      REGISTERED_GRAPH_FLAT_TOOLS,
+      CENTRAL_GRAPH_FLAT_TOOLS,
+      CONDITIONAL_GRAPH_FLAT_TOOLS,
       EXCLUDED_FLAT_TOOLS,
     );
     assertClosedRegistry(
@@ -252,13 +275,15 @@ describe("public graph retrieval admission classifier", () => {
     assertClosedRegistry(
       [...gatewayToolByAction.keys()],
       "gateway actions",
-      REGISTERED_GRAPH_ACTIONS,
+      CENTRAL_GRAPH_ACTIONS,
+      CONDITIONAL_GRAPH_ACTIONS,
       EXCLUDED_GATEWAY_ACTIONS,
     );
     assertClosedRegistry(
       GATEWAY_ACTION_DEFINITIONS.map((definition) => definition.action),
       "action definitions",
-      REGISTERED_GRAPH_ACTIONS,
+      CENTRAL_GRAPH_ACTIONS,
+      CONDITIONAL_GRAPH_ACTIONS,
       EXCLUDED_ACTION_DEFINITION_ACTIONS,
     );
     assertClosedRegistry(
@@ -276,7 +301,8 @@ describe("public graph retrieval admission classifier", () => {
     assertClosedRegistry(
       Object.keys(FN_NAME_MAP),
       "workflow action functions",
-      REGISTERED_GRAPH_WORKFLOW_FNS,
+      CENTRAL_GRAPH_WORKFLOW_FNS,
+      CONDITIONAL_GRAPH_WORKFLOW_FNS,
       EXCLUDED_WORKFLOW_FNS,
     );
     assertClosedRegistry(
@@ -293,7 +319,7 @@ describe("public graph retrieval admission classifier", () => {
       const required = REGISTERED_GRAPH_ACTIONS.has(definition.action);
       assert.deepEqual(
         classifyPublicGraphRetrieval(definition.toolName, { repoId: REPO_ID }),
-        expected(required),
+        expected(required, definition.action === "slice.refresh"),
         definition.toolName,
       );
     }
@@ -307,7 +333,7 @@ describe("public graph retrieval admission classifier", () => {
           repoId: REPO_ID,
           action,
         }),
-        expected(required),
+        expected(required, action === "slice.refresh"),
         `${toolName}:${action}`,
       );
     }
@@ -317,7 +343,10 @@ describe("public graph retrieval admission classifier", () => {
     for (const toolName of TOOL_INVENTORY.flatToolNames) {
       assert.deepEqual(
         classifyPublicGraphRetrieval(toolName, { repoId: REPO_ID }),
-        expected(REGISTERED_GRAPH_FLAT_TOOLS.has(toolName)),
+        expected(
+          REGISTERED_GRAPH_FLAT_TOOLS.has(toolName),
+          CONDITIONAL_GRAPH_FLAT_TOOLS.has(toolName),
+        ),
         toolName,
       );
     }
@@ -420,7 +449,7 @@ describe("public graph retrieval admission classifier", () => {
           repoId: REPO_ID,
           steps: [{ fn: definition.action, args: {} }],
         }),
-        expected(required),
+        expected(required, definition.action === "slice.refresh"),
         definition.action,
       );
 
@@ -430,7 +459,7 @@ describe("public graph retrieval admission classifier", () => {
           repoId: REPO_ID,
           steps: [{ fn: definition.fn, args: {} }],
         }),
-        expected(required),
+        expected(required, definition.action === "slice.refresh"),
         definition.fn,
       );
     }
@@ -479,14 +508,14 @@ describe("public graph retrieval admission classifier", () => {
 
   it("returns only the explicit top-level repoId for gated calls", () => {
     assert.deepEqual(classifyPublicGraphRetrieval("sdl.context", {}), {
-      required: true,
+      mode: "central",
       repoId: undefined,
     });
     assert.deepEqual(
       classifyPublicGraphRetrieval("sdl.workflow", {
         steps: [{ fn: "symbolSearch", args: { repoId: "nested" } }],
       }),
-      { required: true, repoId: undefined },
+      { mode: "central", repoId: undefined },
     );
   });
 
@@ -523,8 +552,8 @@ describe("public graph retrieval admission classifier", () => {
       assert.deepEqual(
         classifyPublicGraphRetrieval(toolName, args),
         isContextWithMissingArgs
-          ? { required: true, repoId: undefined }
-          : { required: false },
+          ? { mode: "central", repoId: undefined }
+          : { mode: "excluded" },
         toolName,
       );
     }

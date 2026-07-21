@@ -8,6 +8,7 @@ import { handleRetrieve } from "../../dist/code-mode/retrieve.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import {
   closeLadybugDb,
+  getLadybugConn,
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
@@ -27,6 +28,7 @@ import {
   handleSymbolSearch,
 } from "../../dist/mcp/tools/symbol.js";
 import { SymbolSearchRequestSchema } from "../../dist/mcp/tools.js";
+import { assertGraphRetrievalAvailable } from "../../dist/services/graph-retrieval-availability.js";
 
 describe("graph retrieval availability", { concurrency: 1 }, () => {
   const root = mkdtempSync(join(tmpdir(), "sdl-graph-retrieval-"));
@@ -230,13 +232,7 @@ describe("graph retrieval availability", { concurrency: 1 }, () => {
     }
   });
 
-  it("fails real symbol, slice, and retrieve handlers closed for unknown no-manifest state", async () => {
-    const actionMap = {
-      "symbol.search": {
-        schema: SymbolSearchRequestSchema,
-        handler: handleSymbolSearch,
-      },
-    } as ActionMap;
+  it("fails the shared availability assertion closed for unknown no-manifest state", async () => {
     const unavailable = (error: unknown): boolean => {
       const typed = error as { code?: string; message?: string };
       return (
@@ -246,34 +242,9 @@ describe("graph retrieval availability", { concurrency: 1 }, () => {
       );
     };
 
+    const conn = await getLadybugConn();
     await assert.rejects(
-      () =>
-        handleSymbolSearch({
-          repoId: "unknown",
-          query: "alpha",
-          semantic: false,
-        }),
-      unavailable,
-    );
-    await assert.rejects(
-      () =>
-        handleSliceBuild({
-          repoId: "unknown",
-          entrySymbols: ["unknown:alpha"],
-          budget: { maxCards: 4, maxEstimatedTokens: 2_000 },
-        }),
-      unavailable,
-    );
-    await assert.rejects(
-      () =>
-        handleRetrieve(
-          {
-            repoId: "unknown",
-            op: "symbolSearch",
-            args: { query: "alpha", semantic: false },
-          },
-          actionMap,
-        ),
+      () => assertGraphRetrievalAvailable(conn, "unknown"),
       unavailable,
     );
   });

@@ -326,7 +326,6 @@ async function handleSliceBuildInternal(
     if (!repo) {
       throw new NotFoundError(`Repository not found: ${repoId}`);
     }
-    await assertGraphRetrievalAvailable(conn, repoId);
     const repoConfig = safeJsonParseOrThrow(
       repo.configJson,
       ConfigObjectSchema,
@@ -905,8 +904,6 @@ export async function handleSliceSpilloverGet(
   if (handleRow.repoId !== request.repoId) {
     throw new ValidationError("repoId does not own this handle");
   }
-  await assertGraphRetrievalAvailable(conn, handleRow.repoId);
-
   recordToolTrace({
     repoId: handleRow.repoId,
     taskType: "slice",
