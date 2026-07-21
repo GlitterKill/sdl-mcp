@@ -484,6 +484,133 @@ describe("saved file graph patch", () => {
     assert.ok(pageQueries >= 2);
   });
 
+  it("prunes only the current repo when a fileless symbol is file-backed elsewhere", async () => {
+    const conn = await getLadybugConn();
+    const filelessBefore = await ladybugDb.listGraphIntegrityFilelessStates(
+      conn,
+      repoId,
+    );
+    const sharedStates = filelessBefore.filter(
+      (state) => state.symbolId !== providerExternalId,
+    );
+    assert.equal(sharedStates.length, 1);
+    const sharedState = sharedStates[0]!;
+    const sharedCanonical = parseGraphIntegrityCanonicalSymbol(
+      sharedState.canonicalSymbolJson,
+    );
+
+    const otherRepoId = "saved-file-graph-patch-repo-b";
+    const otherFileId = generateFileId(otherRepoId, "src/shared.ts");
+    const now = "2026-07-21T12:15:00.000Z";
+    await ladybugDb.upsertRepo(conn, {
+      repoId: otherRepoId,
+      rootPath: repoDir,
+      configJson: JSON.stringify({
+        repoId: otherRepoId,
+        rootPath: repoDir,
+        ignore: [],
+        languages: ["ts"],
+        maxFileBytes: 2_000_000,
+        includeNodeModulesTypes: true,
+      }),
+      createdAt: now,
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId: otherFileId,
+      repoId: otherRepoId,
+      relPath: "src/shared.ts",
+      contentHash: "shared-content-hash",
+      language: "typescript",
+      byteSize: 40,
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertSymbol(conn, {
+      symbolId: sharedState.symbolId,
+      repoId: otherRepoId,
+      fileId: otherFileId,
+      kind: sharedCanonical.kind,
+      name: "sharedFromRepoB",
+      exported: true,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 40,
+      astFingerprint: "repo-b-shared-symbol",
+      signatureJson: JSON.stringify({ name: "sharedFromRepoB" }),
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      source: "treesitter",
+      scipSymbol: null,
+      updatedAt: now,
+    });
+
+    let committedRevision = 0;
+    await patchSavedFile(
+      {
+        repoId,
+        filePath: "src/example.ts",
+        content: [
+          "export function alpha() {",
+          "  return gamma();",
+          "}",
+          "",
+          "export function gamma() {",
+          "  return 5;",
+          "}",
+        ].join("\n"),
+        language: "typescript",
+        version: 5,
+      },
+      {
+        onCommitted(revision) {
+          committedRevision = revision;
+        },
+        onForegroundFullGraphCapture() {
+          assert.fail("cross-repo pruning must remain background verified");
+        },
+      },
+    );
+    assert.ok(committedRevision > 0);
+
+    const repoASymbols = await ladybugDb.getPersistedGraphIntegritySymbolPage(
+      conn,
+      { repoId, limit: 100 },
+    );
+    assert.equal(
+      repoASymbols.some((symbol) => symbol.symbolId === sharedState.symbolId),
+      false,
+    );
+    assert.equal(
+      (
+        await ladybugDb.listGraphIntegrityFilelessStates(conn, repoId)
+      ).some((state) => state.symbolId === sharedState.symbolId),
+      false,
+    );
+
+    const verified = await waitForVerifiedRevision(repoId, committedRevision);
+    assert.equal(verified.graphIntegrityVersionId, "v1");
+
+    const repoBSymbols = await ladybugDb.getPersistedGraphIntegritySymbolPage(
+      conn,
+      { repoId: otherRepoId, limit: 100 },
+    );
+    assert.ok(
+      repoBSymbols.some(
+        (symbol) =>
+          symbol.symbolId === sharedState.symbolId &&
+          symbol.fileId === otherFileId,
+      ),
+    );
+    assert.ok(
+      (await ladybugDb.getSymbolsByFile(conn, otherFileId)).some(
+        (symbol) => symbol.symbolId === sharedState.symbolId,
+      ),
+    );
+  });
+
   it("preserves the durable provider file identity across saved-file patches", async () => {
     let releaseWrite!: () => void;
     const writeGate = new Promise<void>((resolve) => {

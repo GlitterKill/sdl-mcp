@@ -374,7 +374,7 @@ export async function applyGraphIntegrityFilePatchInTransaction(
       conn,
       `UNWIND $rows AS row
        MATCH (s:Symbol {symbolId: row.symbolId})-[rel:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
-       WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+       WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)-[:FILE_IN_REPO]->(:Repo {repoId: $repoId})
        DELETE rel`,
       { repoId: file.repoId, rows },
     );
