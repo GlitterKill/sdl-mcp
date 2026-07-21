@@ -438,14 +438,13 @@ export class PersistedGraphIntegritySession {
     }
 
     this.versionId = targetVersionId;
-    await markGraphIntegrityVerifying(this.repoId, targetVersionId);
-    const verificationState = await getDerivedState(this.repoId);
+    const verificationRevision = await markGraphIntegrityVerifying(
+      this.repoId,
+      targetVersionId,
+    );
     activeVerifications.set(this.repoId, {
       versionId: targetVersionId,
-      revision:
-        verificationState?.graphIntegrityVersionId === targetVersionId
-          ? verificationState.graphIntegrityRevision ?? null
-          : null,
+      revision: verificationRevision,
     });
     try {
       if (this.mode === "incremental") {

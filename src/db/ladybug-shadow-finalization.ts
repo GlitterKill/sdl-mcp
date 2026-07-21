@@ -12,6 +12,7 @@ import {
 } from "./ladybug-clusters.js";
 import type { DerivedStateRow } from "./ladybug-derived-state.js";
 import {
+  assertSafeInt,
   exec,
   execDdl,
   queryAll,
@@ -277,6 +278,9 @@ const DERIVED_STATE_COLUMNS = [
   "graphIntegrityVersionId",
   "graphIntegrityDigest",
   "graphIntegrityError",
+  "graphIntegrityRevision",
+  "graphIntegrityVerifiedRevision",
+  "graphIntegrityFilelessPruningSupported",
 ] as const;
 
 interface AuxiliarySymbolRow {
@@ -901,6 +905,9 @@ async function copyFinalizedRows(params: {
         row.graphIntegrityVersionId,
         row.graphIntegrityDigest,
         row.graphIntegrityError,
+        row.graphIntegrityRevision,
+        row.graphIntegrityVerifiedRevision,
+        row.graphIntegrityFilelessPruningSupported,
       ],
     }),
   ];
@@ -2145,6 +2152,9 @@ async function readDerivedStateRow(
     graphIntegrityVersionId: string | null;
     graphIntegrityDigest: string | null;
     graphIntegrityError: string | null;
+    graphIntegrityRevision: unknown;
+    graphIntegrityVerifiedRevision: unknown;
+    graphIntegrityFilelessPruningSupported: unknown;
   }>(
     conn,
     `MATCH (d:DerivedState {repoId: $repoId})
@@ -2161,10 +2171,29 @@ async function readDerivedStateRow(
             d.graphIntegrityState AS graphIntegrityState,
             d.graphIntegrityVersionId AS graphIntegrityVersionId,
             d.graphIntegrityDigest AS graphIntegrityDigest,
-            d.graphIntegrityError AS graphIntegrityError`,
+            d.graphIntegrityError AS graphIntegrityError,
+            d.graphIntegrityRevision AS graphIntegrityRevision,
+            d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision,
+            d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported`,
     { repoId },
   );
   if (!row) return null;
+  const graphIntegrityRevision = row.graphIntegrityRevision == null
+    ? null
+    : toNumber(row.graphIntegrityRevision);
+  const graphIntegrityVerifiedRevision =
+    row.graphIntegrityVerifiedRevision == null
+      ? null
+      : toNumber(row.graphIntegrityVerifiedRevision);
+  if (graphIntegrityRevision !== null) {
+    assertSafeInt(graphIntegrityRevision, "graphIntegrityRevision");
+  }
+  if (graphIntegrityVerifiedRevision !== null) {
+    assertSafeInt(
+      graphIntegrityVerifiedRevision,
+      "graphIntegrityVerifiedRevision",
+    );
+  }
   return {
     repoId: row.repoId,
     clustersDirty: toBoolean(row.clustersDirty),
@@ -2185,6 +2214,12 @@ async function readDerivedStateRow(
     graphIntegrityVersionId: row.graphIntegrityVersionId,
     graphIntegrityDigest: row.graphIntegrityDigest,
     graphIntegrityError: row.graphIntegrityError,
+    graphIntegrityRevision,
+    graphIntegrityVerifiedRevision,
+    graphIntegrityFilelessPruningSupported:
+      row.graphIntegrityFilelessPruningSupported == null
+        ? null
+        : toBoolean(row.graphIntegrityFilelessPruningSupported),
   };
 }
 

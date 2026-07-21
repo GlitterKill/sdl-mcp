@@ -40,9 +40,9 @@ export interface DerivedStateRow {
   graphIntegrityVersionId: string | null;
   graphIntegrityDigest: string | null;
   graphIntegrityError: string | null;
-  graphIntegrityRevision?: number | null;
-  graphIntegrityVerifiedRevision?: number | null;
-  graphIntegrityFilelessPruningSupported?: boolean | null;
+  graphIntegrityRevision: number | null;
+  graphIntegrityVerifiedRevision: number | null;
+  graphIntegrityFilelessPruningSupported: boolean | null;
 }
 
 export interface DerivedStateDirtyFlags {
@@ -347,18 +347,29 @@ export async function listPendingGraphIntegrityRevisions(): Promise<
 export async function markGraphIntegrityVerifying(
   repoId: string,
   versionId: string,
-): Promise<void> {
+): Promise<number | null> {
   const updatedAt = getCurrentTimestamp();
-  await withWriteConn(async (wConn) => {
-    await exec(
+  return withWriteConn(async (wConn) => {
+    const row = await querySingle<{ revision: unknown }>(
       wConn,
       `MERGE (d:DerivedState {repoId: $repoId})
-       SET d.graphIntegrityState = 'verifying',
+       WITH d, d.graphIntegrityVersionId = $versionId AS sameVersion
+       SET d.graphIntegrityRevision = CASE
+             WHEN sameVersion THEN d.graphIntegrityRevision
+             ELSE NULL
+           END,
+           d.graphIntegrityFilelessPruningSupported = CASE
+             WHEN sameVersion THEN d.graphIntegrityFilelessPruningSupported
+             ELSE NULL
+           END,
+           d.graphIntegrityState = 'verifying',
            d.graphIntegrityVersionId = $versionId,
            d.graphIntegrityError = NULL,
-           d.updatedAt = $updatedAt`,
+           d.updatedAt = $updatedAt
+       RETURN d.graphIntegrityRevision AS revision`,
       { repoId, versionId, updatedAt },
     );
+    return nullableInt64(row?.revision, "graphIntegrityRevision");
   });
 }
 

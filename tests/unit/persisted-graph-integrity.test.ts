@@ -1720,7 +1720,7 @@ describe("persisted graph integrity", () => {
     );
     const markFailed = requiredFunction<AsyncFn>(
       derivedState,
-      "markCurrentGraphIntegrityRevisionFailed",
+      "markUnrevisionedGraphIntegrityFailedIfVerifying",
     );
 
     await markVerifying("repo", "v1");
@@ -1739,13 +1739,14 @@ describe("persisted graph integrity", () => {
 
     await markVerifying("repo", "v2");
     assert.equal(
-      await markFailed("repo", "v2", 0, "sensitive ".repeat(300)),
+      await markFailed("repo", "v2", "sensitive ".repeat(300)),
       true,
     );
     row = await derivedState.getDerivedState("repo");
     assert.equal(row?.graphIntegrityState, "failed");
     assert.equal(row?.graphIntegrityVersionId, "v2");
     assert.equal(row?.graphIntegrityDigest, "a".repeat(64));
+    assert.equal(row?.graphIntegrityRevision, null);
     assert.equal(row?.graphIntegrityVerifiedRevision, 0);
     assert.ok((row?.graphIntegrityError?.length ?? 0) <= 1_024);
   });
@@ -1767,26 +1768,77 @@ describe("persisted graph integrity", () => {
       "v0",
       "a".repeat(64),
     );
-    await markVerifying("repo", "v1");
+    await markVerifying("repo", "v0");
     assert.equal(
       await markFailedIfVerifying("repo", "v2", 0, "stale failure"),
       false,
     );
     let row = await derivedState.getDerivedState("repo");
     assert.equal(row?.graphIntegrityState, "verifying");
-    assert.equal(row?.graphIntegrityVersionId, "v1");
+    assert.equal(row?.graphIntegrityVersionId, "v0");
     assert.equal(row?.graphIntegrityError, null);
 
     assert.equal(
-      await markFailedIfVerifying("repo", "v1", 0, "owned failure"),
+      await markFailedIfVerifying("repo", "v0", 0, "owned failure"),
       true,
     );
     row = await derivedState.getDerivedState("repo");
     assert.equal(row?.graphIntegrityState, "failed");
-    assert.equal(row?.graphIntegrityVersionId, "v1");
+    assert.equal(row?.graphIntegrityVersionId, "v0");
     assert.equal(row?.graphIntegrityDigest, "a".repeat(64));
     assert.equal(row?.graphIntegrityVerifiedRevision, 0);
     assert.equal(row?.graphIntegrityError, "owned failure");
+  });
+
+  it("registers cleanup without a read after marking verification active", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-begin-read-fault-"));
+    await initLadybugDb(join(root, "begin-read-fault.lbug"));
+    const Session = requiredFunction<SyncFn>(
+      integrityModule,
+      "PersistedGraphIntegritySession",
+    ) as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+    };
+    const hasActive = requiredFunction<SyncFn>(
+      integrityModule,
+      "hasActiveGraphIntegrityVerification",
+    );
+    const failActive = requiredFunction<AsyncFn>(
+      integrityModule,
+      "failActiveGraphIntegrityVerification",
+    );
+    const readConnections = await Promise.all([
+      getLadybugConn(),
+      getLadybugConn(),
+      getLadybugConn(),
+      getLadybugConn(),
+    ]);
+    const originalPrepare = readConnections.map((conn) => conn.prepare);
+    for (const conn of readConnections) {
+      conn.prepare = async () => {
+        throw new Error("injected read failure");
+      };
+    }
+
+    const session = new Session("repo", "full", true);
+    try {
+      await assert.doesNotReject(() => session.begin("v1"));
+    } finally {
+      readConnections.forEach((conn, index) => {
+        conn.prepare = originalPrepare[index];
+      });
+    }
+    assert.equal(hasActive("repo"), true);
+    await failActive("repo");
+
+    const row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityState, "failed");
+    assert.equal(row?.graphIntegrityVersionId, "v1");
+    assert.equal(row?.graphIntegrityRevision, null);
   });
 
   it("marks an aborted unrevisioned verification failed without clearing its baseline", async () => {
@@ -2318,6 +2370,67 @@ describe("persisted graph integrity", () => {
       true,
     );
   });
+
+  it("restarts synchronous verification at revision zero for a new Version", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-new-version-revision-"));
+    await initLadybugDb(join(root, "new-version-revision.lbug"));
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-21T00:00:00.000Z",
+      });
+      await derivedState.beginGraphIntegrityVersion(
+        conn,
+        "repo",
+        "v1",
+        "a".repeat(64),
+        false,
+      );
+    });
+    assert.equal(
+      await derivedState.advanceGraphIntegrityRevisionInTransaction(
+        await getLadybugConn(),
+        "repo",
+        "v1",
+        0,
+      ),
+      1,
+    );
+    assert.equal(
+      await derivedState.markGraphIntegrityVerifiedIfVerifying(
+        "repo",
+        "v1",
+        1,
+        "b".repeat(64),
+      ),
+      true,
+    );
+
+    const Session = requiredFunction<SyncFn>(
+      integrityModule,
+      "PersistedGraphIntegritySession",
+    ) as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+      complete: (versionId: string) => Promise<void>;
+    };
+    const session = new Session("repo", "full", true);
+    await session.begin("v2");
+    await session.complete("v2");
+
+    const row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityState, "verified");
+    assert.equal(row?.graphIntegrityVersionId, "v2");
+    assert.equal(row?.graphIntegrityRevision, 0);
+    assert.equal(row?.graphIntegrityVerifiedRevision, 0);
+    assert.equal(row?.graphIntegrityFilelessPruningSupported, true);
+  });
+
   it("bridges migrated null revisions through full and incremental synchronous verification", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-integrity-sync-revisions-"));
     await initLadybugDb(join(root, "sync-revisions.lbug"));
