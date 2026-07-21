@@ -276,6 +276,9 @@ describe("saved file graph patch", () => {
   });
 
   it("serializes concurrent saved-file integrity patches for the same repository", async () => {
+    const startingState = await getDerivedState(repoId);
+    assert.equal(startingState?.graphIntegrityState, "verified");
+    const startingRevision = startingState!.graphIntegrityRevision!;
     const request = {
       repoId,
       filePath: "src/example.ts",
@@ -308,7 +311,7 @@ describe("saved file graph patch", () => {
     ]);
     assert.equal(patched.length, 2);
     assert.ok(patched.every((result) => result.fileId === durableFileId));
-    assert.deepStrictEqual(revisions, [1, 2]);
+    assert.deepStrictEqual(revisions, [startingRevision + 1, startingRevision + 2]);
     assert.equal(foregroundCaptures, 0);
 
     const conn = await getLadybugConn();
@@ -326,7 +329,7 @@ describe("saved file graph patch", () => {
 
     const state = await getDerivedState(repoId);
     assert.equal(state?.graphIntegrityVersionId, "v1");
-    assert.equal(state?.graphIntegrityRevision, 2);
+    assert.equal(state?.graphIntegrityRevision, startingRevision + 2);
     const filelessStates = await ladybugDb.listGraphIntegrityFilelessStates(
       conn,
       repoId,
@@ -343,7 +346,7 @@ describe("saved file graph patch", () => {
         compareGraphIntegrityExpectations(manifestExpectation, committedGraph),
       ),
     );
-    await waitForVerifiedRevision(repoId, 2);
+    await waitForVerifiedRevision(repoId, startingRevision + 2);
     const verifiedFileless = await ladybugDb.listGraphIntegrityFilelessStates(
       conn,
       repoId,
@@ -379,6 +382,13 @@ describe("saved file graph patch", () => {
   });
 
   it("returns rapid edits independently while only the newest revision publishes", async (t) => {
+    const startingState = await getDerivedState(repoId);
+    assert.equal(startingState?.graphIntegrityState, "verified");
+    const startingRevision = startingState!.graphIntegrityRevision!;
+    const startingVerifiedRevision =
+      startingState!.graphIntegrityVerifiedRevision!;
+    const firstRevision = startingRevision + 1;
+    const secondRevision = startingRevision + 2;
     await clearTestPreparedStatementCaches();
     const statements = new WeakMap<object, string>();
     const firstPageStarted = deferred();
@@ -450,8 +460,11 @@ describe("saved file graph patch", () => {
     await firstPatch;
     const firstState = await getDerivedState(repoId);
     assert.equal(firstState?.graphIntegrityState, "verifying");
-    assert.equal(firstState?.graphIntegrityRevision, 3);
-    assert.equal(firstState?.graphIntegrityVerifiedRevision, 2);
+    assert.equal(firstState?.graphIntegrityRevision, firstRevision);
+    assert.equal(
+      firstState?.graphIntegrityVerifiedRevision,
+      startingVerifiedRevision,
+    );
 
     await patchSavedFile(
       {
@@ -472,19 +485,51 @@ describe("saved file graph patch", () => {
       observer,
     );
     const secondState = await getDerivedState(repoId);
-    assert.deepStrictEqual(committedRevisions, [3, 4]);
+    assert.deepStrictEqual(committedRevisions, [firstRevision, secondRevision]);
     assert.equal(secondState?.graphIntegrityState, "verifying");
-    assert.equal(secondState?.graphIntegrityRevision, 4);
-    assert.equal(secondState?.graphIntegrityVerifiedRevision, 2);
+    assert.equal(secondState?.graphIntegrityRevision, secondRevision);
+    assert.equal(
+      secondState?.graphIntegrityVerifiedRevision,
+      startingVerifiedRevision,
+    );
     assert.deepStrictEqual(publishedRevisions, []);
 
     releaseFirstPage.resolve();
-    await waitForVerifiedRevision(repoId, 4);
-    assert.deepStrictEqual(publishedRevisions, [4]);
+    await waitForVerifiedRevision(repoId, secondRevision);
+    assert.deepStrictEqual(publishedRevisions, [secondRevision]);
     assert.ok(pageQueries >= 2);
   });
 
   it("prunes only the current repo when a fileless symbol is file-backed elsewhere", async () => {
+    let seededRevision = 0;
+    await patchSavedFile(
+      {
+        repoId,
+        filePath: "src/example.ts",
+        content: [
+          "export function alpha() {",
+          "  return gamma() + sharedAcrossRepos();",
+          "}",
+          "",
+          "export function gamma() {",
+          "  return 5;",
+          "}",
+        ].join("\n"),
+        language: "typescript",
+        version: 5,
+      },
+      {
+        onCommitted(revision) {
+          seededRevision = revision;
+        },
+        onForegroundFullGraphCapture() {
+          assert.fail("cross-repo setup must remain background verified");
+        },
+      },
+    );
+    assert.ok(seededRevision > 0);
+    await waitForVerifiedRevision(repoId, seededRevision);
+
     const conn = await getLadybugConn();
     const filelessBefore = await ladybugDb.listGraphIntegrityFilelessStates(
       conn,
@@ -562,7 +607,7 @@ describe("saved file graph patch", () => {
           "}",
         ].join("\n"),
         language: "typescript",
-        version: 5,
+        version: 6,
       },
       {
         onCommitted(revision) {
