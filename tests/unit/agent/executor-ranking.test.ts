@@ -773,7 +773,7 @@ describe("Executor focus selection", () => {
     );
   });
 
-  it("does not hard-filter inferred focus paths in precise mode", async () => {
+  it("keeps explicit focus authoritative when inferred paths are also present", async () => {
     const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
 
     const selected = await privateExecutor.selectTopSymbols(
@@ -789,11 +789,7 @@ describe("Executor focus selection", () => {
       srcSeeds(),
     );
 
-    assert.ok(
-      selected.some((symbolId) =>
-        symbolMap.get(symbolId)?.fileId.includes(":src/"),
-      ),
-    );
+    assertOnlyTests(selected, symbolMap);
   });
 
   it("enforces explicit focus paths when no identifiers or seeds are available", async () => {
@@ -838,7 +834,7 @@ describe("Executor focus selection", () => {
     assert.deepEqual(selected, ["src-alpha", "src-beta", "src-gamma"]);
   });
 
-  it("caps inferred early returns without hard-filtering their soft scope", async () => {
+  it("does not inject inferred paths ahead of the ranked selection", async () => {
     const { privateExecutor, symbolMap } = createSelectionFixture();
     const inferredLast = [
       "src-alpha",
@@ -867,16 +863,7 @@ describe("Executor focus selection", () => {
       ),
     );
     assert.equal(selected.length, 3);
-    assert.ok(
-      selected.some((symbolId) =>
-        symbolMap.get(symbolId)?.fileId.includes(":tests/"),
-      ),
-    );
-    assert.ok(
-      selected.some((symbolId) =>
-        symbolMap.get(symbolId)?.fileId.includes(":src/"),
-      ),
-    );
+    assert.deepEqual(selected, inferredLast.slice(0, 3));
   });
 
   it("returns an empty selection without hydrating an empty symbol list", async () => {
@@ -891,7 +878,7 @@ describe("Executor focus selection", () => {
     assert.deepEqual(selected, []);
   });
 
-  it("bounds cumulative inferred replacements only for forced semantic", () => {
+  it("does not replace ordered fallback candidates for inferred paths", () => {
     const { privateExecutor, symbolMap } = createSelectionFixture();
     const ranked = [
       "src-alpha",
@@ -921,21 +908,12 @@ describe("Executor focus selection", () => {
         ranked,
       );
 
-    const forced = finalize(true);
-    assert.equal(
-      forced.filter((symbolId) => symbolId.startsWith("test-")).length,
-      2,
-    );
-    assert.equal(
-      forced.filter((symbolId) => symbolId.startsWith("src-")).length,
-      1,
-    );
-    for (const semantic of [undefined, false] as const) {
-      assert.ok(finalize(semantic).every((symbolId) => symbolId.startsWith("test-")));
+    for (const semantic of [true, undefined, false] as const) {
+      assert.deepEqual(finalize(semantic), ranked.slice(0, 3));
     }
   });
 
-  it("ranks forced semantic retrieval before bounded inferred coverage", async () => {
+  it("keeps explicit focus authoritative during forced semantic retrieval", async () => {
     const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
     symbolMap.get("src-alpha")!.name = "adjustForBudget";
     symbolMap.get("src-beta")!.name = "maxTokens";
@@ -981,19 +959,7 @@ describe("Executor focus selection", () => {
         competitionSeeds,
       );
 
-    const forced = await select(true);
-    assert.equal(
-      forced.filter((symbolId) => symbolMap.get(symbolId)?.fileId.includes(":src/"))
-        .length,
-      1,
-      `Expected one lexical source symbol, got ${forced.join(", ")}`,
-    );
-    assert.equal(
-      forced.filter((symbolId) => symbolMap.get(symbolId)?.fileId.includes(":tests/"))
-        .length,
-      2,
-    );
-    for (const semantic of [undefined, false] as const) {
+    for (const semantic of [true, undefined, false] as const) {
       assertOnlyTests(await select(semantic), symbolMap);
     }
   });

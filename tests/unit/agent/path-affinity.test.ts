@@ -25,14 +25,14 @@ function createSymbol(
 }
 
 describe("path affinity", () => {
-  it("uses caller focus paths only when no inferred paths exist", () => {
+  it("keeps caller focus paths authoritative when inferred paths exist", () => {
     assert.deepEqual(explicitFocusPaths({ focusPaths: ["tests"] }), ["tests"]);
     assert.deepEqual(
       explicitFocusPaths({
         focusPaths: ["tests"],
         inferredFocusPaths: ["src"],
       }),
-      [],
+      ["tests"],
     );
     assert.deepEqual(explicitFocusPaths(undefined), []);
   });

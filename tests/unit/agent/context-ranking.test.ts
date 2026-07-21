@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  computeReviewImportanceBySymbolId,
+  explicitFocusPaths,
+  inferEvidenceFocusPaths,
   rankSymbols,
   scorePathAffinity,
   selectFinalSymbols,
@@ -23,6 +26,16 @@ function createSymbol(
 }
 
 describe("context ranking relevance", () => {
+  it("keeps explicit focus authoritative when inferred paths are present", () => {
+    assert.deepEqual(
+      explicitFocusPaths({
+        focusPaths: ["src/explicit.ts"],
+        inferredFocusPaths: ["src/inferred.ts"],
+      }),
+      ["src/explicit.ts"],
+    );
+  });
+
   it("does not penalize source files whose names contain output", () => {
     assert.equal(
       scorePathAffinity(
@@ -172,97 +185,74 @@ describe("context ranking relevance", () => {
     assert.equal(result.ranked[0]?.symbolId, "response-builder");
   });
 
-  it("selects generic tool-review representatives without prompt-specific activation", () => {
-    const accepted = new Set([
-      "buildFlatToolDescriptors",
-      "registerTool",
-      "buildToolResponseEnvelope",
-      "asStructuredContent",
-      "handleRuntimeQueryOutput",
+  it("infers evidence scope from distinct task terms in symbol names", () => {
+    const symbols = new Map<string, RankableSymbol>([
+      ["decode", createSymbol("repo:src/transport.ts", { name: "decodeRequestBody" })],
+      ["encode", createSymbol("repo:src/transport.ts", { name: "encodeResponseBody" })],
+      ["failure", createSymbol("repo:src/errors.ts", { name: "formatFailure" })],
+      ["noise", createSymbol("repo:src/misc.ts", { name: "formatValue" })],
+      ["generated", createSymbol("repo:outputs/demo.ts", { name: "decodeRequestBody" })],
     ]);
-    const prohibited = new Set([
-      "renderMeta",
-      "renderGrid",
-      "evaluateSeedResolution",
-      "evaluateCase",
+
+    assert.deepEqual(
+      inferEvidenceFocusPaths(
+        symbols,
+        ["request", "response", "failure", "format"],
+        {
+          taskType: "review",
+          taskText: "Review request and response failure formatting.",
+          repoId: "repo",
+        },
+      ),
+      ["src/errors.ts", "src/transport.ts"],
+    );
+  });
+
+  it("uses PageRank only inside a bounded review-importance score", () => {
+    const importance = computeReviewImportanceBySymbolId(
+      ["leaf", "entry", "hub"],
+      new Map([
+        ["leaf", { fanIn: 0, fanOut: 0, kCore: 0, pageRank: 0 }],
+        ["entry", { fanIn: 2, fanOut: 3, kCore: 2, pageRank: 0.01 }],
+        ["hub", { fanIn: 20, fanOut: 8, kCore: 6, pageRank: 0.9 }],
+      ]),
+    );
+
+    assert.equal(importance.get("leaf"), 0);
+    assert.ok((importance.get("entry") ?? 0) > 0);
+    assert.equal(importance.get("hub"), 32);
+  });
+
+  it("adds only the strongest graph-backed near-coverage file", () => {
+    const symbols = new Map<string, RankableSymbol>([
+      ["primary-a", createSymbol("repo:src/api.ts", { name: "decodeRequestBody" })],
+      ["primary-b", createSymbol("repo:src/api.ts", { name: "encodeResponseFailure" })],
+      ["bridge-a", createSymbol("repo:src/entry.ts", { name: "decodeRequestResponseFailure" })],
+      ["noise-a", createSymbol("repo:src/noise.ts", { name: "decodeRequestResponseFailure" })],
     ]);
-    const entries: Array<[string, RankableSymbol]> = [
-      [
-        "descriptor-build",
-        createSymbol("repo:src/mcp/tools/tool-descriptors.ts", {
-          name: "buildFlatToolDescriptors",
-          summary: "Builds stable descriptors for the registered MCP tool surface.",
-          searchText: "tool descriptors schema contract deterministic",
-        }),
-      ],
-      [
-        "descriptor-register",
-        createSymbol("repo:src/mcp/tools/tool-descriptors.ts", {
-          name: "registerTool",
-          summary: "Registers a tool with its deterministic schema and handler.",
-          searchText: "tool registration schema contract",
-        }),
-      ],
-      [
-        "server-envelope",
-        createSymbol("repo:src/server.ts", {
-          name: "buildToolResponseEnvelope",
-          summary: "Builds the stable MCP tool response envelope.",
-          searchText: "tool response envelope contract structured content",
-        }),
-      ],
-      [
-        "server-structured",
-        createSymbol("repo:src/server.ts", {
-          name: "asStructuredContent",
-          summary: "Converts tool output into structured MCP response content.",
-          searchText: "structured content response contract",
-        }),
-      ],
-      [
-        "runtime-handler",
-        createSymbol("repo:src/mcp/tools/runtime-query.ts", {
-          name: "handleRuntimeQueryOutput",
-          summary: "Handles persisted runtime output queries and safe errors.",
-          searchText: "runtime query output safe error response",
-        }),
-      ],
-      ["logo-meta", createSymbol("repo:outputs/logos/meta.js", { name: "renderMeta" })],
-      ["logo-grid", createSymbol("repo:outputs/logos/grid.js", { name: "renderGrid" })],
-      ["seed-evaluation", createSymbol("repo:scripts/evaluate-seed-resolution.ts", { name: "evaluateSeedResolution" })],
-      ["case-evaluation", createSymbol("repo:tests/benchmark/context-quality.test.ts", { name: "evaluateCase" })],
-      ["unrelated-edit", createSymbol("repo:src/mcp/tools/search-edit/index.ts", { name: "applyFilePlan" })],
-      ["unrelated-projection", createSymbol("repo:src/mcp/context-response-projection.ts", { name: "projectWorkflowResultForModel" })],
-    ];
-    const symbols = new Map(entries);
-    const task = {
-      taskType: "review" as const,
-      taskText: "Review the current SDL-MCP tool surface for contracts, output noise, deterministic responses, and safe errors.",
-      repoId: "repo",
-      options: { contextMode: "broad" as const, semantic: true },
-    };
-    const ranking = rankSymbols(entries.map(([symbolId]) => symbolId), symbols, [], task, {
-      seedCandidates: entries.map(([symbolId], sourceRank) => ({
-        contextRef: `symbol:${symbolId}`,
-        source: sourceRank < 5 ? ("lexical" as const) : ("semantic" as const),
-        // The live graph reaches the desired declarations through lower-scored
-        // file expansion, while direct semantic noise starts much higher.
-        score: sourceRank < 5 ? 0.05 : 1 - (sourceRank - 5) / 20,
-        sourceRank,
-        ...(sourceRank < 5
-          ? {
-              expandedFrom: `fileSummary:${entries[sourceRank]?.[1].fileId}`,
-              expansionReason: "fileSummary" as const,
-            }
-          : {}),
-      })),
-    });
+    const paths = inferEvidenceFocusPaths(
+      symbols,
+      ["decode", "request", "encode", "response", "failure"],
+      {
+        taskType: "review",
+        taskText: "Review request decoding, response encoding, and failures.",
+        repoId: "repo",
+      },
+      {
+        retrievalPriors: new Map([
+          ["primary-a", 1],
+          ["primary-b", 1],
+          ["bridge-a", 0.75],
+          ["noise-a", 0.75],
+        ]),
+        metrics: new Map([
+          ["bridge-a", { fanIn: 4, fanOut: 3, kCore: 2 }],
+          ["noise-a", { fanIn: 1, fanOut: 1, kCore: 1 }],
+        ]),
+      },
+    );
 
-    const selectedNames = selectFinalSymbols(ranking, symbols, task, 10)
-      .map((symbolId) => symbols.get(symbolId)?.name);
-
-    assert.ok(selectedNames.filter((name) => name && accepted.has(name)).length >= 4);
-    assert.equal(selectedNames.filter((name) => name && prohibited.has(name)).length, 0);
+    assert.deepEqual(paths, ["src/api.ts", "src/entry.ts"]);
   });
 
   it("keeps explicit focus below the generic adaptive cutoff", () => {
@@ -286,7 +276,7 @@ describe("context ranking relevance", () => {
     assert.deepEqual(selectFinalSymbols(ranking, symbols, task, 5), ["focused"]);
   });
 
-  it("interleaves broad inferred-path coverage after the strongest retrieval seeds", () => {
+  it("does not inject inferred coverage after the final selector", () => {
     const semanticEntries: Array<[string, RankableSymbol]> = Array.from(
       { length: 16 },
       (_, index) => [
@@ -342,18 +332,13 @@ describe("context ranking relevance", () => {
 
     const selected = selectFinalSymbols(ranking, symbols, task, 16);
     const firstTen = selected.slice(0, 10);
-    const focusedFirstTen = firstTen.filter((symbolId) =>
-      focusEntries.some(([focusId]) => focusId === symbolId),
+    assert.deepEqual(
+      firstTen,
+      Array.from({ length: 10 }, (_, index) => `semantic-${index}`),
     );
-
-    assert.equal(selected[0], "semantic-0");
-    assert.ok(focusedFirstTen.length >= 4);
-    assert.ok(firstTen.some((symbolId) => symbolId.startsWith("server-")));
-    assert.ok(firstTen.some((symbolId) => symbolId.startsWith("tools-")));
-    assert.ok(firstTen.some((symbolId) => symbolId.startsWith("handler-")));
   });
 
-  it("orders inferred-path coverage by task relevance instead of retrieval prior", () => {
+  it("does not promote inferred paths without ranking support", () => {
     const semanticEntries: Array<[string, RankableSymbol]> = Array.from(
       { length: 16 },
       (_, index) => [
@@ -442,8 +427,11 @@ describe("context ranking relevance", () => {
     );
 
     const selected = selectFinalSymbols(ranking, symbols, task, 16);
+    const selectedFocus = selected.filter((symbolId) =>
+      focusEntries.some(([focusId]) => focusId === symbolId),
+    );
 
-    assert.ok(selected.includes("response-builder"));
+    assert.deepEqual(selectedFocus, []);
   });
 
   it("diversifies generic final cards toward declarations across files", () => {

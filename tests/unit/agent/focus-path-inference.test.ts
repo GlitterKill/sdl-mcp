@@ -109,52 +109,6 @@ describe("inferFocusPathsFromTaskText", () => {
     );
   });
 
-  it("infers MCP contract paths for structured output prompts", () => {
-    const paths = inferFocusPathsFromTaskText(
-      "check MCP outputSchema structuredContent registerTool contract behavior",
-    );
-
-    assert.ok(
-      paths.includes("src/server.ts"),
-      `Expected server registration path in ${JSON.stringify(paths)}`,
-    );
-    assert.ok(
-      paths.includes("src/mcp/tools.ts"),
-      `Expected MCP tools schema path in ${JSON.stringify(paths)}`,
-    );
-  });
-
-  it("infers tool-surface paths for SDL tool QA prompts", () => {
-    const paths = inferFocusPathsFromTaskText(
-      "SDL tool QA contract pass for inputSchema outputSchema structuredContent and noisy sdl.context evidence",
-    );
-
-    assert.ok(
-      paths.includes("src/server.ts"),
-      `Expected server registration path in ${JSON.stringify(paths)}`,
-    );
-    assert.ok(
-      paths.includes("src/mcp/tools.ts"),
-      `Expected MCP tools schema path in ${JSON.stringify(paths)}`,
-    );
-    assert.ok(
-      paths.includes("src/mcp/tools/"),
-      `Expected MCP tool handler path in ${JSON.stringify(paths)}`,
-    );
-  });
-
-  it("infers dispatch, gateway, and formatter files for broad tool QA", () => {
-    const paths = inferFocusPathsFromTaskText(
-      "Retrieve code context for SDL tool functionality QA: MCP dispatch, workflow, tool formatting",
-    );
-
-    assert.deepStrictEqual(paths, [
-      "src/server.ts",
-      "src/gateway/router.ts",
-      "src/mcp/tool-call-formatter.ts",
-    ]);
-  });
-
   it("returns empty array for unrecognized queries", () => {
     const paths = inferFocusPathsFromTaskText("what is the meaning of life?");
     assert.deepStrictEqual(paths, []);

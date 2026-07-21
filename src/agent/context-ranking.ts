@@ -32,6 +32,14 @@ export interface RankableSymbol {
   fileId?: string;
 }
 
+export interface ReviewImportanceMetric {
+  fanIn: number;
+  fanOut: number;
+  testRefsJson?: string | null;
+  pageRank?: number;
+  kCore?: number;
+}
+
 /** Behavioral kinds that get a structural bonus. */
 const BEHAVIORAL_KINDS = new Set([
   "function",
@@ -362,9 +370,7 @@ function isTopLevelGeneratedOutputPath(relPath: string): boolean {
 export function explicitFocusPaths(
   options: TaskOptions | undefined,
 ): string[] {
-  return options?.inferredFocusPaths?.length
-    ? []
-    : (options?.focusPaths ?? []).filter((path) => path.trim().length > 0);
+  return (options?.focusPaths ?? []).filter((path) => path.trim().length > 0);
 }
 
 export function pathMatchesFocus(
@@ -537,6 +543,7 @@ export function rankSymbols(
     seedCandidates?: ContextSeedCandidate[];
     feedbackBoosts?: Map<string, number>;
     anchorSymbolIds?: string[];
+    reviewImportance?: Map<string, number>;
   },
 ): SymbolRankingResult {
   const taskTextLower = task.taskText.toLowerCase();
@@ -593,6 +600,7 @@ export function rankSymbols(
         pathAffinity: 0,
         languageAffinity: 0,
         genericModulePenalty: 0,
+        reviewImportance: 0,
         candidateCategories: Array.from(seedCategoryMap.get(symbolId) ?? []).sort(),
       });
       continue;
@@ -654,6 +662,7 @@ export function rankSymbols(
       pathAffinity,
       languageAffinity,
       genericModulePenalty,
+      reviewImportance: options?.reviewImportance?.get(symbolId) ?? 0,
       candidateCategories: Array.from(seedCategoryMap.get(symbolId) ?? []).sort(),
     });
   }
@@ -791,6 +800,183 @@ function extractTaskCoverageTerms(taskText: string): string[] {
   );
 }
 
+function splitIdentifierWords(value: string): string[] {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 3);
+}
+
+/**
+ * Infer a small evidence scope from agreement between task terms and symbol
+ * names already retrieved. Every file tied for the strongest distinct-term
+ * coverage is retained; no file is chosen from a prompt-specific concept map.
+ */
+export function inferEvidenceFocusPaths(
+  symbols: Map<string, RankableSymbol>,
+  identifiers: string[],
+  task: AgentTask,
+  evidence?: {
+    retrievalPriors?: Map<string, number>;
+    metrics?: Map<string, ReviewImportanceMetric>;
+  },
+): string[] {
+  const identifierTerms = new Set(
+    identifiers.flatMap((identifier) => splitIdentifierWords(identifier)),
+  );
+  if (identifierTerms.size === 0) return [];
+
+  const coverageByPath = new Map<string, Set<string>>();
+  const priorByPath = new Map<string, number>();
+  const graphReachByPath = new Map<string, number>();
+  const pageRankByPath = new Map<string, number>();
+  for (const [symbolId, symbol] of symbols) {
+    const path = repositoryRelativeSymbolPath(symbol);
+    if (!path) continue;
+    if (
+      scorePathAffinity(
+        symbol,
+        { explicit: [], inferred: [] },
+        task.taskText.toLowerCase(),
+        task.options?.includeTests,
+      ) < 0
+    ) {
+      continue;
+    }
+
+    const nameTerms = new Set(splitIdentifierWords(symbol.name));
+    const matchedTerms = [...identifierTerms].filter((term) => nameTerms.has(term));
+    if (matchedTerms.length === 0) continue;
+    const coverage = coverageByPath.get(path) ?? new Set<string>();
+    for (const term of matchedTerms) coverage.add(term);
+    coverageByPath.set(path, coverage);
+    priorByPath.set(
+      path,
+      Math.max(priorByPath.get(path) ?? 0, evidence?.retrievalPriors?.get(symbolId) ?? 0),
+    );
+    const metrics = evidence?.metrics?.get(symbolId);
+    if (metrics) {
+      graphReachByPath.set(
+        path,
+        Math.max(
+          graphReachByPath.get(path) ?? 0,
+          Math.max(0, metrics.fanIn) +
+            Math.max(0, metrics.fanOut) +
+            2 * Math.max(0, metrics.kCore ?? 0),
+        ),
+      );
+      pageRankByPath.set(
+        path,
+        Math.max(pageRankByPath.get(path) ?? 0, metrics.pageRank ?? 0),
+      );
+    }
+  }
+
+  const maxCoverage = Math.max(
+    0,
+    ...[...coverageByPath.values()].map((coverage) => coverage.size),
+  );
+  if (maxCoverage < 2) return [];
+  const strongestPrior = Math.max(0, ...priorByPath.values());
+  const hasPriorEvidence = strongestPrior > 0;
+  const hasMaterialPrior = (path: string): boolean =>
+    !hasPriorEvidence || (priorByPath.get(path) ?? 0) * 2 >= strongestPrior;
+  const selected = new Set(
+    [...coverageByPath.entries()]
+      .filter(
+        ([path, coverage]) =>
+          coverage.size === maxCoverage && hasMaterialPrior(path),
+      )
+      .map(([path]) => path),
+  );
+
+  // A directly retrieved file one term behind the leaders may be the
+  // composition root. Retain only the strongest graph-reach tier, using
+  // PageRank solely to break reach ties.
+  const bridgeCandidates = [...coverageByPath.entries()]
+    .filter(
+      ([path, coverage]) =>
+        maxCoverage >= 3 &&
+        coverage.size === maxCoverage - 1 &&
+        hasMaterialPrior(path) &&
+        (graphReachByPath.get(path) ?? 0) > 0,
+    )
+    .map(([path]) => path);
+  const maxBridgeReach = Math.max(
+    0,
+    ...bridgeCandidates.map((path) => graphReachByPath.get(path) ?? 0),
+  );
+  const maxBridgePageRank = Math.max(
+    0,
+    ...bridgeCandidates
+      .filter((path) => (graphReachByPath.get(path) ?? 0) === maxBridgeReach)
+      .map((path) => pageRankByPath.get(path) ?? 0),
+  );
+  for (const path of bridgeCandidates) {
+    if (
+      (graphReachByPath.get(path) ?? 0) === maxBridgeReach &&
+      (pageRankByPath.get(path) ?? 0) === maxBridgePageRank
+    ) {
+      selected.add(path);
+    }
+  }
+
+  return [...selected].sort((a, b) => a.localeCompare(b));
+}
+
+function countTestReferences(testRefsJson: string | null | undefined): number {
+  if (!testRefsJson) return 0;
+  try {
+    const parsed: unknown = JSON.parse(testRefsJson);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Build a review-only importance signal for task-relevant candidates. Global
+ * PageRank is candidate-relative and capped at 12 points so it remains a
+ * tie-breaker instead of replacing lexical/retrieval relevance.
+ */
+export function computeReviewImportanceBySymbolId(
+  candidateIds: string[],
+  metricsBySymbolId: Map<string, ReviewImportanceMetric>,
+): Map<string, number> {
+  const positivePageRanks = [
+    ...new Set(
+      candidateIds
+        .map((symbolId) => metricsBySymbolId.get(symbolId)?.pageRank ?? 0)
+        .filter((pageRank) => pageRank > 0),
+    ),
+  ].sort((a, b) => a - b);
+  const result = new Map<string, number>();
+
+  for (const symbolId of candidateIds) {
+    const metrics = metricsBySymbolId.get(symbolId);
+    if (!metrics) continue;
+    const pageRank = metrics.pageRank ?? 0;
+    const pageRankIndex = positivePageRanks.indexOf(pageRank);
+    const pageRankQuantile =
+      pageRankIndex < 0
+        ? 0
+        : positivePageRanks.length === 1
+          ? 1
+          : pageRankIndex / (positivePageRanks.length - 1);
+    const graphReach = Math.min(
+      20,
+      Math.max(0, metrics.fanIn) +
+        1.5 * Math.max(0, metrics.fanOut) +
+        2 * Math.max(0, metrics.kCore ?? 0) +
+        Math.log2(1 + countTestReferences(metrics.testRefsJson)),
+    );
+    result.set(symbolId, Math.min(32, graphReach + 12 * pageRankQuantile));
+  }
+
+  return result;
+}
+
 function taskCoverageTerms(
   symbol: RankableSymbol | undefined,
   identifiers: string[],
@@ -824,6 +1010,12 @@ function selectDiverseFinalCandidates(
 ): string[] {
   const scoreById = new Map(
     ranking?.ranked.map(({ symbolId, totalScore }) => [symbolId, totalScore]) ?? [],
+  );
+  const reviewImportanceById = new Map(
+    ranking?.ranked.map(({ symbolId, reviewImportance }) => [
+      symbolId,
+      reviewImportance,
+    ]) ?? [],
   );
   const categoriesById = new Map(
     ranking?.ranked.map(({ symbolId, candidateCategories }) => [
@@ -862,6 +1054,7 @@ function selectDiverseFinalCandidates(
       const adjustedScore =
         (scoreById.get(symbolId) ?? 0) -
         declarationPenalty(symbol) +
+        (reviewImportanceById.get(symbolId) ?? 0) +
         Math.min(12, novelTermCount * 3) +
         Math.min(6, novelCategoryCount * 2);
 
@@ -963,94 +1156,7 @@ export function selectFinalSymbols(
     return candidates;
   }
 
-  if (inferredPaths.length === 0 || candidates.length === 0) return candidates;
-
-  const selected = new Set(candidates);
-  const additions: string[] = [];
-  const selectedFocusCount = candidates.filter((symbolId) =>
-    inferredPaths.some((focusPath) => matchesPath(symbolId, focusPath)),
-  ).length;
-  const maxTotalFocusSymbols =
-    task.options?.semantic === true ? Math.ceil(maxCount / 2) : Number.POSITIVE_INFINITY;
-  const perPathLimit = inferredPaths.some((path) => path.split("/").pop()?.includes("."))
-    ? 4
-    : 2;
-
-  // Walk inferred paths round-robin so the first matching path cannot consume
-  // the entire soft-coverage budget before other inferred areas contribute.
-  const rankingById = new Map(
-    ranking?.ranked.map((entry) => [entry.symbolId, entry] as const) ?? [],
-  );
-  const inferredCoverageScore = (symbolId: string): number => {
-    const entry = rankingById.get(symbolId);
-    if (!entry) return 0;
-    return (
-      entry.lexicalOverlap +
-      entry.summarySupport +
-      entry.feedbackPrior +
-      entry.structuralBonus +
-      entry.pathAffinity +
-      entry.languageAffinity +
-      entry.genericModulePenalty
-    );
-  };
-
-  // The inferred path already supplies the scope signal. Order within that
-  // scope by task relevance, without letting global retrieval or graph priors
-  // crowd out a lower-prior behavioral declaration.
-  const pathQueues = inferredPaths.map((focusPath) =>
-    rankedCandidates
-      .filter((symbolId) => matchesPath(symbolId, focusPath))
-      .sort(
-        (a, b) =>
-          inferredCoverageScore(b) - inferredCoverageScore(a) ||
-          a.localeCompare(b),
-      ),
-  );
-  for (let round = 0; round < perPathLimit; round++) {
-    for (const queue of pathQueues) {
-      if (selectedFocusCount + additions.length >= maxTotalFocusSymbols) break;
-      let symbolId = queue.shift();
-      while (symbolId !== undefined && selected.has(symbolId)) {
-        symbolId = queue.shift();
-      }
-      if (symbolId === undefined) continue;
-      selected.add(symbolId);
-      additions.push(symbolId);
-    }
-    if (selectedFocusCount + additions.length >= maxTotalFocusSymbols) break;
-  }
-
-  if (additions.length === 0) return candidates;
-
-  const focusSet = new Set(
-    rankedCandidates.filter((symbolId) =>
-      inferredPaths.some((focusPath) => matchesPath(symbolId, focusPath)),
-    ),
-  );
-  const merged = [...candidates];
-  if (task.options?.semantic === true) {
-    // Preserve the strongest retrieval prefix, then surface bounded inferred
-    // coverage while it is still actionable instead of hiding it at the tail.
-    const insertionPoint = Math.max(1, Math.ceil(merged.length / 4));
-    return [
-      ...merged.slice(0, insertionPoint),
-      ...additions,
-      ...merged.slice(insertionPoint),
-    ].slice(0, maxCount);
-  }
-
-  for (const symbolId of additions) {
-    if (merged.length < maxCount) {
-      merged.push(symbolId);
-      continue;
-    }
-    const replaceIndex = merged.findLastIndex((symbolId) => !focusSet.has(symbolId));
-    if (replaceIndex < 0) break;
-    merged[replaceIndex] = symbolId;
-  }
-
-  return merged;
+  return candidates;
 }
 
 /**

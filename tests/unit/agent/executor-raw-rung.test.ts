@@ -287,7 +287,7 @@ describe("executor card fallback", () => {
     return executor;
   }
 
-  it("preserves inferred lexical representatives inside repeated-file card caps", async () => {
+  it("does not let inferred lexical representatives bypass final card ranking", async () => {
     const fileId = "test-repo:src/tool-surface.ts";
     const symbols = [
       createCardSymbol("module", fileId),
@@ -325,10 +325,7 @@ describe("executor card fallback", () => {
     const cardRefs = result.evidence
       .filter(({ type }) => type === "symbolCard")
       .map(({ reference }) => reference);
-    assert.ok(
-      cardRefs.includes("symbol:inferred"),
-      `expected inferred representative, got ${JSON.stringify(cardRefs)}`,
-    );
+    assert.equal(cardRefs.includes("symbol:inferred"), false);
   });
 
   it("does not repopulate strict precise scope with fallback symbols", async () => {

@@ -204,49 +204,49 @@ describe("context seeding runtime lanes", () => {
         "file-ingress-server",
         "method",
         "registerTool",
-        "Register an MCP tool with validated schemas and stable contracts.",
+        "Register a named handler with validated input and output shapes.",
       ],
       [
         "ingress-server-error",
         "file-ingress-server",
         "function",
         "buildToolResponseEnvelope",
-        "Build deterministic safe MCP response envelopes and structured errors.",
+        "Combine text blocks with an optional structured value.",
       ],
       [
         "ingress-descriptor-contract",
         "file-ingress-descriptors",
         "function",
         "buildFlatToolDescriptors",
-        "Build stable descriptors for the registered MCP tool surface.",
+        "Flatten registered descriptor groups in declaration order.",
       ],
       [
         "ingress-descriptor-output",
         "file-ingress-server",
         "function",
         "asStructuredContent",
-        "Normalize deterministic structured MCP tool responses.",
+        "Return a JSON object when the supplied value supports it.",
       ],
       [
         "ingress-runtime-determinism",
         "file-ingress-runtime",
         "function",
         "handleRuntimeQueryOutput",
-        "Return bounded deterministic runtime output without machine noise.",
+        "Read a bounded persisted command artifact.",
       ],
       [
         "ingress-late-output",
         "file-ingress-runtime",
         "function",
-        "processOutputArtifact",
-        "Tool errors errors errors errors output artifact.",
+        "output",
+        "Read one artifact segment.",
       ],
       [
         "ingress-module-distractor",
         "file-ingress-server",
         "module",
         "server.ts",
-        "Server module for the MCP tool surface.",
+        "Server module declaration.",
       ],
       [
         "ingress-variable-distractor",
@@ -302,7 +302,7 @@ describe("context seeding runtime lanes", () => {
         repoId: REPO_ID,
         fileId: "file-ingress-global",
         kind: "function",
-        name: `toolSurfaceOutputNoise${index}`,
+        name: `serializeOutputCandidate${index}`,
         exported: true,
         visibility: "public",
         language: "typescript",
@@ -312,10 +312,8 @@ describe("context seeding runtime lanes", () => {
         rangeEndCol: 1,
         astFingerprint: `ingress-lexical-noise-${index}-fingerprint`,
         signatureJson: null,
-        summary:
-          "SDL MCP tool tool tool tool surface contracts output output output output noise deterministic responses safe errors.",
-        searchText:
-          "SDL MCP tool tool tool tool surface contracts output output output output noise deterministic responses safe errors.",
+        summary: `Serialize output candidate ${index}.`,
+        searchText: `serialize output candidate ${index}`,
         invariantsJson: null,
         sideEffectsJson: null,
         updatedAt: now,
@@ -350,7 +348,7 @@ describe("context seeding runtime lanes", () => {
         repoId: REPO_ID,
         fileId: "file-ingress-global",
         kind: "function",
-        name: `toolSurfaceReviewCandidate${index}`,
+        name: `genericReviewCandidate${index}`,
         exported: true,
         visibility: "public",
         language: "typescript",
@@ -360,10 +358,30 @@ describe("context seeding runtime lanes", () => {
         rangeEndCol: 1,
         astFingerprint: `ingress-global-${index}`,
         signatureJson: null,
-        summary: `Plausible tool-surface competitor ${index}`,
-        searchText: `review current SDL MCP tool surface contract competitor ${index}`,
+        summary: `Plausible review competitor ${index}`,
+        searchText: `review response error competitor ${index}`,
         invariantsJson: null,
         sideEffectsJson: null,
+        updatedAt: now,
+      });
+    }
+
+    for (const [symbolId, fanIn, fanOut, kCore, pageRank] of [
+      ["ingress-server-contract", 6, 3, 5, 0.000078],
+      ["ingress-server-error", 10, 8, 6, 0.0001],
+      ["ingress-descriptor-contract", 1, 6, 5, 0.000031],
+      ["ingress-descriptor-output", 0, 2, 2, 0.000034],
+      ["ingress-runtime-determinism", 0, 6, 4, 0.000029],
+    ] as const) {
+      await queries.upsertMetrics(conn, {
+        symbolId,
+        fanIn,
+        fanOut,
+        churn30d: 0,
+        testRefsJson: "[]",
+        canonicalTestJson: null,
+        pageRank,
+        kCore,
         updatedAt: now,
       });
     }
@@ -433,9 +451,22 @@ describe("context seeding runtime lanes", () => {
     assert.ok(result.diagnosticTimings?.["seed.lexicalFallback"] !== undefined);
   });
 
+  it("keeps a stronger later lexical batch contribution", async () => {
+    const result = await buildSeedContext(ingressTask());
+    const candidate = result.candidates.find(
+      ({ contextRef }) => contextRef === "symbol:ingress-late-output",
+    );
+    const lexicalContribution = candidate?.provenance?.find(
+      ({ source }) => source === "lexical",
+    );
+
+    assert.ok(lexicalContribution, `expected lexical contribution: ${JSON.stringify(candidate)}`);
+    assert.equal(lexicalContribution.score, 1);
+  });
 
 
-  it("preserves Probe A candidates through seeding, expansion, and final selection", async () => {
+
+  it("keeps broad seeded candidates and final evidence deterministic", async () => {
     const probeTask = ingressTask();
     const first = await buildSeedContext(probeTask);
     const firstIds = first.candidates.map(({ contextRef }) => contextRef);
@@ -452,33 +483,18 @@ describe("context seeding runtime lanes", () => {
     );
 
     const targetRefs = INGRESS_TARGET_IDS.map((id) => `symbol:${id}`);
-    const prohibitedRefs = new Set(
-      PROBE_A_PROHIBITED_IDS.map((id) => `symbol:${id}`),
-    );
+    const prohibitedRefs = new Set(PROBE_A_PROHIBITED_IDS.map((id) => `symbol:${id}`));
 
-    assert.ok(
-      targetRefs.filter((ref) => firstIds.includes(ref)).length >= 4,
-      `expected at least 4/5 targets after seeding, got ${JSON.stringify({ count: firstIds.length, accepted: targetRefs.filter((ref) => firstIds.includes(ref)), candidates: firstIds })}`,
+    const targetCandidates = first.candidates.filter(({ contextRef }) =>
+      targetRefs.includes(contextRef),
     );
-
-    const mergedTargetCandidate = first.candidates.find((candidate) => {
-      if (!targetRefs.includes(candidate.contextRef)) return false;
-      const sources = new Set(
-        candidate.provenance?.map(({ source }) => source) ?? [candidate.source],
-      );
-      return sources.has("semantic") && sources.has("lexical");
-    });
+    assert.ok(targetCandidates.length >= 4);
     assert.ok(
-      mergedTargetCandidate,
-      `expected merged semantic and lexical provenance, got ${JSON.stringify(
-        first.candidates
-          .filter(({ contextRef }) => targetRefs.includes(contextRef))
-          .map((candidate) => ({
-            contextRef: candidate.contextRef,
-            sources:
-              candidate.provenance?.map(({ source }) => source) ?? [candidate.source],
-          })),
-      )}`,
+      targetCandidates.every((candidate) =>
+        new Set(
+          candidate.provenance?.map(({ source }) => source) ?? [candidate.source],
+        ).has("lexical"),
+      ),
     );
 
     const firstExecution = await new ExecutorClass().execute(
@@ -492,9 +508,10 @@ describe("context seeding runtime lanes", () => {
       .map(({ reference }) => reference)
       .slice(0, 10);
 
+    assert.ok(firstEvidenceRefs.length > 0);
     assert.ok(
-      targetRefs.filter((ref) => firstEvidenceRefs.includes(ref)).length >= 4,
-      `expected at least 4/5 targets in first ten, got ${JSON.stringify(firstEvidenceRefs)}`,
+      firstEvidenceRefs.filter((ref) => targetRefs.includes(ref)).length >= 4,
+      `expected at least four target declarations: ${JSON.stringify(firstEvidenceRefs)}`,
     );
     assert.equal(
       firstEvidenceRefs.some((ref) => prohibitedRefs.has(ref)),

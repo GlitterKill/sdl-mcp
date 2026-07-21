@@ -1196,6 +1196,10 @@ describe("ContextEngine", () => {
       selectContextMock.mock.calls[0]?.arguments[0].options?.inferredFocusPaths,
       ["src/graph/"],
     );
+    assert.deepEqual(
+      selectContextMock.mock.calls[0]?.arguments[0].options?.focusPaths,
+      ["", "  "],
+    );
   });
 
   it("preserves focus-symbol-only retrieval without implicit hybrid seeding", async () => {

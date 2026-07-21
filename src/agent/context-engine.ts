@@ -490,7 +490,6 @@ export class ContextEngine {
             ...task,
             options: {
               ...task.options,
-              focusPaths: inferred,
               inferredFocusPaths: inferred,
             },
           };

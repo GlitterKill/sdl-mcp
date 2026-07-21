@@ -176,6 +176,32 @@ export function buildContextFtsQuery(taskText: string): string {
   return taskText.slice(0, 200);
 }
 
+/** Build the shared compound-plus-term lexical plan for context candidates. */
+export function buildContextLexicalQueryPlan(
+  taskText: string,
+  isBroad: boolean,
+): Array<{ query: string; limit: number }> {
+  const compoundQuery = buildContextFtsQuery(taskText);
+  if (!compoundQuery) return [];
+  const compoundLimit = isBroad
+    ? COMPOUND_LIMIT_BROAD
+    : COMPOUND_LIMIT_PRECISE;
+  const perTermLimit = isBroad
+    ? PER_TERM_LIMIT_BROAD
+    : PER_TERM_LIMIT_PRECISE;
+  const maxIndividualTerms = isBroad
+    ? MAX_INDIVIDUAL_TERMS_BROAD
+    : MAX_INDIVIDUAL_TERMS_PRECISE;
+  return [
+    { query: compoundQuery, limit: compoundLimit },
+    ...compoundQuery
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, maxIndividualTerms)
+      .map((query) => ({ query, limit: perTermLimit })),
+  ];
+}
+
 const ACTION_SEED_QUERY_LIMIT = 3;
 
 function toPascalCaseIdentifier(identifier: string): string {
@@ -310,16 +336,6 @@ export function buildSeedEntitySearchPlan(
  */
 const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
   {
-    // Cross-surface QA needs the public server, shared gateway, and formatter;
-    // exact file anchors let broad retrieval inspect those contracts together.
-    keywords: ["mcp dispatch", "tool functionality", "tool formatting"],
-    paths: [
-      "src/server.ts",
-      "src/gateway/router.ts",
-      "src/mcp/tool-call-formatter.ts",
-    ],
-  },
-  {
     keywords: ["buildcontext", "build context", "context seeding", "seed context", "context seed"],
     paths: [
       "src/agent/context-engine.ts",
@@ -384,32 +400,6 @@ const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
   {
     keywords: ["identifier extraction", "stop word", "stop words", "stopwords"],
     paths: ["src/agent/identifier-extraction.ts"],
-  },
-  {
-    keywords: [
-      "mcp contract",
-      "tool contract",
-      "tool qa",
-      "tool surface",
-      "tool-surface",
-      "contract pass",
-      "inputschema",
-      "input schema",
-      "structured output",
-      "outputschema",
-      "output schema",
-      "structuredcontent",
-      "structured content",
-      "registertool",
-      "register tool",
-      "tools/list",
-      "calltoolrequestschema",
-    ],
-    paths: [
-      "src/server.ts",
-      "src/mcp/tools.ts",
-      "src/mcp/tools/",
-    ],
   },
   {
     keywords: ["projection", "broad response", "visible fields"],
@@ -653,6 +643,7 @@ export async function buildSeedContext(
     feedback: new Set<string>(),
   };
   const allCandidates: ContextSeedCandidate[] = [];
+  let lexicalSourceRank = 0;
 
   // ------------------------------------------------------------------
   // Stage 1: Semantic retrieval (hybrid FTS + vector via orchestrator).
@@ -727,25 +718,14 @@ export async function buildSeedContext(
   // including when callers explicitly force semantic retrieval.
   // ------------------------------------------------------------------
   const actionSeedQueries = seedPlan.actionSeedQueries;
-  const compoundQuery = buildContextFtsQuery(task.taskText);
-  const terms = compoundQuery.split(/\s+/).filter(Boolean);
+  const lexicalQueryPlan = buildContextLexicalQueryPlan(task.taskText, isBroad);
+  const compoundQuery = lexicalQueryPlan[0]?.query ?? "";
   const conceptQueries = useScopedPreciseLexical
     ? buildScopedPreciseConceptQueries(task.taskText)
     : [];
-  const compoundLimit = isBroad
-    ? COMPOUND_LIMIT_BROAD
-    : COMPOUND_LIMIT_PRECISE;
-  const perTermLimit = isBroad
-    ? PER_TERM_LIMIT_BROAD
-    : PER_TERM_LIMIT_PRECISE;
-  const maxIndividualTerms = isBroad
-    ? MAX_INDIVIDUAL_TERMS_BROAD
-    : MAX_INDIVIDUAL_TERMS_PRECISE;
-  const individualTerms = terms.slice(0, maxIndividualTerms);
-  const lexicalQueryPlan = [
-    ...(compoundQuery ? [{ query: compoundQuery, limit: compoundLimit }] : []),
-    ...individualTerms.map((query) => ({ query, limit: perTermLimit })),
-  ];
+  const compoundLimit = lexicalQueryPlan[0]?.limit ?? 0;
+  const perTermLimit = lexicalQueryPlan[1]?.limit ?? compoundLimit;
+  const individualTerms = lexicalQueryPlan.slice(1).map(({ query }) => query);
 
   let scopedLexicalResults:
     | {
@@ -819,7 +799,7 @@ export async function buildSeedContext(
         contextRef: ref,
         source: "lexical",
         score: Math.max(0.8, 1 - conceptRank / 20),
-        sourceRank: conceptRank,
+        sourceRank: lexicalSourceRank++,
         expansionReason: "namedConcept",
       });
     }
@@ -837,8 +817,6 @@ export async function buildSeedContext(
     const actionStartedAt = performance.now();
     try {
       const conn = await getLadybugConn();
-      let actionRank = 0;
-
       for (let queryIndex = 0; queryIndex < actionSeedQueries.length; queryIndex++) {
         const query = actionSeedQueries[queryIndex];
         const results = await useScopedResultsOrFallback(
@@ -852,21 +830,19 @@ export async function buildSeedContext(
               preservedScopedSeedRefs.has(`symbol:${result.symbolId}`),
             )
           : results;
-        for (const r of selectedResults) {
+        for (const [localRank, r] of selectedResults.entries()) {
           const ref = `symbol:${r.symbolId}`;
-          if (seenBySource.lexical.has(ref)) {
-            tagExistingSeedCandidate(allCandidates, ref, "actionCatalog");
-            continue;
-          }
           seenBySource.lexical.add(ref);
           allCandidates.push({
             contextRef: ref,
             source: "lexical",
-            score: Math.max(0.8, 1 - actionRank / 12),
-            sourceRank: actionRank,
+            score: Math.max(
+              0.8,
+              1 - localRank / Math.max(selectedResults.length, 1),
+            ),
+            sourceRank: lexicalSourceRank++,
             expansionReason: "actionCatalog",
           });
-          actionRank++;
         }
       }
     } catch (err) {
@@ -883,8 +859,6 @@ export async function buildSeedContext(
     const lexicalStartedAt = performance.now();
     try {
       const conn = await getLadybugConn();
-
-      let lexicalRank = 0;
 
       // Strategy 1: Compound multi-term search
       if (compoundQuery) {
@@ -917,25 +891,19 @@ export async function buildSeedContext(
                 ),
         );
         recordTiming(timings, "seed.lexicalCompound", compoundStartedAt);
-        for (const r of compoundResults) {
+        for (const [localRank, r] of compoundResults.entries()) {
           const ref = `symbol:${r.symbolId}`;
-          if (seenBySource.lexical.has(ref)) continue;
           seenBySource.lexical.add(ref);
-          // Score lexical results on a 0-1 scale based on rank.
-          // Note: cross-batch scores (compound vs individual) aren't perfectly
-          // comparable because denominators differ, but the final sort + cap
-          // handles this acceptably.
           const score = Math.max(
             0,
-            1 - lexicalRank / Math.max(compoundResults.length, 1),
+            1 - localRank / Math.max(compoundResults.length, 1),
           );
           allCandidates.push({
             contextRef: ref,
             source: "lexical",
             score,
-            sourceRank: lexicalRank,
+            sourceRank: lexicalSourceRank++,
           });
-          lexicalRank++;
         }
       }
 
@@ -967,21 +935,19 @@ export async function buildSeedContext(
               : searchSymbols(conn, task.repoId, term, perTermLimit),
         );
         recordTiming(timings, "seed.lexicalTermSearch", termStartedAt);
-        for (const r of results) {
+        for (const [localRank, r] of results.entries()) {
           const ref = `symbol:${r.symbolId}`;
-          if (seenBySource.lexical.has(ref)) continue;
           seenBySource.lexical.add(ref);
           const score = Math.max(
             0,
-            1 - lexicalRank / Math.max(results.length + lexicalRank, 1),
+            1 - localRank / Math.max(results.length, 1),
           );
           allCandidates.push({
             contextRef: ref,
             source: "lexical",
             score,
-            sourceRank: lexicalRank,
+            sourceRank: lexicalSourceRank++,
           });
-          lexicalRank++;
         }
       }
     } catch (err) {

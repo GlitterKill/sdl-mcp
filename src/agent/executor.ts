@@ -34,7 +34,11 @@ import {
 import { IndexError } from "../domain/errors.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import type { SymbolRow } from "../db/ladybug-symbols.js";
+import {
+  searchSymbolsLiteQueriesInPool,
+  type SearchSymbolLiteCandidate,
+  type SymbolRow,
+} from "../db/ladybug-symbols.js";
 import { generateSkeletonIR, generateFileSkeleton } from "../code/skeleton.js";
 import { extractHotPath } from "../code/hotpath.js";
 import { enforceCodeWindow } from "../code/enforce.js";
@@ -58,9 +62,13 @@ import {
   rankSymbols,
   mergeContextSeedCandidates,
   selectFinalSymbols,
+  computeReviewImportanceBySymbolId,
   explicitFocusPaths,
+  inferEvidenceFocusPaths,
   pathMatchesFocus,
+  type ReviewImportanceMetric,
 } from "./context-ranking.js";
+import { buildContextLexicalQueryPlan } from "./context-seeding.js";
 import { randomUUID } from "node:crypto";
 import {
   MAX_IDENTIFIERS,
@@ -88,7 +96,10 @@ export type ExecutorDbQueries = Pick<
   | "searchSymbols"
 > &
   Partial<
-    Pick<typeof ladybugDb, "getBoundedDependencySymbolsFromSources">
+    Pick<
+      typeof ladybugDb,
+      "getBoundedDependencySymbolsFromSources" | "getMetricsBySymbolIds"
+    >
   >;
 
 /**
@@ -152,6 +163,7 @@ const OUTLINE_DECLARATIVE_KINDS = new Set([
   "typeAlias",
   "enum",
 ]);
+const REVIEW_EVIDENCE_KINDS = ["function", "method", "constructor"];
 
 /** Map rung types to action type strings for error reporting. */
 const RUNG_TO_ACTION_TYPE: Record<RungType, Action["type"]> = {
@@ -848,8 +860,72 @@ export class Executor {
     seedCandidates: ContextSeedCandidate[] = [],
     feedbackBoosts?: Map<string, number>,
   ): Promise<string[]> {
+    const identifiers = this.extractIdentifiersFromTask(task);
+    const directlyResolved = await this.resolveVisibleSymbols(task.repoId, symbolIds);
+    const directSymbolMap = new Map<string, SymbolRow>();
+    for (const item of directlyResolved.items) {
+      if (item.status !== "resolved") continue;
+      directSymbolMap.set(
+        item.symbolId,
+        item.file ? { ...item.symbol, fileId: item.file.relPath } : item.symbol,
+      );
+    }
+
+    let evidencePaths: string[] = [];
+    if (
+      task.options?.semantic === true &&
+      explicitFocusPaths(task.options).length === 0
+    ) {
+      const retrievalPriors = new Map<string, number>();
+      for (const candidate of seedCandidates) {
+        if (!candidate.contextRef.startsWith("symbol:")) continue;
+        const symbolId = candidate.contextRef.slice("symbol:".length);
+        retrievalPriors.set(
+          symbolId,
+          Math.max(retrievalPriors.get(symbolId) ?? 0, candidate.score),
+        );
+      }
+      let directMetrics: Map<string, ReviewImportanceMetric> | undefined;
+      if (this.dbQueries.getMetricsBySymbolIds) {
+        try {
+          directMetrics = await this.dbQueries.getMetricsBySymbolIds(
+            await this.getConn(),
+            [...directSymbolMap.keys()],
+          );
+        } catch (err) {
+          logger.debug("Evidence-scope metrics lookup failed (non-fatal)", {
+            repoId: task.repoId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      evidencePaths = inferEvidenceFocusPaths(directSymbolMap, identifiers, task, {
+        retrievalPriors,
+        metrics: directMetrics,
+      });
+      if (evidencePaths.length > 0) {
+        const conn = await this.getConn();
+        const companionDirectories: string[] = [];
+        for (const filePath of evidencePaths) {
+          const companionPath = filePath.replace(/\.[^/.]+$/, "");
+          if (companionPath === filePath) continue;
+          const files = await this.dbQueries.getFilesByPrefix(
+            conn,
+            task.repoId,
+            `${companionPath}/`,
+          );
+          if (files.length > 0) companionDirectories.push(`${companionPath}/`);
+        }
+        evidencePaths = [...new Set([...evidencePaths, ...companionDirectories])];
+      }
+    }
+
     const inferredPaths =
-      task.options?.semantic === true ? task.options.inferredFocusPaths ?? [] : [];
+      evidencePaths.length > 0
+        ? evidencePaths
+        : task.options?.semantic === true
+          ? task.options.inferredFocusPaths ?? []
+          : [];
     const inferredSymbolIds =
       inferredPaths.length > 0
         ? await this.resolveFileSymbols(inferredPaths, task.repoId)
@@ -857,7 +933,10 @@ export class Executor {
     const candidateSymbolIds = [
       ...new Set([...symbolIds, ...inferredSymbolIds]),
     ];
-    const resolved = await this.resolveVisibleSymbols(task.repoId, candidateSymbolIds);
+    const resolved =
+      inferredSymbolIds.length > 0
+        ? await this.resolveVisibleSymbols(task.repoId, candidateSymbolIds)
+        : directlyResolved;
     // Persisted file IDs are opaque hashes. Clone only the ranking view so
     // path affinity and explicit-scope finalization receive repo-relative paths.
     const symbolMap = new Map<string, SymbolRow>();
@@ -869,17 +948,24 @@ export class Executor {
       );
     }
 
+    const rankingTask: AgentTask = {
+      ...task,
+      options: {
+        ...task.options,
+        ...(inferredPaths.length > 0 ? { inferredFocusPaths: inferredPaths } : {}),
+      },
+    };
+
     if (!task.taskText || candidateSymbolIds.length === 0) {
       return selectFinalSymbols(
         undefined,
         symbolMap,
-        task,
+        rankingTask,
         maxCount,
         candidateSymbolIds,
       );
     }
 
-    const identifiers = this.extractIdentifiersFromTask(task);
     if (
       identifiers.length === 0 &&
       seedCandidates.length === 0 &&
@@ -888,13 +974,63 @@ export class Executor {
       return selectFinalSymbols(
         undefined,
         symbolMap,
-        task,
+        rankingTask,
         maxCount,
         candidateSymbolIds,
       );
     }
 
-    const anchorSymbolIds = seedCandidates
+    let rankingSeedCandidates = seedCandidates;
+    const taskRelevantScopeIds = new Set<string>();
+    if (inferredPaths.length > 0) {
+      const scopedPool: SearchSymbolLiteCandidate[] = [];
+      for (const [symbolId, symbol] of symbolMap) {
+        const file = symbol.fileId ?? "";
+        if (!pathMatchesFocus(file, inferredPaths)) continue;
+        scopedPool.push({
+          symbolId,
+          name: symbol.name,
+          fileId: file,
+          file,
+          kind: symbol.kind,
+          exported: symbol.exported ?? false,
+          summary: symbol.summary ?? "",
+          searchText: symbol.searchText ?? "",
+        });
+      }
+
+      const lexicalPlan = buildContextLexicalQueryPlan(
+        task.taskText,
+        task.options?.contextMode !== "precise",
+      ).map(({ query }) => ({
+        query,
+        // The complete scoped pool remains available to the final selector;
+        // this limit only bounds retrieval-prior assignment.
+        limit: Math.max(1, scopedPool.length),
+        kinds: REVIEW_EVIDENCE_KINDS,
+      }));
+      const scopedResults = searchSymbolsLiteQueriesInPool(scopedPool, lexicalPlan);
+      const scopedSeeds: ContextSeedCandidate[] = [];
+      let sourceRank = rankingSeedCandidates.length;
+      for (const batch of scopedResults) {
+        for (let localRank = 0; localRank < batch.length; localRank++) {
+          const result = batch[localRank];
+          taskRelevantScopeIds.add(result.symbolId);
+          scopedSeeds.push({
+            contextRef: `symbol:${result.symbolId}`,
+            source: "lexical",
+            score: 1 - localRank / Math.max(1, batch.length),
+            sourceRank: sourceRank++,
+          });
+        }
+      }
+      rankingSeedCandidates = mergeContextSeedCandidates([
+        ...rankingSeedCandidates,
+        ...scopedSeeds,
+      ]);
+    }
+
+    const anchorSymbolIds = rankingSeedCandidates
       .map((candidate) =>
         candidate.contextRef.startsWith("symbol:")
           ? candidate.contextRef.slice("symbol:".length)
@@ -902,28 +1038,37 @@ export class Executor {
       )
       .filter((symbolId): symbolId is string => !!symbolId);
 
-    const hasForcedSemanticInferredScope =
-      task.options?.semantic === true &&
-      (task.options.inferredFocusPaths?.length ?? 0) > 0;
-    // Engine-inferred paths are soft coverage hints for forced semantic calls.
-    // Rank retrieval evidence first, then add bounded path coverage below.
-    const rankingTask = hasForcedSemanticInferredScope
-      ? {
-          ...task,
-          options: {
-            ...task.options,
-            focusPaths: undefined,
-            inferredFocusPaths: undefined,
-          },
-        }
-      : task;
+    let reviewImportance: Map<string, number> | undefined;
+    if (
+      task.taskType === "review" &&
+      taskRelevantScopeIds.size > 0 &&
+      this.dbQueries.getMetricsBySymbolIds
+    ) {
+      try {
+        const metrics = await this.dbQueries.getMetricsBySymbolIds(
+          await this.getConn(),
+          [...taskRelevantScopeIds],
+        );
+        reviewImportance = computeReviewImportanceBySymbolId(
+          [...taskRelevantScopeIds],
+          metrics,
+        );
+      } catch (err) {
+        logger.debug("Review importance lookup failed (non-fatal)", {
+          repoId: task.repoId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     const ranking = rankSymbols(candidateSymbolIds, symbolMap, identifiers, rankingTask, {
-      seedCandidates,
+      seedCandidates: rankingSeedCandidates,
       anchorSymbolIds,
       feedbackBoosts,
+      reviewImportance,
     });
 
-    return selectFinalSymbols(ranking, symbolMap, task, maxCount);
+    return selectFinalSymbols(ranking, symbolMap, rankingTask, maxCount);
   }
 
   private async buildRelatedSymbolNameMap(

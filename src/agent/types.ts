@@ -231,6 +231,8 @@ export interface ScoredSymbol {
   pathAffinity: number; // -10 to 10
   languageAffinity: number; // 0-4
   genericModulePenalty: number; // -8 or 0
+  /** Review-only graph importance used by the sole final selector (0-32). */
+  reviewImportance: number;
   candidateCategories?: readonly ContextSeedEntityType[];
 }
 

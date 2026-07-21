@@ -118,7 +118,7 @@ That separation matters. A workflow can reproduce context retrieval, but it cost
 
 When precise mode receives both explicit `focusPaths` and `focusSymbols`, it applies intersection semantics. A named symbol remains eligible only when its file also matches an explicit path.
 
-Path inference runs only when the caller provides no explicit paths or symbols. Internally inferred paths remain identifiable as inferred scope, even though the engine also carries them in `focusPaths` for downstream ranking.
+Path inference runs only when the caller provides no explicit paths or symbols. The engine carries inferred paths separately from `focusPaths`, so downstream selection cannot mistake a soft retrieval hint for caller-authorized scope.
 
 See [Context Modes](./context-modes.md) for the detailed comparison.
 

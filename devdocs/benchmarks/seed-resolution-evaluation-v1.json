@@ -7,12 +7,12 @@
     "caseCount": 4
   },
   "baseline": {
-    "gitHead": "30063f31d0e567740bfef6925cd50a69ff8bbd83",
-    "evaluatedSourceDiffSha256": "c0a945da4a625037bb62858906ffa544d61ebb049b9bd5f242959949fbeca6da",
+    "gitHead": "37f1442a9b7fe51f7304c848fa18a87ed8a0aeef",
+    "evaluatedSourceDiffSha256": "fd66a422c876190fc072c746a59e343373e302fb707014e163ebc892db84f938",
     "sourceHashes": {
-      "src/agent/context-seeding.ts": "5dbf9032e78f6638aab15cf2fcd1be74da829c3d5b6b942c526cd54a7ef7482e",
+      "src/agent/context-seeding.ts": "bee6f05c51063806e4075f184b160ab9cc37b66130dd6b77557b187d1b08c0d4",
       "src/agent/planner.ts": "2c6a8a3f7ad57248a0dc5261d05d5c4f99c59baac8759a35cae89b2a802adecd",
-      "src/agent/executor.ts": "e414160930e7d2d2ec8ffed5914e7416271026cc690d74abf46401b678a664e7",
+      "src/agent/executor.ts": "0ad1e179ba0116b2aff768e4d95d5907d942b85aefee86baa1128e55eb141425",
       "src/graph/slice/start-node-resolver.ts": "9584d711965a144bf56ade8668be759ffb7d5e4619333e903f1c8407327d6ea0",
       "src/retrieval/seed-resolver.ts": "f2429719b1ae16e02e9b3f296ca09f67240d3ac71bce5d3c42c7295f80b1c672"
     },
@@ -472,9 +472,9 @@
     "autopilotExplicitScopeRecall": 1
   },
   "observedMedianPolicyLatencyMs": {
-    "contextAssembly": 0.1618,
-    "sliceStartNodes": 0.0113,
-    "autopilotExecution": 0.6917
+    "contextAssembly": 0.1834,
+    "sliceStartNodes": 0.0136,
+    "autopilotExecution": 0.8741
   },
   "interfaces": {
     "contextAssembly": "task text/options -> entity query plan + mixed entity candidates -> context refs",

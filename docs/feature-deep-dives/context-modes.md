@@ -111,11 +111,11 @@ Candidate seeding uses a mode-based retrieval pipeline:
 
 Explicit `focusPaths` constrain whichever retrieval lane is active. Broad mode defaults to hybrid discovery for recall, while precise mode preserves the lexical fast path unless the caller forces semantic retrieval.
 
-Forced semantic retrieval treats inferred paths as soft coverage hints: retrieval evidence is ranked without inferred-path bias, then at most half of the selected slots are filled for inferred-path coverage. With explicit precise scope, SDL also runs deterministic scoped lexical queries for every named concept and catalog action. Each resolved named seed remains eligible even when another concept misses or the semantic lane found the same symbol first. Multi-term lexical matches prefer complete query coverage before name/path affinity breaks ties.
+Forced semantic retrieval treats inferred paths as soft coverage hints. With explicit precise scope, SDL also runs deterministic scoped lexical queries for every named concept and catalog action. Each resolved named seed remains eligible even when another concept misses or the semantic lane found the same symbol first. Multi-term lexical matches prefer complete query coverage before name/path affinity breaks ties.
 
 Precise forced-semantic calls may retain up to 20 cards. Once at least five named/action seeds resolve, the card budget tightens to those seeds plus two semantic complements, still within the 20-card ceiling. Repeated evidence from one file is capped at three cards, with named/action representatives selected inside that hard cap. The skeleton rung can expand from five to at most eight named targets. Every skeleton summary keeps a structural/signature prefix plus task-relevant imports and declarations inside 480 characters, so increased coverage does not create an unbounded response.
 
-Broad cross-surface tool-QA prompts add deterministic anchors for MCP dispatch, gateway routing, and tool formatting. Ordinary action debugging stays handler-shaped; shared response-projection and response-test queries are added only when the task asks about output, formatting, contracts, visibility, QA, or tests. Unrelated context prompts and every other SDL tool keep their existing behavior.
+Broad review retrieval derives a bounded evidence scope from multi-term declaration coverage in the retrieved candidates. It may add existing companion modules for a strongly supported file, but it does not promote inferred paths into explicit caller focus or add prompt-specific symbol vocabulary.
 
 After seeding, an evidence-aware multi-factor scorer ranks every candidate using:
 
@@ -125,6 +125,8 @@ After seeding, an evidence-aware multi-factor scorer ranks every candidate using
 - summary support (does the symbol's summary relate to the task?)
 - feedback history from prior tasks
 - structural signals (exported symbols, entry-point position)
+
+For task-relevant broad-review candidates, the final selector also considers bounded graph importance from fan-in, fan-out, K-core, test references, and candidate-relative PageRank. PageRank refines ordering only after lexical and path evidence establishes scope; global centrality cannot introduce unrelated symbols or override explicit focus.
 
 The threshold changes by mode:
 
