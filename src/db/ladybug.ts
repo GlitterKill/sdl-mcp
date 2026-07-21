@@ -522,10 +522,21 @@ async function createConnection(
 ): Promise<LadybugConnection> {
   const modules = await loadLadybug();
   const conn = new modules.Connection(db);
-  if ("setMaxNumThreadForExec" in conn) {
-    await (
-      conn as unknown as LadybugConnectionWithThreads
-    ).setMaxNumThreadForExec(1);
+  try {
+    if ("setMaxNumThreadForExec" in conn) {
+      await (
+        conn as unknown as LadybugConnectionWithThreads
+      ).setMaxNumThreadForExec(1);
+    }
+  } catch (err) {
+    try {
+      await conn.close();
+    } catch (closeErr) {
+      logger.warn("Error closing LadybugDB connection after setup failure", {
+        error: closeErr instanceof Error ? closeErr.message : String(closeErr),
+      });
+    }
+    throw err;
   }
   return conn;
 }

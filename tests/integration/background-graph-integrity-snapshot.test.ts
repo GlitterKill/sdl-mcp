@@ -149,30 +149,50 @@ describe("background graph integrity snapshot", () => {
 
   it("starts publication only after the read-only transaction ends", async () => {
     const events: string[] = [];
+    const snapshotHeld = deferred();
+    const releaseSnapshot = deferred();
 
-    await withExclusiveReadConnection((conn) =>
-      withReadOnlyTransaction(conn, async () => {
-        events.push("snapshot:started");
-        await queryAll(conn, "MATCH (n:SnapshotProbe) RETURN count(n) AS count");
-        events.push("snapshot:page-complete");
-      }),
-    );
-    events.push("snapshot:ended");
-
-    await withWriteConn(async (conn) => {
-      events.push("publication:started");
-      await exec(
-        conn,
-        "MATCH (n:SnapshotProbe {id: $id}) SET n.value = $value",
-        { id: 1, value: "one-published" },
+    const scanThenPublication = (async () => {
+      await withExclusiveReadConnection((conn) =>
+        withReadOnlyTransaction(conn, async () => {
+          events.push("snapshot:started");
+          await queryAll(
+            conn,
+            "MATCH (n:SnapshotProbe) RETURN count(n) AS count",
+          );
+          events.push("snapshot:page-complete");
+          snapshotHeld.resolve();
+          await releaseSnapshot.promise;
+        }),
       );
-    });
+      events.push("snapshot:ended");
 
+      await withWriteConn(async (conn) => {
+        events.push("publication:started");
+        await exec(
+          conn,
+          "MATCH (n:SnapshotProbe {id: $id}) SET n.value = $value",
+          { id: 1, value: "one-published" },
+        );
+        events.push("publication:completed");
+      });
+    })();
+
+    await snapshotHeld.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepStrictEqual(events, [
+      "snapshot:started",
+      "snapshot:page-complete",
+    ]);
+
+    releaseSnapshot.resolve();
+    await scanThenPublication;
     assert.deepStrictEqual(events, [
       "snapshot:started",
       "snapshot:page-complete",
       "snapshot:ended",
       "publication:started",
+      "publication:completed",
     ]);
   });
 

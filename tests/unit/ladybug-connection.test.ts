@@ -338,6 +338,60 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
       }
     });
 
+    it("closes a constructed connection when thread setup fails", async () => {
+      const testPath = getTestDbPath("exclusive-read-thread-setup-failure");
+      cleanupTestDb("exclusive-read-thread-setup-failure");
+      await initLadybugDb(testPath);
+
+      const setupFailure = new Error("thread setup failed");
+      const kuzu = await import("kuzu");
+      const prototype = kuzu.Connection.prototype;
+      const originalThreadSetter = prototype.setMaxNumThreadForExec;
+      const originalClose = prototype.close;
+      let constructed: Connection | undefined;
+      const closed = new Set<Connection>();
+      let closeShouldFail = false;
+      prototype.setMaxNumThreadForExec = async function () {
+        constructed = this;
+        throw setupFailure;
+      };
+      prototype.close = async function () {
+        closed.add(this);
+        if (closeShouldFail) throw new Error("close failed");
+        await originalClose.call(this);
+      };
+
+      try {
+        await assert.rejects(
+          withExclusiveReadConnection(async () => {
+            assert.fail("callback must not run after connection setup fails");
+          }),
+          (err) => err === setupFailure,
+        );
+        assert.ok(constructed);
+        assert.ok(closed.has(constructed));
+
+        closeShouldFail = true;
+        constructed = undefined;
+        await assert.rejects(
+          withExclusiveReadConnection(async () => {
+            assert.fail("callback must not run after connection setup fails");
+          }),
+          (err) => err === setupFailure,
+        );
+        assert.ok(constructed);
+        assert.ok(closed.has(constructed));
+      } finally {
+        prototype.setMaxNumThreadForExec = originalThreadSetter;
+        prototype.close = originalClose;
+        if (constructed && (closeShouldFail || !closed.has(constructed))) {
+          await originalClose.call(constructed);
+        }
+        await closeLadybugDb();
+        cleanupTestDb("exclusive-read-thread-setup-failure");
+      }
+    });
+
     it("makes closeLadybugDb wait for an active exclusive lease", async () => {
       const testPath = getTestDbPath("exclusive-read-close");
       cleanupTestDb("exclusive-read-close");
