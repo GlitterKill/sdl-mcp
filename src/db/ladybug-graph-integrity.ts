@@ -140,6 +140,7 @@ export async function getGraphIntegrityFileState(
   const row = await querySingle<RawGraphIntegrityFileStateRecord>(
     conn,
     `MATCH (f:GraphIntegrityFileState {stateId: $stateId})
+     MATCH (f)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(:Repo {repoId: $repoId})
      WHERE f.repoId = $repoId AND f.fileId = $fileId
      RETURN f.stateId AS stateId, f.repoId AS repoId, f.fileId AS fileId,
             f.relPath AS relPath, f.symbolCount AS symbolCount,

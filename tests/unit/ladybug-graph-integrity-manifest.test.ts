@@ -145,8 +145,20 @@ describe("graph integrity manifest persistence", () => {
              s.canonicalSymbolJson = '[]', s.referenceCount = 1`,
         { stateId: symbolStateId },
       );
+      await exec(
+        conn,
+        `MERGE (f:GraphIntegrityFileState {stateId: $stateId})
+         SET f.repoId = $repoId, f.fileId = $fileId, f.relPath = 'orphan.ts',
+             f.symbolCount = 1, f.digest = 'orphan', f.filelessReferencesJson = '[]'`,
+        {
+          stateId: JSON.stringify(["repo-a", "orphan-exact"]),
+          repoId: "repo-a",
+          fileId: "orphan-exact",
+        },
+      );
 
       assert.equal(await getFile(conn, "repo-a", "file"), null);
+      assert.equal(await getFile(conn, "repo-a", "orphan-exact"), null);
       await deleteFile(conn, "repo-a", "file");
       await deleteFileless(conn, "repo-a", "symbol");
       assert.equal(
