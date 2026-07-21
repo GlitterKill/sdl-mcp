@@ -2055,6 +2055,9 @@ describe("persisted graph integrity", () => {
       graphIntegrityVersionId: "v2",
       graphIntegrityDigest: "a".repeat(64),
       graphIntegrityError: null,
+      graphIntegrityRevision: 0,
+      graphIntegrityVerifiedRevision: 0,
+      graphIntegrityFilelessPruningSupported: true,
     };
 
     assert.equal(
@@ -2078,4 +2081,74 @@ describe("persisted graph integrity", () => {
       true,
     );
   });
+  it("bridges migrated null revisions through full and incremental synchronous verification", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-sync-revisions-"));
+    await initLadybugDb(join(root, "sync-revisions.lbug"));
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-21T00:00:00.000Z",
+      });
+      await ladybugDb.createVersion(conn, {
+        versionId: "v1",
+        repoId: "repo",
+        createdAt: "2026-07-21T00:00:00.000Z",
+        reason: "test",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await ladybugDb.exec(
+        conn,
+        `MERGE (d:DerivedState {repoId: $repoId})
+         SET d.graphIntegrityState = 'unknown',
+             d.graphIntegrityVersionId = 'legacy',
+             d.graphIntegrityDigest = $digest,
+             d.graphIntegrityError = 'history',
+             d.graphIntegrityRevision = NULL,
+             d.graphIntegrityVerifiedRevision = NULL,
+             d.graphIntegrityFilelessPruningSupported = NULL`,
+        { repoId: "repo", digest: "f".repeat(64) },
+      );
+    });
+
+    const Session = requiredFunction<SyncFn>(
+      integrityModule,
+      "PersistedGraphIntegritySession",
+    ) as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string, affectedFileIds?: string[]) => Promise<void>;
+      complete: (versionId: string) => Promise<void>;
+    };
+    const isVerified = requiredFunction<SyncFn>(
+      derivedState,
+      "graphIntegrityIsVerifiedForVersion",
+    );
+
+    const full = new Session("repo", "full", true);
+    await full.begin("v1");
+    await full.complete("v1");
+
+    let row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityRevision, 0);
+    assert.equal(row?.graphIntegrityVerifiedRevision, 0);
+    assert.equal(row?.graphIntegrityFilelessPruningSupported, true);
+    assert.equal(isVerified(row, "v1"), true);
+    assert.notEqual(row?.graphIntegrityDigest, "f".repeat(64));
+
+    const incremental = new Session("repo", "incremental", true);
+    await incremental.begin("v1");
+    await incremental.complete("v1");
+
+    row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityState, "verified");
+    assert.equal(row?.graphIntegrityRevision, 0);
+    assert.equal(row?.graphIntegrityVerifiedRevision, 0);
+    assert.equal(isVerified(row, "v1"), true);
+  });
+
 });
