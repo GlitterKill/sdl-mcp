@@ -737,8 +737,7 @@ function resolveTypeName(schema: z.ZodType): string {
       return `literal(${JSON.stringify(litVal)})`;
     }
     case "union":
-      return getUnionOptions(schema)
-        .map((o) => resolveTypeName(o))
+      return [...new Set(getUnionOptions(schema).map(resolveTypeName))]
         .join(" | ");
     default:
       return "unknown";

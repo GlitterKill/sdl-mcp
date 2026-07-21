@@ -289,6 +289,20 @@ describe("bounded schema manual regressions", () => {
     );
   });
 
+  it("renders TypeScript discriminated-union branches", () => {
+    const result = handleManual({
+      actions: ["symbol.edit"],
+      format: "typescript",
+      includeSchemas: true,
+      detail: "full",
+    }) as { manual: string };
+
+    assert.match(result.manual, /operation\?: \{ kind: "replaceSymbol"; content: unknown \}/);
+    assert.match(result.manual, /\{ kind: "replaceBody"; content: unknown \}/);
+    assert.match(result.manual, /\{ kind: "renameLocal"; name: unknown; replacement: unknown \}/);
+    assert.doesNotMatch(result.manual, /operation\?: object(?: \| object)*;/);
+  });
+
   it("keeps variant metadata out of compact manuals", () => {
     const result = handleManual({
       actions: ["symbol.edit"],

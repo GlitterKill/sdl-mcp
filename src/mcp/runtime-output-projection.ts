@@ -24,13 +24,26 @@ export function projectRuntimeOutputExcerpts(
   return excerpts.flatMap((excerpt) => {
     const lines = excerpt.content.split("\n");
     let removedLeadingLines = 0;
-    while (lines.length > 0 && isWindowsCmdEchoLine(lines[0])) {
-      lines.shift();
-      removedLeadingLines++;
+    while (lines.length > 0) {
+      let echoIndex = 0;
+      while (
+        echoIndex < lines.length &&
+        lines[echoIndex].trim().length === 0
+      ) {
+        echoIndex++;
+      }
+      if (
+        echoIndex >= lines.length ||
+        !isWindowsCmdEchoLine(lines[echoIndex])
+      ) {
+        break;
+      }
+      lines.splice(0, echoIndex + 1);
+      removedLeadingLines += echoIndex + 1;
     }
     if (
       removedLeadingLines > 0 &&
-      (lines.length === 0 || lines.every((line) => line.length === 0))
+      (lines.length === 0 || lines.every((line) => line.trim().length === 0))
     ) {
       return [];
     }

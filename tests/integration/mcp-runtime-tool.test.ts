@@ -744,4 +744,25 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     assert.match(intentContent, /application retry took \(12\.34ms\)/);
   });
 
+  it("removes a blank line immediately preceding a Windows prompt echo", async () => {
+    const { projectRuntimeOutputExcerpts } =
+      await import("../../dist/mcp/runtime-output-projection.js");
+    const rawContent =
+      "\r\n" +
+      String.raw`F:\Claude\projects\sdl-mcp\sdl-mcp>echo qa-runtime-probe` +
+      " \r\nqa-runtime-probe\r\n";
+
+    const projected = projectRuntimeOutputExcerpts([
+      {
+        lineStart: 1,
+        lineEnd: 4,
+        content: rawContent,
+        source: "stdout",
+      },
+    ]);
+
+    assert.strictEqual(projected[0]?.lineStart, 3);
+    assert.strictEqual(projected[0]?.content, "qa-runtime-probe\r\n");
+  });
+
 });

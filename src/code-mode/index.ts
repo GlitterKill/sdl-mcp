@@ -18,6 +18,7 @@ import {
   rankCatalog,
   META_ACTION_SEARCH_SCHEMA,
   type ActionCatalogEntry,
+  type SchemaSummaryField,
 } from "./action-catalog.js";
 import {
   ACTION_SEARCH_DESCRIPTION,
@@ -656,6 +657,27 @@ export function registerCodeModeTools(
   );
 }
 
+function renderTypescriptFieldType(field: SchemaSummaryField): string {
+  if (
+    field.type !== "object" ||
+    !field.discriminator ||
+    !field.variants?.length
+  ) {
+    return field.type;
+  }
+  return field.variants
+    .map((variant) => {
+      const requiredFields = variant.requiredFields
+        .filter((name) => name !== field.discriminator)
+        .map((name) => `${name}: unknown`);
+      return `{ ${[
+        `${field.discriminator}: ${JSON.stringify(variant.value)}`,
+        ...requiredFields,
+      ].join("; ")} }`;
+    })
+    .join(" | ");
+}
+
 function renderTypescript(catalog: ActionCatalogEntry[]): string {
   const lines: string[] = [
     "// SDL-MCP API - use with sdl.workflow for multi-step operations",
@@ -687,7 +709,8 @@ function renderTypescript(catalog: ActionCatalogEntry[]): string {
     if (descriptor.schemaSummary) {
       const params = descriptor.schemaSummary.fields
         .map(
-          (field) => `${field.name}${field.required ? "" : "?"}: ${field.type}`,
+          (field) =>
+            `${field.name}${field.required ? "" : "?"}: ${renderTypescriptFieldType(field)}`,
         )
         .join("; ");
       lines.push(`function ${descriptor.fn}(p: { ${params} }): object`);
