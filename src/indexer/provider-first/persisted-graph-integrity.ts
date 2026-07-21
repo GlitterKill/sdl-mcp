@@ -158,7 +158,7 @@ export class GraphIntegrityVerificationError extends Error {
 
 export interface GraphIntegrityVerificationOptions {
   persistFailureState?: typeof markGraphIntegrityFailedIfVerifying;
-  /** Test barrier used to prove invalidation wins after the final read. */
+  /** Test barrier used to prove a newer state wins after the final read. */
   afterCapture?: () => Promise<void>;
 }
 
@@ -788,6 +788,7 @@ export class PersistedGraphIntegritySession {
  */
 export async function verifyNoOpIncrementalGraphIntegrity(
   repoId: string,
+  options: Pick<GraphIntegrityVerificationOptions, "afterCapture"> = {},
 ): Promise<string> {
   const conn = await getLadybugConn();
   const [latestVersion, state] = await Promise.all([
@@ -797,12 +798,15 @@ export async function verifyNoOpIncrementalGraphIntegrity(
   if (
     !latestVersion ||
     !state ||
-    !graphIntegrityIsVerifiedForVersion(state, latestVersion.versionId)
+    !graphIntegrityIsVerifiedForVersion(state, latestVersion.versionId) ||
+    typeof state.graphIntegrityRevision !== "number"
   ) {
     throw new Error(INCREMENTAL_BASELINE_ERROR);
   }
+  const expectedRevision = state.graphIntegrityRevision;
 
   const actual = await capturePersistedGraphIntegrity(conn, repoId);
+  await options.afterCapture?.();
   if (actual.digest !== state.graphIntegrityDigest) {
     logger.error("Persisted graph integrity no-op mismatch", {
       repoId,
@@ -815,6 +819,7 @@ export async function verifyNoOpIncrementalGraphIntegrity(
       repoId,
       latestVersion.versionId,
       PUBLIC_VERIFICATION_ERROR,
+      expectedRevision,
     );
     throw new GraphIntegrityVerificationError();
   }

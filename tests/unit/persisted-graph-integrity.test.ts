@@ -1460,7 +1460,15 @@ describe("persisted graph integrity", () => {
       integrityModule,
       "verifyNoOpIncrementalGraphIntegrity",
     );
-    await derivedState.markGraphIntegrityFailed("repo", "v1", "failed");
+    await derivedState.markGraphIntegrityVerified(
+      "repo",
+      "v1",
+      "a".repeat(64),
+    );
+    assert.equal(
+      await derivedState.markGraphIntegrityFailed("repo", "v1", "failed", 0),
+      true,
+    );
 
     await assert.rejects(
       verifyNoOp("repo"),
@@ -1498,6 +1506,88 @@ describe("persisted graph integrity", () => {
     const state = await derivedState.getDerivedState("repo");
     assert.equal(state?.graphIntegrityState, "failed");
     assert.equal(state?.graphIntegrityVersionId, "v1");
+    assert.equal(state?.graphIntegrityRevision, 0);
+    assert.equal(state?.graphIntegrityVerifiedRevision, 0);
+    assert.equal(state?.graphIntegrityDigest, baseline.digest);
+  });
+
+  it("does not let a stale no-op mismatch poison a newer Version revision", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-noop-race-"));
+    await seedVersionedGraph(root);
+    const verifyNoOp = requiredFunction<AsyncFn>(
+      integrityModule,
+      "verifyNoOpIncrementalGraphIntegrity",
+    );
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const baseline = (await capture(await getLadybugConn(), "repo")) as {
+      digest: string;
+    };
+    await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'sym:alpha'})
+         SET s.signatureJson = '{"name":"corrupted"}'`,
+      ),
+    );
+
+    await assert.rejects(
+      verifyNoOp("repo", {
+        afterCapture: async () => {
+          await withWriteConn(async (conn) => {
+            await ladybugDb.createVersion(conn, {
+              versionId: "v2",
+              repoId: "repo",
+              createdAt: "2026-07-17T00:00:00.000Z",
+              reason: "test-race",
+              prevVersionHash: null,
+              versionHash: null,
+            });
+            await derivedState.beginGraphIntegrityVersion(
+              conn,
+              "repo",
+              "v2",
+              "b".repeat(64),
+              true,
+            );
+            assert.equal(
+              await derivedState.advanceGraphIntegrityRevisionInTransaction(
+                conn,
+                "repo",
+                "v2",
+                0,
+              ),
+              1,
+            );
+          });
+          assert.equal(
+            await derivedState.markGraphIntegrityVerifiedIfVerifying(
+              "repo",
+              "v2",
+              "b".repeat(64),
+              1,
+            ),
+            true,
+          );
+        },
+      }),
+      /^Error: Persisted graph integrity verification failed$/,
+    );
+
+    const state = await derivedState.getDerivedState("repo");
+    assert.equal(state?.graphIntegrityState, "verified");
+    assert.equal(state?.graphIntegrityVersionId, "v2");
+    assert.equal(state?.graphIntegrityRevision, 1);
+    assert.equal(state?.graphIntegrityVerifiedRevision, 1);
+    assert.equal(state?.graphIntegrityDigest, "b".repeat(64));
+    assert.equal(
+      (await ladybugDb.getLatestVersion(await getLadybugConn(), "repo"))
+        ?.versionId,
+      "v2",
+    );
   });
 
   it("accepts a verified clean no-op without creating a version", async () => {
@@ -1598,11 +1688,16 @@ describe("persisted graph integrity", () => {
     assert.equal(row?.graphIntegrityDigest, "a".repeat(64));
     assert.equal(row?.graphIntegrityError, null);
 
-    await markFailed("repo", "v2", "sensitive ".repeat(300));
+    await markVerifying("repo", "v2");
+    assert.equal(
+      await markFailed("repo", "v2", "sensitive ".repeat(300), 0),
+      true,
+    );
     row = await derivedState.getDerivedState("repo");
     assert.equal(row?.graphIntegrityState, "failed");
     assert.equal(row?.graphIntegrityVersionId, "v2");
-    assert.equal(row?.graphIntegrityDigest, null);
+    assert.equal(row?.graphIntegrityDigest, "a".repeat(64));
+    assert.equal(row?.graphIntegrityVerifiedRevision, 0);
     assert.ok((row?.graphIntegrityError?.length ?? 0) <= 1_024);
   });
 

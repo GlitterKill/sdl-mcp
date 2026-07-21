@@ -448,17 +448,8 @@ export async function markGraphIntegrityFailed(
   repoId: string,
   versionId: string,
   error: string,
-  expectedRevision?: number,
+  expectedRevision: number,
 ): Promise<boolean> {
-  if (expectedRevision === undefined) {
-    await setGraphIntegrityState(repoId, {
-      state: "failed",
-      versionId,
-      digest: null,
-      error: error.slice(0, 1024),
-    });
-    return true;
-  }
   assertSafeInt(expectedRevision, "expectedRevision");
   const updatedAt = getCurrentTimestamp();
   return withWriteConn(async (wConn) => {
@@ -546,36 +537,6 @@ export function graphIntegrityIsVerifiedForVersion(
   );
 }
 
-async function setGraphIntegrityState(
-  repoId: string,
-  state: {
-    state: GraphIntegrityState;
-    versionId: string;
-    digest: string | null;
-    error: string | null;
-  },
-): Promise<void> {
-  const updatedAt = getCurrentTimestamp();
-  await withWriteConn(async (wConn) => {
-    await exec(
-      wConn,
-      `MERGE (d:DerivedState {repoId: $repoId})
-       SET d.graphIntegrityState = $graphIntegrityState,
-           d.graphIntegrityVersionId = $graphIntegrityVersionId,
-           d.graphIntegrityDigest = $graphIntegrityDigest,
-           d.graphIntegrityError = $graphIntegrityError,
-           d.updatedAt = $updatedAt`,
-      {
-        repoId,
-        graphIntegrityState: state.state,
-        graphIntegrityVersionId: state.versionId,
-        graphIntegrityDigest: state.digest,
-        graphIntegrityError: state.error,
-        updatedAt,
-      },
-    );
-  });
-}
 
 function normalizeGraphIntegrityState(value: unknown): GraphIntegrityState {
   return value === "verifying" || value === "verified" || value === "failed"
