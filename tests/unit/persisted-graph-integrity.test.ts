@@ -1789,6 +1789,57 @@ describe("persisted graph integrity", () => {
     assert.equal(row?.graphIntegrityError, "owned failure");
   });
 
+  it("marks an aborted unrevisioned verification failed without clearing its baseline", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-abort-null-revision-"));
+    await initLadybugDb(join(root, "abort-null-revision.lbug"));
+    const Session = requiredFunction<SyncFn>(
+      integrityModule,
+      "PersistedGraphIntegritySession",
+    ) as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+    };
+    const failActive = requiredFunction<AsyncFn>(
+      integrityModule,
+      "failActiveGraphIntegrityVerification",
+    );
+    const conn = await getLadybugConn();
+    const digest = "8".repeat(64);
+    await derivedState.beginGraphIntegrityVersion(
+      conn,
+      "repo",
+      "v1",
+      digest,
+      false,
+    );
+    await ladybugDb.exec(
+      conn,
+      `MATCH (d:DerivedState {repoId: 'repo'})
+       SET d.graphIntegrityRevision = NULL,
+           d.graphIntegrityVerifiedRevision = 7`,
+    );
+
+    const session = new Session("repo", "full", true);
+    await session.begin("v1");
+    await failActive("repo");
+
+    const row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityState, "failed");
+    assert.equal(row?.graphIntegrityVersionId, "v1");
+    assert.equal(row?.graphIntegrityRevision, null);
+    assert.equal(row?.graphIntegrityVerifiedRevision, 7);
+    assert.equal(row?.graphIntegrityDigest, digest);
+    assert.equal(row?.graphIntegrityFilelessPruningSupported, false);
+    assert.equal(
+      row?.graphIntegrityError,
+      "Persisted graph integrity verification did not complete",
+    );
+    assert.ok(String(row?.graphIntegrityError).length <= 1024);
+  });
+
   it("active verification cleanup preserves invalidated state", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-cleanup-cas-"));
     await initLadybugDb(join(root, "cleanup-cas.lbug"));

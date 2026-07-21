@@ -869,9 +869,16 @@ export async function failActiveGraphIntegrityVerification(
   if (!verification) return;
   activeVerifications.delete(repoId);
   const { versionId, revision } = verification;
-  if (revision === null) return;
   try {
-    await failGraphIntegrityVerification(repoId, versionId, revision);
+    if (revision === null) {
+      await markUnrevisionedGraphIntegrityFailedIfVerifying(
+        repoId,
+        versionId,
+        "Persisted graph integrity verification did not complete",
+      );
+    } else {
+      await failGraphIntegrityVerification(repoId, versionId, revision);
+    }
   } catch (error) {
     logger.error("Failed to persist graph integrity failure state", {
       repoId,
