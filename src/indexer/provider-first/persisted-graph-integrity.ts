@@ -5,10 +5,11 @@ import type { Connection } from "kuzu";
 import {
   getDerivedState,
   graphIntegrityIsVerifiedForVersion,
-  markGraphIntegrityFailed,
+  markCurrentGraphIntegrityRevisionFailed,
   markGraphIntegrityFailedIfVerifying,
   markGraphIntegrityVerifying,
   markGraphIntegrityVerifiedIfVerifying,
+  initializeGraphIntegrityRevisionIfVerifying,
 } from "../../db/ladybug-derived-state.js";
 import { classifyDependencyTarget } from "../../db/symbol-placeholders.js";
 import {
@@ -40,7 +41,10 @@ const PUBLIC_VERIFICATION_ERROR =
 const INCREMENTAL_BASELINE_ERROR =
   'Incremental indexing requires a verified graph integrity baseline. Run sdl.index.refresh with mode:"full" first. If full verification also fails, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.';
 const FILELESS_SENTINEL = "";
-const activeVerifications = new Map<string, string>();
+const activeVerifications = new Map<
+  string,
+  { versionId: string; revision: number | null }
+>();
 
 export type GraphIntegrityCanonicalSymbol = Pick<
   SymbolRow,
@@ -434,7 +438,14 @@ export class PersistedGraphIntegritySession {
 
     this.versionId = targetVersionId;
     await markGraphIntegrityVerifying(this.repoId, targetVersionId);
-    activeVerifications.set(this.repoId, targetVersionId);
+    const verificationState = await getDerivedState(this.repoId);
+    activeVerifications.set(this.repoId, {
+      versionId: targetVersionId,
+      revision:
+        verificationState?.graphIntegrityVersionId === targetVersionId
+          ? verificationState.graphIntegrityRevision ?? null
+          : null,
+    });
     try {
       if (this.mode === "incremental") {
         const filelessSymbols = new Map<string, CanonicalSymbol>();
@@ -815,11 +826,11 @@ export async function verifyNoOpIncrementalGraphIntegrity(
       actualDigest: actual.digest,
       actualSymbolCount: actual.symbolCount,
     });
-    await markGraphIntegrityFailed(
+    await markCurrentGraphIntegrityRevisionFailed(
       repoId,
       latestVersion.versionId,
-      PUBLIC_VERIFICATION_ERROR,
       expectedRevision,
+      PUBLIC_VERIFICATION_ERROR,
     );
     throw new GraphIntegrityVerificationError();
   }
@@ -853,11 +864,13 @@ export async function ensureGraphIntegrityVerificationComplete(
 export async function failActiveGraphIntegrityVerification(
   repoId: string,
 ): Promise<void> {
-  const versionId = activeVerifications.get(repoId);
-  if (!versionId) return;
+  const verification = activeVerifications.get(repoId);
+  if (!verification) return;
   activeVerifications.delete(repoId);
+  const { versionId, revision } = verification;
+  if (revision === null) return;
   try {
-    await failGraphIntegrityVerification(repoId, versionId);
+    await failGraphIntegrityVerification(repoId, versionId, revision);
   } catch (error) {
     logger.error("Failed to persist graph integrity failure state", {
       repoId,
@@ -1280,7 +1293,18 @@ export async function completeGraphIntegrityVerification(
   options: GraphIntegrityVerificationOptions = {},
 ): Promise<void> {
   const startedAt = Date.now();
+  let verificationRevision: number | null = null;
   try {
+    const verificationState = await getDerivedState(repoId);
+    if (
+      !verificationState ||
+      verificationState.graphIntegrityState !== "verifying" ||
+      verificationState.graphIntegrityVersionId !== versionId
+    ) {
+      throw new GraphIntegrityVerificationError();
+    }
+    verificationRevision = verificationState.graphIntegrityRevision ?? null;
+
     const actual = await capturePersistedGraphIntegrity(
       await getLadybugConn(),
       repoId,
@@ -1295,9 +1319,21 @@ export async function completeGraphIntegrityVerification(
       });
       throw new GraphIntegrityVerificationError();
     }
+    if (verificationRevision === null) {
+      verificationRevision =
+        await initializeGraphIntegrityRevisionIfVerifying(repoId, versionId);
+    }
+    if (verificationRevision === null) {
+      logger.error("Persisted graph integrity publish lost verification state", {
+        repoId,
+        versionId,
+      });
+      throw new GraphIntegrityVerificationError();
+    }
     const published = await markGraphIntegrityVerifiedIfVerifying(
       repoId,
       versionId,
+      verificationRevision,
       actual.digest,
     );
     if (!published) {
@@ -1321,19 +1357,22 @@ export async function completeGraphIntegrityVerification(
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    try {
-      await (options.persistFailureState ?? markGraphIntegrityFailedIfVerifying)(
-        repoId,
-        versionId,
-        PUBLIC_VERIFICATION_ERROR,
-      );
-    } catch (stateError) {
-      logger.error("Failed to persist graph integrity failure state", {
-        repoId,
-        versionId,
-        error:
-          stateError instanceof Error ? stateError.message : String(stateError),
-      });
+    if (verificationRevision !== null) {
+      try {
+        await (options.persistFailureState ?? markGraphIntegrityFailedIfVerifying)(
+          repoId,
+          versionId,
+          verificationRevision,
+          PUBLIC_VERIFICATION_ERROR,
+        );
+      } catch (stateError) {
+        logger.error("Failed to persist graph integrity failure state", {
+          repoId,
+          versionId,
+          error:
+            stateError instanceof Error ? stateError.message : String(stateError),
+        });
+      }
     }
     throw new GraphIntegrityVerificationError();
   }
@@ -1342,10 +1381,12 @@ export async function completeGraphIntegrityVerification(
 export async function failGraphIntegrityVerification(
   repoId: string,
   versionId: string,
+  revision: number,
 ): Promise<void> {
   await markGraphIntegrityFailedIfVerifying(
     repoId,
     versionId,
+    revision,
     "Persisted graph integrity verification did not complete",
   );
 }

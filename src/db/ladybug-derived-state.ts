@@ -195,6 +195,7 @@ export interface GraphIntegrityPendingRevision {
   repoId: string;
   versionId: string;
   revision: number;
+  verifiedRevision: number | null;
 }
 
 export async function beginGraphIntegrityVersion(
@@ -256,6 +257,30 @@ export async function advanceGraphIntegrityRevisionInTransaction(
   return nullableInt64(row?.revision, "graphIntegrityRevision");
 }
 
+/** Initialize revision zero only for a migrated synchronous verifier that still owns state. */
+export async function initializeGraphIntegrityRevisionIfVerifying(
+  repoId: string,
+  versionId: string,
+): Promise<number | null> {
+  const updatedAt = getCurrentTimestamp();
+  return withWriteConn(async (wConn) => {
+    const row = await querySingle<{ revision: unknown }>(
+      wConn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       WHERE d.graphIntegrityState = 'verifying'
+         AND d.graphIntegrityVersionId = $versionId
+         AND d.graphIntegrityRevision IS NULL
+       SET d.graphIntegrityRevision = 0,
+           d.graphIntegrityFilelessPruningSupported = true,
+           d.graphIntegrityError = NULL,
+           d.updatedAt = $updatedAt
+       RETURN d.graphIntegrityRevision AS revision`,
+      { repoId, versionId, updatedAt },
+    );
+    return nullableInt64(row?.revision, "graphIntegrityRevision");
+  });
+}
+
 export async function listPendingGraphIntegrityRevisions(): Promise<
   GraphIntegrityPendingRevision[]
 > {
@@ -271,13 +296,21 @@ export async function listPendingGraphIntegrityRevisions(): Promise<
        )
      RETURN d.repoId AS repoId,
             d.graphIntegrityVersionId AS versionId,
-            d.graphIntegrityRevision AS revision
+            d.graphIntegrityRevision AS revision,
+            d.graphIntegrityVerifiedRevision AS verifiedRevision
      ORDER BY d.repoId`,
   );
   return rows.map((row) => ({
     repoId: String(row.repoId),
     versionId: String(row.versionId),
     revision: nullableInt64(row.revision, "graphIntegrityRevision")!,
+    verifiedRevision:
+      row.verifiedRevision === null || row.verifiedRevision === undefined
+        ? null
+        : nullableInt64(
+            row.verifiedRevision,
+            "graphIntegrityVerifiedRevision",
+          ),
   }));
 }
 
@@ -313,65 +346,18 @@ export async function markGraphIntegrityVerified(
 export async function markGraphIntegrityVerifiedIfVerifying(
   repoId: string,
   versionId: string,
+  revision: number,
   digest: string,
-  expectedRevision?: number,
 ): Promise<boolean> {
-  if (expectedRevision !== undefined) {
-    assertSafeInt(expectedRevision, "expectedRevision");
-  }
+  assertSafeInt(revision, "revision");
   const updatedAt = getCurrentTimestamp();
   return withWriteConn(async (wConn) => {
-    if (expectedRevision === undefined) {
-      const owner = await querySingle<Record<string, unknown>>(
-        wConn,
-        `MATCH (d:DerivedState {repoId: $repoId})
-         WHERE d.graphIntegrityState = 'verifying'
-           AND d.graphIntegrityVersionId = $versionId
-         RETURN d.graphIntegrityRevision AS graphIntegrityRevision`,
-        { repoId, versionId },
-      );
-      if (!owner) return false;
-
-      const currentRevision = nullableInt64(
-        owner.graphIntegrityRevision,
-        "graphIntegrityRevision",
-      );
-      if (currentRevision === null) {
-        // Task 6 moves revision advancement into the transaction-owned path.
-        await beginGraphIntegrityVersion(wConn, repoId, versionId, digest, true);
-        return true;
-      }
-
-      const row = await querySingle<{ repoId: string }>(
-        wConn,
-        `MATCH (d:DerivedState {repoId: $repoId})
-         WHERE d.graphIntegrityState = 'verifying'
-           AND d.graphIntegrityVersionId = $versionId
-           AND d.graphIntegrityRevision = $expectedRevision
-         SET d.graphIntegrityState = 'verified',
-             d.graphIntegrityVerifiedRevision = d.graphIntegrityRevision,
-             d.graphIntegrityFilelessPruningSupported = true,
-             d.graphIntegrityDigest = $graphIntegrityDigest,
-             d.graphIntegrityError = NULL,
-             d.updatedAt = $updatedAt
-         RETURN d.repoId AS repoId`,
-        {
-          repoId,
-          versionId,
-          expectedRevision: currentRevision,
-          graphIntegrityDigest: digest,
-          updatedAt,
-        },
-      );
-      return row !== null;
-    }
-
     const row = await querySingle<{ repoId: string }>(
       wConn,
       `MATCH (d:DerivedState {repoId: $repoId})
        WHERE d.graphIntegrityState = 'verifying'
          AND d.graphIntegrityVersionId = $versionId
-         AND d.graphIntegrityRevision = $expectedRevision
+         AND d.graphIntegrityRevision = $revision
        SET d.graphIntegrityState = 'verified',
            d.graphIntegrityVerifiedRevision = d.graphIntegrityRevision,
            d.graphIntegrityDigest = $graphIntegrityDigest,
@@ -381,7 +367,7 @@ export async function markGraphIntegrityVerifiedIfVerifying(
       {
         repoId,
         versionId,
-        expectedRevision,
+        revision,
         graphIntegrityDigest: digest,
         updatedAt,
       },
@@ -394,40 +380,18 @@ export async function markGraphIntegrityVerifiedIfVerifying(
 export async function markGraphIntegrityFailedIfVerifying(
   repoId: string,
   versionId: string,
+  revision: number,
   error: string,
-  expectedRevision?: number,
 ): Promise<boolean> {
-  if (expectedRevision !== undefined) {
-    assertSafeInt(expectedRevision, "expectedRevision");
-  }
+  assertSafeInt(revision, "revision");
   const updatedAt = getCurrentTimestamp();
   return withWriteConn(async (wConn) => {
-    if (expectedRevision === undefined) {
-      const row = await querySingle<{ repoId: string }>(
-        wConn,
-        `MATCH (d:DerivedState {repoId: $repoId})
-         WHERE d.graphIntegrityState = 'verifying'
-           AND d.graphIntegrityVersionId = $versionId
-         SET d.graphIntegrityState = 'failed',
-             d.graphIntegrityError = $graphIntegrityError,
-             d.updatedAt = $updatedAt
-         RETURN d.repoId AS repoId`,
-        {
-          repoId,
-          versionId,
-          graphIntegrityError: error.slice(0, 1024),
-          updatedAt,
-        },
-      );
-      return row !== null;
-    }
-
     const row = await querySingle<{ repoId: string }>(
       wConn,
       `MATCH (d:DerivedState {repoId: $repoId})
        WHERE d.graphIntegrityState = 'verifying'
          AND d.graphIntegrityVersionId = $versionId
-         AND d.graphIntegrityRevision = $expectedRevision
+         AND d.graphIntegrityRevision = $revision
        SET d.graphIntegrityState = 'failed',
            d.graphIntegrityError = $graphIntegrityError,
            d.updatedAt = $updatedAt
@@ -435,7 +399,7 @@ export async function markGraphIntegrityFailedIfVerifying(
       {
         repoId,
         versionId,
-        expectedRevision,
+        revision,
         graphIntegrityError: error.slice(0, 1024),
         updatedAt,
       },
@@ -444,20 +408,20 @@ export async function markGraphIntegrityFailedIfVerifying(
   });
 }
 
-export async function markGraphIntegrityFailed(
+export async function markCurrentGraphIntegrityRevisionFailed(
   repoId: string,
   versionId: string,
+  revision: number,
   error: string,
-  expectedRevision: number,
 ): Promise<boolean> {
-  assertSafeInt(expectedRevision, "expectedRevision");
+  assertSafeInt(revision, "revision");
   const updatedAt = getCurrentTimestamp();
   return withWriteConn(async (wConn) => {
     const row = await querySingle<{ repoId: string }>(
       wConn,
       `MATCH (d:DerivedState {repoId: $repoId})
        WHERE d.graphIntegrityVersionId = $versionId
-         AND d.graphIntegrityRevision = $expectedRevision
+         AND d.graphIntegrityRevision = $revision
        SET d.graphIntegrityState = 'failed',
            d.graphIntegrityError = $graphIntegrityError,
            d.updatedAt = $updatedAt
@@ -465,7 +429,7 @@ export async function markGraphIntegrityFailed(
       {
         repoId,
         versionId,
-        expectedRevision,
+        revision,
         graphIntegrityError: error.slice(0, 1024),
         updatedAt,
       },

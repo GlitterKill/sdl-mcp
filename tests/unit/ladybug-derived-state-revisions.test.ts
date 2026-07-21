@@ -21,23 +21,28 @@ interface RevisionApi {
   markGraphIntegrityVerifiedIfVerifying(
     repoId: string,
     versionId: string,
+    revision: number,
     digest: string,
-    expectedRevision: number,
   ): Promise<boolean>;
   markGraphIntegrityFailedIfVerifying(
     repoId: string,
     versionId: string,
+    revision: number,
     error: string,
-    expectedRevision: number,
   ): Promise<boolean>;
-  markGraphIntegrityFailed(
+  markCurrentGraphIntegrityRevisionFailed(
     repoId: string,
     versionId: string,
+    revision: number,
     error: string,
-    expectedRevision: number,
   ): Promise<boolean>;
   listPendingGraphIntegrityRevisions(): Promise<
-    Array<{ repoId: string; versionId: string; revision: number }>
+    Array<{
+      repoId: string;
+      versionId: string;
+      revision: number;
+      verifiedRevision: number | null;
+    }>
   >;
   getDerivedState(
     repoId: string,
@@ -151,9 +156,34 @@ describe(
         0,
       );
 
+      await exec(
+        conn,
+        `CREATE (d:DerivedState {
+          repoId: 'repo-c',
+          graphIntegrityVersionId: 'v0',
+          graphIntegrityRevision: 0
+        })`,
+      );
+
       assert.deepEqual(await api.listPendingGraphIntegrityRevisions(), [
-        { repoId: "repo-a", versionId: "v1", revision: 1 },
-        { repoId: "repo-b", versionId: "v2", revision: 1 },
+        {
+          repoId: "repo-a",
+          versionId: "v1",
+          revision: 1,
+          verifiedRevision: 0,
+        },
+        {
+          repoId: "repo-b",
+          versionId: "v2",
+          revision: 1,
+          verifiedRevision: 0,
+        },
+        {
+          repoId: "repo-c",
+          versionId: "v0",
+          revision: 0,
+          verifiedRevision: null,
+        },
       ]);
     });
 
@@ -173,8 +203,8 @@ describe(
         await api.markGraphIntegrityVerifiedIfVerifying(
           "repo",
           "wrong",
-          nextDigest,
           1,
+          nextDigest,
         ),
         false,
       );
@@ -182,8 +212,8 @@ describe(
         await api.markGraphIntegrityVerifiedIfVerifying(
           "repo",
           "v1",
-          nextDigest,
           0,
+          nextDigest,
         ),
         false,
       );
@@ -191,8 +221,8 @@ describe(
         await api.markGraphIntegrityVerifiedIfVerifying(
           "repo",
           "v1",
-          nextDigest,
           1,
+          nextDigest,
         ),
         true,
       );
@@ -200,8 +230,8 @@ describe(
         await api.markGraphIntegrityVerifiedIfVerifying(
           "repo",
           "v1",
-          nextDigest,
           1,
+          nextDigest,
         ),
         false,
       );
@@ -227,8 +257,8 @@ describe(
         await api.markGraphIntegrityFailedIfVerifying(
           "repo",
           "v1",
-          "wrong revision",
           0,
+          "wrong revision",
         ),
         false,
       );
@@ -236,8 +266,8 @@ describe(
         await api.markGraphIntegrityFailedIfVerifying(
           "repo",
           "v1",
-          "failed",
           1,
+          "failed",
         ),
         true,
       );
@@ -254,15 +284,15 @@ describe(
       await api.beginGraphIntegrityVersion(conn, "repo", "v1", digest, true);
 
       assert.equal(
-        await api.markGraphIntegrityFailed("repo", "wrong", "failed", 0),
+        await api.markCurrentGraphIntegrityRevisionFailed("repo", "wrong", 0, "failed"),
         false,
       );
       assert.equal(
-        await api.markGraphIntegrityFailed("repo", "v1", "failed", 1),
+        await api.markCurrentGraphIntegrityRevisionFailed("repo", "v1", 1, "failed"),
         false,
       );
       assert.equal(
-        await api.markGraphIntegrityFailed("repo", "v1", "failed", 0),
+        await api.markCurrentGraphIntegrityRevisionFailed("repo", "v1", 0, "failed"),
         true,
       );
       const row = await api.getDerivedState("repo");
@@ -304,6 +334,21 @@ describe(
       );
       await assert.rejects(
         () => api.getDerivedState("unsafe"),
+        /safe integer/i,
+      );
+
+      await exec(
+        conn,
+        `CREATE (d:DerivedState {
+          repoId: 'unsafe-verified',
+          graphIntegrityVersionId: 'v1',
+          graphIntegrityRevision: 0,
+          graphIntegrityVerifiedRevision: $verifiedRevision
+        })`,
+        { verifiedRevision: -9_007_199_254_740_992n },
+      );
+      await assert.rejects(
+        () => api.listPendingGraphIntegrityRevisions(),
         /safe integer/i,
       );
     });

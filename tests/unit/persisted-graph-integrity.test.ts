@@ -1466,7 +1466,7 @@ describe("persisted graph integrity", () => {
       "a".repeat(64),
     );
     assert.equal(
-      await derivedState.markGraphIntegrityFailed("repo", "v1", "failed", 0),
+      await derivedState.markCurrentGraphIntegrityRevisionFailed("repo", "v1", 0, "failed"),
       true,
     );
 
@@ -1567,8 +1567,8 @@ describe("persisted graph integrity", () => {
             await derivedState.markGraphIntegrityVerifiedIfVerifying(
               "repo",
               "v2",
-              "b".repeat(64),
               1,
+              "b".repeat(64),
             ),
             true,
           );
@@ -1671,7 +1671,7 @@ describe("persisted graph integrity", () => {
     );
     const markFailed = requiredFunction<AsyncFn>(
       derivedState,
-      "markGraphIntegrityFailed",
+      "markCurrentGraphIntegrityRevisionFailed",
     );
 
     await markVerifying("repo", "v1");
@@ -1690,7 +1690,7 @@ describe("persisted graph integrity", () => {
 
     await markVerifying("repo", "v2");
     assert.equal(
-      await markFailed("repo", "v2", "sensitive ".repeat(300), 0),
+      await markFailed("repo", "v2", 0, "sensitive ".repeat(300)),
       true,
     );
     row = await derivedState.getDerivedState("repo");
@@ -1713,9 +1713,14 @@ describe("persisted graph integrity", () => {
       "markGraphIntegrityFailedIfVerifying",
     );
 
+    await derivedState.markGraphIntegrityVerified(
+      "repo",
+      "v0",
+      "a".repeat(64),
+    );
     await markVerifying("repo", "v1");
     assert.equal(
-      await markFailedIfVerifying("repo", "v2", "stale failure"),
+      await markFailedIfVerifying("repo", "v2", 0, "stale failure"),
       false,
     );
     let row = await derivedState.getDerivedState("repo");
@@ -1724,13 +1729,14 @@ describe("persisted graph integrity", () => {
     assert.equal(row?.graphIntegrityError, null);
 
     assert.equal(
-      await markFailedIfVerifying("repo", "v1", "owned failure"),
+      await markFailedIfVerifying("repo", "v1", 0, "owned failure"),
       true,
     );
     row = await derivedState.getDerivedState("repo");
     assert.equal(row?.graphIntegrityState, "failed");
     assert.equal(row?.graphIntegrityVersionId, "v1");
-    assert.equal(row?.graphIntegrityDigest, null);
+    assert.equal(row?.graphIntegrityDigest, "a".repeat(64));
+    assert.equal(row?.graphIntegrityVerifiedRevision, 0);
     assert.equal(row?.graphIntegrityError, "owned failure");
   });
 
@@ -1878,6 +1884,23 @@ describe("persisted graph integrity", () => {
         symbolRow({ signatureJson: '{"name":"corrupted"}' }),
       ]);
     });
+    await withWriteConn(async (conn) => {
+      await ladybugDb.createVersion(conn, {
+        versionId: "v1",
+        repoId: "repo",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        reason: "test-verification",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await derivedState.beginGraphIntegrityVersion(
+        conn,
+        "repo",
+        "v1",
+        "a".repeat(64),
+        true,
+      );
+    });
     await markVerifying("repo", "v1");
 
     await assert.rejects(
@@ -1937,6 +1960,25 @@ describe("persisted graph integrity", () => {
         symbolRow({ signatureJson: '{"name":"corrupted"}' }),
       ]);
     });
+
+    await withWriteConn(async (conn) => {
+      await ladybugDb.createVersion(conn, {
+        versionId: "v1",
+        repoId: "repo",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        reason: "test-verification",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await derivedState.beginGraphIntegrityVersion(
+        conn,
+        "repo",
+        "v1",
+        "a".repeat(64),
+        true,
+      );
+    });
+    await derivedState.markGraphIntegrityVerifying("repo", "v1");
 
     let stateWriteAttempted = false;
     await assert.rejects(
