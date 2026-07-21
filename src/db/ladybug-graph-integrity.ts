@@ -12,6 +12,9 @@ import type { SymbolStatus } from "./symbol-placeholders.js";
 
 const GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE = 256;
 
+/** Marker for deterministic persisted-manifest corruption. */
+export class GraphIntegrityManifestValidationError extends DatabaseError {}
+
 export interface PersistedGraphIntegritySymbolRow {
   symbolId: string;
   fileId: string;
@@ -111,7 +114,9 @@ function graphIntegrityFilelessStateId(
 
 function assertFileStateIdentity(row: GraphIntegrityFileStateRecord): void {
   if (row.stateId !== graphIntegrityFileStateId(row.repoId, row.fileId)) {
-    throw new DatabaseError("Graph integrity file state identity is inconsistent");
+    throw new GraphIntegrityManifestValidationError(
+      "Graph integrity file state identity is inconsistent",
+    );
   }
 }
 
@@ -119,7 +124,7 @@ function assertFilelessStateIdentity(
   row: GraphIntegrityFilelessStateRecord,
 ): void {
   if (row.stateId !== graphIntegrityFilelessStateId(row.repoId, row.symbolId)) {
-    throw new DatabaseError(
+    throw new GraphIntegrityManifestValidationError(
       "Graph integrity fileless state identity is inconsistent",
     );
   }
@@ -416,13 +421,13 @@ export async function getPersistedGraphIntegritySymbolPage(
   },
 ): Promise<PersistedGraphIntegritySymbolRow[]> {
   const hasCursor = params.after !== undefined;
-  // Membership endpoints are not unique, so collapse joined logical tuples
-  // before the strict keyset cursor and page limit are applied.
+  // Membership endpoints are not unique. Filter the candidate range first,
+  // then collapse logical tuples before ordering and limiting the page.
   const rows = await queryAll<RawPersistedGraphIntegritySymbolRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
      OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)-[:FILE_IN_REPO]->(r)
-     WITH DISTINCT s, coalesce(f.fileId, '') AS fileId, coalesce(f.relPath, '') AS relPath
+     WITH s, coalesce(f.fileId, '') AS fileId, coalesce(f.relPath, '') AS relPath
      WHERE true
      ${
        hasCursor
@@ -433,6 +438,7 @@ export async function getPersistedGraphIntegritySymbolPage(
             )`
          : ""
      }
+     WITH DISTINCT s, fileId, relPath
      RETURN s.symbolId AS symbolId,
             fileId,
             relPath,

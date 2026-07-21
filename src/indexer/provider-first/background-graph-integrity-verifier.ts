@@ -8,6 +8,7 @@ import {
   markGraphIntegrityFailedIfVerifying,
   type GraphIntegrityPendingRevision,
 } from "../../db/ladybug-derived-state.js";
+import { GraphIntegrityManifestValidationError } from "../../db/ladybug-graph-integrity.js";
 import { logger } from "../../util/logger.js";
 import {
   GRAPH_INTEGRITY_VERIFICATION_FAILURE,
@@ -31,7 +32,8 @@ interface WorkerEntry {
 
 const workers = new Map<string, WorkerEntry>();
 let recoveryTimer: NodeJS.Timeout | undefined;
-let recoveryStart: Promise<void> | undefined;
+let recoveryStart: Promise<boolean> | undefined;
+let recoveryReady = false;
 
 function checkCancelled(signal: AbortSignal): void {
   if (signal.aborted) throw new VerificationCancelledError();
@@ -69,13 +71,17 @@ async function verifyWithRetry(
       return;
     } catch (error) {
       if (error instanceof VerificationCancelledError) return;
-      if (attempt + 1 >= WATCHER_REINDEX_MAX_ATTEMPTS) {
+      const deterministic =
+        error instanceof GraphIntegrityManifestValidationError;
+      if (deterministic || attempt + 1 >= WATCHER_REINDEX_MAX_ATTEMPTS) {
         if (signal.aborted) return;
-        logger.error("Background graph integrity verification exhausted retries", {
+        logger.error("Background graph integrity verification failed", {
           repoId: pending.repoId,
           versionId: pending.versionId,
           revision: pending.revision,
-          error: error instanceof Error ? error.message : String(error),
+          attempts: attempt + 1,
+          deterministic,
+          errorType: error instanceof Error ? error.name : typeof error,
         });
         try {
           await markGraphIntegrityFailedIfVerifying(
@@ -111,9 +117,7 @@ async function runWorker(repoId: string, entry: WorkerEntry): Promise<void> {
     entry.wakePending = false;
     let pending: GraphIntegrityPendingRevision | undefined;
     try {
-      pending = (await listPendingGraphIntegrityRevisions()).find(
-        (revision) => revision.repoId === repoId,
-      );
+      pending = (await listPendingGraphIntegrityRevisions(repoId))[0];
     } catch (error) {
       logger.error("Failed to load pending graph integrity revision", {
         repoId,
@@ -189,25 +193,43 @@ export async function runGraphIntegrityVerifierRecoverySweep(): Promise<void> {
   }
 }
 
-export async function startGraphIntegrityVerifierRecovery(): Promise<void> {
-  if (recoveryTimer) {
-    await recoveryStart;
-    return;
-  }
-  recoveryStart = runGraphIntegrityVerifierRecoverySweep();
-  recoveryTimer = setInterval(() => {
-    void runGraphIntegrityVerifierRecoverySweep().catch((error: unknown) => {
+function beginRecoverySweep(): Promise<boolean> {
+  if (recoveryStart) return recoveryStart;
+  const task = runGraphIntegrityVerifierRecoverySweep()
+    .then(() => true)
+    .catch((error: unknown) => {
       logger.error("Graph integrity recovery sweep failed", {
-        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.name : typeof error,
       });
+      return false;
+    })
+    .finally(() => {
+      if (recoveryStart === task) recoveryStart = undefined;
     });
-  }, RECOVERY_SWEEP_MS);
-  recoveryTimer.unref();
-  await recoveryStart;
+  recoveryStart = task;
+  return task;
+}
+
+export async function startGraphIntegrityVerifierRecovery(): Promise<void> {
+  if (!recoveryTimer) {
+    const timer = setInterval(() => {
+      void beginRecoverySweep().then((succeeded) => {
+        if (succeeded && recoveryTimer === timer) recoveryReady = true;
+      });
+    }, RECOVERY_SWEEP_MS);
+    timer.unref();
+    recoveryTimer = timer;
+  }
+  if (recoveryReady) return;
+
+  const activeTimer = recoveryTimer;
+  const succeeded = await beginRecoverySweep();
+  if (succeeded && recoveryTimer === activeTimer) recoveryReady = true;
 }
 
 export function stopGraphIntegrityVerifierRecovery(): void {
   if (recoveryTimer) clearInterval(recoveryTimer);
   recoveryTimer = undefined;
   recoveryStart = undefined;
+  recoveryReady = false;
 }

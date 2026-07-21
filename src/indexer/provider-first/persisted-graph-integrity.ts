@@ -20,6 +20,7 @@ import {
   getPersistedGraphIntegrityReferenceCountPage,
   getPersistedGraphIntegritySourceReferenceCounts,
   getPersistedGraphIntegritySymbolPage,
+  GraphIntegrityManifestValidationError,
   hasPersistedGraphIntegrityFilelessSourceReferences,
   listGraphIntegrityFilelessStates,
   listGraphIntegrityFileStates,
@@ -1471,8 +1472,8 @@ export async function verifyPersistedGraphIntegrityRevision(
   revision: number,
   options: {
     checkCancelled?: () => void;
+    /** @internal Minimal test hook proving the read lease closes before CAS. */
     persistSuccessState?: typeof markGraphIntegrityVerifiedIfVerifying;
-    persistFailureState?: typeof markGraphIntegrityFailedIfVerifying;
   } = {},
 ): Promise<"verified" | "failed" | "stale"> {
   const snapshot = await withExclusiveReadConnection((conn) =>
@@ -1482,7 +1483,17 @@ export async function verifyPersistedGraphIntegrityRevision(
       options.checkCancelled?.();
       const fileless = await listGraphIntegrityFilelessStates(conn, repoId);
       options.checkCancelled?.();
-      const expected = createGraphIntegrityExpectationFromManifest(files, fileless);
+      let expected: GraphIntegrityExpectation;
+      try {
+        expected = createGraphIntegrityExpectationFromManifest(files, fileless);
+      } catch (error) {
+        if (error instanceof GraphIntegrityManifestValidationError) throw error;
+        throw new GraphIntegrityManifestValidationError(
+          error instanceof Error
+            ? error.message
+            : "Graph integrity manifest is invalid",
+        );
+      }
       const actual = await capturePersistedGraphIntegrity(conn, repoId, {
         checkCancelled: options.checkCancelled,
       });
@@ -1500,9 +1511,7 @@ export async function verifyPersistedGraphIntegrityRevision(
       revision,
       mismatch: snapshot.mismatch,
     });
-    const published = await (
-      options.persistFailureState ?? markGraphIntegrityFailedIfVerifying
-    )(
+    const published = await markGraphIntegrityFailedIfVerifying(
       repoId,
       versionId,
       revision,

@@ -310,9 +310,9 @@ export async function markUnrevisionedGraphIntegrityFailedIfVerifying(
   });
 }
 
-export async function listPendingGraphIntegrityRevisions(): Promise<
-  GraphIntegrityPendingRevision[]
-> {
+export async function listPendingGraphIntegrityRevisions(
+  repoId?: string,
+): Promise<GraphIntegrityPendingRevision[]> {
   const conn = await getLadybugConn();
   const rows = await queryAll<Record<string, unknown>>(
     conn,
@@ -320,6 +320,7 @@ export async function listPendingGraphIntegrityRevisions(): Promise<
      WHERE d.graphIntegrityState = 'verifying'
        AND d.graphIntegrityVersionId IS NOT NULL
        AND d.graphIntegrityRevision IS NOT NULL
+       ${repoId === undefined ? "" : "AND d.repoId = $repoId"}
        AND (
          d.graphIntegrityVerifiedRevision IS NULL
          OR d.graphIntegrityRevision > d.graphIntegrityVerifiedRevision
@@ -329,6 +330,7 @@ export async function listPendingGraphIntegrityRevisions(): Promise<
             d.graphIntegrityRevision AS revision,
             d.graphIntegrityVerifiedRevision AS verifiedRevision
      ORDER BY d.repoId`,
+    repoId === undefined ? undefined : { repoId },
   );
   return rows.map((row) => ({
     repoId: String(row.repoId),

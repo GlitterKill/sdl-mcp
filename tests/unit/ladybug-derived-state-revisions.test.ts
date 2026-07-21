@@ -41,7 +41,7 @@ interface RevisionApi {
     revision: number,
     error: string,
   ): Promise<boolean>;
-  listPendingGraphIntegrityRevisions(): Promise<
+  listPendingGraphIntegrityRevisions(repoId?: string): Promise<
     Array<{
       repoId: string;
       versionId: string;
@@ -195,6 +195,19 @@ describe(
           verifiedRevision: 0,
         },
       ]);
+      assert.deepEqual(await api.listPendingGraphIntegrityRevisions("repo-b"), [
+        {
+          repoId: "repo-b",
+          versionId: "v2",
+          revision: 1,
+          verifiedRevision: 0,
+        },
+      ]);
+      assert.deepEqual(
+        await api.listPendingGraphIntegrityRevisions("repo-b' OR true"),
+        [],
+        "repository filtering must remain parameterized",
+      );
     });
 
     it("publishes success only for the verifying version and revision", async () => {

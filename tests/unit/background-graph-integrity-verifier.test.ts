@@ -26,6 +26,7 @@ import {
   createGraphIntegrityExpectationFromManifest,
   createGraphIntegrityFileState,
 } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
+import { logger } from "../../dist/util/logger.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -175,6 +176,7 @@ describe("background graph integrity verifier", () => {
 
     const statements = new WeakMap<object, string>();
     let pendingReads = 0;
+    const pendingRepoIds: unknown[] = [];
     const originalPrepare = Connection.prototype.prepare;
     const originalExecute = Connection.prototype.execute;
     t.mock.method(Connection.prototype, "prepare", async function (statement) {
@@ -192,6 +194,9 @@ describe("background graph integrity verifier", () => {
           statement.includes("graphIntegrityVerifiedRevision")
         ) {
           pendingReads += 1;
+          pendingRepoIds.push(
+            (params as Record<string, unknown> | undefined)?.repoId,
+          );
         }
         return originalExecute.call(this, prepared, params, progressCallback);
       },
@@ -207,6 +212,11 @@ describe("background graph integrity verifier", () => {
 
     assert.equal(row.graphIntegrityRevision, 1);
     assert.ok(pendingReads >= 2, "worker must reload after completion");
+    assert.deepEqual(
+      [...new Set(pendingRepoIds)],
+      ["repo"],
+      "workers must query only their current repository",
+    );
   });
 
   it("coalesces rapid notifications to the newest durable revision and cancels only after an in-flight page returns", async (t) => {
@@ -321,6 +331,56 @@ describe("background graph integrity verifier", () => {
       "Persisted graph integrity verification failed",
     );
     assert.doesNotMatch(row.graphIntegrityError ?? "", /secret|private|\.lbug/i);
+  });
+
+  it("publishes deterministic manifest corruption without retrying", async (t) => {
+    root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-corrupt-manifest-"));
+    await initLadybugDb(join(root, "graph.lbug"));
+    await seedPendingRevision(root, "repo");
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MATCH (f:GraphIntegrityFileState {stateId: $stateId})
+         SET f.fileId = 'corrupt-file-id'`,
+        { stateId: JSON.stringify(["repo", "repo:src/alpha.ts"]) },
+      ),
+    );
+
+    const statements = new WeakMap<object, string>();
+    let manifestReads = 0;
+    const originalPrepare = Connection.prototype.prepare;
+    const originalExecute = Connection.prototype.execute;
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      const prepared = await originalPrepare.call(this, statement);
+      statements.set(prepared, statement);
+      return prepared;
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        if (
+          statements
+            .get(prepared)
+            ?.includes("GRAPH_INTEGRITY_FILE_STATE_IN_REPO")
+        ) {
+          manifestReads += 1;
+        }
+        return originalExecute.call(this, prepared, params, progressCallback);
+      },
+    );
+
+    notifyGraphIntegrityVerifier("repo");
+    const row = await waitForState(
+      "repo",
+      (state) => state?.graphIntegrityState === "failed",
+    );
+
+    assert.equal(manifestReads, 1);
+    assert.equal(
+      row.graphIntegrityError,
+      "Persisted graph integrity verification failed",
+    );
   });
 
   it("reloads the newest durable revision after a stale success CAS", async (t) => {
@@ -537,5 +597,73 @@ describe("background graph integrity verifier", () => {
     await runGraphIntegrityVerifierRecoverySweep();
     stopGraphIntegrityVerifierRecovery();
     assert.equal(cleared, true);
+  });
+
+  it("keeps startup recovery retryable after an initial sanitized failure", async (t) => {
+    root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-startup-retry-"));
+    await initLadybugDb(join(root, "graph.lbug"));
+    await seedPendingRevision(root, "repo");
+
+    const statements = new WeakMap<object, string>();
+    let pendingFailures = 0;
+    const originalPrepare = Connection.prototype.prepare;
+    const originalExecute = Connection.prototype.execute;
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      const prepared = await originalPrepare.call(this, statement);
+      statements.set(prepared, statement);
+      return prepared;
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        const statement = statements.get(prepared);
+        if (
+          pendingFailures === 0 &&
+          statement?.includes("MATCH (d:DerivedState)") &&
+          statement.includes("graphIntegrityVerifiedRevision")
+        ) {
+          pendingFailures += 1;
+          throw new Error("secret C:\\private\\startup.lbug query detail");
+        }
+        return originalExecute.call(this, prepared, params, progressCallback);
+      },
+    );
+
+    let intervalStarts = 0;
+    t.mock.method(
+      globalThis,
+      "setInterval",
+      ((callback: () => void, delay: number) => {
+        assert.equal(delay, 5_000);
+        intervalStarts += 1;
+        return { unref() {}, callback } as unknown as NodeJS.Timeout;
+      }) as typeof setInterval,
+    );
+    const errors: Array<{
+      message: string;
+      meta: Record<string, unknown> | undefined;
+    }> = [];
+    t.mock.method(
+      logger,
+      "error",
+      (message: string, meta?: Record<string, unknown>) => {
+        errors.push({ message, meta });
+      },
+    );
+
+    await startGraphIntegrityVerifierRecovery();
+    assert.equal(intervalStarts, 1);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0]!.message, /recovery sweep failed/i);
+    assert.doesNotMatch(JSON.stringify(errors[0]), /secret|private|\.lbug/i);
+
+    await startGraphIntegrityVerifierRecovery();
+    await waitForState(
+      "repo",
+      (state) => state?.graphIntegrityVerifiedRevision === 1,
+    );
+    await startGraphIntegrityVerifierRecovery();
+    assert.equal(intervalStarts, 1, "restarts must not install another interval");
   });
 });

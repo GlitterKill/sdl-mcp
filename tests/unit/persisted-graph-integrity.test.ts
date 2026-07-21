@@ -601,15 +601,47 @@ describe("persisted graph integrity", () => {
     assert.equal((actual as { digest: string }).digest, expected.digest);
   });
 
-  it("deduplicates membership tuples before the 2048-row integrity page boundary", async () => {
+  it("filters the integrity cursor before deduplicating joined tuples", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/db/ladybug-graph-integrity.ts"),
+      "utf8",
+    );
+    const queryStart = source.indexOf(
+      "export async function getPersistedGraphIntegritySymbolPage",
+    );
+    const aliasIndex = source.indexOf(
+      "WITH s, coalesce(f.fileId, '') AS fileId",
+      queryStart,
+    );
+    const cursorIndex = source.indexOf("WHERE true", queryStart);
+    const distinctIndex = source.indexOf(
+      "WITH DISTINCT s, fileId, relPath",
+      queryStart,
+    );
+    const returnIndex = source.indexOf("RETURN s.symbolId AS symbolId", queryStart);
+
+    assert.ok(queryStart >= 0);
+    assert.ok(aliasIndex > queryStart);
+    assert.ok(cursorIndex > aliasIndex);
+    assert.ok(distinctIndex > cursorIndex);
+    assert.ok(returnIndex > distinctIndex);
+  });
+
+  it("deduplicates membership tuples across real 2048-row integrity pages", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-duplicate-page-"));
     await initLadybugDb(join(root, "duplicate-page.lbug"));
     const fileId = "repo:src/page.ts";
     const relPath = "src/page.ts";
-    const symbols = [
-      symbolRow({ symbolId: "sym:0000", fileId, name: "first" }),
-      symbolRow({ symbolId: "sym:0001", fileId, name: "next" }),
-    ];
+    const symbols = Array.from({ length: 2_049 }, (_, index) => {
+      const suffix = String(index).padStart(4, "0");
+      return symbolRow({
+        symbolId: `sym:${suffix}`,
+        fileId,
+        name: `symbol-${suffix}`,
+        astFingerprint: `fingerprint-${suffix}`,
+        scipSymbol: `scip-typescript npm fixture 1.0.0 src/page.ts/symbol-${suffix}().`,
+      });
+    });
 
     await withWriteConn(async (conn) => {
       await ladybugDb.upsertRepo(conn, {
@@ -656,11 +688,7 @@ describe("persisted graph integrity", () => {
       "repo",
     );
 
-    assert.equal(
-      actual.symbolCount,
-      2,
-      "the unique tuple after the boundary is retained",
-    );
+    assert.equal(actual.symbolCount, 2_049);
     assert.equal(compareGraphIntegrityExpectations(expected, actual), null);
     assert.equal(actual.digest, expected.digest);
   });
