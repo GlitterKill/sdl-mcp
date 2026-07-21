@@ -601,6 +601,70 @@ describe("persisted graph integrity", () => {
     assert.equal((actual as { digest: string }).digest, expected.digest);
   });
 
+  it("deduplicates membership tuples before the 2048-row integrity page boundary", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-duplicate-page-"));
+    await initLadybugDb(join(root, "duplicate-page.lbug"));
+    const fileId = "repo:src/page.ts";
+    const relPath = "src/page.ts";
+    const symbols = [
+      symbolRow({ symbolId: "sym:0000", fileId, name: "first" }),
+      symbolRow({ symbolId: "sym:0001", fileId, name: "next" }),
+    ];
+
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-21T00:00:00.000Z",
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId,
+        repoId: "repo",
+        relPath,
+        contentHash: "a".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-21T00:00:00.000Z",
+      });
+      await ladybugDb.upsertKnownFileSymbols(conn, symbols);
+      await ladybugDb.exec(
+        conn,
+        `UNWIND $duplicates AS duplicateOrdinal
+         MATCH (s:Symbol {symbolId: $symbolId}), (r:Repo {repoId: $repoId})
+         CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+        {
+          duplicates: Array.from({ length: 2_048 }, (_, index) => index),
+          repoId: "repo",
+          symbolId: symbols[0]!.symbolId,
+        },
+      );
+      const duplicateCount = await ladybugDb.querySingle<{ count: unknown }>(
+        conn,
+        `MATCH (s:Symbol {symbolId: $symbolId})-[rel:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
+         RETURN count(rel) AS count`,
+        { repoId: "repo", symbolId: symbols[0]!.symbolId },
+      );
+      assert.equal(ladybugDb.toNumber(duplicateCount?.count ?? 0), 2_049);
+    });
+
+    const expected = createGraphIntegrityExpectation([
+      createGraphIntegrityFileDigest({ fileId, relPath, symbols }),
+    ]);
+    const actual = await capturePersistedGraphIntegrity(
+      await getLadybugConn(),
+      "repo",
+    );
+
+    assert.equal(
+      actual.symbolCount,
+      2,
+      "the unique tuple after the boundary is retained",
+    );
+    assert.equal(compareGraphIntegrityExpectations(expected, actual), null);
+    assert.equal(actual.digest, expected.digest);
+  });
+
   it("keeps shared fileless placeholders in each repository universe", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-shared-placeholder-"));
     await initLadybugDb(join(root, "shared-placeholder.lbug"));

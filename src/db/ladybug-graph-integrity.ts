@@ -416,11 +416,13 @@ export async function getPersistedGraphIntegritySymbolPage(
   },
 ): Promise<PersistedGraphIntegritySymbolRow[]> {
   const hasCursor = params.after !== undefined;
+  // Membership endpoints are not unique, so collapse joined logical tuples
+  // before the strict keyset cursor and page limit are applied.
   const rows = await queryAll<RawPersistedGraphIntegritySymbolRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
      OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)-[:FILE_IN_REPO]->(r)
-     WITH s, coalesce(f.fileId, '') AS fileId, coalesce(f.relPath, '') AS relPath
+     WITH DISTINCT s, coalesce(f.fileId, '') AS fileId, coalesce(f.relPath, '') AS relPath
      WHERE true
      ${
        hasCursor
