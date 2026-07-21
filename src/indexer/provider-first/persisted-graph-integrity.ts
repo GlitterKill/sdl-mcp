@@ -21,12 +21,18 @@ import {
   getPersistedGraphIntegritySourceReferenceCounts,
   getPersistedGraphIntegritySymbolPage,
   hasPersistedGraphIntegrityFilelessSourceReferences,
+  listGraphIntegrityFilelessStates,
+  listGraphIntegrityFileStates,
   type GraphIntegrityFileStateRecord,
   type GraphIntegrityFilelessDelta,
   type GraphIntegrityFilelessStateRecord,
   type GraphIntegritySymbolCursor,
 } from "../../db/ladybug-graph-integrity.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import {
+  getLadybugConn,
+  withExclusiveReadConnection,
+} from "../../db/ladybug.js";
+import { withReadOnlyTransaction } from "../../db/ladybug-core.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { EdgeRow, SymbolRow } from "../../db/ladybug-queries.js";
 import { logger } from "../../util/logger.js";
@@ -41,7 +47,7 @@ const GRAPH_INTEGRITY_QUERY_PAGE_SIZE = 2_048;
 const GRAPH_INTEGRITY_REFERENCE_PAGE_SIZE = 2_048;
 const GRAPH_INTEGRITY_FILE_ID_CHUNK_SIZE = 256;
 const DIAGNOSTIC_STRING_LIMIT = 160;
-const PUBLIC_VERIFICATION_ERROR =
+export const GRAPH_INTEGRITY_VERIFICATION_FAILURE =
   "Persisted graph integrity verification failed";
 const INCREMENTAL_BASELINE_ERROR =
   'Incremental indexing requires a verified graph integrity baseline. Run sdl.index.refresh with mode:"full" first. If full verification also fails, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.';
@@ -191,7 +197,7 @@ interface MutableFileDigest {
 
 export class GraphIntegrityVerificationError extends Error {
   constructor() {
-    super(PUBLIC_VERIFICATION_ERROR);
+    super(GRAPH_INTEGRITY_VERIFICATION_FAILURE);
   }
 }
 
@@ -864,7 +870,7 @@ export async function verifyNoOpIncrementalGraphIntegrity(
       repoId,
       latestVersion.versionId,
       expectedRevision,
-      PUBLIC_VERIFICATION_ERROR,
+      GRAPH_INTEGRITY_VERIFICATION_FAILURE,
     );
     throw new GraphIntegrityVerificationError();
   }
@@ -1383,20 +1389,29 @@ export function createGraphIntegrityExpectation(
 export async function capturePersistedGraphIntegrity(
   conn: Connection,
   repoId: string,
+  options: { checkCancelled?: () => void } = {},
 ): Promise<GraphIntegrityExpectation> {
-  return capturePersistedGraphIntegrityInternal(conn, repoId);
+  return capturePersistedGraphIntegrityInternal(
+    conn,
+    repoId,
+    undefined,
+    options.checkCancelled,
+  );
 }
 
 async function capturePersistedGraphIntegrityInternal(
   conn: Connection,
   repoId: string,
   onSymbol?: (symbol: CanonicalSymbol) => void,
+  checkCancelled?: () => void,
 ): Promise<GraphIntegrityExpectation> {
   const files: GraphIntegrityFileDigest[] = [];
   let current: MutableFileDigest | undefined;
   let cursor: GraphIntegritySymbolCursor | undefined;
 
   while (true) {
+    // Cancellation is cooperative: never interrupt a native Ladybug query.
+    checkCancelled?.();
     const rows = await getPersistedGraphIntegritySymbolPage(
       conn,
       {
@@ -1447,6 +1462,59 @@ async function capturePersistedGraphIntegrityInternal(
   }
   if (current) files.push(finishMutableFileDigest(current));
   return createGraphIntegrityExpectation(files);
+}
+
+/** @internal Background-only snapshot scan and revision-CAS publication. */
+export async function verifyPersistedGraphIntegrityRevision(
+  repoId: string,
+  versionId: string,
+  revision: number,
+  options: {
+    checkCancelled?: () => void;
+    persistSuccessState?: typeof markGraphIntegrityVerifiedIfVerifying;
+    persistFailureState?: typeof markGraphIntegrityFailedIfVerifying;
+  } = {},
+): Promise<"verified" | "failed" | "stale"> {
+  const snapshot = await withExclusiveReadConnection((conn) =>
+    withReadOnlyTransaction(conn, async () => {
+      options.checkCancelled?.();
+      const files = await listGraphIntegrityFileStates(conn, repoId);
+      options.checkCancelled?.();
+      const fileless = await listGraphIntegrityFilelessStates(conn, repoId);
+      options.checkCancelled?.();
+      const expected = createGraphIntegrityExpectationFromManifest(files, fileless);
+      const actual = await capturePersistedGraphIntegrity(conn, repoId, {
+        checkCancelled: options.checkCancelled,
+      });
+      return { actual, mismatch: compareGraphIntegrityExpectations(expected, actual) };
+    }),
+  );
+  options.checkCancelled?.();
+
+  // The read transaction and exclusive lease must end before acquiring the
+  // single writer for the tiny publication CAS.
+  if (snapshot.mismatch) {
+    logger.error("Persisted graph integrity background mismatch", {
+      repoId,
+      versionId,
+      revision,
+      mismatch: snapshot.mismatch,
+    });
+    const published = await (
+      options.persistFailureState ?? markGraphIntegrityFailedIfVerifying
+    )(
+      repoId,
+      versionId,
+      revision,
+      GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+    );
+    return published ? "failed" : "stale";
+  }
+
+  const published = await (
+    options.persistSuccessState ?? markGraphIntegrityVerifiedIfVerifying
+  )(repoId, versionId, revision, snapshot.actual.digest);
+  return published ? "verified" : "stale";
 }
 
 /**
@@ -1593,14 +1661,14 @@ export async function completeGraphIntegrityVerification(
         await markUnrevisionedGraphIntegrityFailedIfVerifying(
           repoId,
           versionId,
-          PUBLIC_VERIFICATION_ERROR,
+          GRAPH_INTEGRITY_VERIFICATION_FAILURE,
         );
       } else {
         await (options.persistFailureState ?? markGraphIntegrityFailedIfVerifying)(
           repoId,
           versionId,
           verificationRevision,
-          PUBLIC_VERIFICATION_ERROR,
+          GRAPH_INTEGRITY_VERIFICATION_FAILURE,
         );
       }
     } catch (stateError) {

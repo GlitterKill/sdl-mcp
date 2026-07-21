@@ -30,6 +30,7 @@ import {
   parseGraphIntegrityCanonicalSymbol,
   parseGraphIntegrityFilelessReferences,
   PersistedGraphIntegritySession,
+  verifyPersistedGraphIntegrityRevision,
   verifyNoOpIncrementalGraphIntegrity,
 } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
 
@@ -426,6 +427,73 @@ describe("persisted graph integrity", () => {
           digest,
         }),
       ),
+    );
+  });
+
+  it("releases the production read-only snapshot before invoking the publication dependency", async (t) => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-publication-order-"));
+    await seedVersionedGraph(root);
+    const row = symbolRow();
+    const file = createGraphIntegrityFileState(
+      "repo",
+      row.fileId,
+      "src/alpha.ts",
+      [row],
+      [],
+    );
+    await withWriteConn(async (conn) => {
+      await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, "repo", {
+        files: [file],
+        fileless: [],
+      });
+      const expected = createGraphIntegrityExpectationFromManifest([file], []);
+      await derivedState.beginGraphIntegrityVersion(
+        conn,
+        "repo",
+        "v1",
+        expected.digest,
+        true,
+      );
+      assert.equal(
+        await derivedState.advanceGraphIntegrityRevisionInTransaction(
+          conn,
+          "repo",
+          "v1",
+          0,
+        ),
+        1,
+      );
+    });
+
+    const { Connection } = await import("kuzu");
+    const originalClose = Connection.prototype.close;
+    let exclusiveConnectionReleased = false;
+    t.mock.method(Connection.prototype, "close", async function () {
+      await originalClose.call(this);
+      exclusiveConnectionReleased = true;
+    });
+
+    const result = await verifyPersistedGraphIntegrityRevision(
+      "repo",
+      "v1",
+      1,
+      {
+        persistSuccessState: async (repoId, versionId, revision, digest) => {
+          assert.equal(exclusiveConnectionReleased, true);
+          return derivedState.markGraphIntegrityVerifiedIfVerifying(
+            repoId,
+            versionId,
+            revision,
+            digest,
+          );
+        },
+      },
+    );
+
+    assert.equal(result, "verified");
+    assert.equal(
+      (await derivedState.getDerivedState("repo"))?.graphIntegrityVerifiedRevision,
+      1,
     );
   });
 

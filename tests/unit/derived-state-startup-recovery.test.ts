@@ -7,6 +7,7 @@ describe("recoverStaleDerivedStateOnStartup", () => {
   it("re-enqueues stale persisted derived state and reports recovery", async () => {
     const enqueued: Array<{ repoId: string; targetVersionId: string }> = [];
     const logs: string[] = [];
+    let verifierRecoveryStarts = 0;
 
     const result = await recoverStaleDerivedStateOnStartup(
       {
@@ -50,10 +51,14 @@ describe("recoverStaleDerivedStateOnStartup", () => {
         enqueueDerivedRefresh: (repoId, targetVersionId) => {
           enqueued.push({ repoId, targetVersionId });
         },
+        startGraphIntegrityVerifierRecovery: async () => {
+          verifierRecoveryStarts += 1;
+        },
       },
     );
 
     assert.deepEqual(enqueued, [{ repoId: "repo-a", targetVersionId: "v2" }]);
+    assert.equal(verifierRecoveryStarts, 1);
     assert.deepEqual(result, {
       checked: 3,
       queued: 1,
@@ -94,6 +99,7 @@ describe("recoverStaleDerivedStateOnStartup", () => {
         enqueueDerivedRefresh: (repoId, targetVersionId) => {
           enqueued.push({ repoId, targetVersionId });
         },
+        startGraphIntegrityVerifierRecovery: async () => {},
       },
     );
 
