@@ -53,9 +53,14 @@ export const GRAPH_INTEGRITY_VERIFICATION_FAILURE =
 const INCREMENTAL_BASELINE_ERROR =
   'Incremental indexing requires a verified graph integrity baseline. Run sdl.index.refresh with mode:"full" first. If full verification also fails, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.';
 const FILELESS_SENTINEL = "";
+interface ActiveGraphIntegrityVerification {
+  versionId: string;
+  revision: number | null;
+}
+
 const activeVerifications = new Map<
   string,
-  { versionId: string; revision: number | null }
+  ActiveGraphIntegrityVerification
 >();
 
 export type GraphIntegrityCanonicalSymbol = Pick<
@@ -209,6 +214,8 @@ export interface GraphIntegrityVerificationOptions {
   persistFailureState?: typeof markGraphIntegrityFailedIfVerifying;
   /** Test barrier used to prove a newer state wins after the final read. */
   afterCapture?: () => Promise<void>;
+  /** Exact synchronous session revision; never adopt a newer durable revision. */
+  expectedRevision?: number;
 }
 
 interface GraphIntegrityReferenceCount {
@@ -455,6 +462,7 @@ export class PersistedGraphIntegritySession {
   >();
   private stagedRevision: number | undefined;
   private baselineRevision: number | undefined;
+  private activeVerification: ActiveGraphIntegrityVerification | undefined;
   private pass2ApplyChain: Promise<void> = Promise.resolve();
 
   constructor(
@@ -507,15 +515,17 @@ export class PersistedGraphIntegritySession {
     }
 
     this.versionId = targetVersionId;
-    const verificationRevision = await markGraphIntegrityVerifying(
-      this.repoId,
-      targetVersionId,
-    );
-    activeVerifications.set(this.repoId, {
+    const activeVerification: ActiveGraphIntegrityVerification = {
       versionId: targetVersionId,
-      revision: verificationRevision,
-    });
+      revision: null,
+    };
+    this.activeVerification = activeVerification;
+    activeVerifications.set(this.repoId, activeVerification);
     try {
+      activeVerification.revision = await markGraphIntegrityVerifying(
+        this.repoId,
+        targetVersionId,
+      );
       if (this.mode === "incremental") {
         const baselineConn = await getLadybugConn();
         const fileStates = await listGraphIntegrityFileStates(
@@ -850,14 +860,20 @@ export class PersistedGraphIntegritySession {
       throw new Error("Graph integrity version changed during indexing");
     }
     try {
-      await this.stageManifest(versionId);
+      const stagedRevision = await this.stageManifest(versionId);
+      if (stagedRevision === undefined) {
+        throw new GraphIntegrityVerificationError();
+      }
       await completeGraphIntegrityVerification(
         this.repoId,
         versionId,
         this.createExpectedGraph(),
+        { expectedRevision: stagedRevision },
       );
     } finally {
-      activeVerifications.delete(this.repoId);
+      if (activeVerifications.get(this.repoId) === this.activeVerification) {
+        activeVerifications.delete(this.repoId);
+      }
       this.files = undefined;
       this.filelessSymbols = undefined;
       this.filelessLiveness = undefined;
@@ -865,6 +881,7 @@ export class PersistedGraphIntegritySession {
       this.filelessReferencesByFileId.clear();
       this.stagedRevision = undefined;
       this.baselineRevision = undefined;
+      this.activeVerification = undefined;
       this.pass2ApplyChain = Promise.resolve();
     }
   }
@@ -879,7 +896,11 @@ export class PersistedGraphIntegritySession {
     await this.pass2ApplyChain;
     const manifest = this.createManifest();
     const active = activeVerifications.get(this.repoId);
-    if (!active || active.versionId !== versionId) {
+    if (
+      !active ||
+      active !== this.activeVerification ||
+      active.versionId !== versionId
+    ) {
       throw new GraphIntegrityVerificationError();
     }
     const revision = await withWriteConn((conn) =>
@@ -911,7 +932,7 @@ export class PersistedGraphIntegritySession {
     );
     if (revision === null) throw new GraphIntegrityVerificationError();
     this.stagedRevision = revision;
-    activeVerifications.set(this.repoId, { versionId, revision });
+    active.revision = revision;
     return revision;
   }
 
@@ -1842,17 +1863,19 @@ export async function completeGraphIntegrityVerification(
   options: GraphIntegrityVerificationOptions = {},
 ): Promise<void> {
   const startedAt = Date.now();
-  let verificationRevision: number | null = null;
+  let verificationRevision: number | null = options.expectedRevision ?? null;
   try {
     const verificationState = await getDerivedState(repoId);
     if (
       !verificationState ||
       verificationState.graphIntegrityState !== "verifying" ||
-      verificationState.graphIntegrityVersionId !== versionId
+      verificationState.graphIntegrityVersionId !== versionId ||
+      (options.expectedRevision !== undefined &&
+        verificationState.graphIntegrityRevision !== options.expectedRevision)
     ) {
       throw new GraphIntegrityVerificationError();
     }
-    verificationRevision = verificationState.graphIntegrityRevision ?? null;
+    verificationRevision ??= verificationState.graphIntegrityRevision ?? null;
 
     const actual = await capturePersistedGraphIntegrity(
       await getLadybugConn(),

@@ -3258,7 +3258,8 @@ async function indexRepoImpl(
                   // in another transaction makes large provider-first writes
                   // crash in LadybugDB's native transaction handling.
                   await materializeProviderFacts(conn, materializedRows, {
-                    graphIntegrityExpectationsTracked: true,
+                    graphIntegrityExpectationsTracked:
+                      !scopedSourceFileListActive,
                     replaceFileSymbols: true,
                     deleteExistingFileSymbols:
                       activeMaterializationPlan.deleteExistingFileSymbols,

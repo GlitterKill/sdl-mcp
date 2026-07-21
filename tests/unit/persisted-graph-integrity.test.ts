@@ -2737,6 +2737,54 @@ describe("persisted graph integrity", () => {
     );
   });
 
+  it("does not let stale synchronous completion adopt a newer revision", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-stale-sync-complete-"));
+    await initLadybugDb(join(root, "stale-sync-complete.lbug"));
+    await withWriteConn((conn) =>
+      ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-21T00:00:00.000Z",
+      }),
+    );
+
+    const Session = PersistedGraphIntegritySession as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+      stageManifest: (versionId: string) => Promise<number | undefined>;
+      complete: (versionId: string) => Promise<void>;
+    };
+    const session = new Session("repo", "full", true);
+    await session.begin("v1");
+    assert.equal(await session.stageManifest("v1"), 0);
+    assert.equal(
+      await withWriteConn((conn) =>
+        derivedState.advanceGraphIntegrityRevisionInTransaction(
+          conn,
+          "repo",
+          "v1",
+          0,
+        ),
+      ),
+      1,
+    );
+
+    await assert.rejects(
+      session.complete("v1"),
+      /^Error: Persisted graph integrity verification failed$/,
+    );
+    const state = await derivedState.getDerivedState("repo");
+    assert.equal(state?.graphIntegrityState, "verifying");
+    assert.equal(state?.graphIntegrityVersionId, "v1");
+    assert.equal(state?.graphIntegrityRevision, 1);
+    assert.equal(state?.graphIntegrityVerifiedRevision, null);
+    assert.equal(state?.graphIntegrityError, null);
+  });
+
   it("restarts synchronous verification at revision zero for a new Version", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-integrity-new-version-revision-"));
     await initLadybugDb(join(root, "new-version-revision.lbug"));

@@ -12,6 +12,7 @@ import { GraphIntegrityManifestValidationError } from "../../db/ladybug-graph-in
 import { logger } from "../../util/logger.js";
 import {
   GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+  hasActiveGraphIntegrityVerification,
   verifyPersistedGraphIntegrityRevision,
 } from "./persisted-graph-integrity.js";
 
@@ -114,6 +115,7 @@ async function verifyWithRetry(
 
 async function runWorker(repoId: string, entry: WorkerEntry): Promise<void> {
   while (!entry.cancellation.stopRequested) {
+    if (hasActiveGraphIntegrityVerification(repoId)) return;
     entry.wakePending = false;
     let pending: GraphIntegrityPendingRevision | undefined;
     try {
@@ -126,7 +128,10 @@ async function runWorker(repoId: string, entry: WorkerEntry): Promise<void> {
       return;
     }
 
-    if (entry.cancellation.stopRequested) return;
+    if (
+      entry.cancellation.stopRequested ||
+      hasActiveGraphIntegrityVerification(repoId)
+    ) return;
     // A wake arriving during the durable read may represent a newer commit.
     if (entry.wakePending) continue;
     if (!pending) return;
@@ -151,15 +156,17 @@ function startWorker(repoId: string): void {
   });
 }
 
-export function notifyGraphIntegrityVerifier(repoId: string): void {
+export function notifyGraphIntegrityVerifier(repoId: string): boolean {
+  if (hasActiveGraphIntegrityVerification(repoId)) return false;
   const entry = workers.get(repoId);
   if (!entry) {
     startWorker(repoId);
-    return;
+    return true;
   }
-  if (entry.cancellation.stopRequested) return;
+  if (entry.cancellation.stopRequested) return false;
   entry.wakePending = true;
   entry.cancellation.controller?.abort();
+  return true;
 }
 
 export async function cancelAndWaitForGraphIntegrityVerifier(

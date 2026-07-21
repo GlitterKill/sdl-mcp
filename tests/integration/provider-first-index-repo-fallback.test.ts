@@ -640,6 +640,15 @@ describe("provider-first indexRepo fallback", () => {
       scipFixture: "complete",
       scopedSourceFileList: ["src/index.ts"],
     });
+    await withWriteConn((conn) =>
+      ladybugDb.beginGraphIntegrityVersion(
+        conn,
+        repoId,
+        "verified-before-subset",
+        "a".repeat(64),
+        true,
+      ),
+    );
 
     const result = await indexRepo(repoId, "full");
 
@@ -661,6 +670,11 @@ describe("provider-first indexRepo fallback", () => {
       "__providerFirstActiveScipInput__",
     );
     assert.equal(activeInputRecord, null);
+    const integrity = await getDerivedState(repoId);
+    assert.equal(integrity?.graphIntegrityState, "unknown");
+    assert.equal(integrity?.graphIntegrityVersionId, null);
+    assert.equal(integrity?.graphIntegrityRevision, null);
+    assert.equal(integrity?.graphIntegrityVerifiedRevision, null);
   });
 
   it("scans before SCIP fact collection so DB reads do not run under retained provider heap", async () => {

@@ -25,6 +25,7 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   createGraphIntegrityExpectationFromManifest,
   createGraphIntegrityFileState,
+  PersistedGraphIntegritySession,
 } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
 import { logger } from "../../dist/util/logger.js";
 
@@ -553,6 +554,34 @@ describe("background graph integrity verifier", () => {
     releasePages.resolve();
     await Promise.all([cancelOne, cancelAll]);
     assert.equal(closed, 2);
+  });
+
+  it("does not let recovery claim a staged synchronous revision", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-sync-owner-"));
+    await initLadybugDb(join(root, "graph.lbug"));
+    await withWriteConn((conn) =>
+      ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-21T00:00:00.000Z",
+      }),
+    );
+    const session = new PersistedGraphIntegritySession("repo", "full", true);
+    await session.begin("v1");
+    assert.equal(await session.stageManifest("v1"), 0);
+
+    assert.equal(notifyGraphIntegrityVerifier("repo"), false);
+    await runGraphIntegrityVerifierRecoverySweep();
+    const staged = await derivedState.getDerivedState("repo");
+    assert.equal(staged?.graphIntegrityState, "verifying");
+    assert.equal(staged?.graphIntegrityRevision, 0);
+    assert.equal(staged?.graphIntegrityVerifiedRevision, null);
+
+    await session.complete("v1");
+    const completed = await derivedState.getDerivedState("repo");
+    assert.equal(completed?.graphIntegrityState, "verified");
+    assert.equal(completed?.graphIntegrityVerifiedRevision, 0);
   });
 
   it("startup and the fixed five-second sweep recover runtime-registered repositories", async (t) => {
