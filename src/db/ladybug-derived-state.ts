@@ -281,6 +281,35 @@ export async function initializeGraphIntegrityRevisionIfVerifying(
   });
 }
 
+/** Fail only the migrated, unrevisioned verification attempt that still owns state. */
+export async function markUnrevisionedGraphIntegrityFailedIfVerifying(
+  repoId: string,
+  versionId: string,
+  error: string,
+): Promise<boolean> {
+  const updatedAt = getCurrentTimestamp();
+  return withWriteConn(async (wConn) => {
+    const row = await querySingle<{ repoId: string }>(
+      wConn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       WHERE d.graphIntegrityState = 'verifying'
+         AND d.graphIntegrityVersionId = $versionId
+         AND d.graphIntegrityRevision IS NULL
+       SET d.graphIntegrityState = 'failed',
+           d.graphIntegrityError = $graphIntegrityError,
+           d.updatedAt = $updatedAt
+       RETURN d.repoId AS repoId`,
+      {
+        repoId,
+        versionId,
+        graphIntegrityError: error.slice(0, 1024),
+        updatedAt,
+      },
+    );
+    return row !== null;
+  });
+}
+
 export async function listPendingGraphIntegrityRevisions(): Promise<
   GraphIntegrityPendingRevision[]
 > {

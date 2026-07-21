@@ -1511,6 +1511,55 @@ describe("persisted graph integrity", () => {
     assert.equal(state?.graphIntegrityDigest, baseline.digest);
   });
 
+  it("fails a corrupt unrevisioned verification without erasing its baseline", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-unrevisioned-failure-"));
+    await seedVersionedGraph(root);
+    const complete = requiredFunction<AsyncFn>(
+      integrityModule,
+      "completeGraphIntegrityVerification",
+    );
+    const capture = requiredFunction<AsyncFn>(
+      integrityModule,
+      "capturePersistedGraphIntegrity",
+    );
+    const expected = await capture(await getLadybugConn(), "repo");
+    const digest = "9".repeat(64);
+    await withWriteConn(async (conn) => {
+      await derivedState.beginGraphIntegrityVersion(
+        conn,
+        "repo",
+        "v1",
+        digest,
+        false,
+      );
+      await ladybugDb.exec(
+        conn,
+        `MATCH (d:DerivedState {repoId: 'repo'})
+         SET d.graphIntegrityState = 'verifying',
+             d.graphIntegrityRevision = NULL,
+             d.graphIntegrityVerifiedRevision = 7`,
+      );
+      await ladybugDb.exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'sym:alpha'})
+         SET s.signatureJson = '{"name":"corrupted"}'`,
+      );
+    });
+
+    await assert.rejects(
+      complete("repo", "v1", expected),
+      /^Error: Persisted graph integrity verification failed$/,
+    );
+    const state = await derivedState.getDerivedState("repo");
+    assert.equal(state?.graphIntegrityState, "failed");
+    assert.equal(state?.graphIntegrityVersionId, "v1");
+    assert.equal(state?.graphIntegrityRevision, null);
+    assert.equal(state?.graphIntegrityVerifiedRevision, 7);
+    assert.equal(state?.graphIntegrityDigest, digest);
+    assert.equal(state?.graphIntegrityFilelessPruningSupported, false);
+    assert.ok(String(state?.graphIntegrityError).length <= 1024);
+  });
+
   it("does not let a stale no-op mismatch poison a newer Version revision", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-noop-race-"));
     await seedVersionedGraph(root);

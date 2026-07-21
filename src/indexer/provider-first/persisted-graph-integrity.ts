@@ -10,6 +10,7 @@ import {
   markGraphIntegrityVerifying,
   markGraphIntegrityVerifiedIfVerifying,
   initializeGraphIntegrityRevisionIfVerifying,
+  markUnrevisionedGraphIntegrityFailedIfVerifying,
 } from "../../db/ladybug-derived-state.js";
 import { classifyDependencyTarget } from "../../db/symbol-placeholders.js";
 import {
@@ -1357,22 +1358,28 @@ export async function completeGraphIntegrityVerification(
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    if (verificationRevision !== null) {
-      try {
+    try {
+      if (verificationRevision === null) {
+        await markUnrevisionedGraphIntegrityFailedIfVerifying(
+          repoId,
+          versionId,
+          PUBLIC_VERIFICATION_ERROR,
+        );
+      } else {
         await (options.persistFailureState ?? markGraphIntegrityFailedIfVerifying)(
           repoId,
           versionId,
           verificationRevision,
           PUBLIC_VERIFICATION_ERROR,
         );
-      } catch (stateError) {
-        logger.error("Failed to persist graph integrity failure state", {
-          repoId,
-          versionId,
-          error:
-            stateError instanceof Error ? stateError.message : String(stateError),
-        });
       }
+    } catch (stateError) {
+      logger.error("Failed to persist graph integrity failure state", {
+        repoId,
+        versionId,
+        error:
+          stateError instanceof Error ? stateError.message : String(stateError),
+      });
     }
     throw new GraphIntegrityVerificationError();
   }

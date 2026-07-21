@@ -30,6 +30,11 @@ interface RevisionApi {
     revision: number,
     error: string,
   ): Promise<boolean>;
+  markUnrevisionedGraphIntegrityFailedIfVerifying(
+    repoId: string,
+    versionId: string,
+    error: string,
+  ): Promise<boolean>;
   markCurrentGraphIntegrityRevisionFailed(
     repoId: string,
     versionId: string,
@@ -276,6 +281,80 @@ describe(
       assert.equal(row?.graphIntegrityVerifiedRevision, 0);
       assert.equal(row?.graphIntegrityDigest, digest);
       assert.equal(row?.graphIntegrityState, "failed");
+    });
+
+    it("fails only the matching unrevisioned verification attempt", async () => {
+      const conn = await getLadybugConn();
+      const digest = "0".repeat(64);
+      await api.beginGraphIntegrityVersion(conn, "repo", "v1", digest, false);
+      await exec(
+        conn,
+        `MATCH (d:DerivedState {repoId: 'repo'})
+         SET d.graphIntegrityState = 'verifying',
+             d.graphIntegrityRevision = NULL,
+             d.graphIntegrityVerifiedRevision = 7`,
+      );
+
+      assert.equal(
+        await api.markUnrevisionedGraphIntegrityFailedIfVerifying(
+          "repo",
+          "wrong-version",
+          "stale",
+        ),
+        false,
+      );
+      let row = await api.getDerivedState("repo");
+      assert.equal(row?.graphIntegrityState, "verifying");
+      assert.equal(row?.graphIntegrityVersionId, "v1");
+      assert.equal(row?.graphIntegrityRevision, null);
+      assert.equal(row?.graphIntegrityVerifiedRevision, 7);
+      assert.equal(row?.graphIntegrityDigest, digest);
+      assert.equal(row?.graphIntegrityFilelessPruningSupported, false);
+
+      await exec(
+        conn,
+        `MATCH (d:DerivedState {repoId: 'repo'})
+         SET d.graphIntegrityState = 'verified',
+             d.graphIntegrityVersionId = 'v2'`,
+      );
+      assert.equal(
+        await api.markUnrevisionedGraphIntegrityFailedIfVerifying(
+          "repo",
+          "v2",
+          "stale state",
+        ),
+        false,
+      );
+      row = await api.getDerivedState("repo");
+      assert.equal(row?.graphIntegrityState, "verified");
+      assert.equal(row?.graphIntegrityVersionId, "v2");
+      assert.equal(row?.graphIntegrityRevision, null);
+      assert.equal(row?.graphIntegrityVerifiedRevision, 7);
+      assert.equal(row?.graphIntegrityDigest, digest);
+      assert.equal(row?.graphIntegrityFilelessPruningSupported, false);
+
+      await exec(
+        conn,
+        `MATCH (d:DerivedState {repoId: 'repo'})
+         SET d.graphIntegrityState = 'verifying',
+             d.graphIntegrityVersionId = 'v1'`,
+      );
+      assert.equal(
+        await api.markUnrevisionedGraphIntegrityFailedIfVerifying(
+          "repo",
+          "v1",
+          "x".repeat(2048),
+        ),
+        true,
+      );
+      row = await api.getDerivedState("repo");
+      assert.equal(row?.graphIntegrityState, "failed");
+      assert.equal(row?.graphIntegrityVersionId, "v1");
+      assert.equal(row?.graphIntegrityRevision, null);
+      assert.equal(row?.graphIntegrityVerifiedRevision, 7);
+      assert.equal(row?.graphIntegrityDigest, digest);
+      assert.equal(row?.graphIntegrityFilelessPruningSupported, false);
+      assert.equal(String(row?.graphIntegrityError).length, 1024);
     });
 
     it("direct failure uses the exact version and current revision", async () => {
