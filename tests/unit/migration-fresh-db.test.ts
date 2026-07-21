@@ -55,7 +55,7 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
     }
   });
 
-  it("creates schema version 22 with unknown graph integrity directly", async () => {
+  it("creates schema version 23 with nullable graph integrity revisions directly", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "fresh.lbug");
     const original = migrations[0];
@@ -70,8 +70,8 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
       await initLadybugDb(dbPath);
       const conn = await getLadybugConn();
 
-      assert.equal(LADYBUG_SCHEMA_VERSION, 22);
-      assert.equal(await getSchemaVersion(conn), 22);
+      assert.equal(LADYBUG_SCHEMA_VERSION, 23);
+      assert.equal(await getSchemaVersion(conn), 23);
 
       await exec(
         conn,
@@ -83,13 +83,19 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
         graphIntegrityVersionId: string | null;
         graphIntegrityDigest: string | null;
         graphIntegrityError: string | null;
+        graphIntegrityRevision: bigint | null;
+        graphIntegrityVerifiedRevision: bigint | null;
+        graphIntegrityFilelessPruningSupported: boolean | null;
       }>(
         conn,
         `MATCH (d:DerivedState {repoId: $repoId})
          RETURN d.graphIntegrityState AS graphIntegrityState,
                 d.graphIntegrityVersionId AS graphIntegrityVersionId,
                 d.graphIntegrityDigest AS graphIntegrityDigest,
-                d.graphIntegrityError AS graphIntegrityError`,
+                d.graphIntegrityError AS graphIntegrityError,
+                 d.graphIntegrityRevision AS graphIntegrityRevision,
+                 d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision,
+                 d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported`,
         { repoId: "fresh-repo" },
       );
       assert.deepEqual(integrityRows, [
@@ -98,6 +104,9 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
           graphIntegrityVersionId: null,
           graphIntegrityDigest: null,
           graphIntegrityError: null,
+          graphIntegrityRevision: null,
+          graphIntegrityVerifiedRevision: null,
+          graphIntegrityFilelessPruningSupported: null,
         },
       ]);
 

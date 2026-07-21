@@ -463,6 +463,24 @@ export const NODE_TABLES: string[] = [
   // summary/embedding recompute may lag after incremental runs; this
   // table makes the staleness lifecycle explicit, queryable, and
   // recoverable. See devdocs/plans/2026-04-17-post-pass2-performance-and-feedback-plan.md §5.
+  `CREATE NODE TABLE IF NOT EXISTS GraphIntegrityFileState (
+    stateId STRING PRIMARY KEY,
+    repoId STRING,
+    fileId STRING,
+    relPath STRING,
+    symbolCount INT64,
+    digest STRING,
+    filelessReferencesJson STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS GraphIntegrityFilelessState (
+    stateId STRING PRIMARY KEY,
+    repoId STRING,
+    symbolId STRING,
+    canonicalSymbolJson STRING,
+    referenceCount INT64
+  )`,
+
   `CREATE NODE TABLE IF NOT EXISTS DerivedState (
     repoId STRING PRIMARY KEY,
     clustersDirty BOOL DEFAULT false,
@@ -477,7 +495,10 @@ export const NODE_TABLES: string[] = [
     graphIntegrityState STRING DEFAULT 'unknown',
     graphIntegrityVersionId STRING,
     graphIntegrityDigest STRING,
-    graphIntegrityError STRING
+    graphIntegrityError STRING,
+    graphIntegrityRevision INT64,
+    graphIntegrityVerifiedRevision INT64,
+    graphIntegrityFilelessPruningSupported BOOLEAN
   )`,
 ];
 
@@ -491,6 +512,14 @@ export const CALL_EDGE_METADATA_FIELDS = [
 const REL_TABLES: string[] = [
   `CREATE REL TABLE IF NOT EXISTS FILE_IN_REPO (
     FROM File TO Repo
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS GRAPH_INTEGRITY_FILE_STATE_IN_REPO (
+    FROM GraphIntegrityFileState TO Repo
+  )`,
+
+  `CREATE REL TABLE IF NOT EXISTS GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO (
+    FROM GraphIntegrityFilelessState TO Repo
   )`,
 
   `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_FILE (

@@ -6,16 +6,34 @@ import { join } from "node:path";
 
 import {
   closeLadybugDb,
+  getLadybugConn,
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
-import { getDerivedStateSummary } from "../../dist/db/ladybug-derived-state.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+} from "../../dist/db/ladybug-core.js";
+import {
+  getDerivedState,
+  getDerivedStateSummary,
+} from "../../dist/db/ladybug-derived-state.js";
 import { LADYBUG_SCHEMA_VERSION } from "../../dist/db/migrations/index.js";
 
-async function createVersion21Database(dbPath: string): Promise<void> {
+async function createVersion22Database(
+  dbPath: string,
+  partialM023 = false,
+): Promise<void> {
   const kuzu = await import("kuzu");
   const db = new kuzu.Database(dbPath);
   const conn = new kuzu.Connection(db);
-  for (const ddl of [
+  const ddls = [
+    `CREATE NODE TABLE Repo (
+      repoId STRING PRIMARY KEY,
+      rootPath STRING,
+      configJson STRING,
+      createdAt STRING
+    )`,
     `CREATE NODE TABLE DerivedState (
       repoId STRING PRIMARY KEY,
       clustersDirty BOOL DEFAULT false,
@@ -26,7 +44,11 @@ async function createVersion21Database(dbPath: string): Promise<void> {
       targetVersionId STRING,
       computedVersionId STRING,
       updatedAt STRING,
-      lastError STRING
+      lastError STRING,
+      graphIntegrityState STRING DEFAULT 'unknown',
+      graphIntegrityVersionId STRING,
+      graphIntegrityDigest STRING,
+      graphIntegrityError STRING
     )`,
     `CREATE NODE TABLE SchemaVersion (
       id STRING PRIMARY KEY,
@@ -34,40 +56,49 @@ async function createVersion21Database(dbPath: string): Promise<void> {
       createdAt STRING,
       updatedAt STRING
     )`,
-  ]) {
+  ];
+  if (partialM023) {
+    ddls.push(
+      "ALTER TABLE DerivedState ADD graphIntegrityRevision INT64 DEFAULT NULL",
+      `CREATE NODE TABLE GraphIntegrityFileState (
+        stateId STRING PRIMARY KEY,
+        repoId STRING,
+        fileId STRING,
+        relPath STRING,
+        symbolCount INT64,
+        digest STRING,
+        filelessReferencesJson STRING
+      )`,
+    );
+  }
+  for (const ddl of ddls) {
     const result = await conn.query(ddl);
-    const queryResult = Array.isArray(result) ? result[0] : result;
-    queryResult.close();
+    (Array.isArray(result) ? result[0] : result).close();
   }
   for (const statement of [
+    "CREATE (r:Repo {repoId: 'repo', rootPath: '.', configJson: '{}', createdAt: '2026-07-21T00:00:00.000Z'})",
     `CREATE (d:DerivedState {
       repoId: 'repo',
-      clustersDirty: false,
-      processesDirty: false,
-      algorithmsDirty: false,
-      summariesDirty: false,
-      embeddingsDirty: false,
-      targetVersionId: 'legacy-v1',
-      computedVersionId: 'legacy-v1',
-      updatedAt: '2026-07-16T00:00:00.000Z',
-      lastError: null
+      graphIntegrityState: 'verified',
+      graphIntegrityVersionId: 'legacy-v1',
+      graphIntegrityDigest: '${"a".repeat(64)}',
+      graphIntegrityError: 'history'
     })`,
     `CREATE (sv:SchemaVersion {
       id: 'current',
-      schemaVersion: 21,
-      createdAt: '2026-07-16T00:00:00.000Z',
-      updatedAt: '2026-07-16T00:00:00.000Z'
+      schemaVersion: 22,
+      createdAt: '2026-07-21T00:00:00.000Z',
+      updatedAt: '2026-07-21T00:00:00.000Z'
     })`,
   ]) {
     const result = await conn.query(statement);
-    const queryResult = Array.isArray(result) ? result[0] : result;
-    queryResult.close();
+    (Array.isArray(result) ? result[0] : result).close();
   }
   await conn.close();
   await db.close();
 }
 
-describe("migration: graph integrity state", () => {
+describe("migration: graph integrity revisions and manifest", () => {
   let root = "";
 
   afterEach(async () => {
@@ -78,22 +109,89 @@ describe("migration: graph integrity state", () => {
     root = "";
   });
 
-  it("migrates legacy derived state to unknown with one full-refresh action", async () => {
-    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-migration-"));
-    const dbPath = join(root, "v21.lbug");
-    await createVersion21Database(dbPath);
+  it("migrates m022 rows to unknown nullable revision state", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-m023-"));
+    const dbPath = join(root, "v22.lbug");
+    await createVersion22Database(dbPath);
 
     await initLadybugDb(dbPath);
+    const row = await getDerivedState("repo");
     const summary = await getDerivedStateSummary("repo");
 
-    assert.equal(LADYBUG_SCHEMA_VERSION, 22);
-    assert.equal(summary?.graphIntegrityState, "unknown");
-    assert.equal(summary?.graphIntegrityVersionId, null);
-    assert.equal(summary?.graphIntegrityDigest, null);
-    assert.equal(
-      summary?.nextBestAction,
-      'Graph integrity is unverified. Run sdl.index.refresh with mode:"full" to establish a verified baseline.',
+    assert.equal(LADYBUG_SCHEMA_VERSION, 23);
+    assert.equal(row?.graphIntegrityState, "unknown");
+    assert.equal(row?.graphIntegrityRevision, null);
+    assert.equal(row?.graphIntegrityVerifiedRevision, null);
+    assert.equal(row?.graphIntegrityFilelessPruningSupported, null);
+    assert.equal(row?.graphIntegrityVersionId, "legacy-v1");
+    assert.equal(row?.graphIntegrityDigest, "a".repeat(64));
+    assert.equal(row?.graphIntegrityError, "history");
+    assert.equal(summary?.graphIntegrityRevision, null);
+  });
+
+  it("finishes a partial DDL rerun and creates both manifest relationships", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-m023-partial-"));
+    const dbPath = join(root, "partial.lbug");
+    await createVersion22Database(dbPath, true);
+
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
+    await exec(
+      conn,
+      `CREATE (f:GraphIntegrityFileState {
+         stateId: 'repo:file',
+         repoId: 'repo',
+         fileId: 'file',
+         relPath: 'src/file.ts',
+         symbolCount: 1,
+         digest: $digest,
+         filelessReferencesJson: '[]'
+       })`,
+      { digest: "b".repeat(64) },
     );
-    assert.equal("graphIntegrityError" in (summary ?? {}), false);
+    await exec(
+      conn,
+      `CREATE (s:GraphIntegrityFilelessState {
+         stateId: 'repo:symbol',
+         repoId: 'repo',
+         symbolId: 'symbol',
+         canonicalSymbolJson: '{}',
+         referenceCount: 1
+       })`,
+    );
+    await exec(
+      conn,
+      "MATCH (f:GraphIntegrityFileState {stateId: 'repo:file'}), (r:Repo {repoId: 'repo'}) CREATE (f)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(r)",
+    );
+    await exec(
+      conn,
+      "MATCH (s:GraphIntegrityFilelessState {stateId: 'repo:symbol'}), (r:Repo {repoId: 'repo'}) CREATE (s)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(r)",
+    );
+
+    const fileRel = await querySingle<{ count: unknown }>(
+      conn,
+      "MATCH (:GraphIntegrityFileState)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(:Repo) RETURN count(*) AS count",
+    );
+    const filelessRel = await querySingle<{ count: unknown }>(
+      conn,
+      "MATCH (:GraphIntegrityFilelessState)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(:Repo) RETURN count(*) AS count",
+    );
+    assert.equal(Number(fileRel?.count), 1);
+    assert.equal(Number(filelessRel?.count), 1);
+  });
+
+  it("creates no custom-property indexes for manifest tables", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-m023-indexes-"));
+    const dbPath = join(root, "indexes.lbug");
+    await createVersion22Database(dbPath);
+
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
+    const indexes = await queryAll<Record<string, unknown>>(
+      conn,
+      "CALL show_indexes() RETURN *",
+    );
+    const catalog = JSON.stringify(indexes);
+    assert.doesNotMatch(catalog, /idx_graph_integrity/i);
   });
 });

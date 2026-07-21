@@ -91,6 +91,7 @@ export * from "./ladybug-semantic.js";
 
 // Graph algorithm adapter (PageRank, K-core, Louvain, shortest-path)
 export * from "./ladybug-algorithms.js";
+export * from "./ladybug-derived-state.js";
 // Shadow cluster (Louvain) operations
 export * from "./ladybug-shadow-clusters.js";
 
