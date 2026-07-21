@@ -1,0 +1,205 @@
+import { after, before, describe, it } from "node:test";
+import assert from "node:assert";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  closeLadybugDb,
+  initLadybugDb,
+  runWalCheckpoint,
+  withExclusiveReadConnection,
+  withWriteConn,
+} from "../../dist/db/ladybug.js";
+import {
+  exec,
+  execDdl,
+  queryAll,
+  withReadOnlyTransaction,
+  withTransaction,
+} from "../../dist/db/ladybug-core.js";
+
+interface SnapshotRow {
+  id: bigint | number;
+  value: string;
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+describe("background graph integrity snapshot", () => {
+  const dbDir = mkdtempSync(join(tmpdir(), "sdl-graph-snapshot-"));
+  const dbPath = join(dbDir, "snapshot.lbug");
+
+  before(async () => {
+    await initLadybugDb(dbPath);
+    await withWriteConn(async (conn) => {
+      await execDdl(
+        conn,
+        "CREATE NODE TABLE SnapshotProbe (id INT64 PRIMARY KEY, value STRING)",
+      );
+      await exec(
+        conn,
+        `UNWIND $rows AS row
+         CREATE (n:SnapshotProbe {id: row.id, value: row.value})`,
+        {
+          rows: [
+            { id: 1, value: "one" },
+            { id: 2, value: "two" },
+            { id: 3, value: "three" },
+            { id: 4, value: "four" },
+          ],
+        },
+      );
+    });
+  });
+
+  after(async () => {
+    await closeLadybugDb();
+    rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it("keeps deterministic pages stable across a concurrent writer commit", async () => {
+    const firstPageRead = deferred();
+    const continueSnapshot = deferred();
+
+    const snapshot = withExclusiveReadConnection((conn) =>
+      withReadOnlyTransaction(conn, async () => {
+        const first = await queryAll<SnapshotRow>(
+          conn,
+          `MATCH (n:SnapshotProbe)
+           RETURN n.id AS id, n.value AS value
+           ORDER BY n.id
+           SKIP $offset LIMIT $limit`,
+          { offset: 0, limit: 2 },
+        );
+        firstPageRead.resolve();
+        await continueSnapshot.promise;
+        const second = await queryAll<SnapshotRow>(
+          conn,
+          `MATCH (n:SnapshotProbe)
+           RETURN n.id AS id, n.value AS value
+           ORDER BY n.id
+           SKIP $offset LIMIT $limit`,
+          { offset: 2, limit: 10 },
+        );
+        return { first, second };
+      }),
+    );
+
+    await firstPageRead.promise;
+    await withWriteConn((conn) =>
+      withTransaction(conn, async () => {
+        await exec(
+          conn,
+          "MATCH (n:SnapshotProbe {id: $id}) SET n.value = $value",
+          { id: 4, value: "four-updated" },
+        );
+        await exec(
+          conn,
+          "CREATE (n:SnapshotProbe {id: $id, value: $value})",
+          { id: 5, value: "five" },
+        );
+      }),
+    );
+    continueSnapshot.resolve();
+
+    const pages = await snapshot;
+    assert.deepStrictEqual(
+      pages.first.map((row) => [Number(row.id), row.value]),
+      [
+        [1, "one"],
+        [2, "two"],
+      ],
+    );
+    assert.deepStrictEqual(
+      pages.second.map((row) => [Number(row.id), row.value]),
+      [
+        [3, "three"],
+        [4, "four"],
+      ],
+    );
+
+    const nextSnapshot = await withExclusiveReadConnection((conn) =>
+      withReadOnlyTransaction(conn, () =>
+        queryAll<SnapshotRow>(
+          conn,
+          `MATCH (n:SnapshotProbe)
+           RETURN n.id AS id, n.value AS value
+           ORDER BY n.id`,
+        ),
+      ),
+    );
+    assert.deepStrictEqual(
+      nextSnapshot.map((row) => [Number(row.id), row.value]),
+      [
+        [1, "one"],
+        [2, "two"],
+        [3, "three"],
+        [4, "four-updated"],
+        [5, "five"],
+      ],
+    );
+  });
+
+  it("starts publication only after the read-only transaction ends", async () => {
+    const events: string[] = [];
+
+    await withExclusiveReadConnection((conn) =>
+      withReadOnlyTransaction(conn, async () => {
+        events.push("snapshot:started");
+        await queryAll(conn, "MATCH (n:SnapshotProbe) RETURN count(n) AS count");
+        events.push("snapshot:page-complete");
+      }),
+    );
+    events.push("snapshot:ended");
+
+    await withWriteConn(async (conn) => {
+      events.push("publication:started");
+      await exec(
+        conn,
+        "MATCH (n:SnapshotProbe {id: $id}) SET n.value = $value",
+        { id: 1, value: "one-published" },
+      );
+    });
+
+    assert.deepStrictEqual(events, [
+      "snapshot:started",
+      "snapshot:page-complete",
+      "snapshot:ended",
+      "publication:started",
+    ]);
+  });
+
+  it("allows a delayed checkpoint to succeed after the snapshot releases", async () => {
+    const snapshotStarted = deferred();
+    const releaseSnapshot = deferred();
+    const snapshot = withExclusiveReadConnection((conn) =>
+      withReadOnlyTransaction(conn, async () => {
+        await queryAll(conn, "MATCH (n:SnapshotProbe) RETURN count(n) AS count");
+        snapshotStarted.resolve();
+        await releaseSnapshot.promise;
+      }),
+    );
+
+    await snapshotStarted.promise;
+    let checkpointCompleted = false;
+    const checkpoint = runWalCheckpoint("held-graph-integrity-snapshot").then(
+      (result) => {
+        checkpointCompleted = true;
+        return result;
+      },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(checkpointCompleted, false);
+
+    releaseSnapshot.resolve();
+    await snapshot;
+    assert.strictEqual(await checkpoint, true);
+  });
+});
