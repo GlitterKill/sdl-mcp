@@ -985,6 +985,18 @@ export function createGraphIntegrityFileState(
   };
 }
 
+export function graphIntegrityFileStateMatchesDigest(
+  state: GraphIntegrityFileStateRecord,
+  file: GraphIntegrityFileDigest,
+): boolean {
+  return (
+    state.fileId === file.fileId &&
+    normalizeGraphIntegrityPath(state.relPath) === file.relPath &&
+    state.symbolCount === file.symbolCount &&
+    state.digest === file.digest
+  );
+}
+
 export function parseGraphIntegrityCanonicalSymbol(
   json: string,
 ): GraphIntegrityCanonicalSymbol {
@@ -1118,6 +1130,37 @@ export function createGraphIntegrityFilelessDelta(
   return { upserts, deleteSymbolIds };
 }
 
+export function createGraphIntegrityFilelessReferenceTuples(
+  references: readonly GraphIntegrityEdgeReference[],
+  symbols: readonly GraphIntegrityCanonicalSymbol[],
+  current: ReadonlyMap<string, GraphIntegrityFilelessStateRecord>,
+): GraphIntegrityFilelessReferenceTuple[] {
+  const symbolById = new Map(symbols.map((symbol) => [symbol.symbolId, symbol]));
+  return references
+    .map((reference): GraphIntegrityFilelessReferenceTuple => {
+      const existing = current.get(reference.filelessSymbolId);
+      const symbol = symbolById.get(reference.filelessSymbolId);
+      if (!existing && !symbol) {
+        throw new Error("Graph integrity fileless canonical symbol is missing");
+      }
+      const canonicalSymbolJson = existing
+        ? normalizeGraphIntegrityCanonicalSymbolJson(
+            reference.filelessSymbolId,
+            existing.canonicalSymbolJson,
+          )
+        : serializeGraphIntegrityCanonicalSymbol(symbol!);
+      return [
+        reference.filelessSymbolId,
+        canonicalSymbolJson,
+        reference.sourceSymbolId,
+        reference.edgeType,
+        reference.direction,
+        reference.referenceCount,
+      ];
+    })
+    .sort((left, right) => compareText(JSON.stringify(left), JSON.stringify(right)));
+}
+
 export function createGraphIntegrityExpectationFromManifest(
   files: readonly GraphIntegrityFileStateRecord[],
   fileless: readonly GraphIntegrityFilelessStateRecord[],
@@ -1160,6 +1203,7 @@ export function createGraphIntegrityFilelessSymbols(rows: {
   symbols: readonly Pick<SymbolRow, "symbolId">[];
   externalSymbols: readonly ProviderFirstExternalSymbolRow[];
   edges: readonly EdgeRow[];
+  canonicalizeDependencyPlaceholders?: boolean;
 }): CanonicalSymbol[] {
   const fileBackedIds = new Set(rows.symbols.map((symbol) => symbol.symbolId));
   const fileless = new Map<string, CanonicalSymbol>();
@@ -1198,12 +1242,13 @@ export function createGraphIntegrityFilelessSymbols(rows: {
       ? classifyDependencyTarget(edge.toSymbolId)
       : edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
     if (metadata.symbolStatus === "real") continue;
+    const canonical = rows.canonicalizeDependencyPlaceholders ?? true;
     fileless.set(edge.toSymbolId, {
       symbolId: edge.toSymbolId,
       fileId: FILELESS_SENTINEL,
-      name: edge.toSymbolId,
-      kind: "unknown",
-      language: "unknown",
+      name: canonical ? edge.toSymbolId : "",
+      kind: canonical ? "unknown" : "",
+      language: canonical ? "unknown" : "",
       rangeStartLine: 0,
       rangeStartCol: 0,
       rangeEndLine: 0,
@@ -1211,7 +1256,7 @@ export function createGraphIntegrityFilelessSymbols(rows: {
       signatureJson: null,
       source: "treesitter",
       scipSymbol: null,
-      astFingerprint: edge.toSymbolId,
+      astFingerprint: canonical ? edge.toSymbolId : "",
       symbolStatus: metadata.symbolStatus,
       external: metadata.symbolStatus === "external",
       placeholderKind: metadata.placeholderKind ?? "",

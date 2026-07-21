@@ -1,13 +1,34 @@
 import type { RepoConfig } from "../config/types.js";
+import { WATCHER_REINDEX_MAX_ATTEMPTS } from "../config/constants.js";
 import {
+  advanceGraphIntegrityRevisionInTransaction,
   getDerivedState,
-  graphIntegrityIsVerifiedForVersion,
+  graphIntegrityIsAvailableForVersion,
   invalidateGraphIntegrity,
+  markCurrentGraphIntegrityRevisionFailed,
 } from "../db/ladybug-derived-state.js";
 import {
+  applyGraphIntegrityFilePatchInTransaction,
+  getGraphIntegrityFilelessStates,
+  getGraphIntegrityFileState,
+  GraphIntegrityManifestValidationError,
+  ownsGraphIntegrityRevision,
+  type GraphIntegrityFileStateRecord,
+  type GraphIntegrityFilelessStateRecord,
+} from "../db/ladybug-graph-integrity.js";
+import { notifyGraphIntegrityVerifier } from "../indexer/provider-first/background-graph-integrity-verifier.js";
+import {
+  capturePersistedGraphIntegrity,
   createGraphIntegrityFileDigest,
+  createGraphIntegrityFilelessDelta,
+  createGraphIntegrityFilelessEdgeReferences,
+  createGraphIntegrityFilelessReferenceTuples,
   createGraphIntegrityFilelessSymbols,
-  PersistedGraphIntegritySession,
+  createGraphIntegrityFileState,
+  GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+  graphIntegrityFileStateMatchesDigest,
+  GraphIntegrityVerificationError,
+  parseGraphIntegrityFilelessReferences,
 } from "../indexer/provider-first/persisted-graph-integrity.js";
 import { withRepoWriteHeavyLock } from "../indexer/derived-refresh-queue.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
@@ -50,15 +71,45 @@ export interface SavedFilePatchResult {
   frontier: DependencyFrontier;
 }
 
+/** @internal Saved-file commit timing and foreground-capture observability. */
+export interface SavedFilePatchObserver {
+  onCommitted(revision: number): void;
+  onForegroundFullGraphCapture(): void;
+}
+
+class SavedFilePatchRetry extends Error {}
+
+const RETRY_SAVED_FILE_PATCH = Symbol("retry-saved-file-patch");
+
+/** @internal Synchronous benchmark control; production saved edits never call it. */
+export async function captureForegroundPersistedGraphIntegrity(
+  observer: SavedFilePatchObserver | undefined,
+  conn: Parameters<typeof capturePersistedGraphIntegrity>[0],
+  repoId: string,
+): ReturnType<typeof capturePersistedGraphIntegrity> {
+  observer?.onForegroundFullGraphCapture();
+  return capturePersistedGraphIntegrity(conn, repoId);
+}
+
 export async function patchSavedFile(
   request: SavedFilePatchRequest,
+  observer?: SavedFilePatchObserver,
 ): Promise<SavedFilePatchResult> {
-  return withRepoWriteHeavyLock(request.repoId, () => patchSavedFileUnlocked(request));
+  for (let attempt = 0; attempt < WATCHER_REINDEX_MAX_ATTEMPTS; attempt += 1) {
+    const result = await withRepoWriteHeavyLock(request.repoId, () =>
+      patchSavedFileUnlocked(request, observer),
+    );
+    if (result !== RETRY_SAVED_FILE_PATCH) return result;
+  }
+  throw new IndexError(
+    `Saved-file reconciliation lost graph integrity ownership for ${request.repoId}`,
+  );
 }
 
 async function patchSavedFileUnlocked(
   request: SavedFilePatchRequest,
-): Promise<SavedFilePatchResult> {
+  observer?: SavedFilePatchObserver,
+): Promise<SavedFilePatchResult | typeof RETRY_SAVED_FILE_PATCH> {
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, request.repoId);
   if (!repo) {
@@ -78,6 +129,50 @@ async function patchSavedFileUnlocked(
     request.repoId,
     relPath,
   );
+  const durableFileId = existingFile?.fileId ?? `${request.repoId}:${relPath}`;
+  const existingSymbols = existingFile
+    ? await ladybugDb.getSymbolsByFile(conn, existingFile.fileId)
+    : [];
+  const [latestVersion, derivedState] = await Promise.all([
+    ladybugDb.getLatestVersion(conn, request.repoId),
+    getDerivedState(request.repoId),
+  ]);
+  const integrityBaseline =
+    latestVersion &&
+    graphIntegrityIsAvailableForVersion(derivedState, latestVersion.versionId)
+      ? {
+          versionId: latestVersion.versionId,
+          revision: derivedState!.graphIntegrityRevision!,
+          pruningSupported:
+            derivedState!.graphIntegrityFilelessPruningSupported!,
+        }
+      : undefined;
+  let trustedFileState: GraphIntegrityFileStateRecord | null = null;
+  if (integrityBaseline) {
+    try {
+      trustedFileState = await getGraphIntegrityFileState(
+        conn,
+        request.repoId,
+        durableFileId,
+      );
+    } catch (error) {
+      if (!(error instanceof GraphIntegrityManifestValidationError)) throw error;
+      return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    }
+    if (
+      trustedFileState &&
+      !graphIntegrityFileStateMatchesDigest(
+        trustedFileState,
+        createGraphIntegrityFileDigest({
+          fileId: durableFileId,
+          relPath,
+          symbols: existingSymbols,
+        }),
+      )
+    ) {
+      return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    }
+  }
 
   const parseResult =
     request.parseResult ??
@@ -109,16 +204,24 @@ async function patchSavedFileUnlocked(
   const now = new Date().toISOString();
   const durableFile = {
     ...parseResult.file,
+    fileId: durableFileId,
+    repoId: request.repoId,
+    relPath,
     lastIndexedAt: now,
   };
-
-  // Load existing symbols for diff/merge when the file already exists in the DB
-  const existingSymbols = existingFile
-    ? await ladybugDb.getSymbolsByFile(conn, existingFile.fileId)
-    : [];
+  const parsedSymbols = parseResult.symbols.map((symbol) => ({
+    ...symbol,
+    repoId: request.repoId,
+    fileId: durableFileId,
+  }));
+  const parsedReferences = parseResult.references.map((reference) => ({
+    ...reference,
+    repoId: request.repoId,
+    fileId: durableFileId,
+  }));
 
   // Diff existing DB symbols against new tree-sitter-derived symbols
-  const newSymbols = parseResult.symbols.map(toNewSymbol);
+  const newSymbols = parsedSymbols.map(toNewSymbol);
   const existingMapped = existingSymbols.map((row) =>
     toExistingSymbol(row as Parameters<typeof toExistingSymbol>[0]),
   );
@@ -134,7 +237,7 @@ async function patchSavedFileUnlocked(
     existingSymbols.map((symbol) => [symbol.symbolId, symbol]),
   );
   const expectedSymbols = [
-    ...parseResult.symbols
+    ...parsedSymbols
       .filter(
         (symbol) =>
           matchedNewToOldId.has(symbol.symbolId) ||
@@ -154,42 +257,116 @@ async function patchSavedFileUnlocked(
       }),
     ...existingSymbols.filter((symbol) => preservedIds.has(symbol.symbolId)),
   ];
-  const expectedFile = createGraphIntegrityFileDigest({
-    fileId: durableFile.fileId,
-    relPath,
-    symbols: expectedSymbols,
-  });
   const expectedEdges = parseResult.edges.map((edge) => ({
     ...edge,
     fromSymbolId:
       matchedNewToOldId.get(edge.fromSymbolId) ?? edge.fromSymbolId,
   }));
-  const expectedFilelessSymbols = createGraphIntegrityFilelessSymbols({
-    symbols: expectedSymbols,
-    externalSymbols: [],
-    edges: expectedEdges,
-  });
+  let nextFileState: ReturnType<typeof createGraphIntegrityFileState> | undefined;
+  let filelessDelta: ReturnType<typeof createGraphIntegrityFilelessDelta> | undefined;
+  if (integrityBaseline && trustedFileState) {
+    let previousReferences: ReturnType<
+      typeof parseGraphIntegrityFilelessReferences
+    >;
+    try {
+      previousReferences = parseGraphIntegrityFilelessReferences(
+        trustedFileState.filelessReferencesJson,
+      );
+    } catch {
+      return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    }
 
-  const [latestVersion, derivedState] = await Promise.all([
-    ladybugDb.getLatestVersion(conn, request.repoId),
-    getDerivedState(request.repoId),
-  ]);
-  const integrityVersionId =
-    latestVersion &&
-    derivedState &&
-    graphIntegrityIsVerifiedForVersion(derivedState, latestVersion.versionId)
-      ? latestVersion.versionId
-      : undefined;
-  const integritySession = integrityVersionId
-    ? new PersistedGraphIntegritySession(request.repoId, "incremental", true)
-    : undefined;
-  if (integritySession) {
-    await integritySession.begin(integrityVersionId, [durableFile.fileId]);
+    const existingEdges = await ladybugDb.getEdgesFromSymbols(
+      conn,
+      existingSymbols.map((symbol) => symbol.symbolId),
+    );
+    const matchedIds = new Set(diff.matched.map((match) => match.old.symbolId));
+    const parserOwnedSourceIds = new Set([...matchedIds, ...addedIds]);
+    const postWriteEdges = [
+      ...expectedEdges.filter((edge) => parserOwnedSourceIds.has(edge.fromSymbolId)),
+      ...diff.matched.flatMap((match) =>
+        (existingEdges.get(match.old.symbolId) ?? []).filter(
+          (edge) => edge.resolverId === "scip",
+        ),
+      ),
+      ...diff.preserved.flatMap(
+        (symbol) => existingEdges.get(symbol.symbolId) ?? [],
+      ),
+    ];
+    const nextFilelessSymbols = createGraphIntegrityFilelessSymbols({
+      symbols: expectedSymbols,
+      externalSymbols: [],
+      edges: postWriteEdges,
+      canonicalizeDependencyPlaceholders: false,
+    });
+    const filelessSymbolIds = new Set([
+      ...previousReferences.map((reference) => reference[0]),
+      ...nextFilelessSymbols.map((symbol) => symbol.symbolId),
+    ]);
+    const nextEdgeReferences = createGraphIntegrityFilelessEdgeReferences(
+      postWriteEdges,
+      filelessSymbolIds,
+      { trackSources: true },
+    );
+    const currentFileless = new Map<string, GraphIntegrityFilelessStateRecord>();
+    try {
+      for (const state of await getGraphIntegrityFilelessStates(
+        conn,
+        request.repoId,
+        [...filelessSymbolIds],
+      )) {
+        currentFileless.set(state.symbolId, state);
+      }
+    } catch (error) {
+      if (!(error instanceof GraphIntegrityManifestValidationError)) throw error;
+      return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    }
+    try {
+      const nextReferences = createGraphIntegrityFilelessReferenceTuples(
+        nextEdgeReferences,
+        nextFilelessSymbols,
+        currentFileless,
+      );
+      nextFileState = createGraphIntegrityFileState(
+        request.repoId,
+        durableFileId,
+        relPath,
+        expectedSymbols,
+        nextReferences,
+      );
+      filelessDelta = createGraphIntegrityFilelessDelta(
+        request.repoId,
+        currentFileless,
+        previousReferences,
+        nextReferences,
+        integrityBaseline.pruningSupported,
+      );
+    } catch {
+      return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    }
   }
 
+  let committedRevision: number | undefined;
   try {
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
+        if (integrityBaseline) {
+          const currentVersion = await ladybugDb.getLatestVersion(
+            txConn,
+            request.repoId,
+          );
+          if (
+            currentVersion?.versionId !== integrityBaseline.versionId ||
+            !(await ownsGraphIntegrityRevision(
+              txConn,
+              request.repoId,
+              integrityBaseline.versionId,
+              integrityBaseline.revision,
+            ))
+          ) {
+            throw new SavedFilePatchRetry();
+          }
+        }
         await ladybugDb.upsertFile(txConn, durableFile);
 
         // Always refresh symbol references for this file
@@ -197,7 +374,7 @@ async function patchSavedFileUnlocked(
           txConn,
           durableFile.fileId,
         );
-        await ladybugDb.insertSymbolReferences(txConn, parseResult.references);
+        await ladybugDb.insertSymbolReferences(txConn, parsedReferences);
 
         // --- Matched symbols: update properties, refresh non-SCIP edges ---
         if (diff.matched.length > 0) {
@@ -210,7 +387,7 @@ async function patchSavedFileUnlocked(
           // Upsert each matched symbol with updated properties from tree-sitter.
           // Build a lookup from new symbolId -> parse result symbol for fast access.
           const newSymbolLookup = new Map(
-            parseResult.symbols.map((s) => [s.symbolId, s]),
+            parsedSymbols.map((s) => [s.symbolId, s]),
           );
 
           for (const { old: oldSym, new: newSym } of diff.matched) {
@@ -245,7 +422,7 @@ async function patchSavedFileUnlocked(
 
         // --- Added symbols: insert fresh ---
         if (diff.added.length > 0) {
-          for (const symbol of parseResult.symbols) {
+          for (const symbol of parsedSymbols) {
             if (addedIds.has(symbol.symbolId)) {
               await ladybugDb.upsertSymbol(txConn, {
                 ...symbol,
@@ -283,34 +460,45 @@ async function patchSavedFileUnlocked(
           });
         }
 
-        // Without a verified baseline there is nothing trustworthy to advance.
-        if (!integritySession) {
+        if (
+          integrityBaseline &&
+          trustedFileState &&
+          nextFileState &&
+          filelessDelta
+        ) {
+          await applyGraphIntegrityFilePatchInTransaction(
+            txConn,
+            nextFileState,
+            filelessDelta,
+          );
+          committedRevision =
+            (await advanceGraphIntegrityRevisionInTransaction(
+              txConn,
+              request.repoId,
+              integrityBaseline.versionId,
+              integrityBaseline.revision,
+            )) ?? undefined;
+          if (committedRevision === undefined) throw new SavedFilePatchRetry();
+        } else {
           await invalidateGraphIntegrity(txConn, request.repoId);
         }
       });
     });
   } catch (error) {
-    if (integritySession && integrityVersionId) {
-      try {
-        // The transaction rolled back, so the original baseline should verify.
-        await integritySession.complete(integrityVersionId);
-      } catch (recoveryError) {
-        logger.error("Failed to restore graph integrity after live-index rollback", {
-          repoId: request.repoId,
-          error:
-            recoveryError instanceof Error
-              ? recoveryError.message
-              : String(recoveryError),
-        });
-      }
-    }
+    if (error instanceof SavedFilePatchRetry) return RETRY_SAVED_FILE_PATCH;
     throw error;
   }
 
-  if (integritySession && integrityVersionId) {
-    integritySession.applyFile(expectedFile);
-    integritySession.applyFilelessSymbols(expectedFilelessSymbols);
-    await integritySession.complete(integrityVersionId);
+  if (committedRevision !== undefined) {
+    try {
+      observer?.onCommitted(committedRevision);
+    } catch (error) {
+      logger.debug("Saved-file patch observer failed", {
+        repoId: request.repoId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    notifyGraphIntegrityVerifier(request.repoId);
   }
 
   return {
@@ -322,11 +510,11 @@ async function patchSavedFileUnlocked(
     symbolsRemoved: diff.removed.length,
     symbolsPreserved: diff.preserved.length,
     edgesUpserted: parseResult.edges.length,
-    referencesUpserted: parseResult.references.length,
+    referencesUpserted: parsedReferences.length,
     parseResult: {
       ...parseResult,
       file: durableFile,
-      symbols: parseResult.symbols.map((symbol) => ({
+      symbols: parsedSymbols.map((symbol) => ({
         ...symbol,
         updatedAt: now,
       })),
@@ -337,4 +525,18 @@ async function patchSavedFileUnlocked(
     },
     frontier,
   };
+}
+
+async function failOwnedSavedFileBaseline(
+  repoId: string,
+  baseline: { versionId: string; revision: number },
+): Promise<typeof RETRY_SAVED_FILE_PATCH> {
+  const published = await markCurrentGraphIntegrityRevisionFailed(
+    repoId,
+    baseline.versionId,
+    baseline.revision,
+    GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+  );
+  if (!published) return RETRY_SAVED_FILE_PATCH;
+  throw new GraphIntegrityVerificationError();
 }
