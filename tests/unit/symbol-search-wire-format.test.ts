@@ -188,6 +188,11 @@ test("actual handler JSON and packed responses satisfy the output schema", async
       }),
     },
   });
+  t.mock.module("../../dist/services/graph-retrieval-availability.js", {
+    namedExports: {
+      assertGraphRetrievalAvailable: async () => undefined,
+    },
+  });
   t.mock.module("../../dist/live-index/overlay-reader.js", {
     namedExports: {
       clearSnapshotCache: () => undefined,

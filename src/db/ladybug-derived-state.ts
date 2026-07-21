@@ -104,6 +104,13 @@ export async function getDerivedState(
   repoId: string,
 ): Promise<DerivedStateRow | null> {
   const conn = await getLadybugConn();
+  return getDerivedStateFromConnection(conn, repoId);
+}
+
+export async function getDerivedStateFromConnection(
+  conn: Connection,
+  repoId: string,
+): Promise<DerivedStateRow | null> {
   const rows = await queryAll<Record<string, unknown>>(
     conn,
     "MATCH (d:DerivedState {repoId: $repoId}) RETURN d.repoId AS repoId, d.clustersDirty AS clustersDirty, d.processesDirty AS processesDirty, d.algorithmsDirty AS algorithmsDirty, d.summariesDirty AS summariesDirty, d.embeddingsDirty AS embeddingsDirty, d.targetVersionId AS targetVersionId, d.computedVersionId AS computedVersionId, d.updatedAt AS updatedAt, d.lastError AS lastError, d.graphIntegrityState AS graphIntegrityState, d.graphIntegrityVersionId AS graphIntegrityVersionId, d.graphIntegrityDigest AS graphIntegrityDigest, d.graphIntegrityError AS graphIntegrityError, d.graphIntegrityRevision AS graphIntegrityRevision, d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision, d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported",

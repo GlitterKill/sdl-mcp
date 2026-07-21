@@ -83,20 +83,23 @@ describe("repo.unregister integration", () => {
     );
   }
 
-  it("cancels graph verification after closing mutation admission and before deleting graph state", () => {
+  it("quiesces graph verification after closing mutation admission and through graph deletion", () => {
     const source = readFileSync(
       new URL("../../src/mcp/tools/repo.ts", import.meta.url),
       "utf8",
     );
     const begin = source.indexOf("await beginRepoRemoval(repoId)");
-    const cancel = source.indexOf(
-      "await cancelAndWaitForGraphIntegrityVerifier(repoId)",
+    const quiesce = source.indexOf(
+      "await withGraphIntegrityVerifierQuiesced(repoId",
       begin,
     );
     const deletion = source.indexOf("await ladybugDb.deleteRepo(writeConn, repoId)", begin);
 
-    assert.ok(begin >= 0 && cancel > begin);
-    assert.ok(cancel < deletion, "verification must stop before repository deletion");
+    assert.ok(begin >= 0 && quiesce > begin);
+    assert.ok(
+      quiesce < deletion,
+      "verification admission must remain closed through repository deletion",
+    );
   });
 
   async function waitForRepoInactive(repoId: string): Promise<void> {

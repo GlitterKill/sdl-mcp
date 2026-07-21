@@ -15,6 +15,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { beginGraphIntegrityVersion } from "../../dist/db/ladybug-derived-state.js";
 import { NotFoundError } from "../../dist/domain/errors.js";
 import { clearAllCaches } from "../../dist/graph/cache.js";
 import { clearSnapshotCache } from "../../dist/live-index/overlay-reader.js";
@@ -96,6 +97,22 @@ describe("missing symbol-card MCP error envelope", () => {
       configJson: JSON.stringify({ policy: {} }),
       createdAt: "2026-07-17T12:00:00.000Z",
     });
+    const versionId = `${REPO_ID}:v1`;
+    await ladybugDb.createVersion(conn, {
+      versionId,
+      repoId: REPO_ID,
+      createdAt: "2026-07-17T12:00:00.000Z",
+      reason: "test",
+      prevVersionHash: null,
+      versionHash: null,
+    });
+    await beginGraphIntegrityVersion(
+      conn,
+      REPO_ID,
+      versionId,
+      "0".repeat(64),
+      true,
+    );
 
     server = await createMCPServer({
       gatewayConfig: { enabled: false, emitLegacyTools: true },

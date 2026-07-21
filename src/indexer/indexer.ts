@@ -160,7 +160,7 @@ import {
   summarizeProviderFirstShadowActivationReadiness,
 } from "./provider-first/shadow-activation.js";
 import { finalizeProviderFirstShadowDb } from "./provider-first/shadow-finalization.js";
-import { cancelAndWaitForGraphIntegrityVerifier } from "./provider-first/background-graph-integrity-verifier.js";
+import { withGraphIntegrityVerifierQuiesced } from "./provider-first/background-graph-integrity-verifier.js";
 import {
   ensureGraphIntegrityVerificationComplete,
   failActiveGraphIntegrityVerification,
@@ -2617,12 +2617,12 @@ async function indexRepoImpl(
         "providerFirstShadowActivate",
         () =>
           withRepoWriteHeavyLock(repoId, () =>
-            activateProviderFirstShadowDbWithHandoff({
+            withGraphIntegrityVerifierQuiesced(repoId, () =>
+              activateProviderFirstShadowDbWithHandoff({
               activeDbPath,
               shadowDbPath,
               generationId: finalizedShadowBuild.generationId,
               prepareHandoff: async () => {
-                await cancelAndWaitForGraphIntegrityVerifier(repoId);
                 if (
                   !graphIntegrity.ownsStagedRevision(
                     versionId,
@@ -2675,7 +2675,8 @@ async function indexRepoImpl(
                   }
                 }
               },
-            }),
+              }),
+            ),
           ),
       );
       if (finalizedShadowBuild.activationResult.status === "activated") {

@@ -32,9 +32,12 @@ interface WorkerEntry {
 }
 
 const workers = new Map<string, WorkerEntry>();
+const quiescedRepos = new Map<string, number>();
 let recoveryTimer: NodeJS.Timeout | undefined;
 let recoveryStart: Promise<boolean> | undefined;
 let recoveryReady = false;
+let notificationsStopped = false;
+let stopPromise: Promise<void> | undefined;
 
 function checkCancelled(signal: AbortSignal): void {
   if (signal.aborted) throw new VerificationCancelledError();
@@ -157,6 +160,7 @@ function startWorker(repoId: string): void {
 }
 
 export function notifyGraphIntegrityVerifier(repoId: string): boolean {
+  if (notificationsStopped || quiescedRepos.has(repoId)) return false;
   if (hasActiveGraphIntegrityVerification(repoId)) return false;
   const entry = workers.get(repoId);
   if (!entry) {
@@ -178,6 +182,26 @@ export async function cancelAndWaitForGraphIntegrityVerifier(
   entry.cancellation.stopRequested = true;
   entry.cancellation.controller?.abort();
   await entry.task;
+}
+
+/**
+ * Prevent verifier admission while a repository crosses a destructive lifecycle
+ * boundary. The block is installed before cancellation so a captured recovery
+ * sweep cannot recreate the worker after cancellation completes.
+ */
+export async function withGraphIntegrityVerifierQuiesced<T>(
+  repoId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  quiescedRepos.set(repoId, (quiescedRepos.get(repoId) ?? 0) + 1);
+  try {
+    await cancelAndWaitForGraphIntegrityVerifier(repoId);
+    return await operation();
+  } finally {
+    const remaining = (quiescedRepos.get(repoId) ?? 1) - 1;
+    if (remaining > 0) quiescedRepos.set(repoId, remaining);
+    else quiescedRepos.delete(repoId);
+  }
 }
 
 export async function cancelAndWaitForAllGraphIntegrityVerifiers(): Promise<void> {
@@ -218,6 +242,8 @@ function beginRecoverySweep(): Promise<boolean> {
 }
 
 export async function startGraphIntegrityVerifierRecovery(): Promise<void> {
+  if (stopPromise) await stopPromise;
+  notificationsStopped = false;
   if (!recoveryTimer) {
     const timer = setInterval(() => {
       void beginRecoverySweep().then((succeeded) => {
@@ -234,9 +260,29 @@ export async function startGraphIntegrityVerifierRecovery(): Promise<void> {
   if (succeeded && recoveryTimer === activeTimer) recoveryReady = true;
 }
 
-export function stopGraphIntegrityVerifierRecovery(): void {
+export async function stopGraphIntegrityVerifierRecovery(): Promise<void> {
+  if (stopPromise) return stopPromise;
+  notificationsStopped = true;
   if (recoveryTimer) clearInterval(recoveryTimer);
   recoveryTimer = undefined;
-  recoveryStart = undefined;
+  recoveryReady = false;
+  const activeRecovery = recoveryStart;
+  const task = (async () => {
+    await activeRecovery;
+    await cancelAndWaitForAllGraphIntegrityVerifiers();
+  })().finally(() => {
+    if (stopPromise === task) stopPromise = undefined;
+  });
+  stopPromise = task;
+  await task;
+}
+
+/** @internal Reset process admission state after a test has drained all work. */
+export function _resetGraphIntegrityVerifierForTesting(): void {
+  if (recoveryTimer || recoveryStart || stopPromise || workers.size > 0) {
+    throw new Error("Graph integrity verifier must be stopped before reset");
+  }
+  quiescedRepos.clear();
+  notificationsStopped = false;
   recoveryReady = false;
 }

@@ -226,6 +226,11 @@ describe("toAgentGraphSlice", () => {
         getSymbolsByIds: async () => [],
       },
     });
+    t.mock.module("../../dist/services/graph-retrieval-availability.js", {
+      namedExports: {
+        assertGraphRetrievalAvailable: async () => undefined,
+      },
+    });
     t.mock.module("../../dist/graph/slice.js", {
       namedExports: {
         buildSlice: async () => ({ slice, hybridSearchItems: [] }),

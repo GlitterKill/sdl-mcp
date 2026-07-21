@@ -61,7 +61,6 @@ import {
 } from "../../observability/index.js";
 import type { ObservabilityService } from "../../observability/index.js";
 import {
-  cancelAndWaitForAllGraphIntegrityVerifiers,
   stopGraphIntegrityVerifierRecovery,
 } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
 
@@ -70,8 +69,7 @@ function writeStderrLine(message: string): boolean {
 }
 
 async function stopGraphIntegrityVerifier(): Promise<void> {
-  stopGraphIntegrityVerifierRecovery();
-  await cancelAndWaitForAllGraphIntegrityVerifiers();
+  await stopGraphIntegrityVerifierRecovery();
 }
 
 async function closeDbAfterStartupFailure(): Promise<void> {

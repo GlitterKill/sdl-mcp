@@ -24,23 +24,28 @@ describe("per-repository lifecycle barrier", () => {
     resetRepoLifecycleForTests();
   });
 
-  it("cancels verification before full-index shadow activation closes the active DB", () => {
+  it("quiesces verification across full-index shadow activation and active DB close", () => {
     const source = readFileSync(
       new URL("../../src/indexer/indexer.ts", import.meta.url),
       "utf8",
     );
-    const activation = source.indexOf("activateProviderFirstShadowDbWithHandoff({");
-    const cancel = source.indexOf(
-      "await cancelAndWaitForGraphIntegrityVerifier(repoId)",
-      activation,
+    const quiesce = source.indexOf(
+      "withGraphIntegrityVerifierQuiesced(repoId",
+    );
+    const activation = source.indexOf(
+      "activateProviderFirstShadowDbWithHandoff({",
+      quiesce,
     );
     const close = source.indexOf(
       "closeLadybugDb({ preserveCloseHooks: true })",
       activation,
     );
 
-    assert.ok(activation >= 0 && cancel > activation);
-    assert.ok(cancel < close, "verification must release its read lease before DB close");
+    assert.ok(quiesce >= 0 && activation > quiesce);
+    assert.ok(
+      activation < close,
+      "verification admission must remain closed through active DB close",
+    );
   });
 
   it("drains accepted mutations and rejects work arriving after removal starts", async () => {

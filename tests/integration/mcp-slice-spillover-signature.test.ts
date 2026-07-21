@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { beginGraphIntegrityVersion } from "../../dist/db/ladybug-derived-state.js";
 import { buildToolResponseEnvelope } from "../../dist/server.js";
 import { handleSliceSpilloverGet } from "../../dist/mcp/tools/slice.js";
 import { SliceSpilloverGetResponseSchema } from "../../dist/mcp/tools.js";
@@ -54,6 +55,7 @@ describe("MCP slice spillover signatures", () => {
       prevVersionHash: null,
       versionHash: "v1-hash",
     });
+    await beginGraphIntegrityVersion(conn, repoId, "v1", "0".repeat(64), true);
 
     await ladybugDb.upsertFile(conn, {
       fileId: "file-rs-1",

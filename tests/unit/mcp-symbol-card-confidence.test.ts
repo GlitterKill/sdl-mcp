@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { clearAllCaches } from "../../dist/graph/cache.js";
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { beginGraphIntegrityVersion } from "../../dist/db/ladybug-derived-state.js";
 import { SymbolGetCardRequestSchema } from "../../dist/mcp/tools.js";
 import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
 
@@ -43,6 +44,7 @@ describe("symbol card confidence-aware filtering", () => {
       prevVersionHash: null,
       versionHash: "hash-v1",
     });
+    await beginGraphIntegrityVersion(conn, "repo", "v1", "0".repeat(64), true);
 
     await ladybugDb.upsertFile(conn, {
       fileId: "file-1",

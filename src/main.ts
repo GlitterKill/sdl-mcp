@@ -36,7 +36,6 @@ import { loadConfiguredAdapterPlugins } from "./startup/plugins.js";
 import { installProcessHandlers } from "./startup/process-handlers.js";
 import { safeWriteStderr } from "./util/stdio-safety.js";
 import {
-  cancelAndWaitForAllGraphIntegrityVerifiers,
   stopGraphIntegrityVerifierRecovery,
 } from "./indexer/provider-first/background-graph-integrity-verifier.js";
 
@@ -62,8 +61,7 @@ if (!getLogFilePath()) {
 const log = (msg: string) => safeWriteStderr(`[sdl-mcp] ${msg}\n`);
 
 async function stopGraphIntegrityVerifier(): Promise<void> {
-  stopGraphIntegrityVerifierRecovery();
-  await cancelAndWaitForAllGraphIntegrityVerifiers();
+  await stopGraphIntegrityVerifierRecovery();
 }
 
 async function closeDbAfterStartupFailure(): Promise<void> {

@@ -245,6 +245,7 @@ describe("main.ts shutdown wiring", () => {
 
     assert.ok(verifierCleanup >= 0, "main.ts should register verifier cleanup");
     assert.ok(verifierCleanup < dbCleanup, "verifier cleanup must run before DB cleanup");
+    assert.match(source, /await stopGraphIntegrityVerifierRecovery\(\)/);
   });
 
   it("closes LadybugDB when startup fails after DB init", () => {
@@ -372,6 +373,7 @@ describe("serve.ts shutdown wiring", () => {
 
     assert.ok(verifierCleanup >= 0, "serve.ts should register verifier cleanup");
     assert.ok(verifierCleanup < dbCleanup, "verifier cleanup must run before DB cleanup");
+    assert.match(source, /await stopGraphIntegrityVerifierRecovery\(\)/);
   });
 
   it("checks for early stdio shutdown before opening LadybugDB", () => {

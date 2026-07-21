@@ -88,7 +88,7 @@ import {
   graphIntegrityIsVerifiedForVersion,
   graphIntegrityNextBestAction,
 } from "../../db/ladybug-derived-state.js";
-import { cancelAndWaitForGraphIntegrityVerifier } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
+import { withGraphIntegrityVerifierQuiesced } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
 
 // Health snapshot cache with 30s TTL to avoid expensive recomputation.
 // lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
@@ -635,16 +635,16 @@ export async function handleRepoUnregister(
       );
     }
 
-    await cancelAndWaitForGraphIntegrityVerifier(repoId);
-
-    await withWriteConn(async (writeConn) => {
-      if (!(await ladybugDb.getRepo(writeConn, repoId))) {
-        throw new NotFoundError(`Repository not found: ${repoId}`);
-      }
-      await ladybugDb.deleteRepo(writeConn, repoId);
-      removal.commitTombstone();
-      tombstoned = true;
-    });
+    await withGraphIntegrityVerifierQuiesced(repoId, () =>
+      withWriteConn(async (writeConn) => {
+        if (!(await ladybugDb.getRepo(writeConn, repoId))) {
+          throw new NotFoundError(`Repository not found: ${repoId}`);
+        }
+        await ladybugDb.deleteRepo(writeConn, repoId);
+        removal.commitTombstone();
+        tombstoned = true;
+      }),
+    );
   } finally {
     if (!tombstoned) removal.abort();
   }

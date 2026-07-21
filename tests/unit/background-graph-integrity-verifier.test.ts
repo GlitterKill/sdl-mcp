@@ -7,12 +7,14 @@ import { afterEach, describe, it } from "node:test";
 import { Connection } from "kuzu";
 
 import {
+  _resetGraphIntegrityVerifierForTesting,
   cancelAndWaitForAllGraphIntegrityVerifiers,
   cancelAndWaitForGraphIntegrityVerifier,
   notifyGraphIntegrityVerifier,
   runGraphIntegrityVerifierRecoverySweep,
   startGraphIntegrityVerifierRecovery,
   stopGraphIntegrityVerifierRecovery,
+  withGraphIntegrityVerifierQuiesced,
 } from "../../dist/indexer/provider-first/background-graph-integrity-verifier.js";
 import {
   closeLadybugDb,
@@ -161,13 +163,125 @@ describe("background graph integrity verifier", () => {
   let root = "";
 
   afterEach(async () => {
-    stopGraphIntegrityVerifierRecovery();
-    await cancelAndWaitForAllGraphIntegrityVerifiers();
+    await stopGraphIntegrityVerifierRecovery();
     await closeLadybugDb().catch(() => {});
     if (root && existsSync(root)) {
       rmSync(root, { recursive: true, force: true });
     }
     root = "";
+    _resetGraphIntegrityVerifierForTesting();
+  });
+
+  it("keeps a repository quiesced when a previously captured recovery sweep resumes", async (t) => {
+    root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-quiesce-race-"));
+    await initLadybugDb(join(root, "graph.lbug"));
+    await seedPendingRevision(root, "repo");
+
+    const statements = new WeakMap<object, string>();
+    const pendingCaptured = deferred();
+    const releasePendingRead = deferred();
+    const originalPrepare = Connection.prototype.prepare;
+    const originalExecute = Connection.prototype.execute;
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      const prepared = await originalPrepare.call(this, statement);
+      statements.set(prepared, statement);
+      return prepared;
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        const result = await originalExecute.call(
+          this,
+          prepared,
+          params,
+          progressCallback,
+        );
+        const statement = statements.get(prepared);
+        if (
+          statement?.includes("MATCH (d:DerivedState)") &&
+          statement.includes("graphIntegrityVerifiedRevision")
+        ) {
+          pendingCaptured.resolve();
+          await releasePendingRead.promise;
+        }
+        return result;
+      },
+    );
+
+    const sweep = runGraphIntegrityVerifierRecoverySweep();
+    await pendingCaptured.promise;
+    await withGraphIntegrityVerifierQuiesced("repo", async () => {
+      releasePendingRead.resolve();
+      await sweep;
+      assert.equal(notifyGraphIntegrityVerifier("repo"), false);
+      assert.equal(
+        (await derivedState.getDerivedState("repo"))?.graphIntegrityState,
+        "verifying",
+      );
+    });
+
+    assert.equal(notifyGraphIntegrityVerifier("repo"), true);
+    await waitForState(
+      "repo",
+      (state) => state?.graphIntegrityVerifiedRevision === 1,
+    );
+  });
+
+  it("awaits an in-flight recovery sweep and blocks late notifications during global stop", async (t) => {
+    root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-stop-race-"));
+    await initLadybugDb(join(root, "graph.lbug"));
+    await seedPendingRevision(root, "repo");
+
+    const statements = new WeakMap<object, string>();
+    const pendingCaptured = deferred();
+    const releasePendingRead = deferred();
+    const originalPrepare = Connection.prototype.prepare;
+    const originalExecute = Connection.prototype.execute;
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      const prepared = await originalPrepare.call(this, statement);
+      statements.set(prepared, statement);
+      return prepared;
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        const result = await originalExecute.call(
+          this,
+          prepared,
+          params,
+          progressCallback,
+        );
+        const statement = statements.get(prepared);
+        if (
+          statement?.includes("MATCH (d:DerivedState)") &&
+          statement.includes("graphIntegrityVerifiedRevision")
+        ) {
+          pendingCaptured.resolve();
+          await releasePendingRead.promise;
+        }
+        return result;
+      },
+    );
+
+    const recovery = startGraphIntegrityVerifierRecovery();
+    await pendingCaptured.promise;
+    let stopped = false;
+    const stopping = stopGraphIntegrityVerifierRecovery().then(() => {
+      stopped = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(stopped, false, "global stop must drain the captured sweep");
+
+    releasePendingRead.resolve();
+    await recovery;
+    await stopping;
+    assert.equal(notifyGraphIntegrityVerifier("repo"), false);
+    assert.equal(
+      (await derivedState.getDerivedState("repo"))?.graphIntegrityState,
+      "verifying",
+    );
   });
 
   it("starts immediately and reloads durable work after successful publication", async (t) => {
