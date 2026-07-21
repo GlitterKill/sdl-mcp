@@ -4,25 +4,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
+import type { Connection } from "kuzu";
+
 import { exec, querySingle, withTransaction } from "../../dist/db/ladybug-core.js";
 import {
   closeLadybugDb,
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
-import * as ladybugDb from "../../dist/db/ladybug-queries.js";
-
-const manifestDb = await import(
-  "../../dist/db/ladybug-queries.js"
-).catch(() => null);
-
-type AsyncFn = (...args: any[]) => Promise<any>;
-
-function requiredFunction(name: string): AsyncFn {
-  const candidate = manifestDb?.[name as keyof typeof manifestDb];
-  assert.equal(typeof candidate, "function", `${name} must be implemented`);
-  return candidate as AsyncFn;
-}
+import {
+  deleteGraphIntegrityFileStateInTransaction,
+  deleteGraphIntegrityFilelessStateInTransaction,
+  deleteGraphIntegrityManifestInTransaction,
+  getGraphIntegrityFileState,
+  listGraphIntegrityFileStates,
+  listGraphIntegrityFilelessStates,
+  replaceGraphIntegrityManifestInTransaction,
+  upsertGraphIntegrityFileStateInTransaction,
+  upsertGraphIntegrityFilelessStateInTransaction,
+  upsertRepo,
+} from "../../dist/db/ladybug-queries.js";
 
 function fileState(repoId: string, fileId: string, relPath: string) {
   return {
@@ -54,7 +55,7 @@ describe("graph integrity manifest persistence", () => {
     await initLadybugDb(join(root, "manifest.lbug"));
     await withWriteConn(async (conn) => {
       for (const repoId of ["repo-a", "repo-b"]) {
-        await ladybugDb.upsertRepo(conn, {
+        await upsertRepo(conn, {
           repoId,
           rootPath: join(root, repoId),
           configJson: "{}",
@@ -70,14 +71,10 @@ describe("graph integrity manifest persistence", () => {
   });
 
   it("reads only relationship-owned rows in deterministic repository order", async () => {
-    const upsertFile = requiredFunction(
-      "upsertGraphIntegrityFileStateInTransaction",
-    );
-    const upsertFileless = requiredFunction(
-      "upsertGraphIntegrityFilelessStateInTransaction",
-    );
-    const listFiles = requiredFunction("listGraphIntegrityFileStates");
-    const listFileless = requiredFunction("listGraphIntegrityFilelessStates");
+    const upsertFile = upsertGraphIntegrityFileStateInTransaction;
+    const upsertFileless = upsertGraphIntegrityFilelessStateInTransaction;
+    const listFiles = listGraphIntegrityFileStates;
+    const listFileless = listGraphIntegrityFilelessStates;
 
     await withWriteConn(async (conn) => {
       await upsertFile(conn, fileState("repo-a", "f-z", "z.ts"));
@@ -105,22 +102,22 @@ describe("graph integrity manifest persistence", () => {
       );
 
       assert.deepEqual(
-        (await listFiles(conn, "repo-a")).map((row: any) => row.fileId),
+        (await listFiles(conn, "repo-a")).map((row) => row.fileId),
         ["f-a", "f-b", "f-z"],
       );
       assert.deepEqual(
-        (await listFileless(conn, "repo-a")).map((row: any) => row.symbolId),
+        (await listFileless(conn, "repo-a")).map((row) => row.symbolId),
         ["sym:a", "sym:z"],
       );
       assert.deepEqual(
-        (await listFiles(conn, "repo-b")).map((row: any) => row.fileId),
+        (await listFiles(conn, "repo-b")).map((row) => row.fileId),
         ["f-other"],
       );
     });
   });
 
   it("rejects relationship-owned file rows with inconsistent tuple identities", async () => {
-    const listFiles = requiredFunction("listGraphIntegrityFileStates");
+    const listFiles = listGraphIntegrityFileStates;
 
     await withWriteConn(async (conn) => {
       await exec(
@@ -145,7 +142,7 @@ describe("graph integrity manifest persistence", () => {
   });
 
   it("rejects relationship-owned fileless rows with inconsistent tuple identities", async () => {
-    const listFileless = requiredFunction("listGraphIntegrityFilelessStates");
+    const listFileless = listGraphIntegrityFilelessStates;
 
     await withWriteConn(async (conn) => {
       await exec(
@@ -170,13 +167,9 @@ describe("graph integrity manifest persistence", () => {
   });
 
   it("rechecks stored identities after primary-key lookup and before delete", async () => {
-    const getFile = requiredFunction("getGraphIntegrityFileState");
-    const deleteFile = requiredFunction(
-      "deleteGraphIntegrityFileStateInTransaction",
-    );
-    const deleteFileless = requiredFunction(
-      "deleteGraphIntegrityFilelessStateInTransaction",
-    );
+    const getFile = getGraphIntegrityFileState;
+    const deleteFile = deleteGraphIntegrityFileStateInTransaction;
+    const deleteFileless = deleteGraphIntegrityFilelessStateInTransaction;
 
     await withWriteConn(async (conn) => {
       const fileStateId = JSON.stringify(["repo-a", "file"]);
@@ -231,20 +224,12 @@ describe("graph integrity manifest persistence", () => {
   });
 
   it("upserts, replaces, rolls back, deletes, and isolates repositories", async () => {
-    const upsertFile = requiredFunction(
-      "upsertGraphIntegrityFileStateInTransaction",
-    );
-    const upsertFileless = requiredFunction(
-      "upsertGraphIntegrityFilelessStateInTransaction",
-    );
-    const listFiles = requiredFunction("listGraphIntegrityFileStates");
-    const listFileless = requiredFunction("listGraphIntegrityFilelessStates");
-    const replace = requiredFunction(
-      "replaceGraphIntegrityManifestInTransaction",
-    );
-    const deleteManifest = requiredFunction(
-      "deleteGraphIntegrityManifestInTransaction",
-    );
+    const upsertFile = upsertGraphIntegrityFileStateInTransaction;
+    const upsertFileless = upsertGraphIntegrityFilelessStateInTransaction;
+    const listFiles = listGraphIntegrityFileStates;
+    const listFileless = listGraphIntegrityFilelessStates;
+    const replace = replaceGraphIntegrityManifestInTransaction;
+    const deleteManifest = deleteGraphIntegrityManifestInTransaction;
 
     await withWriteConn(async (conn) => {
       await upsertFile(conn, fileState("repo-a", "old", "old.ts"));
@@ -263,7 +248,7 @@ describe("graph integrity manifest persistence", () => {
         });
       });
       assert.deepEqual(
-        (await listFiles(conn, "repo-a")).map((row: any) => [row.fileId, row.digest]),
+        (await listFiles(conn, "repo-a")).map((row) => [row.fileId, row.digest]),
         [["new", "repo-a:new"]],
       );
 
@@ -278,11 +263,11 @@ describe("graph integrity manifest persistence", () => {
         /rollback manifest/,
       );
       assert.deepEqual(
-        (await listFiles(conn, "repo-a")).map((row: any) => row.fileId),
+        (await listFiles(conn, "repo-a")).map((row) => row.fileId),
         ["new"],
       );
       assert.deepEqual(
-        (await listFileless(conn, "repo-a")).map((row: any) => row.symbolId),
+        (await listFileless(conn, "repo-a")).map((row) => row.symbolId),
         ["sym:new"],
       );
 
@@ -290,12 +275,147 @@ describe("graph integrity manifest persistence", () => {
       assert.deepEqual(await listFiles(conn, "repo-a"), []);
       assert.deepEqual(await listFileless(conn, "repo-a"), []);
       assert.deepEqual(
-        (await listFiles(conn, "repo-b")).map((row: any) => row.fileId),
+        (await listFiles(conn, "repo-b")).map((row) => row.fileId),
         ["keep"],
       );
       assert.deepEqual(
-        (await listFileless(conn, "repo-b")).map((row: any) => row.symbolId),
+        (await listFileless(conn, "repo-b")).map((row) => row.symbolId),
         ["sym:keep"],
+      );
+    });
+  });
+
+  it("rejects duplicate file identities before replacing the manifest", async () => {
+    const upsertFile = upsertGraphIntegrityFileStateInTransaction;
+    const replace = replaceGraphIntegrityManifestInTransaction;
+    const listFiles = listGraphIntegrityFileStates;
+
+    await withWriteConn(async (conn) => {
+      await upsertFile(conn, fileState("repo-a", "old", "old.ts"));
+      const duplicate = fileState("repo-a", "duplicate", "duplicate.ts");
+
+      await assert.rejects(
+        () =>
+          replace(conn, "repo-a", {
+            files: [duplicate, { ...duplicate, digest: "contradictory" }],
+            fileless: [],
+          }),
+        { name: "DatabaseError", message: /duplicate.*file/i },
+      );
+      assert.deepEqual(
+        (await listFiles(conn, "repo-a")).map((row) => row.fileId),
+        ["old"],
+      );
+    });
+  });
+
+  it("rejects duplicate fileless identities before replacing the manifest", async () => {
+    const upsertFileless = upsertGraphIntegrityFilelessStateInTransaction;
+    const replace = replaceGraphIntegrityManifestInTransaction;
+    const listFileless = listGraphIntegrityFilelessStates;
+
+    await withWriteConn(async (conn) => {
+      await upsertFileless(conn, filelessState("repo-a", "sym:old"));
+      const duplicate = filelessState("repo-a", "sym:duplicate");
+
+      await assert.rejects(
+        () =>
+          replace(conn, "repo-a", {
+            files: [],
+            fileless: [
+              duplicate,
+              { ...duplicate, canonicalSymbolJson: '["contradictory"]' },
+            ],
+          }),
+        { name: "DatabaseError", message: /duplicate.*fileless/i },
+      );
+      assert.deepEqual(
+        (await listFileless(conn, "repo-a")).map((row) => row.symbolId),
+        ["sym:old"],
+      );
+    });
+  });
+
+  it("chunks 257-row replacements at 256 and persists every row", async () => {
+    const replace = replaceGraphIntegrityManifestInTransaction;
+    const listFiles = listGraphIntegrityFileStates;
+    const listFileless = listGraphIntegrityFilelessStates;
+    const files = Array.from({ length: 257 }, (_, index) => {
+      const suffix = String(index).padStart(3, "0");
+      return fileState("repo-a", `file-${suffix}`, `src/${suffix}.ts`);
+    });
+    const fileless = Array.from({ length: 257 }, (_, index) =>
+      filelessState("repo-a", `sym:${String(index).padStart(3, "0")}`),
+    );
+    const batchSizes: number[] = [];
+    const fakeConnection = {
+      prepare: async (statement: string) => ({ statement }),
+      execute: async (
+        _prepared: unknown,
+        params: Record<string, unknown> = {},
+      ) => {
+        if (Array.isArray(params.rows)) batchSizes.push(params.rows.length);
+        return { close() {} };
+      },
+    } as unknown as Connection;
+
+    await replace(fakeConnection, "repo-a", { files, fileless });
+    assert.deepEqual(batchSizes, [256, 1, 256, 1]);
+
+    await withWriteConn(async (conn) => {
+      await withTransaction(conn, (tx) =>
+        replace(tx, "repo-a", { files, fileless }),
+      );
+      assert.equal((await listFiles(conn, "repo-a")).length, 257);
+      assert.equal((await listFileless(conn, "repo-a")).length, 257);
+    });
+  });
+
+  it("leaves tuple-valid file and fileless orphans untouched on exact delete", async () => {
+    const deleteFile = deleteGraphIntegrityFileStateInTransaction;
+    const deleteFileless = deleteGraphIntegrityFilelessStateInTransaction;
+
+    await withWriteConn(async (conn) => {
+      const file = fileState("repo-a", "orphan", "orphan.ts");
+      const fileless = filelessState("repo-a", "sym:orphan");
+      await exec(
+        conn,
+        `MERGE (f:GraphIntegrityFileState {stateId: $stateId})
+         SET f.repoId = $repoId, f.fileId = $fileId, f.relPath = $relPath,
+             f.symbolCount = $symbolCount, f.digest = $digest,
+             f.filelessReferencesJson = $filelessReferencesJson`,
+        file,
+      );
+      await exec(
+        conn,
+        `MERGE (s:GraphIntegrityFilelessState {stateId: $stateId})
+         SET s.repoId = $repoId, s.symbolId = $symbolId,
+             s.canonicalSymbolJson = $canonicalSymbolJson,
+             s.referenceCount = $referenceCount`,
+        fileless,
+      );
+
+      await deleteFile(conn, "repo-a", "orphan");
+      await deleteFileless(conn, "repo-a", "sym:orphan");
+      assert.equal(
+        Number(
+          await querySingle<{ count: unknown }>(
+            conn,
+            "MATCH (f:GraphIntegrityFileState {stateId: $stateId}) RETURN count(f) AS count",
+            { stateId: file.stateId },
+          ).then((row) => row?.count ?? 0),
+        ),
+        1,
+      );
+      assert.equal(
+        Number(
+          await querySingle<{ count: unknown }>(
+            conn,
+            "MATCH (s:GraphIntegrityFilelessState {stateId: $stateId}) RETURN count(s) AS count",
+            { stateId: fileless.stateId },
+          ).then((row) => row?.count ?? 0),
+        ),
+        1,
       );
     });
   });

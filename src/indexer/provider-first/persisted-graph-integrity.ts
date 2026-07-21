@@ -2,6 +2,7 @@ import { createHash, type Hash } from "node:crypto";
 
 import type { Connection } from "kuzu";
 
+import { DatabaseError } from "../../domain/errors.js";
 import {
   getDerivedState,
   graphIntegrityIsVerifiedForVersion,
@@ -1073,9 +1074,17 @@ export function createGraphIntegrityFilelessDelta(
           existing.canonicalSymbolJson,
         )
       : undefined;
+    const currentReferenceCount = existing?.referenceCount ?? 0;
+    const previousReferenceCount =
+      previousBySymbol.get(symbolId)?.referenceCount ?? 0;
+    if (currentReferenceCount < previousReferenceCount) {
+      throw new DatabaseError(
+        "Graph integrity fileless baseline reference count is inconsistent",
+      );
+    }
     const referenceCount =
-      (existing?.referenceCount ?? 0) -
-      (previousBySymbol.get(symbolId)?.referenceCount ?? 0) +
+      currentReferenceCount -
+      previousReferenceCount +
       (nextBySymbol.get(symbolId)?.referenceCount ?? 0);
     if (!Number.isSafeInteger(referenceCount) || referenceCount < 0) {
       throw new Error("Graph integrity fileless reference count is invalid");

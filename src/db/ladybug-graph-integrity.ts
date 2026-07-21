@@ -10,6 +10,8 @@ import {
 } from "./ladybug-core.js";
 import type { SymbolStatus } from "./symbol-placeholders.js";
 
+const GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE = 256;
+
 export interface PersistedGraphIntegritySymbolRow {
   symbolId: string;
   fileId: string;
@@ -188,14 +190,7 @@ export async function deleteGraphIntegrityFileStateInTransaction(
     conn,
     `MATCH (f:GraphIntegrityFileState {stateId: $stateId})-[rel:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(:Repo {repoId: $repoId})
      WHERE f.repoId = $repoId AND f.fileId = $fileId
-     DELETE rel`,
-    params,
-  );
-  await exec(
-    conn,
-    `MATCH (f:GraphIntegrityFileState {stateId: $stateId})
-     WHERE f.repoId = $repoId AND f.fileId = $fileId
-     DELETE f`,
+     DELETE rel, f`,
     params,
   );
 }
@@ -248,14 +243,7 @@ export async function deleteGraphIntegrityFilelessStateInTransaction(
     conn,
     `MATCH (s:GraphIntegrityFilelessState {stateId: $stateId})-[rel:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(:Repo {repoId: $repoId})
      WHERE s.repoId = $repoId AND s.symbolId = $symbolId
-     DELETE rel`,
-    params,
-  );
-  await exec(
-    conn,
-    `MATCH (s:GraphIntegrityFilelessState {stateId: $stateId})
-     WHERE s.repoId = $repoId AND s.symbolId = $symbolId
-     DELETE s`,
+     DELETE rel, s`,
     params,
   );
 }
@@ -302,21 +290,45 @@ export async function replaceGraphIntegrityManifestInTransaction(
   repoId: string,
   manifest: GraphIntegrityManifest,
 ): Promise<void> {
+  const fileStateIds = new Set<string>();
+  const fileIds = new Set<string>();
   for (const row of manifest.files) {
     assertFileStateIdentity(row);
     if (row.repoId !== repoId) {
       throw new Error("Graph integrity file state belongs to another repository");
     }
+    if (fileStateIds.has(row.stateId) || fileIds.has(row.fileId)) {
+      throw new DatabaseError("Duplicate graph integrity file state identity");
+    }
+    fileStateIds.add(row.stateId);
+    fileIds.add(row.fileId);
   }
+  const filelessStateIds = new Set<string>();
+  const symbolIds = new Set<string>();
   for (const row of manifest.fileless) {
     assertFilelessStateIdentity(row);
     if (row.repoId !== repoId) {
       throw new Error("Graph integrity fileless state belongs to another repository");
     }
+    if (filelessStateIds.has(row.stateId) || symbolIds.has(row.symbolId)) {
+      throw new DatabaseError(
+        "Duplicate graph integrity fileless state identity",
+      );
+    }
+    filelessStateIds.add(row.stateId);
+    symbolIds.add(row.symbolId);
   }
 
   await deleteGraphIntegrityManifestInTransaction(conn, repoId);
-  if (manifest.files.length > 0) {
+  for (
+    let offset = 0;
+    offset < manifest.files.length;
+    offset += GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE
+  ) {
+    const rows = manifest.files.slice(
+      offset,
+      offset + GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE,
+    );
     await exec(
       conn,
       `UNWIND $rows AS row
@@ -326,10 +338,18 @@ export async function replaceGraphIntegrityManifestInTransaction(
            f.symbolCount = row.symbolCount, f.digest = row.digest,
            f.filelessReferencesJson = row.filelessReferencesJson
        MERGE (f)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(r)`,
-      { repoId, rows: manifest.files },
+      { repoId, rows },
     );
   }
-  if (manifest.fileless.length > 0) {
+  for (
+    let offset = 0;
+    offset < manifest.fileless.length;
+    offset += GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE
+  ) {
+    const rows = manifest.fileless.slice(
+      offset,
+      offset + GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE,
+    );
     await exec(
       conn,
       `UNWIND $rows AS row
@@ -339,7 +359,7 @@ export async function replaceGraphIntegrityManifestInTransaction(
            s.canonicalSymbolJson = row.canonicalSymbolJson,
            s.referenceCount = row.referenceCount
        MERGE (s)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(r)`,
-      { repoId, rows: manifest.fileless },
+      { repoId, rows },
     );
   }
 }
