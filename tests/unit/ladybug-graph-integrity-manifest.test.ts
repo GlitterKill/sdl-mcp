@@ -119,6 +119,56 @@ describe("graph integrity manifest persistence", () => {
     });
   });
 
+  it("rejects relationship-owned file rows with inconsistent tuple identities", async () => {
+    const listFiles = requiredFunction("listGraphIntegrityFileStates");
+
+    await withWriteConn(async (conn) => {
+      await exec(
+        conn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MERGE (f:GraphIntegrityFileState {stateId: $stateId})
+         SET f.repoId = $repoId, f.fileId = $fileId, f.relPath = 'corrupt.ts',
+             f.symbolCount = 1, f.digest = 'corrupt', f.filelessReferencesJson = '[]'
+         MERGE (f)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(r)`,
+        {
+          stateId: JSON.stringify(["repo-a", "wrong-file"]),
+          repoId: "repo-a",
+          fileId: "actual-file",
+        },
+      );
+
+      await assert.rejects(() => listFiles(conn, "repo-a"), {
+        name: "DatabaseError",
+        message: /file state identity is inconsistent/i,
+      });
+    });
+  });
+
+  it("rejects relationship-owned fileless rows with inconsistent tuple identities", async () => {
+    const listFileless = requiredFunction("listGraphIntegrityFilelessStates");
+
+    await withWriteConn(async (conn) => {
+      await exec(
+        conn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MERGE (s:GraphIntegrityFilelessState {stateId: $stateId})
+         SET s.repoId = $repoId, s.symbolId = $symbolId,
+             s.canonicalSymbolJson = '[]', s.referenceCount = 1
+         MERGE (s)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(r)`,
+        {
+          stateId: JSON.stringify(["repo-a", "wrong-symbol"]),
+          repoId: "repo-a",
+          symbolId: "actual-symbol",
+        },
+      );
+
+      await assert.rejects(() => listFileless(conn, "repo-a"), {
+        name: "DatabaseError",
+        message: /fileless state identity is inconsistent/i,
+      });
+    });
+  });
+
   it("rechecks stored identities after primary-key lookup and before delete", async () => {
     const getFile = requiredFunction("getGraphIntegrityFileState");
     const deleteFile = requiredFunction(

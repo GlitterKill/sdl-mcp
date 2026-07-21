@@ -1,5 +1,6 @@
 import type { Connection } from "kuzu";
 
+import { DatabaseError } from "../domain/errors.js";
 import {
   exec,
   queryAll,
@@ -108,7 +109,7 @@ function graphIntegrityFilelessStateId(
 
 function assertFileStateIdentity(row: GraphIntegrityFileStateRecord): void {
   if (row.stateId !== graphIntegrityFileStateId(row.repoId, row.fileId)) {
-    throw new Error("Graph integrity file state identity is inconsistent");
+    throw new DatabaseError("Graph integrity file state identity is inconsistent");
   }
 }
 
@@ -116,20 +117,26 @@ function assertFilelessStateIdentity(
   row: GraphIntegrityFilelessStateRecord,
 ): void {
   if (row.stateId !== graphIntegrityFilelessStateId(row.repoId, row.symbolId)) {
-    throw new Error("Graph integrity fileless state identity is inconsistent");
+    throw new DatabaseError(
+      "Graph integrity fileless state identity is inconsistent",
+    );
   }
 }
 
 function mapFileState(
   row: RawGraphIntegrityFileStateRecord,
 ): GraphIntegrityFileStateRecord {
-  return { ...row, symbolCount: toNumber(row.symbolCount) };
+  const mapped = { ...row, symbolCount: toNumber(row.symbolCount) };
+  assertFileStateIdentity(mapped);
+  return mapped;
 }
 
 function mapFilelessState(
   row: RawGraphIntegrityFilelessStateRecord,
 ): GraphIntegrityFilelessStateRecord {
-  return { ...row, referenceCount: toNumber(row.referenceCount) };
+  const mapped = { ...row, referenceCount: toNumber(row.referenceCount) };
+  assertFilelessStateIdentity(mapped);
+  return mapped;
 }
 
 export async function getGraphIntegrityFileState(
