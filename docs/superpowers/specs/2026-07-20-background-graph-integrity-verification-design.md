@@ -63,6 +63,7 @@ Add these fields to `DerivedState`:
 
 - `graphIntegrityRevision`: the latest committed live-graph mutation for the current Version.
 - `graphIntegrityVerifiedRevision`: the latest revision successfully verified for the current Version.
+- `graphIntegrityFilelessPruningSupported`: whether the trusted manifest has enough fileless-liveness history to apply existing placeholder-pruning rules during live edits.
 
 Keep `graphIntegrityVersionId` as the owning Version. Full indexing establishes a new Version and initializes both revision counters to `0`. Each later graph mutation calculates `newRevision = previousRevision + 1` inside the owning write transaction and maps LadybugDB integers through the existing number-conversion helpers.
 
@@ -96,7 +97,9 @@ Add a `GraphIntegrityFilelessState` table with one row per expected fileless sym
 - `canonicalSymbolJson`: deterministic canonical symbol fields.
 - `referenceCount`: expected cross-file liveness count.
 
-The fileless manifest persists the inputs currently held by `GraphIntegrityFilelessLivenessLedger`; it must not reconstruct them from post-write Symbol or Edge rows. A live patch diffs the affected file's previous and next `filelessReferencesJson`, adjusts expected reference counts, upserts new independently constructed placeholder/provider expectations, and removes only entries whose expected liveness reaches zero under the existing pruning rules.
+Connect both manifest node types to their owning `Repo` through `GRAPH_INTEGRITY_FILE_STATE_IN_REPO` and `GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO` relationship tables. LadybugDB 0.18.1 cannot index ordinary custom properties, so repository-scoped manifest reads traverse these relationships; exact row reads continue to use the `stateId` primary key.
+
+The fileless manifest persists the inputs currently held by `GraphIntegrityFilelessLivenessLedger`; it must not reconstruct them from post-write Symbol or Edge rows. A live patch diffs the affected file's previous and next deterministic, typed `filelessReferencesJson`, adjusts expected reference counts, and upserts new independently constructed placeholder/provider expectations. It removes zero-liveness entries under the existing pruning rules only when `graphIntegrityFilelessPruningSupported` is true; otherwise it conservatively retains them until the next full refresh rebuilds complete liveness history.
 
 Use the existing fileless sentinel when producing the global expected digest. The manifest does not need to persist page diagnostics; the verifier can generate bounded mismatch diagnostics from the actual scan when comparison fails.
 
@@ -227,9 +230,9 @@ These operations call a per-repository `cancelAndWait()` boundary. Cancellation 
 
 ## Migration
 
-Add migration `m023` to the existing LadybugDB migration registry. The migration adds the two nullable revision properties plus the `GraphIntegrityFileState` and `GraphIntegrityFilelessState` tables and their repository lookup indexes.
+Add migration `m023` to the existing LadybugDB migration registry. The migration adds the two nullable revision properties, the nullable fileless-pruning-support property, the `GraphIntegrityFileState` and `GraphIntegrityFilelessState` tables, and their manifest-to-`Repo` relationship tables. It does not attempt unsupported custom-property indexes.
 
-For existing repositories, `m023` writes the persisted representation of `unknown` to `graphIntegrityState` and leaves both revision fields unset because no independent manifest exists. It preserves the old Version and digest only as diagnostic history. The verified predicate requires both revision fields to be non-null, so equality between two unset values cannot certify the graph. The migration does not rebuild or reindex automatically.
+For existing repositories, `m023` writes the persisted representation of `unknown` to `graphIntegrityState` and leaves both revision fields and `graphIntegrityFilelessPruningSupported` unset because no independent manifest exists. It preserves the old Version and digest only as diagnostic history. The verified predicate requires both revision fields to be non-null, so equality between two unset values cannot certify the graph. The migration does not rebuild or reindex automatically.
 
 An existing repository without a complete manifest remains unverified until one full refresh builds and verifies the manifest. Startup and saved-file patches must not reconstruct a manifest from existing Symbol rows and immediately mark those same rows verified.
 
@@ -264,6 +267,8 @@ No public configuration flag or dual verification mode is added. Full indexing c
 - The final CAS waits only for the short publication write.
 - Checkpoint interaction is bounded and leaves no active transaction after cancellation.
 - Numeric revision values use the repository's LadybugDB number-conversion helpers.
+- Repository-scoped manifest reads traverse manifest-to-`Repo` relationships and never attempt unsupported custom-property indexes.
+- Live edits prune zero-liveness fileless expectations only when the persisted pruning-support flag is true.
 
 ### Performance gates
 
