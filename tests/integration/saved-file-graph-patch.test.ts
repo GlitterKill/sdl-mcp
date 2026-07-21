@@ -18,7 +18,10 @@ import {
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
-import { clearPreparedStatementCache } from "../../dist/db/ladybug-core.js";
+import {
+  clearPreparedStatementCache,
+  exec,
+} from "../../dist/db/ladybug-core.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   capturePersistedGraphIntegrity,
@@ -897,8 +900,39 @@ describe("saved file graph patch", () => {
     assert.ok(beforeManifest);
     const symbols = await ladybugDb.getSymbolsByFile(conn, durableFileId);
     assert.ok(symbols.length > 0);
+    const originalSymbol = symbols[0]!;
+    t.after(async () => {
+      await withWriteConn((writeConn) =>
+        ladybugDb.withTransaction(writeConn, async () => {
+          // Restore only the rows deliberately mutated by this destructive test.
+          await ladybugDb.upsertSymbol(writeConn, originalSymbol);
+          await exec(
+            writeConn,
+            `MATCH (d:DerivedState {repoId: $repoId})
+             SET d.graphIntegrityState = 'verified',
+                 d.graphIntegrityVersionId = $versionId,
+                 d.graphIntegrityDigest = $digest,
+                 d.graphIntegrityError = NULL,
+                 d.graphIntegrityRevision = $revision,
+                 d.graphIntegrityVerifiedRevision = $verifiedRevision,
+                 d.graphIntegrityFilelessPruningSupported = $filelessPruningSupported,
+                 d.updatedAt = $updatedAt`,
+            {
+              repoId,
+              versionId: beforeState!.graphIntegrityVersionId,
+              digest: beforeState!.graphIntegrityDigest,
+              revision: beforeState!.graphIntegrityRevision,
+              verifiedRevision: beforeState!.graphIntegrityVerifiedRevision,
+              filelessPruningSupported:
+                beforeState!.graphIntegrityFilelessPruningSupported,
+              updatedAt: beforeState!.updatedAt,
+            },
+          );
+        }),
+      );
+    });
     await ladybugDb.upsertSymbol(conn, {
-      ...symbols[0]!,
+      ...originalSymbol,
       name: "corrupt-before-edit",
     });
 
@@ -1008,5 +1042,23 @@ describe("saved file graph patch", () => {
     const afterSymbols = await ladybugDb.getSymbolsByFile(conn, durableFileId);
     assert.ok(afterSymbols.some((symbol) => symbol.name === "corrupt-before-edit"));
     assert.equal(afterSymbols.some((symbol) => symbol.name === "repaired"), false);
+  });
+
+  it("leaves the shared fixture verified after destructive failure coverage", async () => {
+    const conn = await getLadybugConn();
+    const state = await getDerivedState(repoId);
+    assert.equal(state?.graphIntegrityState, "verified");
+    assert.equal(
+      state?.graphIntegrityRevision,
+      state?.graphIntegrityVerifiedRevision,
+    );
+
+    const manifestExpectation = createGraphIntegrityExpectationFromManifest(
+      await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
+      await ladybugDb.listGraphIntegrityFilelessStates(conn, repoId),
+    );
+    const graph = await capturePersistedGraphIntegrity(conn, repoId);
+    assert.equal(graph.digest, manifestExpectation.digest);
+    assert.equal(state?.graphIntegrityDigest, graph.digest);
   });
 });
