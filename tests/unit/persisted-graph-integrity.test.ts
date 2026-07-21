@@ -25,6 +25,7 @@ import {
   createGraphIntegrityFileState,
   failActiveGraphIntegrityVerification,
   GraphIntegrityFilelessLivenessLedger,
+  GraphIntegrityVerificationError,
   graphIntegrityPlaceholderPruningIsSafe,
   hasActiveGraphIntegrityVerification,
   parseGraphIntegrityCanonicalSymbol,
@@ -2783,6 +2784,212 @@ describe("persisted graph integrity", () => {
     assert.equal(state?.graphIntegrityRevision, 1);
     assert.equal(state?.graphIntegrityVerifiedRevision, null);
     assert.equal(state?.graphIntegrityError, null);
+  });
+
+  it("preserves the winning manifest when a full session loses version ownership", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-full-lost-cas-"));
+    await initLadybugDb(join(root, "full-lost-cas.lbug"));
+    await withWriteConn((conn) =>
+      ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-21T00:00:00.000Z",
+      }),
+    );
+
+    const Session = PersistedGraphIntegritySession as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+      applyFile: (file: Record<string, unknown>) => void;
+      stageManifest: (versionId: string) => Promise<number | undefined>;
+    };
+    const stale = new Session("repo", "full", true);
+    await stale.begin("stale-v1");
+    stale.applyFile(
+      createGraphIntegrityFileDigest({
+        fileId: "repo:src/stale.ts",
+        relPath: "src/stale.ts",
+        symbols: [],
+      }) as Record<string, unknown>,
+    );
+
+    const winnerManifest = {
+      files: [
+        createGraphIntegrityFileState(
+          "repo",
+          "repo:src/winner.ts",
+          "src/winner.ts",
+          [],
+          [],
+        ),
+      ],
+      fileless: [{
+        stateId: JSON.stringify(["repo", "winner:fileless"]),
+        repoId: "repo",
+        symbolId: "winner:fileless",
+        canonicalSymbolJson: canonicalFilelessJson("winner:fileless"),
+        referenceCount: 1,
+      }],
+    };
+    await withWriteConn((conn) =>
+      ladybugDb.withTransaction(conn, async (txConn) => {
+        await ladybugDb.createVersion(txConn, {
+          versionId: "winner-v1",
+          repoId: "repo",
+          createdAt: "2026-07-21T00:00:01.000Z",
+          reason: "winning full index",
+          prevVersionHash: null,
+          versionHash: null,
+        });
+        await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+          txConn,
+          "repo",
+          winnerManifest,
+        );
+        await derivedState.beginGraphIntegrityVersion(
+          txConn,
+          "repo",
+          "winner-v1",
+          "a".repeat(64),
+          true,
+        );
+      }),
+    );
+
+    const winnerSnapshot = await Promise.all([
+      derivedState.getDerivedState("repo"),
+      ladybugDb.listGraphIntegrityFileStates(await getLadybugConn(), "repo"),
+      ladybugDb.listGraphIntegrityFilelessStates(await getLadybugConn(), "repo"),
+    ]);
+    try {
+      await assert.rejects(
+        stale.stageManifest("stale-v1"),
+        GraphIntegrityVerificationError,
+      );
+      const afterStaleStage = await Promise.all([
+        derivedState.getDerivedState("repo"),
+        ladybugDb.listGraphIntegrityFileStates(await getLadybugConn(), "repo"),
+        ladybugDb.listGraphIntegrityFilelessStates(await getLadybugConn(), "repo"),
+      ]);
+      assert.deepEqual(afterStaleStage, winnerSnapshot);
+    } finally {
+      await failActiveGraphIntegrityVerification("repo");
+    }
+    assert.equal(hasActiveGraphIntegrityVerification("repo"), false);
+  });
+
+  it("preserves the winning manifest when an incremental session loses revision ownership", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-incremental-lost-cas-"));
+    await initLadybugDb(join(root, "incremental-lost-cas.lbug"));
+    const emptyDigest = createGraphIntegrityExpectationFromManifest([], []).digest;
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-21T00:00:00.000Z",
+      });
+      await ladybugDb.createVersion(conn, {
+        versionId: "v1",
+        repoId: "repo",
+        createdAt: "2026-07-21T00:00:00.000Z",
+        reason: "baseline",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, "repo", {
+        files: [],
+        fileless: [],
+      });
+      await derivedState.beginGraphIntegrityVersion(
+        conn,
+        "repo",
+        "v1",
+        emptyDigest,
+        true,
+      );
+    });
+
+    const Session = PersistedGraphIntegritySession as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+      applyFile: (file: Record<string, unknown>) => void;
+      stageManifest: (versionId: string) => Promise<number | undefined>;
+    };
+    const stale = new Session("repo", "incremental", true);
+    await stale.begin("v1");
+    stale.applyFile(
+      createGraphIntegrityFileDigest({
+        fileId: "repo:src/stale.ts",
+        relPath: "src/stale.ts",
+        symbols: [],
+      }) as Record<string, unknown>,
+    );
+
+    const winnerManifest = {
+      files: [
+        createGraphIntegrityFileState(
+          "repo",
+          "repo:src/winner.ts",
+          "src/winner.ts",
+          [],
+          [],
+        ),
+      ],
+      fileless: [{
+        stateId: JSON.stringify(["repo", "winner:fileless"]),
+        repoId: "repo",
+        symbolId: "winner:fileless",
+        canonicalSymbolJson: canonicalFilelessJson("winner:fileless"),
+        referenceCount: 1,
+      }],
+    };
+    await withWriteConn((conn) =>
+      ladybugDb.withTransaction(conn, async (txConn) => {
+        await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+          txConn,
+          "repo",
+          winnerManifest,
+        );
+        assert.equal(
+          await derivedState.advanceGraphIntegrityRevisionInTransaction(
+            txConn,
+            "repo",
+            "v1",
+            0,
+          ),
+          1,
+        );
+      }),
+    );
+
+    const winnerSnapshot = await Promise.all([
+      derivedState.getDerivedState("repo"),
+      ladybugDb.listGraphIntegrityFileStates(await getLadybugConn(), "repo"),
+      ladybugDb.listGraphIntegrityFilelessStates(await getLadybugConn(), "repo"),
+    ]);
+    try {
+      await assert.rejects(
+        stale.stageManifest("v1"),
+        GraphIntegrityVerificationError,
+      );
+      const afterStaleStage = await Promise.all([
+        derivedState.getDerivedState("repo"),
+        ladybugDb.listGraphIntegrityFileStates(await getLadybugConn(), "repo"),
+        ladybugDb.listGraphIntegrityFilelessStates(await getLadybugConn(), "repo"),
+      ]);
+      assert.deepEqual(afterStaleStage, winnerSnapshot);
+    } finally {
+      await failActiveGraphIntegrityVerification("repo");
+    }
+    assert.equal(hasActiveGraphIntegrityVerification("repo"), false);
   });
 
   it("restarts synchronous verification at revision zero for a new Version", async () => {

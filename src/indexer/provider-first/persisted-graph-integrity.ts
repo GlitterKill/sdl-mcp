@@ -905,32 +905,37 @@ export class PersistedGraphIntegritySession {
     }
     const revision = await withWriteConn((conn) =>
       ladybugDb.withTransaction(conn, async (txConn) => {
+        let nextRevision: number | null;
+        if (active.revision === null) {
+          const initialRevision =
+            this.mode === "full" ? 0 : (this.baselineRevision ?? -1) + 1;
+          nextRevision = await initializeGraphIntegrityVersionInTransaction(
+            txConn,
+            this.repoId,
+            versionId,
+            this.filelessLiveness?.canPrune ?? false,
+            initialRevision,
+            this.mode === "full" ? null : this.baselineRevision ?? null,
+          );
+        } else {
+          nextRevision = await advanceGraphIntegrityRevisionInTransaction(
+            txConn,
+            this.repoId,
+            versionId,
+            active.revision,
+          );
+        }
+        if (nextRevision === null) {
+          throw new GraphIntegrityVerificationError();
+        }
         await replaceGraphIntegrityManifestInTransaction(
           txConn,
           this.repoId,
           manifest,
         );
-        if (active.revision === null) {
-          const revision =
-            this.mode === "full" ? 0 : (this.baselineRevision ?? -1) + 1;
-          return initializeGraphIntegrityVersionInTransaction(
-            txConn,
-            this.repoId,
-            versionId,
-            this.filelessLiveness?.canPrune ?? false,
-            revision,
-            this.mode === "full" ? null : this.baselineRevision ?? null,
-          );
-        }
-        return advanceGraphIntegrityRevisionInTransaction(
-          txConn,
-          this.repoId,
-          versionId,
-          active.revision,
-        );
+        return nextRevision;
       }),
     );
-    if (revision === null) throw new GraphIntegrityVerificationError();
     this.stagedRevision = revision;
     active.revision = revision;
     return revision;
