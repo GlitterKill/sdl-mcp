@@ -284,6 +284,34 @@ describe("background graph integrity verifier", () => {
     );
   });
 
+  it("keeps recovery terminal when a late startup continuation runs after stop", async (t) => {
+    root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-terminal-stop-"));
+    await initLadybugDb(join(root, "graph.lbug"));
+    await seedPendingRevision(root, "repo");
+    await stopGraphIntegrityVerifierRecovery();
+
+    let pendingReads = 0;
+    const originalPrepare = Connection.prototype.prepare;
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      if (
+        statement.includes("MATCH (d:DerivedState)") &&
+        statement.includes("graphIntegrityVerifiedRevision")
+      ) {
+        pendingReads += 1;
+      }
+      return originalPrepare.call(this, statement);
+    });
+
+    await startGraphIntegrityVerifierRecovery();
+
+    assert.equal(pendingReads, 0, "late startup must not query recovery state");
+    assert.equal(notifyGraphIntegrityVerifier("repo"), false);
+    assert.doesNotThrow(
+      () => _resetGraphIntegrityVerifierForTesting(),
+      "late startup must not recreate the recovery timer or a worker",
+    );
+  });
+
   it("starts immediately and reloads durable work after successful publication", async (t) => {
     root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-immediate-"));
     await initLadybugDb(join(root, "graph.lbug"));

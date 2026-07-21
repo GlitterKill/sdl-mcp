@@ -243,7 +243,7 @@ function beginRecoverySweep(): Promise<boolean> {
 
 export async function startGraphIntegrityVerifierRecovery(): Promise<void> {
   if (stopPromise) await stopPromise;
-  notificationsStopped = false;
+  if (notificationsStopped) return;
   if (!recoveryTimer) {
     const timer = setInterval(() => {
       void beginRecoverySweep().then((succeeded) => {
