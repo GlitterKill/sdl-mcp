@@ -406,24 +406,35 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
         entered.resolve();
         await release.promise;
       });
-      await entered.promise;
-
       let closeCompleted = false;
-      const close = closeLadybugDb().then(() => {
-        closeCompleted = true;
-      });
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      assert.strictEqual(closeCompleted, false);
-      await assert.rejects(
-        withExclusiveReadConnection(async () => {}),
-        /LadybugDB is closing/,
-      );
+      let closeRequest: Promise<void> | undefined;
+      let closeObserved: Promise<void> | undefined;
 
-      release.resolve();
-      await lease;
-      await close;
-      assert.strictEqual(getLadybugDbPath(), null);
-      cleanupTestDb("exclusive-read-close");
+      try {
+        await Promise.race([entered.promise, lease]);
+        closeRequest = closeLadybugDb();
+        closeObserved = closeRequest.then(() => {
+          closeCompleted = true;
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.strictEqual(closeCompleted, false);
+        await assert.rejects(
+          withExclusiveReadConnection(async () => {}),
+          /LadybugDB is closing/,
+        );
+
+        release.resolve();
+        await Promise.all([lease, closeRequest, closeObserved]);
+        assert.strictEqual(getLadybugDbPath(), null);
+      } finally {
+        release.resolve();
+        const pending = [lease];
+        if (closeRequest) pending.push(closeRequest);
+        if (closeObserved) pending.push(closeObserved);
+        await Promise.allSettled(pending);
+        await closeLadybugDb();
+        cleanupTestDb("exclusive-read-close");
+      }
     });
   });
 
@@ -475,20 +486,23 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
           entered.resolve();
           await release.promise;
         });
-        await entered.promise;
-
         let closeCompleted = false;
-        const firstClose = closeLadybugDb({
-          preserveCloseHooks: firstPreserves,
-        });
-        const firstCloseObserved = firstClose.then(() => {
-          closeCompleted = true;
-        });
-        const secondClose = closeLadybugDb({
-          preserveCloseHooks: secondPreserves,
-        });
+        let firstClose: Promise<void> | undefined;
+        let firstCloseObserved: Promise<void> | undefined;
+        let secondClose: Promise<void> | undefined;
 
         try {
+          await Promise.race([entered.promise, lease]);
+          firstClose = closeLadybugDb({
+            preserveCloseHooks: firstPreserves,
+          });
+          firstCloseObserved = firstClose.then(() => {
+            closeCompleted = true;
+          });
+          secondClose = closeLadybugDb({
+            preserveCloseHooks: secondPreserves,
+          });
+
           assert.strictEqual(firstClose, secondClose);
           await new Promise<void>((resolve) => setImmediate(resolve));
           assert.strictEqual(closeCompleted, false);
@@ -507,12 +521,11 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
           assert.strictEqual(hookCalls, 1);
         } finally {
           release.resolve();
-          await Promise.allSettled([
-            lease,
-            firstClose,
-            firstCloseObserved,
-            secondClose,
-          ]);
+          const pending = [lease];
+          if (firstClose) pending.push(firstClose);
+          if (firstCloseObserved) pending.push(firstCloseObserved);
+          if (secondClose) pending.push(secondClose);
+          await Promise.allSettled(pending);
           await closeLadybugDb();
           cleanupTestDb(name);
         }
