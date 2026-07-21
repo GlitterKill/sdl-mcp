@@ -10541,6 +10541,43 @@ describe("provider-first indexing foundation", () => {
     }
   });
 
+  it("aborts shadow handoff before close when its revision guard is stale", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sdl-provider-first-handoff-guard-"));
+    try {
+      const activePath = join(root, "active.lbug");
+      const shadowPath = join(root, "shadow.lbug");
+      mkdirSync(activePath);
+      mkdirSync(shadowPath);
+      writeFileSync(join(activePath, "marker.txt"), "active", "utf8");
+      writeFileSync(join(shadowPath, "marker.txt"), "shadow", "utf8");
+      const calls: string[] = [];
+
+      const activation = await activateProviderFirstShadowDbWithHandoff({
+        activeDbPath: activePath,
+        shadowDbPath: shadowPath,
+        generationId: "stale-revision",
+        prepareHandoff: async () => {
+          calls.push("prepare");
+          throw new Error("revision advanced");
+        },
+        closeActiveDb: async () => {
+          calls.push("close");
+        },
+        reopenActiveDb: async () => {
+          calls.push("reopen");
+        },
+      });
+
+      assert.equal(activation.status, "failed");
+      assert.match(activation.reasons.join(" "), /revision advanced/);
+      assert.deepEqual(calls, ["prepare"]);
+      assert.equal(readFileSync(join(activePath, "marker.txt"), "utf8"), "active");
+      assert.equal(readFileSync(join(shadowPath, "marker.txt"), "utf8"), "shadow");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("restores the active DB when post-handoff validation fails", async () => {
     const root = mkdtempSync(
       join(tmpdir(), "sdl-provider-first-handoff-validation-"),

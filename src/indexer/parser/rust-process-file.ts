@@ -384,7 +384,7 @@ export async function processFileFromRustResult(params: {
       createGraphIntegrityFilelessEdgeReferences(
         edgesToInsert,
         graphIntegrityFilelessSymbols.map((symbol) => symbol.symbolId),
-        { trackSources: mode === "incremental" },
+        { trackSources: true },
       );
 
     // ── Persist ──────────────────────────────────────────────────────────

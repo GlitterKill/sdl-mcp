@@ -96,6 +96,8 @@ export {
   beginGraphIntegrityVersion,
   graphIntegrityIsAvailableForVersion,
   graphIntegrityIsVerifiedForVersion,
+  initializeGraphIntegrityVersionInTransaction,
+  invalidateGraphIntegrity,
   listPendingGraphIntegrityRevisions,
   markCurrentGraphIntegrityRevisionFailed,
   markGraphIntegrityFailedIfVerifying,

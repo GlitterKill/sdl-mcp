@@ -791,6 +791,53 @@ describe("persisted graph integrity", () => {
         versionHash: null,
       }),
     );
+    const targetRow = (
+      await ladybugDb.getPersistedGraphIntegritySymbolPage(conn, {
+        repoId: "repo-a",
+        limit: 10,
+      })
+    ).find((row) => row.symbolId === targetId);
+    assert.ok(targetRow);
+    const sharedCanonical = JSON.stringify([
+      targetRow.symbolId,
+      targetRow.fileId ?? "",
+      targetRow.relPath ?? "",
+      targetRow.name ?? "",
+      targetRow.signatureJson ?? "",
+      targetRow.kind ?? "",
+      targetRow.language ?? "",
+      ladybugDb.toNumber(targetRow.rangeStartLine),
+      ladybugDb.toNumber(targetRow.rangeStartCol),
+      ladybugDb.toNumber(targetRow.rangeEndLine),
+      ladybugDb.toNumber(targetRow.rangeEndCol),
+      targetRow.source ?? "treesitter",
+      targetRow.scipSymbol ?? "",
+      targetRow.astFingerprint ?? "",
+      targetRow.symbolStatus ?? "real",
+      targetRow.external ?? false,
+      targetRow.placeholderKind ?? "",
+      targetRow.placeholderTarget ?? "",
+    ]);
+    await withWriteConn((writeConn) =>
+      ladybugDb.replaceGraphIntegrityManifestInTransaction(writeConn, "repo-a", {
+        files: [
+          createGraphIntegrityFileState(
+            "repo-a",
+            sourceA.fileId,
+            "src/index.ts",
+            [sourceA],
+            [[targetId, sharedCanonical, sourceA.symbolId, "call", "incoming", 1]],
+          ),
+        ],
+        fileless: [{
+          stateId: JSON.stringify(["repo-a", targetId]),
+          repoId: "repo-a",
+          symbolId: targetId,
+          canonicalSymbolJson: sharedCanonical,
+          referenceCount: 1,
+        }],
+      }),
+    );
     await derivedState.markGraphIntegrityVerified(
       "repo-a",
       "repo-a-v1",
@@ -1254,6 +1301,48 @@ describe("persisted graph integrity", () => {
     const baseline = (await capture(await getLadybugConn(), "repo")) as {
       digest: string;
     };
+    const refreshedCanonical = JSON.stringify([
+      refreshedTarget, "", "", "refresh", "", "function", "typescript",
+      0, 0, 0, 0, "scip", refreshedTarget, refreshedTarget,
+      "external", true, "scip", refreshedTarget,
+    ]);
+    const untouchedCanonical = JSON.stringify([
+      untouchedTarget, "", "", "untouched", "", "function", "typescript",
+      0, 0, 0, 0, "scip", untouchedTarget, untouchedTarget,
+      "external", true, "scip", untouchedTarget,
+    ]);
+    await withWriteConn((conn) =>
+      ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, "repo", {
+        files: [
+          createGraphIntegrityFileState(
+            "repo",
+            refreshedSource.fileId,
+            "src/alpha.ts",
+            [refreshedSource, untouchedSource],
+            [
+              [refreshedTarget, refreshedCanonical, refreshedSource.symbolId, "call", "incoming", 1],
+              [untouchedTarget, untouchedCanonical, untouchedSource.symbolId, "call", "incoming", 1],
+            ],
+          ),
+        ],
+        fileless: [
+          {
+            stateId: JSON.stringify(["repo", refreshedTarget]),
+            repoId: "repo",
+            symbolId: refreshedTarget,
+            canonicalSymbolJson: refreshedCanonical,
+            referenceCount: 1,
+          },
+          {
+            stateId: JSON.stringify(["repo", untouchedTarget]),
+            repoId: "repo",
+            symbolId: untouchedTarget,
+            canonicalSymbolJson: untouchedCanonical,
+            referenceCount: 1,
+          },
+        ],
+      }),
+    );
     await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
 
     const session = new Session("repo", "incremental", true);
@@ -1351,6 +1440,23 @@ describe("persisted graph integrity", () => {
       const baseline = (await capture(await getLadybugConn(), "repo")) as {
         digest: string;
       };
+      const promotedCanonical = JSON.stringify([
+        promotedId, "", "", "promoted", "", "function", "typescript",
+        0, 0, 0, 0, "scip", promotedId, promotedId,
+        "external", true, "scip", promotedId,
+      ]);
+      await withWriteConn((conn) =>
+        ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, "repo", {
+          files: [],
+          fileless: [{
+            stateId: JSON.stringify(["repo", promotedId]),
+            repoId: "repo",
+            symbolId: promotedId,
+            canonicalSymbolJson: promotedCanonical,
+            referenceCount: 0,
+          }],
+        }),
+      );
       await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
 
       const session = new Session("repo", "incremental", true);
@@ -1366,7 +1472,7 @@ describe("persisted graph integrity", () => {
       } else {
         session.applyPass1Accumulator({
           symbolMapFileUpdates: new Map([
-            [fileId, { symbols: [{ symbolId: promotedId }] }],
+            [fileId, { fileId, symbols: [{ symbolId: promotedId }] }],
           ]),
           graphIntegrityFiles: new Map([
             [
@@ -1476,7 +1582,8 @@ describe("persisted graph integrity", () => {
       integritySource,
       /getPersistedGraphIntegrityFilelessEdgeReferences/,
     );
-    assert.match(integritySource, /seedPersistedReferenceCounts/);
+    assert.doesNotMatch(integritySource, /seedPersistedReferenceCounts/);
+    assert.match(integritySource, /listGraphIntegrityFileStates/);
     assert.match(querySource, /count\(\*\) AS referenceCount/);
     assert.match(indexerSource, /isScannedFileChanged\(/);
     assert.match(
@@ -1592,6 +1699,21 @@ describe("persisted graph integrity", () => {
     const baseline = (await capture(await getLadybugConn(), "repo")) as {
       digest: string;
     };
+    await withWriteConn((conn) =>
+      ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, "repo", {
+        files: [],
+        fileless: symbolIds.map((symbolId) => ({
+          stateId: JSON.stringify(["repo", symbolId]),
+          repoId: "repo",
+          symbolId,
+          canonicalSymbolJson: canonicalFilelessJson(symbolId, {
+            16: "call",
+            17: symbolId,
+          }),
+          referenceCount: 0,
+        })),
+      }),
+    );
     await derivedState.markGraphIntegrityVerified("repo", "v1", baseline.digest);
 
     const incremental = new Session("repo", "incremental", true);
@@ -2731,8 +2853,8 @@ describe("persisted graph integrity", () => {
 
     row = await derivedState.getDerivedState("repo");
     assert.equal(row?.graphIntegrityState, "verified");
-    assert.equal(row?.graphIntegrityRevision, 0);
-    assert.equal(row?.graphIntegrityVerifiedRevision, 0);
+    assert.equal(row?.graphIntegrityRevision, 1);
+    assert.equal(row?.graphIntegrityVerifiedRevision, 1);
     assert.equal(isVerified(row, "v1"), true);
   });
 

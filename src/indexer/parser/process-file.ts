@@ -210,7 +210,7 @@ export async function processFile(
       createGraphIntegrityFilelessEdgeReferences(
         edgesToInsert,
         graphIntegrityFilelessSymbols.map((symbol) => symbol.symbolId),
-        { trackSources: mode === "incremental" },
+        { trackSources: true },
       );
 
     // ── Config edges (requires AST tree) ─────────────────────────

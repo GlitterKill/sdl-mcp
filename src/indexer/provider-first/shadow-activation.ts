@@ -48,6 +48,7 @@ export interface ActivateProviderFirstShadowDbParams {
 
 export interface ActivateProviderFirstShadowDbWithHandoffParams
   extends ActivateProviderFirstShadowDbParams {
+  prepareHandoff?: () => Promise<void>;
   closeActiveDb: () => Promise<void>;
   reopenActiveDb: (activeDbPath: string) => Promise<void>;
   validateActivatedDb?: (activeDbPath: string) => Promise<void>;
@@ -229,6 +230,18 @@ export async function activateProviderFirstShadowDbWithHandoff(
       shadowDbPath,
       rollback: "notNeeded",
       reasons: [`shadow LadybugDB path is not readable: ${errorMessage(err)}`],
+    };
+  }
+
+  try {
+    await params.prepareHandoff?.();
+  } catch (err) {
+    return {
+      status: "failed",
+      activeDbPath,
+      shadowDbPath,
+      rollback: "notNeeded",
+      reasons: [`shadow handoff precondition failed: ${errorMessage(err)}`],
     };
   }
 

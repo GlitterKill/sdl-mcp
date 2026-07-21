@@ -70,6 +70,7 @@ import { recoverMissingMetricsForRepo } from "../graph/metrics-recovery.js";
 import { clearSliceCache } from "../graph/sliceCache.js";
 import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
+import { withRepoWriteHeavyLock } from "./derived-refresh-queue.js";
 import {
   fileIdForPath,
   loadExistingSymbolMaps,
@@ -159,6 +160,7 @@ import {
   summarizeProviderFirstShadowActivationReadiness,
 } from "./provider-first/shadow-activation.js";
 import { finalizeProviderFirstShadowDb } from "./provider-first/shadow-finalization.js";
+import { cancelAndWaitForGraphIntegrityVerifier } from "./provider-first/background-graph-integrity-verifier.js";
 import {
   ensureGraphIntegrityVerificationComplete,
   failActiveGraphIntegrityVerification,
@@ -2551,6 +2553,7 @@ async function indexRepoImpl(
     semanticDeferred?: boolean,
   ): Promise<ProviderFirstShadowBuildSummary | undefined> => {
     if (!shadowBuild) return undefined;
+    await graphIntegrity.stageManifest(versionId);
     let finalizedShadowBuild = shadowBuild;
     const shadowDbPath =
       shadowBuild.status === "staged" &&
@@ -2613,51 +2616,67 @@ async function indexRepoImpl(
         "shadowActivate",
         "providerFirstShadowActivate",
         () =>
-          activateProviderFirstShadowDbWithHandoff({
-            activeDbPath,
-            shadowDbPath,
-            generationId: finalizedShadowBuild.generationId,
-            closeActiveDb: () => closeLadybugDb({ preserveCloseHooks: true }),
-            reopenActiveDb: async (path) => {
-              await initLadybugDb(path, {
-                bufferPoolBytes:
-                  appConfig.graphDatabase?.bufferPoolBytes ?? undefined,
-              });
-            },
-            validateActivatedDb: async () => {
-              // Shadow staging cannot load the FTS extension safely beside the
-              // live pool. Validate the required index immediately after the
-              // handoff so a failure triggers the activation rollback path.
-              await ensureCriticalSymbolFtsIndex({
-                recordTiming: recordIndexSubphaseTiming,
-              });
-              const retrievalConfig = appConfig.semantic?.enabled
-                ? appConfig.semantic.retrieval
-                : undefined;
-              const symbolFtsIndexName =
-                retrievalConfig && retrievalConfig.fts?.enabled !== false
-                  ? (retrievalConfig.fts?.indexName ?? "symbol_search_text_v1")
-                  : undefined;
-              if (symbolFtsIndexName) {
-                const { indexExistsForTable, showIndexes } = await import(
-                  "../retrieval/index-lifecycle.js"
-                );
-                const indexes = await showIndexes(await getLadybugConn());
+          withRepoWriteHeavyLock(repoId, () =>
+            activateProviderFirstShadowDbWithHandoff({
+              activeDbPath,
+              shadowDbPath,
+              generationId: finalizedShadowBuild.generationId,
+              prepareHandoff: async () => {
+                await cancelAndWaitForGraphIntegrityVerifier(repoId);
                 if (
-                  !indexExistsForTable(
-                    indexes,
-                    "Symbol",
-                    symbolFtsIndexName,
-                    "fts",
+                  !graphIntegrity.ownsStagedRevision(
+                    versionId,
+                    await getDerivedState(repoId),
                   )
                 ) {
                   throw new Error(
-                    `required Symbol FTS index ${symbolFtsIndexName} is absent after shadow handoff`,
+                    "shadow activation lost its graph integrity revision",
                   );
                 }
-              }
-            },
-          }),
+              },
+              closeActiveDb: () =>
+                closeLadybugDb({ preserveCloseHooks: true }),
+              reopenActiveDb: async (path) => {
+                await initLadybugDb(path, {
+                  bufferPoolBytes:
+                    appConfig.graphDatabase?.bufferPoolBytes ?? undefined,
+                });
+              },
+              validateActivatedDb: async () => {
+                // Shadow staging cannot load the FTS extension safely beside the
+                // live pool. Validate the required index immediately after the
+                // handoff so a failure triggers the activation rollback path.
+                await ensureCriticalSymbolFtsIndex({
+                  recordTiming: recordIndexSubphaseTiming,
+                });
+                const retrievalConfig = appConfig.semantic?.enabled
+                  ? appConfig.semantic.retrieval
+                  : undefined;
+                const symbolFtsIndexName =
+                  retrievalConfig && retrievalConfig.fts?.enabled !== false
+                    ? (retrievalConfig.fts?.indexName ?? "symbol_search_text_v1")
+                    : undefined;
+                if (symbolFtsIndexName) {
+                  const { indexExistsForTable, showIndexes } = await import(
+                    "../retrieval/index-lifecycle.js"
+                  );
+                  const indexes = await showIndexes(await getLadybugConn());
+                  if (
+                    !indexExistsForTable(
+                      indexes,
+                      "Symbol",
+                      symbolFtsIndexName,
+                      "fts",
+                    )
+                  ) {
+                    throw new Error(
+                      `required Symbol FTS index ${symbolFtsIndexName} is absent after shadow handoff`,
+                    );
+                  }
+                }
+              },
+            }),
+          ),
       );
       if (finalizedShadowBuild.activationResult.status === "activated") {
         if (semanticDeferred) {
@@ -3239,6 +3258,7 @@ async function indexRepoImpl(
                   // in another transaction makes large provider-first writes
                   // crash in LadybugDB's native transaction handling.
                   await materializeProviderFacts(conn, materializedRows, {
+                    graphIntegrityExpectationsTracked: true,
                     replaceFileSymbols: true,
                     deleteExistingFileSymbols:
                       activeMaterializationPlan.deleteExistingFileSymbols,

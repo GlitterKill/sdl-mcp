@@ -72,6 +72,8 @@ export interface ProviderFactsToGraphRowsOptions {
 }
 
 export interface MaterializeProviderFactsOptions {
+  /** The owning index session has independently built expectations for this write. */
+  graphIntegrityExpectationsTracked?: boolean;
   /**
    * Full provider-first refreshes replace the symbol graph for provider-owned
    * files before writing new rows. This keeps stale tree-sitter symbols from
@@ -352,6 +354,9 @@ export async function materializeProviderFacts(
   const pruneExternalSymbols = options.pruneExternalSymbols ?? true;
 
   const runMaterialization = async (): Promise<void> => {
+    if (!options.graphIntegrityExpectationsTracked) {
+      await ladybugDb.invalidateGraphIntegrity(conn, repoId);
+    }
     if (deleteExistingFileSymbols) {
       await measurePhase("deleteFileSymbols", async () => {
         await deleteProviderReplacementSymbols(

@@ -262,23 +262,50 @@ export async function initializeGraphIntegrityRevisionIfVerifying(
   repoId: string,
   versionId: string,
 ): Promise<number | null> {
-  const updatedAt = getCurrentTimestamp();
-  return withWriteConn(async (wConn) => {
-    const row = await querySingle<{ revision: unknown }>(
+  return withWriteConn((wConn) =>
+    initializeGraphIntegrityVersionInTransaction(
       wConn,
-      `MATCH (d:DerivedState {repoId: $repoId})
-       WHERE d.graphIntegrityState = 'verifying'
-         AND d.graphIntegrityVersionId = $versionId
-         AND d.graphIntegrityRevision IS NULL
-       SET d.graphIntegrityRevision = 0,
-           d.graphIntegrityFilelessPruningSupported = true,
-           d.graphIntegrityError = NULL,
-           d.updatedAt = $updatedAt
-       RETURN d.graphIntegrityRevision AS revision`,
-      { repoId, versionId, updatedAt },
-    );
-    return nullableInt64(row?.revision, "graphIntegrityRevision");
-  });
+      repoId,
+      versionId,
+      true,
+    ),
+  );
+}
+
+export async function initializeGraphIntegrityVersionInTransaction(
+  conn: Connection,
+  repoId: string,
+  versionId: string,
+  pruningSupported: boolean,
+  revision = 0,
+  verifiedRevision: number | null = null,
+): Promise<number | null> {
+  assertSafeInt(revision, "revision");
+  if (verifiedRevision !== null) {
+    assertSafeInt(verifiedRevision, "verifiedRevision");
+  }
+  const row = await querySingle<{ revision: unknown }>(
+    conn,
+    `MATCH (d:DerivedState {repoId: $repoId})
+     WHERE d.graphIntegrityState = 'verifying'
+       AND d.graphIntegrityVersionId = $versionId
+       AND d.graphIntegrityRevision IS NULL
+     SET d.graphIntegrityRevision = $revision,
+         d.graphIntegrityVerifiedRevision = $verifiedRevision,
+         d.graphIntegrityFilelessPruningSupported = $pruningSupported,
+         d.graphIntegrityError = NULL,
+         d.updatedAt = $updatedAt
+     RETURN d.graphIntegrityRevision AS revision`,
+    {
+      repoId,
+      versionId,
+      pruningSupported,
+      revision,
+      verifiedRevision,
+      updatedAt: getCurrentTimestamp(),
+    },
+  );
+  return nullableInt64(row?.revision, "graphIntegrityRevision");
 }
 
 /** Fail only the migrated, unrevisioned verification attempt that still owns state. */

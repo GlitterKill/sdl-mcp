@@ -12,6 +12,10 @@ import {
 } from "./ladybug-clusters.js";
 import type { DerivedStateRow } from "./ladybug-derived-state.js";
 import {
+  listGraphIntegrityFilelessStates,
+  listGraphIntegrityFileStates,
+} from "./ladybug-graph-integrity.js";
+import {
   assertSafeInt,
   exec,
   execDdl,
@@ -63,6 +67,10 @@ export interface ProviderFirstShadowFinalizationCounts {
   shadowClusters: number;
   shadowClusterMembers: number;
   derivedStates: number;
+  graphIntegrityFileStates: number;
+  graphIntegrityFileStateRepoLinks: number;
+  graphIntegrityFilelessStates: number;
+  graphIntegrityFilelessStateRepoLinks: number;
 }
 
 export interface ProviderFirstShadowFinalizationBulkArtifact {
@@ -263,25 +271,23 @@ const BELONGS_TO_SHADOW_CLUSTER_COLUMNS = [
   "membershipScore",
 ] as const;
 
-const DERIVED_STATE_COLUMNS = [
+const GRAPH_INTEGRITY_FILE_STATE_COLUMNS = [
+  "stateId",
   "repoId",
-  "clustersDirty",
-  "processesDirty",
-  "algorithmsDirty",
-  "summariesDirty",
-  "embeddingsDirty",
-  "targetVersionId",
-  "computedVersionId",
-  "updatedAt",
-  "lastError",
-  "graphIntegrityState",
-  "graphIntegrityVersionId",
-  "graphIntegrityDigest",
-  "graphIntegrityError",
-  "graphIntegrityRevision",
-  "graphIntegrityVerifiedRevision",
-  "graphIntegrityFilelessPruningSupported",
+  "fileId",
+  "relPath",
+  "symbolCount",
+  "digest",
+  "filelessReferencesJson",
 ] as const;
+const GRAPH_INTEGRITY_FILELESS_STATE_COLUMNS = [
+  "stateId",
+  "repoId",
+  "symbolId",
+  "canonicalSymbolJson",
+  "referenceCount",
+] as const;
+const GRAPH_INTEGRITY_STATE_IN_REPO_COLUMNS = ["from", "to"] as const;
 
 interface AuxiliarySymbolRow {
   symbolId: string;
@@ -616,6 +622,14 @@ async function copyFinalizedRows(params: {
     params.activeConn,
     params.repoId,
   );
+  const graphIntegrityFileStates = await listGraphIntegrityFileStates(
+    params.activeConn,
+    params.repoId,
+  );
+  const graphIntegrityFilelessStates = await listGraphIntegrityFilelessStates(
+    params.activeConn,
+    params.repoId,
+  );
   const semanticProviderRuns = await readSemanticProviderRunsForRepo(
     params.activeConn,
     params.repoId,
@@ -885,30 +899,53 @@ async function copyFinalizedRows(params: {
     }),
     await writeCsvArtifact({
       stagingDir,
-      fileName: "derived-state.csv",
-      columns: [...DERIVED_STATE_COLUMNS],
-      targetTable: "DerivedState",
+      fileName: "graph-integrity-file-states.csv",
+      columns: [...GRAPH_INTEGRITY_FILE_STATE_COLUMNS],
+      targetTable: "GraphIntegrityFileState",
       kind: "node",
-      rows: derivedState ? [derivedState] : [],
+      rows: graphIntegrityFileStates,
       mapRow: (row) => [
+        row.stateId,
         row.repoId,
-        row.clustersDirty,
-        row.processesDirty,
-        row.algorithmsDirty,
-        row.summariesDirty,
-        row.embeddingsDirty,
-        row.targetVersionId,
-        row.computedVersionId,
-        row.updatedAt,
-        row.lastError,
-        row.graphIntegrityState,
-        row.graphIntegrityVersionId,
-        row.graphIntegrityDigest,
-        row.graphIntegrityError,
-        row.graphIntegrityRevision,
-        row.graphIntegrityVerifiedRevision,
-        row.graphIntegrityFilelessPruningSupported,
+        row.fileId,
+        row.relPath,
+        row.symbolCount,
+        row.digest,
+        row.filelessReferencesJson,
       ],
+    }),
+    await writeCsvArtifact({
+      stagingDir,
+      fileName: "graph-integrity-file-state-in-repo.csv",
+      columns: [...GRAPH_INTEGRITY_STATE_IN_REPO_COLUMNS],
+      targetTable: "GRAPH_INTEGRITY_FILE_STATE_IN_REPO",
+      kind: "relationship",
+      rows: graphIntegrityFileStates,
+      mapRow: (row) => [row.stateId, row.repoId],
+    }),
+    await writeCsvArtifact({
+      stagingDir,
+      fileName: "graph-integrity-fileless-states.csv",
+      columns: [...GRAPH_INTEGRITY_FILELESS_STATE_COLUMNS],
+      targetTable: "GraphIntegrityFilelessState",
+      kind: "node",
+      rows: graphIntegrityFilelessStates,
+      mapRow: (row) => [
+        row.stateId,
+        row.repoId,
+        row.symbolId,
+        row.canonicalSymbolJson,
+        row.referenceCount,
+      ],
+    }),
+    await writeCsvArtifact({
+      stagingDir,
+      fileName: "graph-integrity-fileless-state-in-repo.csv",
+      columns: [...GRAPH_INTEGRITY_STATE_IN_REPO_COLUMNS],
+      targetTable: "GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO",
+      kind: "relationship",
+      rows: graphIntegrityFilelessStates,
+      mapRow: (row) => [row.stateId, row.repoId],
     }),
   ];
 
@@ -924,6 +961,7 @@ async function copyFinalizedRows(params: {
   for (const artifact of artifacts) {
     await copyArtifact(params.shadowConn, artifact.targetTable, artifact);
   }
+  await upsertDerivedState(params.shadowConn, derivedState);
   await upsertAuxiliarySymbolsFallback(
     params.shadowConn,
     fallbackAuxiliarySymbols,
@@ -1848,6 +1886,18 @@ async function resetBulkFinalizationTargets(
   await exec(conn, `MATCH (:Symbol)-[d:DEPENDS_ON]->(:Symbol) DELETE d`);
   await exec(
     conn,
+    `MATCH (f:GraphIntegrityFileState)-[rel:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+     DELETE rel, f`,
+    { repoId },
+  );
+  await exec(
+    conn,
+    `MATCH (s:GraphIntegrityFilelessState)-[rel:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+     DELETE rel, s`,
+    { repoId },
+  );
+  await exec(
+    conn,
     `MATCH (s:Symbol)-[rel:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
      WHERE coalesce(s.symbolStatus, 'real') <> 'real'
         OR coalesce(s.external, false) = true
@@ -2223,6 +2273,38 @@ async function readDerivedStateRow(
   };
 }
 
+async function upsertDerivedState(
+  conn: Connection,
+  row: DerivedStateRow | null,
+): Promise<void> {
+  if (!row) return;
+
+  // COPY cannot represent nullable INT64 revisions reliably on Windows. Keep
+  // the handoff typed so a pending verification retains its null/older
+  // verified revision and remains recoverable after activation.
+  await exec(
+    conn,
+    `MERGE (d:DerivedState {repoId: $repoId})
+     SET d.clustersDirty = $clustersDirty,
+         d.processesDirty = $processesDirty,
+         d.algorithmsDirty = $algorithmsDirty,
+         d.summariesDirty = $summariesDirty,
+         d.embeddingsDirty = $embeddingsDirty,
+         d.targetVersionId = $targetVersionId,
+         d.computedVersionId = $computedVersionId,
+         d.updatedAt = $updatedAt,
+         d.lastError = $lastError,
+         d.graphIntegrityState = $graphIntegrityState,
+         d.graphIntegrityVersionId = $graphIntegrityVersionId,
+         d.graphIntegrityDigest = $graphIntegrityDigest,
+         d.graphIntegrityError = $graphIntegrityError,
+         d.graphIntegrityRevision = $graphIntegrityRevision,
+         d.graphIntegrityVerifiedRevision = $graphIntegrityVerifiedRevision,
+         d.graphIntegrityFilelessPruningSupported = $graphIntegrityFilelessPruningSupported`,
+    { ...row },
+  );
+}
+
 async function readRealSymbolVersionsForRepoAtVersion(
   conn: Connection,
   repoId: string,
@@ -2376,6 +2458,30 @@ async function readFinalizationCounts(
       conn,
       `MATCH (d:DerivedState {repoId: $repoId})
        RETURN count(d) AS count`,
+      { repoId },
+    ),
+    graphIntegrityFileStates: await count(
+      conn,
+      `MATCH (f:GraphIntegrityFileState {repoId: $repoId})
+       RETURN count(f) AS count`,
+      { repoId },
+    ),
+    graphIntegrityFileStateRepoLinks: await count(
+      conn,
+      `MATCH (f:GraphIntegrityFileState {repoId: $repoId})-[rel:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+       RETURN count(rel) AS count`,
+      { repoId },
+    ),
+    graphIntegrityFilelessStates: await count(
+      conn,
+      `MATCH (s:GraphIntegrityFilelessState {repoId: $repoId})
+       RETURN count(s) AS count`,
+      { repoId },
+    ),
+    graphIntegrityFilelessStateRepoLinks: await count(
+      conn,
+      `MATCH (s:GraphIntegrityFilelessState {repoId: $repoId})-[rel:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+       RETURN count(rel) AS count`,
       { repoId },
     ),
   };
