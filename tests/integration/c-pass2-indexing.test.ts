@@ -32,8 +32,10 @@ function writeRepoFile(
 }
 
 describe("C pass2 indexing", () => {
-  const graphDbPath = join(tmpdir(), ".lbug-c-pass2-test-db.lbug");
-  const configPath = join(tmpdir(), "sdl-c-pass2-config.json");
+  // Keep the database and its sibling WAL inside one per-run cleanup boundary.
+  const testRoot = mkdtempSync(join(tmpdir(), "sdl-mcp-c-pass2-test-"));
+  const graphDbPath = join(testRoot, "graph.lbug");
+  const configPath = join(testRoot, "config.json");
   const prevSDL_CONFIG = process.env.SDL_CONFIG;
   const prevSDL_CONFIG_PATH = process.env.SDL_CONFIG_PATH;
   let repoDir: string | null = null;
@@ -114,10 +116,7 @@ describe("C pass2 indexing", () => {
       process.env.SDL_CONFIG_PATH = prevSDL_CONFIG_PATH;
     }
     try {
-      rmSync(graphDbPath, { recursive: true, force: true });
-    } catch {}
-    try {
-      rmSync(configPath, { recursive: true, force: true });
+      rmSync(testRoot, { recursive: true, force: true });
     } catch {}
     if (repoDir) {
       try {
