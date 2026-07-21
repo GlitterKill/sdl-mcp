@@ -84,6 +84,36 @@ function callEdge(fromSymbolId: string, toSymbolId: string, repoId = "repo") {
   };
 }
 
+function canonicalFilelessJson(
+  symbolId: string,
+  overrides: Record<number, unknown> = {},
+): string {
+  const fields: unknown[] = [
+    symbolId,
+    "",
+    "",
+    symbolId,
+    "",
+    "unknown",
+    "unknown",
+    0,
+    0,
+    0,
+    0,
+    "treesitter",
+    "",
+    symbolId,
+    "unresolved",
+    false,
+    "import",
+    symbolId,
+  ];
+  for (const [index, value] of Object.entries(overrides)) {
+    fields[Number(index)] = value;
+  }
+  return JSON.stringify(fields);
+}
+
 async function seedVersionedGraph(root: string): Promise<void> {
   await initLadybugDb(join(root, "graph.lbug"));
   const row = symbolRow();
@@ -124,6 +154,239 @@ describe("persisted graph integrity", () => {
       rmSync(root, { recursive: true, force: true });
     }
     root = "";
+  });
+
+  it("uses collision-safe tuple state IDs and sorted six-field fileless references", () => {
+    const createFileState = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFileState",
+    );
+    const first = createFileState(
+      "repo:a",
+      "b",
+      "src\\alpha.ts",
+      [symbolRow({ fileId: "b" })],
+      [],
+    ) as { stateId: string };
+    const second = createFileState(
+      "repo",
+      "a:b",
+      "src/beta.ts",
+      [symbolRow({ fileId: "a:b" })],
+      [],
+    ) as { stateId: string };
+    assert.equal(first.stateId, JSON.stringify(["repo:a", "b"]));
+    assert.equal(second.stateId, JSON.stringify(["repo", "a:b"]));
+    assert.notEqual(first.stateId, second.stateId);
+
+    const zCanonical = canonicalFilelessJson("sym:z");
+    const aCanonical = canonicalFilelessJson("sym:a");
+    const row = createFileState(
+      "repo",
+      "file",
+      "src\\file.ts",
+      [symbolRow({ fileId: "file" })],
+      [
+        ["sym:z", zCanonical, "source:z", "call", "incoming", 2],
+        ["sym:a", aCanonical, null, "import", "outgoing", 1],
+      ],
+    ) as { relPath: string; filelessReferencesJson: string };
+    assert.equal(row.relPath, "src/file.ts");
+    assert.deepEqual(JSON.parse(row.filelessReferencesJson), [
+      ["sym:a", aCanonical, null, "import", "outgoing", 1],
+      ["sym:z", zCanonical, "source:z", "call", "incoming", 2],
+    ]);
+  });
+
+  it("parses canonical fileless symbols in appendCanonicalSymbol field order", () => {
+    const parseCanonical = requiredFunction<SyncFn>(
+      integrityModule,
+      "parseGraphIntegrityCanonicalSymbol",
+    );
+    const parseReferences = requiredFunction<SyncFn>(
+      integrityModule,
+      "parseGraphIntegrityFilelessReferences",
+    );
+    const symbolId = "unresolved:module";
+    const canonicalJson = canonicalFilelessJson(symbolId, {
+      3: "module",
+      4: '{"name":"module"}',
+      5: "module",
+      6: "typescript",
+      7: 2,
+      8: 3,
+      9: 4,
+      10: 5,
+      11: "scip",
+      12: "scip-symbol",
+      13: "fingerprint",
+      14: "external",
+      15: true,
+      16: "scip",
+      17: "target",
+    });
+    assert.deepEqual(parseCanonical(canonicalJson), {
+      symbolId,
+      fileId: "",
+      name: "module",
+      signatureJson: '{"name":"module"}',
+      kind: "module",
+      language: "typescript",
+      rangeStartLine: 2,
+      rangeStartCol: 3,
+      rangeEndLine: 4,
+      rangeEndCol: 5,
+      source: "scip",
+      scipSymbol: "scip-symbol",
+      astFingerprint: "fingerprint",
+      symbolStatus: "external",
+      external: true,
+      placeholderKind: "scip",
+      placeholderTarget: "target",
+    });
+    assert.deepEqual(
+      parseReferences(
+        JSON.stringify([
+          [symbolId, canonicalJson, null, "import", "incoming", 2],
+        ]),
+      ),
+      [[symbolId, canonicalJson, null, "import", "incoming", 2]],
+    );
+
+    for (const malformed of [
+      "not json",
+      "{}",
+      JSON.stringify([[symbolId, canonicalJson, null, "import", "incoming"]]),
+      JSON.stringify([[symbolId, "[]", null, "import", "incoming", 1]]),
+      JSON.stringify([["wrong", canonicalJson, null, "import", "incoming", 1]]),
+    ]) {
+      assert.throws(() => parseReferences(malformed), /graph integrity/i);
+    }
+    assert.throws(() => parseCanonical("[]"), /graph integrity/i);
+  });
+
+  it("adjusts only touched fileless rows and gates zero-liveness pruning", () => {
+    const createDelta = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFilelessDelta",
+    );
+    const canonical = (symbolId: string) => canonicalFilelessJson(symbolId);
+    const state = (symbolId: string, referenceCount: number) => ({
+      stateId: JSON.stringify(["repo", symbolId]),
+      repoId: "repo",
+      symbolId,
+      canonicalSymbolJson: canonical(symbolId),
+      referenceCount,
+    });
+    const current = new Map([
+      ["sym:keep", state("sym:keep", 3)],
+      ["sym:remove", state("sym:remove", 1)],
+      ["sym:untouched", state("sym:untouched", 9)],
+    ]);
+    const previous = [
+      ["sym:keep", canonical("sym:keep"), null, "call", "incoming", 2],
+      ["sym:remove", canonical("sym:remove"), null, "call", "incoming", 1],
+    ];
+    const next = [
+      ["sym:add", canonical("sym:add"), null, "call", "incoming", 2],
+      ["sym:keep", canonical("sym:keep"), null, "call", "incoming", 1],
+    ];
+
+    const pruning = createDelta(
+      "repo",
+      current,
+      previous,
+      next,
+      true,
+    ) as { upserts: Array<{ symbolId: string; referenceCount: number }>; deleteSymbolIds: string[] };
+    assert.deepEqual(
+      pruning.upserts.map((row) => [row.symbolId, row.referenceCount]),
+      [
+        ["sym:add", 2],
+        ["sym:keep", 2],
+      ],
+    );
+    assert.deepEqual(pruning.deleteSymbolIds, ["sym:remove"]);
+
+    const conservative = createDelta(
+      "repo",
+      current,
+      previous,
+      next,
+      false,
+    ) as { upserts: Array<{ symbolId: string; referenceCount: number }>; deleteSymbolIds: string[] };
+    assert.deepEqual(
+      conservative.upserts.map((row) => [row.symbolId, row.referenceCount]),
+      [
+        ["sym:add", 2],
+        ["sym:keep", 2],
+        ["sym:remove", 0],
+      ],
+    );
+    assert.deepEqual(conservative.deleteSymbolIds, []);
+    assert.equal(
+      conservative.upserts.some((row) => row.symbolId === "sym:untouched"),
+      false,
+    );
+  });
+
+  it("rebuilds the existing expectation type from file and fileless manifest rows", () => {
+    const createFileState = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFileState",
+    );
+    const createExpectationFromManifest = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityExpectationFromManifest",
+    );
+    const createFileDigest = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFileDigest",
+    );
+    const createExpectation = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityExpectation",
+    );
+    const parseCanonical = requiredFunction<SyncFn>(
+      integrityModule,
+      "parseGraphIntegrityCanonicalSymbol",
+    );
+    const fileSymbol = symbolRow({ fileId: "file" });
+    const file = createFileState("repo", "file", "src/file.ts", [fileSymbol], []);
+    const canonicalSymbolJson = canonicalFilelessJson("sym:fileless");
+    const fileless = {
+      stateId: JSON.stringify(["repo", "sym:fileless"]),
+      repoId: "repo",
+      symbolId: "sym:fileless",
+      canonicalSymbolJson,
+      referenceCount: 1,
+    };
+
+    const actual = createExpectationFromManifest([file], [fileless]);
+    const expected = createExpectation([
+      createFileDigest({ fileId: "file", relPath: "src/file.ts", symbols: [fileSymbol] }),
+      createFileDigest({ fileId: "", relPath: "", symbols: [parseCanonical(canonicalSymbolJson)] }),
+    ]);
+    assert.equal((actual as { symbolCount: number }).symbolCount, expected.symbolCount);
+    assert.equal((actual as { digest: string }).digest, expected.digest);
+    assert.deepEqual(
+      (actual as { files: Array<{ fileId: string; relPath: string; symbolCount: number; digest: string }> }).files.map(
+        ({ fileId, relPath, symbolCount, digest }) => ({
+          fileId,
+          relPath,
+          symbolCount,
+          digest,
+        }),
+      ),
+      (expected as { files: Array<{ fileId: string; relPath: string; symbolCount: number; digest: string }> }).files.map(
+        ({ fileId, relPath, symbolCount, digest }) => ({
+          fileId,
+          relPath,
+          symbolCount,
+          digest,
+        }),
+      ),
+    );
   });
 
   it("builds the same canonical digest regardless of authoritative row order", () => {

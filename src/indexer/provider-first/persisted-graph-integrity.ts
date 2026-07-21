@@ -20,6 +20,9 @@ import {
   getPersistedGraphIntegritySourceReferenceCounts,
   getPersistedGraphIntegritySymbolPage,
   hasPersistedGraphIntegrityFilelessSourceReferences,
+  type GraphIntegrityFileStateRecord,
+  type GraphIntegrityFilelessDelta,
+  type GraphIntegrityFilelessStateRecord,
   type GraphIntegritySymbolCursor,
 } from "../../db/ladybug-graph-integrity.js";
 import { getLadybugConn } from "../../db/ladybug.js";
@@ -79,6 +82,36 @@ export interface GraphIntegrityEdgeReference {
   direction: "incoming" | "outgoing";
   referenceCount: number;
 }
+
+export type GraphIntegrityFilelessReferenceTuple = readonly [
+  filelessSymbolId: string,
+  canonicalSymbolJson: string,
+  sourceSymbolId: string | null,
+  edgeType: string,
+  direction: "incoming" | "outgoing",
+  referenceCount: number,
+];
+
+type GraphIntegrityCanonicalSymbolTuple = readonly [
+  symbolId: string,
+  fileId: string,
+  relPath: string,
+  name: string,
+  signatureJson: string,
+  kind: string,
+  language: string,
+  rangeStartLine: number,
+  rangeStartCol: number,
+  rangeEndLine: number,
+  rangeEndCol: number,
+  source: string,
+  scipSymbol: string,
+  astFingerprint: string,
+  symbolStatus: "real" | "unresolved" | "external",
+  external: boolean,
+  placeholderKind: string,
+  placeholderTarget: string,
+];
 
 export interface GraphIntegrityEdgeWrite {
   symbolIdsToRefresh: readonly string[];
@@ -920,6 +953,188 @@ export function createGraphIntegrityFileDigest(params: {
   return finishMutableFileDigest(builder);
 }
 
+export function createGraphIntegrityFileState(
+  repoId: string,
+  fileId: string,
+  relPath: string,
+  symbols: readonly GraphIntegrityCanonicalSymbol[],
+  filelessReferences: readonly GraphIntegrityFilelessReferenceTuple[],
+): GraphIntegrityFileStateRecord {
+  const file = createGraphIntegrityFileDigest({ fileId, relPath, symbols });
+  const references = filelessReferences
+    .map(normalizeGraphIntegrityFilelessReference)
+    .sort((left, right) =>
+      compareText(JSON.stringify(left), JSON.stringify(right)),
+    );
+  return {
+    stateId: JSON.stringify([repoId, fileId]),
+    repoId,
+    fileId,
+    relPath: file.relPath,
+    symbolCount: file.symbolCount,
+    digest: file.digest,
+    filelessReferencesJson: JSON.stringify(references),
+  };
+}
+
+export function parseGraphIntegrityCanonicalSymbol(
+  json: string,
+): GraphIntegrityCanonicalSymbol {
+  const fields = parseGraphIntegrityArray(json, "canonical symbol");
+  if (
+    fields.length !== 18 ||
+    !fields.slice(0, 7).every((value) => typeof value === "string") ||
+    !fields.slice(7, 11).every(isSafeInteger) ||
+    !fields.slice(11, 15).every((value) => typeof value === "string") ||
+    typeof fields[15] !== "boolean" ||
+    typeof fields[16] !== "string" ||
+    typeof fields[17] !== "string" ||
+    fields[1] !== FILELESS_SENTINEL ||
+    fields[2] !== FILELESS_SENTINEL ||
+    !isGraphIntegritySymbolStatus(fields[14])
+  ) {
+    throw new Error("Malformed graph integrity canonical symbol JSON");
+  }
+  const canonical = fields as unknown as GraphIntegrityCanonicalSymbolTuple;
+  return {
+    symbolId: canonical[0],
+    fileId: canonical[1],
+    name: canonical[3],
+    signatureJson: canonical[4],
+    kind: canonical[5],
+    language: canonical[6],
+    rangeStartLine: canonical[7],
+    rangeStartCol: canonical[8],
+    rangeEndLine: canonical[9],
+    rangeEndCol: canonical[10],
+    source: canonical[11],
+    scipSymbol: canonical[12],
+    astFingerprint: canonical[13],
+    symbolStatus: canonical[14],
+    external: canonical[15],
+    placeholderKind: canonical[16],
+    placeholderTarget: canonical[17],
+  };
+}
+
+export function parseGraphIntegrityFilelessReferences(
+  json: string,
+): GraphIntegrityFilelessReferenceTuple[] {
+  return parseGraphIntegrityArray(json, "fileless references").map(
+    (value): GraphIntegrityFilelessReferenceTuple => {
+      if (
+        !Array.isArray(value) ||
+        value.length !== 6 ||
+        typeof value[0] !== "string" ||
+        typeof value[1] !== "string" ||
+        (value[2] !== null && typeof value[2] !== "string") ||
+        typeof value[3] !== "string" ||
+        (value[4] !== "incoming" && value[4] !== "outgoing") ||
+        !Number.isSafeInteger(value[5]) ||
+        (value[5] as number) < 0
+      ) {
+        throw new Error("Malformed graph integrity fileless reference JSON");
+      }
+      const canonical = parseGraphIntegrityCanonicalSymbol(value[1]);
+      if (canonical.symbolId !== value[0]) {
+        throw new Error("Graph integrity fileless reference identity mismatch");
+      }
+      return [value[0], value[1], value[2], value[3], value[4], value[5] as number];
+    },
+  );
+}
+
+export function createGraphIntegrityFilelessDelta(
+  repoId: string,
+  current: ReadonlyMap<string, GraphIntegrityFilelessStateRecord>,
+  previous: readonly GraphIntegrityFilelessReferenceTuple[],
+  next: readonly GraphIntegrityFilelessReferenceTuple[],
+  pruningSupported: boolean,
+): GraphIntegrityFilelessDelta {
+  const previousBySymbol = aggregateGraphIntegrityFilelessReferences(previous);
+  const nextBySymbol = aggregateGraphIntegrityFilelessReferences(next);
+  const touched = [...new Set([...previousBySymbol.keys(), ...nextBySymbol.keys()])]
+    .sort(compareText);
+  const upserts: GraphIntegrityFilelessStateRecord[] = [];
+  const deleteSymbolIds: string[] = [];
+
+  for (const symbolId of touched) {
+    const existing = current.get(symbolId);
+    if (
+      existing &&
+      (existing.repoId !== repoId ||
+        existing.stateId !== JSON.stringify([repoId, symbolId]))
+    ) {
+      throw new Error("Graph integrity fileless state identity mismatch");
+    }
+    const existingCanonicalSymbolJson = existing
+      ? normalizeGraphIntegrityCanonicalSymbolJson(
+          symbolId,
+          existing.canonicalSymbolJson,
+        )
+      : undefined;
+    const referenceCount =
+      (existing?.referenceCount ?? 0) -
+      (previousBySymbol.get(symbolId)?.referenceCount ?? 0) +
+      (nextBySymbol.get(symbolId)?.referenceCount ?? 0);
+    if (!Number.isSafeInteger(referenceCount) || referenceCount < 0) {
+      throw new Error("Graph integrity fileless reference count is invalid");
+    }
+    if (referenceCount === 0 && pruningSupported) {
+      if (existing) deleteSymbolIds.push(symbolId);
+      continue;
+    }
+    const canonicalSymbolJson =
+      nextBySymbol.get(symbolId)?.canonicalSymbolJson ??
+      existingCanonicalSymbolJson ??
+      previousBySymbol.get(symbolId)?.canonicalSymbolJson;
+    if (!canonicalSymbolJson) {
+      throw new Error("Graph integrity fileless canonical symbol is missing");
+    }
+    upserts.push({
+      stateId: JSON.stringify([repoId, symbolId]),
+      repoId,
+      symbolId,
+      canonicalSymbolJson,
+      referenceCount,
+    });
+  }
+  return { upserts, deleteSymbolIds };
+}
+
+export function createGraphIntegrityExpectationFromManifest(
+  files: readonly GraphIntegrityFileStateRecord[],
+  fileless: readonly GraphIntegrityFilelessStateRecord[],
+): GraphIntegrityExpectation {
+  const digests: GraphIntegrityFileDigest[] = files.map((file) => ({
+    fileId: file.fileId,
+    relPath: normalizeGraphIntegrityPath(file.relPath),
+    symbolCount: file.symbolCount,
+    digest: file.digest,
+    pages: [],
+  }));
+  if (fileless.length > 0) {
+    const symbols = fileless.map((row) => {
+      if (row.stateId !== JSON.stringify([row.repoId, row.symbolId])) {
+        throw new Error("Graph integrity fileless state identity mismatch");
+      }
+      const symbol = parseGraphIntegrityCanonicalSymbol(row.canonicalSymbolJson);
+      if (symbol.symbolId !== row.symbolId) {
+        throw new Error("Graph integrity fileless state identity mismatch");
+      }
+      return symbol;
+    });
+    digests.push(
+      createGraphIntegrityFileDigest({
+        fileId: FILELESS_SENTINEL,
+        relPath: FILELESS_SENTINEL,
+        symbols,
+      }),
+    );
+  }
+  return createGraphIntegrityExpectation(digests);
+}
+
 /**
  * Build canonical fileless Symbol rows from provider externals and non-real
  * dependency targets before persistence. Real cross-file targets are omitted:
@@ -1427,14 +1642,43 @@ function normalizeGraphIntegrityPath(relPath: string): string {
     : normalizePath(relPath);
 }
 
-function appendCanonicalSymbol(
-  builder: MutableFileDigest,
+interface AggregatedGraphIntegrityFilelessReference {
+  canonicalSymbolJson: string;
+  referenceCount: number;
+}
+
+function parseGraphIntegrityArray(json: string, label: string): unknown[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw new Error(`Malformed graph integrity ${label} JSON`);
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`Malformed graph integrity ${label} JSON`);
+  }
+  return value;
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+function isGraphIntegritySymbolStatus(
+  value: unknown,
+): value is NonNullable<CanonicalSymbol["symbolStatus"]> {
+  return value === "real" || value === "unresolved" || value === "external";
+}
+
+function canonicalSymbolFields(
   symbol: CanonicalSymbol,
-): void {
-  const serialized = `${JSON.stringify([
+  fileId: string,
+  relPath: string,
+): GraphIntegrityCanonicalSymbolTuple {
+  return [
     symbol.symbolId,
-    builder.fileId,
-    builder.relPath,
+    fileId,
+    relPath,
     symbol.name ?? "",
     symbol.signatureJson ?? "",
     symbol.kind ?? "",
@@ -1450,7 +1694,84 @@ function appendCanonicalSymbol(
     symbol.external ?? false,
     symbol.placeholderKind ?? "",
     symbol.placeholderTarget ?? "",
-  ])}\n`;
+  ];
+}
+
+function serializeGraphIntegrityCanonicalSymbol(
+  symbol: CanonicalSymbol,
+): string {
+  return JSON.stringify(
+    canonicalSymbolFields(symbol, FILELESS_SENTINEL, FILELESS_SENTINEL),
+  );
+}
+
+function normalizeGraphIntegrityCanonicalSymbolJson(
+  symbolId: string,
+  json: string,
+): string {
+  const canonical = parseGraphIntegrityCanonicalSymbol(json);
+  if (canonical.symbolId !== symbolId) {
+    throw new Error("Graph integrity fileless state identity mismatch");
+  }
+  return serializeGraphIntegrityCanonicalSymbol(canonical);
+}
+
+function normalizeGraphIntegrityFilelessReference(
+  reference: GraphIntegrityFilelessReferenceTuple,
+): GraphIntegrityFilelessReferenceTuple {
+  const canonicalSymbolJson = normalizeGraphIntegrityCanonicalSymbolJson(
+    reference[0],
+    reference[1],
+  );
+  if (
+    (reference[2] !== null && typeof reference[2] !== "string") ||
+    typeof reference[3] !== "string" ||
+    (reference[4] !== "incoming" && reference[4] !== "outgoing") ||
+    !Number.isSafeInteger(reference[5]) ||
+    reference[5] < 0
+  ) {
+    throw new Error("Malformed graph integrity fileless reference");
+  }
+  return [
+    reference[0],
+    canonicalSymbolJson,
+    reference[2],
+    reference[3],
+    reference[4],
+    reference[5],
+  ];
+}
+
+function aggregateGraphIntegrityFilelessReferences(
+  references: readonly GraphIntegrityFilelessReferenceTuple[],
+): Map<string, AggregatedGraphIntegrityFilelessReference> {
+  const aggregated = new Map<string, AggregatedGraphIntegrityFilelessReference>();
+  for (const input of references) {
+    const reference = normalizeGraphIntegrityFilelessReference(input);
+    const previous = aggregated.get(reference[0]);
+    if (previous && previous.canonicalSymbolJson !== reference[1]) {
+      throw new Error("Graph integrity fileless canonical symbol mismatch");
+    }
+    const referenceCount =
+      (previous?.referenceCount ?? 0) + reference[5];
+    if (!Number.isSafeInteger(referenceCount)) {
+      throw new Error("Graph integrity fileless reference count is invalid");
+    }
+    aggregated.set(reference[0], {
+      canonicalSymbolJson: reference[1],
+      referenceCount,
+    });
+  }
+  return aggregated;
+}
+
+function appendCanonicalSymbol(
+  builder: MutableFileDigest,
+  symbol: CanonicalSymbol,
+): void {
+  const serialized = `${JSON.stringify(
+    canonicalSymbolFields(symbol, builder.fileId, builder.relPath),
+  )}\n`;
   builder.digest.update(serialized);
   builder.pageDigest.update(serialized);
   builder.symbolCount++;
