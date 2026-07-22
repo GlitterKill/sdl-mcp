@@ -52,6 +52,13 @@ export class ConcurrencyQueueTimeoutError extends Error {
   }
 }
 
+function queueAbortReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const error = new Error("Concurrency limiter queue aborted");
+  error.name = "AbortError";
+  return error;
+}
+
 export class ConcurrencyLimiter {
   private maxConcurrency: number;
   private queueTimeoutMs: number | undefined;
@@ -62,6 +69,7 @@ export class ConcurrencyLimiter {
     task: () => Promise<unknown>;
     taskTimeoutMs?: number;
     enqueuedAt: number;
+    cleanup: () => void;
   }>;
   private drainResolvers: Array<() => void> = [];
 
@@ -90,9 +98,15 @@ export class ConcurrencyLimiter {
    *
    * @param task - Async function to execute
    * @param timeoutMs - Optional timeout override for this specific task
+   * @param signal - Optional cancellation signal while the task is queued
    * @returns Promise that resolves with the task's result
    */
-  async run<T>(task: () => Promise<T>, timeoutMs?: number): Promise<T> {
+  async run<T>(
+    task: () => Promise<T>,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    if (signal?.aborted) throw queueAbortReason(signal);
     if (this.activeCount < this.maxConcurrency) {
       return this.executeTask(task, timeoutMs);
     }
@@ -100,19 +114,26 @@ export class ConcurrencyLimiter {
     return new Promise<T>((resolve, reject) => {
       const timeout = timeoutMs ?? this.queueTimeoutMs ?? undefined;
       let timeoutHandle: NodeJS.Timeout | undefined;
+      let abortHandler: (() => void) | undefined;
+
+      const cleanup = (): void => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (signal && abortHandler) {
+          signal.removeEventListener("abort", abortHandler);
+        }
+      };
 
       const item = {
         resolve: resolve as (value: unknown) => void,
         reject,
         task: () => {
-          if (timeoutHandle) {
-            clearTimeout(timeoutHandle);
-          }
+          cleanup();
           return task();
         },
         // Preserve the execution timeout for when the task is dequeued (H8)
         taskTimeoutMs: timeoutMs,
         enqueuedAt: Date.now(),
+        cleanup,
       };
 
       if (timeout) {
@@ -120,10 +141,24 @@ export class ConcurrencyLimiter {
           const index = this.queue.indexOf(item);
           if (index !== -1) {
             this.queue.splice(index, 1);
+            cleanup();
+            this.notifyDrainIfIdle();
           }
           reject(new ConcurrencyQueueTimeoutError(timeout, this.getStats()));
         }, timeout);
         timeoutHandle.unref();
+      }
+
+      if (signal) {
+        abortHandler = () => {
+          const index = this.queue.indexOf(item);
+          if (index === -1) return;
+          this.queue.splice(index, 1);
+          cleanup();
+          reject(queueAbortReason(signal));
+          this.notifyDrainIfIdle();
+        };
+        signal.addEventListener("abort", abortHandler, { once: true });
       }
 
       this.queue.push(item);
@@ -277,6 +312,7 @@ export class ConcurrencyLimiter {
     const errorToUse = error ?? new Error("ConcurrencyLimiter queue cleared");
 
     for (const item of this.queue) {
+      item.cleanup();
       item.reject(errorToUse);
     }
 

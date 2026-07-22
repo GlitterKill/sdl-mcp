@@ -712,7 +712,7 @@ export class MCPServer {
             // This also covers workflows, whose refresh step executes inside
             // the workflow's single outer lease rather than acquiring its own.
             const result = isPublicIndexRefresh(toolName, parsedArgs)
-              ? await runIndexRefreshAdmission(runDispatch)
+              ? await runIndexRefreshAdmission(runDispatch, toolContext.signal)
               : await runDispatch();
             timer.record("server.dispatch", dispatchStartedAt);
 

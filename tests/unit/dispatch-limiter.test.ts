@@ -12,6 +12,7 @@ import {
   runIndexRefreshAdmission,
   runOutsideToolDispatchContext,
   runToolDispatch,
+  ToolDispatchQueueCapacityError,
   ToolDispatchQueueTimeoutError,
   waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
@@ -467,6 +468,72 @@ describe("tool dispatch limiter", () => {
       release();
       await delay(0);
     }
+  });
+
+  it("bounds the public refresh admission queue", async () => {
+    let release!: () => void;
+    const background = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    assert.strictEqual(
+      await runIndexRefreshAdmission(async () => {
+        retainIndexRefreshAdmissionUntil(background);
+        return "accepted";
+      }),
+      "accepted",
+    );
+
+    const queued = Array.from({ length: 8 }, (_, index) =>
+      runIndexRefreshAdmission(async () => `queued-${index}`),
+    );
+    const queuedSettled = Promise.allSettled(queued);
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 8);
+
+    try {
+      await assert.rejects(
+        runIndexRefreshAdmission(async () => "overflow"),
+        (error: unknown) => {
+          assert.ok(error instanceof ToolDispatchQueueCapacityError);
+          assert.match(error.message, /queue capacity of 8/);
+          assert.strictEqual(error.classification, "unavailable");
+          assert.strictEqual(error.retryable, true);
+          return true;
+        },
+      );
+    } finally {
+      resetToolDispatchLimiter();
+      release();
+      await queuedSettled;
+    }
+  });
+
+  it("removes disconnected refresh requests from the admission queue", async () => {
+    let release!: () => void;
+    const background = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    assert.strictEqual(
+      await runIndexRefreshAdmission(async () => {
+        retainIndexRefreshAdmissionUntil(background);
+        return "accepted";
+      }),
+      "accepted",
+    );
+
+    const controller = new AbortController();
+    const queued = runIndexRefreshAdmission(
+      async () => "must-not-run",
+      controller.signal,
+    );
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 1);
+
+    controller.abort(new Error("client disconnected"));
+    await assert.rejects(queued, /client disconnected/);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 0);
+    release();
+    await delay(0);
   });
 
   it("waits until active dispatch work drains to the allowance", async () => {

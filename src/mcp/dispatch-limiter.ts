@@ -21,6 +21,7 @@ let limiter: ConcurrencyLimiter | null = null;
 const dispatchContext = new AsyncLocalStorage<boolean>();
 let indexRefreshAdmissionLimiter: ConcurrencyLimiter | null = null;
 let configuredQueueTimeoutMs = 30_000;
+const INDEX_REFRESH_ADMISSION_MAX_QUEUE = 8;
 
 interface IndexRefreshAdmissionContext {
   retainedPromises: Promise<unknown>[];
@@ -100,6 +101,31 @@ export class ToolDispatchQueueTimeoutError extends Error {
         : []),
     ];
     Object.setPrototypeOf(this, ToolDispatchQueueTimeoutError.prototype);
+  }
+}
+
+export class ToolDispatchQueueCapacityError extends Error {
+  readonly code = "RUNTIME_ERROR";
+  readonly classification = "unavailable";
+  readonly retryable = true;
+  readonly suggestedRetryDelayMs = 1_000;
+  readonly details: string[];
+
+  constructor(maxQueued: number, stats: ToolDispatchStats, label: string) {
+    super(
+      `Tool dispatch queue capacity of ${maxQueued} reached for ${label} ` +
+        `(active=${stats.active}, queued=${stats.queued}, max=${stats.maxConcurrency})`,
+    );
+    this.name = "ToolDispatchQueueCapacityError";
+    this.details = [
+      `label=${label}`,
+      `active=${stats.active}`,
+      `queued=${stats.queued}`,
+      `max=${stats.maxConcurrency}`,
+      `queueCapacity=${maxQueued}`,
+      `indexingActive=${stats.indexingActive}`,
+    ];
+    Object.setPrototypeOf(this, ToolDispatchQueueCapacityError.prototype);
   }
 }
 
@@ -198,6 +224,16 @@ function getIndexRefreshAdmissionLimiter(): ConcurrencyLimiter {
   return indexRefreshAdmissionLimiter;
 }
 
+function getIndexRefreshAdmissionToolStats(): ToolDispatchStats {
+  const admission = getIndexRefreshAdmissionLimiter().getStats();
+  return {
+    ...getToolDispatchStats(),
+    ...admission,
+    configuredMax: 1,
+    activeLabels: admission.active > 0 ? ["index-refresh-admission"] : [],
+  };
+}
+
 /**
  * Serialize public index-refresh envelopes before they consume a normal tool
  * dispatch slot. LadybugDB has one writer, and indexRepo waits for every other
@@ -210,7 +246,18 @@ function getIndexRefreshAdmissionLimiter(): ConcurrencyLimiter {
  */
 export async function runIndexRefreshAdmission<T>(
   fn: () => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
+  const admissionLimiter = getIndexRefreshAdmissionLimiter();
+  const admission = admissionLimiter.getStats();
+  if (admission.queued >= INDEX_REFRESH_ADMISSION_MAX_QUEUE) {
+    throw new ToolDispatchQueueCapacityError(
+      INDEX_REFRESH_ADMISSION_MAX_QUEUE,
+      getIndexRefreshAdmissionToolStats(),
+      "index-refresh-admission",
+    );
+  }
+
   let resolveResponse!: (value: T) => void;
   let rejectResponse!: (reason?: unknown) => void;
   let responseSettled = false;
@@ -219,7 +266,7 @@ export async function runIndexRefreshAdmission<T>(
     rejectResponse = reject;
   });
 
-  const admissionLifecycle = getIndexRefreshAdmissionLimiter().run(
+  const admissionLifecycle = admissionLimiter.run(
     async () => {
       const context: IndexRefreshAdmissionContext = { retainedPromises: [] };
       try {
@@ -236,6 +283,8 @@ export async function runIndexRefreshAdmission<T>(
       // Retaining here transfers ownership without keeping a dispatch slot.
       await Promise.allSettled(context.retainedPromises);
     },
+    undefined,
+    signal,
   );
 
   // Queue failures happen before fn runs, so forward them to the tool caller.
@@ -244,18 +293,10 @@ export async function runIndexRefreshAdmission<T>(
   void admissionLifecycle.catch((error: unknown) => {
     if (!responseSettled) {
       if (error instanceof ConcurrencyQueueTimeoutError) {
-        const admission = getIndexRefreshAdmissionLimiter().getStats();
-        const dispatch = getToolDispatchStats();
         rejectResponse(
           new ToolDispatchQueueTimeoutError(
             error.timeoutMs,
-            {
-              ...dispatch,
-              ...admission,
-              configuredMax: 1,
-              activeLabels:
-                admission.active > 0 ? ["index-refresh-admission"] : [],
-            },
+            getIndexRefreshAdmissionToolStats(),
             "index-refresh-admission",
           ),
         );
