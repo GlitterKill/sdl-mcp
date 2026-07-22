@@ -55,6 +55,30 @@ const BENCHMARK_TERMINATION_GRACE_MS = 5_000;
 const BENCHMARK_FORCE_KILL_TIMEOUT_MS = 10_000;
 const BENCHMARK_DEATH_POLL_MS = 50;
 
+function serialSampleId(
+  lane: "candidate" | "control",
+  index: number,
+): string {
+  return index < BENCHMARK_WARMUP_COUNT
+    ? `${lane}:warmup:${index}`
+    : `${lane}:measured:${index - BENCHMARK_WARMUP_COUNT}`;
+}
+
+const CANDIDATE_SERIAL_SAMPLE_COUNT =
+  BENCHMARK_WARMUP_COUNT + BENCHMARK_SAMPLE_COUNT;
+const CONCURRENT_SAMPLE_INDEX = CANDIDATE_SERIAL_SAMPLE_COUNT;
+const CONTROL_SAMPLE_OFFSET = CONCURRENT_SAMPLE_INDEX + 1;
+
+export const BENCHMARK_SAMPLE_SEQUENCE = Object.freeze([
+  ...Array.from({ length: CANDIDATE_SERIAL_SAMPLE_COUNT }, (_, index) =>
+    serialSampleId("candidate", index),
+  ),
+  "concurrent:0",
+  ...Array.from({ length: CANDIDATE_SERIAL_SAMPLE_COUNT }, (_, index) =>
+    serialSampleId("control", index),
+  ),
+]);
+
 export const DEFAULT_THRESHOLDS = {
   candidateForegroundP50Ms: 500,
   candidateForegroundP95Ms: 1_000,
@@ -574,36 +598,88 @@ function parseWorkerMessage(message: unknown): BenchmarkWorkerMessage | undefine
   }
 }
 
-function arraysExtend(previous: readonly number[], next: readonly number[]): boolean {
+function arraysEqual(previous: readonly number[], next: readonly number[]): boolean {
   return (
-    next.length >= previous.length &&
+    previous.length === next.length &&
     previous.every((value, index) => next[index] === value)
   );
 }
 
-function progressIsMonotonic(
+function appendsOne(previous: readonly number[], next: readonly number[]): boolean {
+  return (
+    next.length === previous.length + 1 &&
+    previous.every((value, index) => next[index] === value)
+  );
+}
+
+function progressMatchesSampleEnd(
+  sampleId: string,
   previous: BenchmarkPartialProgress,
   next: BenchmarkPartialProgress,
 ): boolean {
+  if (
+    next.startingDatabaseHash !== previous.startingDatabaseHash ||
+    next.foregroundFullGraphCaptures !== previous.foregroundFullGraphCaptures
+  ) {
+    return false;
+  }
+  const candidateChanged = appendsOne(
+    previous.candidateForegroundSamplesMs,
+    next.candidateForegroundSamplesMs,
+  );
+  const controlChanged = appendsOne(
+    previous.controlForegroundSamplesMs,
+    next.controlForegroundSamplesMs,
+  );
+  const backgroundChanged = appendsOne(
+    previous.backgroundVerificationSamplesMs,
+    next.backgroundVerificationSamplesMs,
+  );
+  const candidateUnchanged = arraysEqual(
+    previous.candidateForegroundSamplesMs,
+    next.candidateForegroundSamplesMs,
+  );
+  const controlUnchanged = arraysEqual(
+    previous.controlForegroundSamplesMs,
+    next.controlForegroundSamplesMs,
+  );
+  const backgroundUnchanged = arraysEqual(
+    previous.backgroundVerificationSamplesMs,
+    next.backgroundVerificationSamplesMs,
+  );
+  const concurrentUnchanged =
+    next.concurrentForegroundMs === previous.concurrentForegroundMs;
+
+  if (sampleId.startsWith("candidate:measured:")) {
+    return (
+      candidateChanged &&
+      backgroundChanged &&
+      controlUnchanged &&
+      concurrentUnchanged
+    );
+  }
+  if (sampleId.startsWith("control:measured:")) {
+    return (
+      candidateUnchanged &&
+      backgroundUnchanged &&
+      controlChanged &&
+      concurrentUnchanged
+    );
+  }
+  if (sampleId === "concurrent:0") {
+    return (
+      candidateUnchanged &&
+      backgroundUnchanged &&
+      controlUnchanged &&
+      previous.concurrentForegroundMs === Number.MAX_VALUE &&
+      next.concurrentForegroundMs < Number.MAX_VALUE
+    );
+  }
   return (
-    (previous.startingDatabaseHash === "unavailable" ||
-      next.startingDatabaseHash === previous.startingDatabaseHash) &&
-    arraysExtend(
-      previous.candidateForegroundSamplesMs,
-      next.candidateForegroundSamplesMs,
-    ) &&
-    arraysExtend(
-      previous.controlForegroundSamplesMs,
-      next.controlForegroundSamplesMs,
-    ) &&
-    arraysExtend(
-      previous.backgroundVerificationSamplesMs,
-      next.backgroundVerificationSamplesMs,
-    ) &&
-    (previous.concurrentForegroundMs === Number.MAX_VALUE ||
-      next.concurrentForegroundMs === previous.concurrentForegroundMs) &&
-    next.foregroundFullGraphCaptures ===
-      previous.foregroundFullGraphCaptures
+    candidateUnchanged &&
+    backgroundUnchanged &&
+    controlUnchanged &&
+    concurrentUnchanged
   );
 }
 
@@ -750,6 +826,7 @@ export async function superviseBenchmarkWorker(
   const forceTerminate = options.forceTerminate ?? forceTerminateWorker;
   return new Promise<BenchmarkSupervisorResult>((resolvePromise, rejectPromise) => {
     let activeSampleId: string | undefined;
+    let nextSampleIndex = 0;
     let completedArtifact: BenchmarkArtifact | undefined;
     let progress = emptyBenchmarkProgress();
     let watchdog: unknown;
@@ -878,7 +955,8 @@ export async function superviseBenchmarkWorker(
         if (
           progress.startingDatabaseHash === "unavailable" ||
           activeSampleId !== undefined ||
-          completedArtifact !== undefined
+          completedArtifact !== undefined ||
+          parsed.sampleId !== BENCHMARK_SAMPLE_SEQUENCE[nextSampleIndex]
         ) {
           void terminateWorker(false);
           return;
@@ -903,7 +981,7 @@ export async function superviseBenchmarkWorker(
       if (parsed.type === "sample-end") {
         if (
           activeSampleId !== parsed.sampleId ||
-          !progressIsMonotonic(progress, parsed.progress)
+          !progressMatchesSampleEnd(parsed.sampleId, progress, parsed.progress)
         ) {
           void terminateWorker(false);
           return;
@@ -911,6 +989,7 @@ export async function superviseBenchmarkWorker(
         clearWatchdog();
         activeSampleId = undefined;
         progress = copyBenchmarkProgress(parsed.progress);
+        nextSampleIndex += 1;
         return;
       }
       if (parsed.type === "error") {
@@ -920,6 +999,7 @@ export async function superviseBenchmarkWorker(
       if (
         activeSampleId !== undefined ||
         completedArtifact !== undefined ||
+        nextSampleIndex !== BENCHMARK_SAMPLE_SEQUENCE.length ||
         progress.startingDatabaseHash === "unavailable" ||
         !artifactMatchesProgress(parsed.artifact, progress)
       ) {
@@ -1060,11 +1140,7 @@ async function runCandidateLane(
   let foregroundFullGraphCaptures = 0;
 
   for (const [index, edit] of serialEdits.entries()) {
-    const measuredIndex = index - BENCHMARK_WARMUP_COUNT;
-    const sampleId =
-      index < BENCHMARK_WARMUP_COUNT
-        ? `candidate:warmup:${index}`
-        : `candidate:measured:${measuredIndex}`;
+    const sampleId = BENCHMARK_SAMPLE_SEQUENCE[index]!;
     await reporter.start(sampleId);
     const sample = await runCandidateSample(repoId, edit, () => {
       foregroundFullGraphCaptures += 1;
@@ -1083,7 +1159,7 @@ async function runCandidateLane(
   let concurrentForegroundMs = Number.MAX_VALUE;
   const [firstEdit, secondEdit] = concurrentEdits;
   if (!firstEdit || !secondEdit) throw new Error("Concurrent edits are missing");
-  const sampleId = "concurrent:0";
+  const sampleId = BENCHMARK_SAMPLE_SEQUENCE[CONCURRENT_SAMPLE_INDEX]!;
   await reporter.start(sampleId);
   let firstRevision: number | undefined;
   await patchSavedFile(
@@ -1208,11 +1284,7 @@ async function runControlLane(
   };
 
   for (const [index, edit] of serialEdits.entries()) {
-    const measuredIndex = index - BENCHMARK_WARMUP_COUNT;
-    const sampleId =
-      index < BENCHMARK_WARMUP_COUNT
-        ? `control:warmup:${index}`
-        : `control:measured:${measuredIndex}`;
+    const sampleId = BENCHMARK_SAMPLE_SEQUENCE[CONTROL_SAMPLE_OFFSET + index]!;
     await reporter.start(sampleId);
     const startedAt = performance.now();
     await runControlSample(repoId, edit, observer);

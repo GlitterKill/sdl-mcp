@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 
 import {
   BENCHMARK_SCHEMA_VERSION,
+  BENCHMARK_SAMPLE_SEQUENCE,
   BENCHMARK_TIMEOUT_MS,
   DEFAULT_THRESHOLDS,
   FIXTURE_FILE_COUNT,
@@ -182,6 +183,74 @@ function createFailureArtifact(
   });
 }
 
+function createArtifactFromProgress(
+  progress: BenchmarkPartialProgress,
+): BenchmarkArtifact {
+  return createArtifact({
+    startingDatabaseHash: progress.startingDatabaseHash,
+    candidateForegroundSamplesMs: progress.candidateForegroundSamplesMs,
+    controlForegroundSamplesMs: progress.controlForegroundSamplesMs,
+    backgroundVerificationSamplesMs: progress.backgroundVerificationSamplesMs,
+    concurrentForegroundMs: progress.concurrentForegroundMs,
+    foregroundFullGraphCaptures: progress.foregroundFullGraphCaptures,
+  });
+}
+
+function progressAfterSample(
+  previous: BenchmarkPartialProgress,
+  sampleId: string,
+): BenchmarkPartialProgress {
+  const next = createProgress({
+    ...previous,
+    candidateForegroundSamplesMs: [...previous.candidateForegroundSamplesMs],
+    controlForegroundSamplesMs: [...previous.controlForegroundSamplesMs],
+    backgroundVerificationSamplesMs: [
+      ...previous.backgroundVerificationSamplesMs,
+    ],
+  });
+  if (sampleId.startsWith("candidate:measured:")) {
+    next.candidateForegroundSamplesMs.push(
+      100 + next.candidateForegroundSamplesMs.length,
+    );
+    next.backgroundVerificationSamplesMs.push(
+      300 + next.backgroundVerificationSamplesMs.length,
+    );
+  } else if (sampleId.startsWith("control:measured:")) {
+    next.controlForegroundSamplesMs.push(
+      1_000 + next.controlForegroundSamplesMs.length,
+    );
+  } else if (sampleId === "concurrent:0") {
+    next.concurrentForegroundMs = 120;
+  }
+  return next;
+}
+
+function emitSample(
+  worker: FakeBenchmarkWorker,
+  sampleId: string,
+  previous: BenchmarkPartialProgress,
+): BenchmarkPartialProgress {
+  const next = progressAfterSample(previous, sampleId);
+  worker.emit("message", { type: "sample-start", sampleId });
+  worker.emit("message", { type: "sample-end", sampleId, progress: next });
+  return next;
+}
+
+function emitValidTrace(
+  worker: FakeBenchmarkWorker,
+  sampleCount = BENCHMARK_SAMPLE_SEQUENCE.length,
+): BenchmarkPartialProgress {
+  worker.emit("message", {
+    type: "metadata",
+    startingDatabaseHash: "c".repeat(64),
+  });
+  let progress = createProgress();
+  for (const sampleId of BENCHMARK_SAMPLE_SEQUENCE.slice(0, sampleCount)) {
+    progress = emitSample(worker, sampleId, progress);
+  }
+  return progress;
+}
+
 describe("background graph integrity benchmark contract", () => {
   it("generates the stable 1,500 by 20 fixture and edit sequence", () => {
     const fixture = createBenchmarkFixture();
@@ -278,6 +347,150 @@ describe("background graph integrity benchmark contract", () => {
     }
   });
 
+  it("defines the exact canonical worker sample sequence", () => {
+    assert.deepEqual(BENCHMARK_SAMPLE_SEQUENCE, [
+      "candidate:warmup:0",
+      "candidate:warmup:1",
+      "candidate:warmup:2",
+      ...Array.from({ length: 20 }, (_, index) => `candidate:measured:${index}`),
+      "concurrent:0",
+      "control:warmup:0",
+      "control:warmup:1",
+      "control:warmup:2",
+      ...Array.from({ length: 20 }, (_, index) => `control:measured:${index}`),
+    ]);
+  });
+
+  it("rejects a bulk progress rewrite from one sample end", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(worker, scheduler, events, () => {}),
+    );
+    worker.emit("message", {
+      type: "metadata",
+      startingDatabaseHash: "c".repeat(64),
+    });
+    worker.emit("message", {
+      type: "sample-start",
+      sampleId: "candidate:warmup:0",
+    });
+    worker.emit("message", {
+      type: "sample-end",
+      sampleId: "candidate:warmup:0",
+      progress: createProgress({
+        candidateForegroundSamplesMs: Array(20).fill(100),
+        controlForegroundSamplesMs: Array(20).fill(1_000),
+        backgroundVerificationSamplesMs: Array(20).fill(300),
+        concurrentForegroundMs: 120,
+      }),
+    });
+
+    assert.deepEqual(events, ["SIGTERM"]);
+    scheduler.fire(TERMINATION_GRACE_MS);
+    assert.equal((await supervision).artifact.passed, false);
+  });
+
+  it("rejects skipped, reordered, and duplicate sample ids", async () => {
+    const cases = [
+      { prefix: 0, sampleId: "candidate:warmup:1" },
+      { prefix: 0, sampleId: "control:warmup:0" },
+      { prefix: 1, sampleId: "candidate:warmup:0" },
+    ];
+    for (const testCase of cases) {
+      const events: string[] = [];
+      const worker = new FakeBenchmarkWorker(events);
+      const scheduler = new FakeWatchdogScheduler();
+      const supervision = superviseBenchmarkWorker(
+        supervisorOptions(worker, scheduler, events, () => {}),
+      );
+      emitValidTrace(worker, testCase.prefix);
+
+      worker.emit("message", { type: "sample-start", sampleId: testCase.sampleId });
+
+      assert.deepEqual(events, ["SIGTERM"]);
+      scheduler.fire(TERMINATION_GRACE_MS);
+      assert.equal((await supervision).artifact.passed, false);
+    }
+  });
+
+  it("rejects the wrong progress delta for each sample kind", async () => {
+    const cases: Array<{
+      prefix: number;
+      mutate(progress: BenchmarkPartialProgress): void;
+    }> = [
+      {
+        prefix: 0,
+        mutate(progress) {
+          progress.candidateForegroundSamplesMs.push(100);
+          progress.backgroundVerificationSamplesMs.push(300);
+        },
+      },
+      {
+        prefix: 3,
+        mutate(progress) {
+          progress.candidateForegroundSamplesMs.push(100);
+        },
+      },
+      {
+        prefix: 23,
+        mutate(progress) {
+          progress.controlForegroundSamplesMs.push(1_000);
+        },
+      },
+      {
+        prefix: 27,
+        mutate(progress) {
+          progress.candidateForegroundSamplesMs.push(999);
+          progress.backgroundVerificationSamplesMs.push(999);
+        },
+      },
+    ];
+    for (const testCase of cases) {
+      const events: string[] = [];
+      const worker = new FakeBenchmarkWorker(events);
+      const scheduler = new FakeWatchdogScheduler();
+      const supervision = superviseBenchmarkWorker(
+        supervisorOptions(worker, scheduler, events, () => {}),
+      );
+      const progress = emitValidTrace(worker, testCase.prefix);
+      const sampleId = BENCHMARK_SAMPLE_SEQUENCE[testCase.prefix]!;
+      const wrong = createProgress({
+        ...progress,
+        candidateForegroundSamplesMs: [...progress.candidateForegroundSamplesMs],
+        controlForegroundSamplesMs: [...progress.controlForegroundSamplesMs],
+        backgroundVerificationSamplesMs: [
+          ...progress.backgroundVerificationSamplesMs,
+        ],
+      });
+      testCase.mutate(wrong);
+
+      worker.emit("message", { type: "sample-start", sampleId });
+      worker.emit("message", { type: "sample-end", sampleId, progress: wrong });
+
+      assert.deepEqual(events, ["SIGTERM"]);
+      scheduler.fire(TERMINATION_GRACE_MS);
+      assert.equal((await supervision).artifact.passed, false);
+    }
+  });
+
+  it("rejects completion before the canonical sequence is exhausted", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(worker, scheduler, events, () => {}),
+    );
+    emitValidTrace(worker, 1);
+
+    worker.emit("message", { type: "complete", artifact: createArtifact() });
+
+    assert.deepEqual(events, ["SIGTERM"]);
+    scheduler.fire(TERMINATION_GRACE_MS);
+    assert.equal((await supervision).artifact.passed, false);
+  });
+
   it("escalates a timed-out worker, confirms death, then writes partial evidence", async () => {
     const events: string[] = [];
     const worker = new FakeBenchmarkWorker(events);
@@ -296,30 +509,21 @@ describe("background graph integrity benchmark contract", () => {
       return result;
     });
 
-    worker.emit("message", {
-      type: "metadata",
-      startingDatabaseHash: "c".repeat(64),
-    });
+    emitValidTrace(worker, 4);
     worker.emit("message", {
       type: "sample-start",
-      sampleId: "candidate:measured:0",
+      sampleId: BENCHMARK_SAMPLE_SEQUENCE[4],
     });
-    worker.emit("message", {
-      type: "sample-end",
-      sampleId: "candidate:measured:0",
-      progress: createProgress({
-        candidateForegroundSamplesMs: [111],
-        backgroundVerificationSamplesMs: [222],
-      }),
-    });
-    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:1" });
     worker.emit("message", { type: "capture", count: 1 });
     assert.deepEqual(scheduler.delays, [BENCHMARK_TIMEOUT_MS]);
     scheduler.fire(BENCHMARK_TIMEOUT_MS);
     assert.deepEqual(events, ["SIGTERM"]);
     assert.equal(written, undefined);
 
-    worker.emit("message", { type: "sample-end", sampleId: "candidate:measured:1" });
+    worker.emit("message", {
+      type: "sample-end",
+      sampleId: BENCHMARK_SAMPLE_SEQUENCE[4],
+    });
     worker.emit("message", { type: "complete", artifact: completed });
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(resolved, false);
@@ -342,8 +546,8 @@ describe("background graph integrity benchmark contract", () => {
     assert.equal(written?.timeoutCount, 1);
     assert.equal(written?.passed, false);
     assert.equal(written?.startingDatabaseHash, "c".repeat(64));
-    assert.deepEqual(written?.rawSamplesMs.candidateForeground, [111]);
-    assert.deepEqual(written?.rawSamplesMs.backgroundVerification, [222]);
+    assert.deepEqual(written?.rawSamplesMs.candidateForeground, [100]);
+    assert.deepEqual(written?.rawSamplesMs.backgroundVerification, [300]);
     assert.equal(written?.foregroundFullGraphCaptures, 1);
     assert.equal(
       written?.checks.find((check) => check.name === "foreground full-graph captures")
@@ -357,7 +561,6 @@ describe("background graph integrity benchmark contract", () => {
     const events: string[] = [];
     const worker = new FakeBenchmarkWorker(events);
     const scheduler = new FakeWatchdogScheduler();
-    const completed = createArtifact();
     let written: BenchmarkArtifact | undefined;
 
     const supervision = superviseBenchmarkWorker(
@@ -367,18 +570,8 @@ describe("background graph integrity benchmark contract", () => {
       }),
     );
 
-    worker.emit("message", { type: "metadata", startingDatabaseHash: "c".repeat(64) });
-    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:0" });
-    worker.emit("message", {
-      type: "sample-end",
-      sampleId: "candidate:measured:0",
-      progress: createProgress({
-        candidateForegroundSamplesMs: Array(20).fill(100),
-        controlForegroundSamplesMs: Array(20).fill(1_000),
-        backgroundVerificationSamplesMs: Array(20).fill(300),
-        concurrentForegroundMs: 120,
-      }),
-    });
+    const progress = emitValidTrace(worker);
+    const completed = createArtifactFromProgress(progress);
     worker.emit("message", { type: "complete", artifact: completed });
     assert.equal(written, undefined);
     worker.close(0, null);
@@ -463,7 +656,7 @@ describe("background graph integrity benchmark contract", () => {
     );
 
     worker.emit("message", { type: "metadata", startingDatabaseHash: "c".repeat(64) });
-    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:0" });
+    worker.emit("message", { type: "sample-start", sampleId: "candidate:warmup:0" });
     scheduler.fire(BENCHMARK_TIMEOUT_MS);
     scheduler.fire(TERMINATION_GRACE_MS);
 
@@ -484,7 +677,7 @@ describe("background graph integrity benchmark contract", () => {
     );
 
     worker.emit("message", { type: "metadata", startingDatabaseHash: "c".repeat(64) });
-    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:0" });
+    worker.emit("message", { type: "sample-start", sampleId: "candidate:warmup:0" });
     scheduler.fire(BENCHMARK_TIMEOUT_MS);
     scheduler.fire(TERMINATION_GRACE_MS);
     await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
@@ -502,7 +695,7 @@ describe("background graph integrity benchmark contract", () => {
       { type: "sample-start", sampleId: "candidate:measured:20" },
       {
         type: "sample-end",
-        sampleId: "candidate:measured:0",
+        sampleId: "candidate:warmup:0",
         progress: createProgress({ candidateForegroundSamplesMs: [Number.NaN] }),
       },
       {
@@ -550,7 +743,7 @@ describe("background graph integrity benchmark contract", () => {
       ) {
         worker.emit("message", {
           type: "sample-start",
-          sampleId: "candidate:measured:0",
+          sampleId: "candidate:warmup:0",
         });
       }
 
@@ -580,7 +773,7 @@ describe("background graph integrity benchmark contract", () => {
     );
 
     worker.emit("message", { type: "metadata", startingDatabaseHash: "c".repeat(64) });
-    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:0" });
+    worker.emit("message", { type: "sample-start", sampleId: "candidate:warmup:0" });
     worker.emit("message", { type: "capture", count: 1 });
     worker.emit("message", { type: "capture", count: 1 });
     assert.deepEqual(events, ["SIGTERM"]);
