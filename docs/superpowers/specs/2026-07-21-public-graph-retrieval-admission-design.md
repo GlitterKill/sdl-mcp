@@ -55,6 +55,23 @@ quiescence because admission uses reference counts.
 The quiescence helper releases admission in `finally`, including index
 failures.
 
+## Public refresh dispatch admission
+
+Public refresh envelopes are serialized by one process-wide FIFO admission
+gate before they acquire the normal tool-dispatch lease. The exact admitted
+surfaces are flat `sdl.index.refresh`, gateway `sdl.repo` with
+`action: "index.refresh"`, and non-dry-run workflows containing
+`fn: "indexRefresh"`. Global admission is required even for different
+repositories because LadybugDB has one writer and each refresh waits for every
+other graph-read dispatch lease to drain before destructive work.
+
+Synchronous calls retain admission through handler completion. For
+`async: true`, the operation response still returns immediately, while the
+handler transfers admission ownership to the detached background refresh
+promise until it settles. The transfer does not retain a normal dispatch slot.
+Direct watcher and CLI `indexRepo` calls keep their existing synthetic
+dispatch/indexing-gate path.
+
 ## Verification
 
 - Exhaustive pure classifier tests enumerate registered public tools and every
@@ -78,6 +95,9 @@ failures.
   byte-identical; handle generation behavior is unchanged.
 - A blocked admission query proves the admission lookup and handler share one
   dispatch lease, so full-index quiescence cannot enter between them.
+- Real concurrent MCP refreshes cover flat calls on different repositories,
+  gateway calls on one repository, multi-step workflow refreshes, detached
+  async ownership transfer, and the graph-read/reset exclusion boundary.
 - A real blocked verifier lease proves legacy/direct full indexing cancels and
   closes the lease before destructive reset. Additional cases cover explicit
   full, incremental-to-full upgrade, failure release, and unchanged ordinary

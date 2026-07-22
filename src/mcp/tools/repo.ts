@@ -89,6 +89,7 @@ import {
   graphIntegrityNextBestAction,
 } from "../../db/ladybug-derived-state.js";
 import { withGraphIntegrityVerifierQuiesced } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
+import { retainIndexRefreshAdmissionUntil } from "../dispatch-limiter.js";
 
 // Health snapshot cache with 30s TTL to avoid expensive recomputation.
 // lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
@@ -1132,7 +1133,12 @@ export async function handleIndexRefresh(
       await runPostRefresh(conn);
       return toResponse(result);
     });
-    bgRefresh().then(
+    const backgroundRefresh = bgRefresh();
+    // The MCP response returns immediately, but the process-wide public
+    // refresh admission lease must remain owned until the actual index work
+    // settles. Outside public dispatch (watcher/CLI), this is a safe no-op.
+    retainIndexRefreshAdmissionUntil(backgroundRefresh);
+    backgroundRefresh.then(
       (result) =>
         logger.info("Async index refresh completed", {
           repoId,
