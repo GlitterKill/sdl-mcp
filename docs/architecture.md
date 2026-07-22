@@ -341,13 +341,58 @@ Each module owns a specific domain of queries:
 
 ### Persisted graph integrity ownership
 
-Full and ordinary incremental indexing build file and fileless manifest rows from independent index output and verify them synchronously. Saved-file edits validate only the affected trusted file state, then commit graph rows, manifest changes, and one monotonic `DerivedState.graphIntegrityRevision` in the same serialized write transaction. The transaction preserves `graphIntegrityVerifiedRevision` until an independent verifier publishes the exact new revision.
+Full and ordinary incremental indexing build file and fileless manifest rows from independent index output and verify them synchronously. A saved-file edit validates the affected trusted file state, then uses one serialized foreground transaction to commit the graph patch, file-manifest changes, fileless-manifest changes, and one monotonic `DerivedState.graphIntegrityRevision`. The transaction marks the exact Version and revision as `verifying`, preserves `graphIntegrityVerifiedRevision`, and lets the edit return immediately after the commit.
 
-Each repository has at most one running background verifier and one coalesced latest wake. The verifier leases an exclusive read connection, opens one read-only transaction, reads both manifest tables through their `Repo` relationships, and scans canonical Symbol rows in deterministic pages from the same snapshot. It closes the snapshot and connection before using the production Version-and-revision compare-and-set to publish success or failure, so stale work cannot overwrite a newer edit.
+Each repository owns at most one running background verifier and one coalesced latest wake. The verifier leases an exclusive read connection, opens one read-only transaction, and reads both manifest tables plus canonical Symbol rows in deterministic pages from the same stable snapshot. The verifier closes the snapshot and connection before it publishes a result.
 
-Startup recovery scans persisted `verifying` rows after migrations and repository bootstrap, then requeues their exact revisions. Full-index activation, unregister, database close, and shutdown block new verifier admission, cancel active work between page queries, and wait for the read lease to close before swapping, deleting, or closing graph state.
+The publication compare-and-set requires the captured Version and revision to remain current. A successful check publishes `verified` and advances `graphIntegrityVerifiedRevision`; a failed check publishes `failed` and preserves the last verified revision. If a newer Version or revision owns the repository, the compare-and-set performs no write, and the coalesced wake leaves the newer owner responsible for verification.
 
-The graph remains readable during `verifying` and after `failed` when the current Version still has a valid manifest, revision, and pruning-support marker. Those states do not claim that the latest revision is verified. An `unknown` state or missing manifest fails graph admission closed and directs the operator to a full refresh. Saved-file verification does not recompute PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state.
+Startup recovery scans persisted `verifying` rows after migrations and repository bootstrap, then requeues each exact Version and revision. Full-index activation, unregister, database close, and shutdown first block new verifier admission, then cancel active work between page queries and wait for the snapshot connection to close before they swap, delete, or close graph state.
+
+`sdl.repo.status` reports the current ownership through `graphIntegrityVersionId` and `graphIntegrityRevision`, and it reports successful verification history through `graphIntegrityVerifiedRevision`. The graph remains readable during `verifying` and after `failed` when the current Version still owns a valid manifest, revision, and pruning-support marker; a null or older verified revision does not remove that availability. Only `verified` with equal current and verified revisions proves the latest revision, while `unknown` or missing-manifest guidance fails graph admission closed and directs the operator to a full refresh.
+
+```mermaid
+sequenceDiagram
+    accTitle: Saved-file graph integrity verification lifecycle
+    accDescr: A foreground edit commits graph and manifest ownership atomically and returns. A background verifier checks one exclusive snapshot, publishes only for the exact Version and revision, recovers pending work at startup, reports current and verified state, and closes its snapshot before destructive lifecycle work.
+    participant C as Caller
+    participant F as Foreground edit
+    participant D as LadybugDB
+    participant V as Background verifier
+    participant L as Lifecycle coordinator
+    participant S as repo.status
+
+    C->>F: Apply saved-file edit
+    F->>D: Commit graph, file and fileless manifests, revision N, state verifying
+    D-->>F: Atomic commit succeeds
+    F-->>C: Return immediately
+    F->>V: Coalesce wake for Version V and revision N
+    V->>D: Lease exclusive connection and begin read-only snapshot
+    D-->>V: Stable manifests and canonical graph pages
+    V->>D: Close snapshot and release connection
+    alt Version V and revision N still own current state
+        alt Verification succeeds
+            V->>D: CAS state verified and verified revision N
+        else Verification fails
+            V->>D: CAS state failed and preserve verified revision
+        end
+    else A newer Version or revision owns current state
+        V->>D: CAS no-op, newer owner remains responsible
+    end
+    S->>D: Read current Version, current revision, verified revision, and state
+    D-->>S: Report graph availability and latest-verification proof separately
+    opt Startup finds persisted verifying ownership
+        L->>D: Scan and requeue the exact Version and revision
+        L->>V: Wake repository verifier
+    end
+    opt Full activation, unregister, database close, or shutdown
+        L->>V: Block admission and cancel active work
+        V-->>L: Close snapshot and release connection
+        L->>D: Swap, delete, or close graph state
+    end
+```
+
+Saved-file verification does not recompute PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state. Their existing refresh and recovery rules still apply.
 
 ---
 

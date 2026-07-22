@@ -49,14 +49,14 @@ If a saved-file write succeeds but graph or live-index sync fails, SDL-MCP keeps
 
 A successful saved-file apply commits the graph patch, its independently constructed manifest changes, and one new graph-integrity revision in the same LadybugDB transaction. The edit returns after that commit. A repository-owned worker then verifies the exact revision from a stable read-only snapshot and publishes the result through a Version-and-revision compare-and-set.
 
-Call `sdl.repo.status` after the edit when your task needs verification state. Compare these fields under `derivedState`:
+Call `sdl.repo.status` after the edit when your task needs verification state. Read `graphIntegrityVersionId` and `graphIntegrityRevision` as the current manifest ownership, and read `graphIntegrityVerifiedRevision` only as the most recently verified revision. A null or older verified revision does not make a current manifest-backed graph unavailable.
 
 | Status | Meaning | Action |
 | --- | --- | --- |
-| `graphIntegrityState: "verified"` and equal current and verified revisions | The worker verified the current graph revision. | Continue normally. |
-| `graphIntegrityState: "verifying"` and current revision greater than verified revision | The saved graph is available, but the current revision is not verified yet. | Continue reading when pending verification is acceptable, or poll `repo.status` when the task requires proof of the latest revision. |
-| `graphIntegrityState: "failed"` with a non-null verified revision | The current manifest-backed graph remains available, but the latest verification attempt failed. | Follow `nextBestAction`; run a full refresh before claiming the latest revision is verified. |
-| `graphIntegrityState: "unknown"`, a null current revision, or missing manifest guidance | SDL-MCP has no trusted manifest for the current graph. | Run `sdl.index.refresh` with `mode: "full"`. |
+| `graphIntegrityState: "verified"` and equal `graphIntegrityRevision` and `graphIntegrityVerifiedRevision` | The worker verified the current manifest-backed graph revision. | Continue normally and treat the current revision as latest-verified. |
+| `graphIntegrityState: "verifying"` with current `graphIntegrityVersionId` and `graphIntegrityRevision` values | The current manifest-backed graph is available while the worker verifies its exact revision. `graphIntegrityVerifiedRevision` may be null or older. | Continue reading when pending verification is acceptable, or poll `repo.status` when the task requires proof of the latest revision. |
+| `graphIntegrityState: "failed"` with current `graphIntegrityVersionId` and `graphIntegrityRevision` values | The current manifest-backed graph remains available, but the latest verification attempt failed. `graphIntegrityVerifiedRevision` may be null or older. | Follow `nextBestAction`; run a full refresh before claiming the current revision is verified. |
+| `graphIntegrityState: "unknown"`, a null `graphIntegrityVersionId` or `graphIntegrityRevision`, or missing-manifest guidance in `nextBestAction` | SDL-MCP has no trusted current manifest, so graph retrieval is unavailable. | Run `sdl.index.refresh` with `mode: "full"`. |
 
 Saved-file verification does not refresh PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state. Their existing refresh and recovery rules still apply.
 
