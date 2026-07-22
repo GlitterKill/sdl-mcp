@@ -887,7 +887,11 @@ function compactPrefetchStatsForStatus(
     ) {
       derivedState = {
         ...derivedState,
-        nextBestAction: graphIntegrityNextBestAction("version-mismatch"),
+        nextBestAction: graphIntegrityNextBestAction(
+          derivedState.graphIntegrityManifestEstablished
+            ? "version-mismatch"
+            : "unknown",
+        ),
       };
     }
     if (!rootAvailable && derivedState) {

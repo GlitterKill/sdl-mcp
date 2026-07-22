@@ -77,6 +77,7 @@ Saved-file patching trusts an absent per-file row only when the durable manifest
 - `graphIntegrityRevision !== null`
 - `graphIntegrityVerifiedRevision !== null`
 - `graphIntegrityVerifiedRevision === graphIntegrityRevision`
+- `graphIntegrityManifestEstablished === true`
 
 When a newer revision enters `verifying` or `failed`, SDL-MCP preserves the previous verified digest for diagnostics, but it must not present that digest as proof of the current revision.
 

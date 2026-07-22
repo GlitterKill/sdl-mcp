@@ -546,6 +546,7 @@ export function graphIntegrityIsAvailableForVersion(
     | "graphIntegrityVersionId"
     | "graphIntegrityRevision"
     | "graphIntegrityFilelessPruningSupported"
+    | "graphIntegrityManifestEstablished"
   > | null,
   versionId: string | null,
 ): boolean {
@@ -557,7 +558,8 @@ export function graphIntegrityIsAvailableForVersion(
         row.graphIntegrityState === "verifying" ||
         row.graphIntegrityState === "failed") &&
       typeof row.graphIntegrityRevision === "number" &&
-      typeof row.graphIntegrityFilelessPruningSupported === "boolean",
+      typeof row.graphIntegrityFilelessPruningSupported === "boolean" &&
+      row.graphIntegrityManifestEstablished === true,
   );
 }
 
@@ -570,6 +572,7 @@ export function graphIntegrityIsVerifiedForVersion(
     | "graphIntegrityRevision"
     | "graphIntegrityVerifiedRevision"
     | "graphIntegrityFilelessPruningSupported"
+    | "graphIntegrityManifestEstablished"
   > | null,
   versionId: string | null,
 ): boolean {
@@ -617,6 +620,7 @@ export interface DerivedStateSummary {
   graphIntegrityRevision: number | null;
   graphIntegrityVerifiedRevision: number | null;
   graphIntegrityFilelessPruningSupported: boolean | null;
+  graphIntegrityManifestEstablished: boolean;
   nextBestAction?: string;
 }
 
@@ -642,6 +646,7 @@ export async function getDerivedStateSummary(
     graphIntegrityVerifiedRevision: row.graphIntegrityVerifiedRevision ?? null,
     graphIntegrityFilelessPruningSupported:
       row.graphIntegrityFilelessPruningSupported ?? null,
+    graphIntegrityManifestEstablished: row.graphIntegrityManifestEstablished,
   };
   if (row.lastError) {
     summary.lastError = row.lastError;

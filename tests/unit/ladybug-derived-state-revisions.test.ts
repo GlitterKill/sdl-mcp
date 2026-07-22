@@ -460,6 +460,7 @@ describe(
         graphIntegrityRevision: 2,
         graphIntegrityVerifiedRevision: 2,
         graphIntegrityFilelessPruningSupported: true,
+        graphIntegrityManifestEstablished: true,
       };
       assert.equal(api.graphIntegrityIsAvailableForVersion(base, "v1"), true);
       assert.equal(api.graphIntegrityIsVerifiedForVersion(base, "v1"), true);
@@ -470,6 +471,7 @@ describe(
         { ...base, graphIntegrityState: "unknown" },
         { ...base, graphIntegrityRevision: null },
         { ...base, graphIntegrityFilelessPruningSupported: null },
+        { ...base, graphIntegrityManifestEstablished: false },
       ]) {
         assert.equal(api.graphIntegrityIsAvailableForVersion(row, "v1"), false);
       }

@@ -157,6 +157,18 @@ async function seedVersionedGraph(root: string): Promise<void> {
       prevVersionHash: null,
       versionHash: null,
     });
+    await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, "repo", {
+      files: [
+        createGraphIntegrityFileState(
+          "repo",
+          row.fileId,
+          "src/alpha.ts",
+          [row],
+          [],
+        ),
+      ],
+      fileless: [],
+    });
   });
 }
 
@@ -2944,6 +2956,7 @@ describe("persisted graph integrity", () => {
       graphIntegrityRevision: 0,
       graphIntegrityVerifiedRevision: 0,
       graphIntegrityFilelessPruningSupported: true,
+      graphIntegrityManifestEstablished: true,
     };
 
     assert.equal(
@@ -2965,6 +2978,64 @@ describe("persisted graph integrity", () => {
     assert.equal(
       isVerified({ ...base, graphIntegrityState: "verified" }, "v2"),
       true,
+    );
+    assert.equal(
+      isVerified(
+        {
+          ...base,
+          graphIntegrityState: "verified",
+          graphIntegrityManifestEstablished: false,
+        },
+        "v2",
+      ),
+      false,
+    );
+  });
+
+  it("rejects incremental indexing without established manifest ownership", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-integrity-missing-manifest-"));
+    await initLadybugDb(join(root, "missing-manifest.lbug"));
+    const emptyDigest = createGraphIntegrityExpectationFromManifest([], []).digest;
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-21T00:00:00.000Z",
+      });
+      await ladybugDb.createVersion(conn, {
+        versionId: "v1",
+        repoId: "repo",
+        createdAt: "2026-07-21T00:00:00.000Z",
+        reason: "legacy verified state",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await derivedState.beginGraphIntegrityVersion(
+        conn,
+        "repo",
+        "v1",
+        emptyDigest,
+        true,
+      );
+    });
+    await derivedState.markGraphIntegrityVerified("repo", "v1", emptyDigest);
+    assert.equal(
+      (await derivedState.getDerivedState("repo"))
+        ?.graphIntegrityManifestEstablished,
+      false,
+    );
+
+    const Session = PersistedGraphIntegritySession as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+    };
+    await assert.rejects(
+      new Session("repo", "incremental", true).begin("v2"),
+      /Incremental indexing requires a verified graph integrity baseline/,
     );
   });
 

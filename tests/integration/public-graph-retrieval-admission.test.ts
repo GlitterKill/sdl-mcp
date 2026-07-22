@@ -334,6 +334,45 @@ async function seedRepoWithoutVersion(repoId: string): Promise<void> {
   );
 }
 
+async function seedVerifiedEmptyManifestRepo(repoId: string): Promise<void> {
+  const versionId = `${repoId}:v1`;
+  const expectation = createGraphIntegrityExpectationFromManifest([], []);
+  await withWriteConn((conn) =>
+    withTransaction(conn, async () => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId,
+        rootPath: TEST_ROOT,
+        configJson: JSON.stringify({ policy: {} }),
+        createdAt: NOW,
+      });
+      await ladybugDb.createVersion(conn, {
+        versionId,
+        repoId,
+        createdAt: NOW,
+        reason: "valid empty manifest",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
+        files: [],
+        fileless: [],
+      });
+      await derivedState.beginGraphIntegrityVersion(
+        conn,
+        repoId,
+        versionId,
+        expectation.digest,
+        true,
+      );
+    }),
+  );
+  await derivedState.markGraphIntegrityVerified(
+    repoId,
+    versionId,
+    expectation.digest,
+  );
+}
+
 function centralCalls(repoId: string): PublicCall[] {
   const symbolId = `${repoId}:alpha`;
   const fromVersion = `${repoId}:v0`;
@@ -529,6 +568,14 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     await seedRepo("verifying", "verifying");
     await seedRepo("failed", "failed");
     await seedRepo("unknown", "unknown");
+    await seedRepo("missing-manifest", "verified");
+    await withWriteConn((conn) =>
+      ladybugDb.deleteGraphIntegrityManifestInTransaction(
+        conn,
+        "missing-manifest",
+      ),
+    );
+    await seedVerifiedEmptyManifestRepo("empty-manifest");
     await seedRepoWithoutVersion("empty");
 
     server = await createMCPServer({
@@ -603,6 +650,46 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
       arguments: { repoId: "empty", query: "alpha", semantic: false },
     })) as ErrorEnvelope;
     assertUnavailable(response, "registered repository without Version");
+  });
+
+  it("fails a revisioned legacy graph without manifest ownership closed", async () => {
+    const response = (await client.callTool({
+      name: "sdl.symbol.search",
+      arguments: {
+        repoId: "missing-manifest",
+        query: "alpha",
+        semantic: false,
+      },
+    })) as ErrorEnvelope;
+    assertUnavailable(response, "missing manifest marker");
+
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+    const status = await handleRepoStatus({
+      repoId: "missing-manifest",
+      detail: "minimal",
+    });
+    assert.match(
+      status.derivedState?.nextBestAction ?? "",
+      /mode:"full"/i,
+    );
+    assert.match(status.derivedState?.nextBestAction ?? "", /unverified/i);
+    assert.doesNotMatch(
+      status.derivedState?.nextBestAction ?? "",
+      /another graph version/i,
+    );
+  });
+
+  it("admits a verified graph with a valid empty manifest", async () => {
+    const response = (await client.callTool({
+      name: "sdl.symbol.search",
+      arguments: {
+        repoId: "empty-manifest",
+        query: "alpha",
+        semantic: false,
+      },
+    })) as ErrorEnvelope;
+    assert.notEqual(response.isError, true);
+    assertNoAdmissionFields(response, "valid empty manifest");
   });
 
   it("dry-runs graph and refresh workflows without DB or refresh admission", async (t) => {
