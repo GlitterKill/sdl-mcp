@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Durable mutation coverage**: Full and ordinary incremental indexing remain synchronously verified. Saved-file mutations advance the current manifest and revision atomically; sync import and unsupported direct provider writes invalidate integrity before graph writes; unregister removes manifest ownership with the repository.
   - **Unchanged derived-state scope**: Saved-file verification does not recompute PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state. Existing refresh and recovery ownership for those computations remains unchanged.
   - **Cross-platform performance gate**: A deterministic 1,500-file, 30,000-symbol benchmark runs the same candidate and synchronous-control edits on byte-identical database clones. Ubuntu and Windows CI enforce foreground p50 below 500 ms, foreground p95 and concurrent edits below one second, candidate p50 at most 20 percent of control p50, background verification p95 at most 3.5 seconds, zero timeouts, and zero foreground full-graph captures.
+  - **Bounded public refresh admission**: Public refresh envelopes share one process-wide FIFO writer gate. One refresh runs while at most eight requests wait; overload and queue timeout responses are retryable `RUNTIME_ERROR` results, aborted waiters are removed cleanly, and asynchronous refreshes retain admission until their detached work settles.
 
 ### Changed
 

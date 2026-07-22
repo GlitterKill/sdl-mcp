@@ -74,6 +74,12 @@ either parser-supported spelling, `fn: "indexRefresh"` or
 repositories because LadybugDB has one writer and each refresh waits for every
 other graph-read dispatch lease to drain before destructive work.
 
+At most eight public refresh envelopes may wait behind the active refresh.
+When the queue is full, another refresh fails immediately with a retryable
+`RUNTIME_ERROR` classified as `unavailable`. Aborting a queued request removes
+it from the FIFO and releases its listener and timer without affecting running
+refreshes.
+
 Synchronous calls retain admission through handler completion. For
 `async: true`, the operation response still returns immediately, while the
 handler transfers admission ownership to the detached background refresh
@@ -82,6 +88,7 @@ tool-dispatch context, so `indexRepo` reserves its own synthetic dispatch lease
 and drains active graph reads before destructive work. Refresh-admission
 context remains inherited, and the transfer does not retain the request's
 normal dispatch slot.
+
 Direct watcher and CLI `indexRepo` calls keep their existing synthetic
 dispatch/indexing-gate path.
 

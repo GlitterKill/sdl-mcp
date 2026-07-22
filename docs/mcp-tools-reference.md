@@ -176,6 +176,14 @@ Refresh the symbol index in `incremental` or `full` mode.
 
 **Response:** `{ ok: boolean, repoId: string, versionId?: string, changedFiles?: integer, async?: boolean, operationId?: string, message?: string, diagnostics?: { timings: { totalMs: number, phases: Record<string, number> } } }`
 
+Public refresh calls use one process-wide FIFO admission gate because
+LadybugDB permits one writer. One refresh runs while at most eight additional
+requests wait. A ninth queued request fails immediately with a retryable
+`RUNTIME_ERROR` classified as `unavailable`; aborting a queued request removes
+it without canceling running work. An `async: true` refresh keeps its admission
+ownership until the detached refresh settles, even though the operation
+response returns immediately.
+
 In incremental mode, files whose modification time predates their last indexed timestamp are skipped. If changed files are found, derived cluster/process state is recomputed inline before the refresh returns. If no tracked files changed, the existing version is reused instead of creating an empty snapshot and the refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync`.
 
 When called with a progress token, the server emits `notifications/progress` messages with the current stage, file path, and completion percentage.

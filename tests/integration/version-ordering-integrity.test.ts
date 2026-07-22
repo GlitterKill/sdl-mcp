@@ -47,6 +47,10 @@ describe("equal-timestamp Version ordering", { concurrency: 1 }, () => {
         versionHash: null,
       });
     }
+    await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
+      files: [],
+      fileless: [],
+    });
     await beginGraphIntegrityVersion(
       conn,
       repoId,

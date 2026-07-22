@@ -62,7 +62,7 @@ Primary modified files:
 - CHANGELOG.md
 - docs/symbol-edit-tool.md
 - docs/mcp-tools-reference.md
-- docs/mcp-tools-reference-detailed.md
+- docs/mcp-tools-detailed.md
 - docs/architecture.md
 - docs/prompt-cache-hygiene.md
 - SDL.md
@@ -797,7 +797,7 @@ git commit -m "Integrate graph verifier lifecycle and status"
 - Modify: CHANGELOG.md
 - Modify: docs/symbol-edit-tool.md
 - Modify: docs/mcp-tools-reference.md
-- Modify: docs/mcp-tools-reference-detailed.md
+- Modify: docs/mcp-tools-detailed.md
 - Modify: docs/architecture.md
 - Modify: docs/prompt-cache-hygiene.md
 - Modify: SDL.md
@@ -904,7 +904,7 @@ Retain this development artifact and confirm it contains the current base commit
 - [ ] **Step 6: Commit**
 
 ~~~powershell
-git add scripts/background-graph-integrity-benchmark.ts src/live-index/file-patcher.ts tests/unit/file-patcher.test.ts tests/benchmark/background-graph-integrity.test.ts package.json .github/workflows/ci.yml CHANGELOG.md docs/symbol-edit-tool.md docs/mcp-tools-reference.md docs/mcp-tools-reference-detailed.md docs/architecture.md docs/prompt-cache-hygiene.md SDL.md
+git add scripts/background-graph-integrity-benchmark.ts src/live-index/file-patcher.ts tests/unit/file-patcher.test.ts tests/benchmark/background-graph-integrity.test.ts package.json .github/workflows/ci.yml CHANGELOG.md docs/symbol-edit-tool.md docs/mcp-tools-reference.md docs/mcp-tools-detailed.md docs/architecture.md docs/prompt-cache-hygiene.md SDL.md
 git commit -m "Benchmark and document background verification"
 ~~~
 

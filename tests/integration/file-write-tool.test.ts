@@ -188,16 +188,18 @@ describe("sdl.file.write", () => {
       });
       const baseline = await capturePersistedGraphIntegrity(conn, repoId);
       const baselineSymbols = await ladybugDb.getSymbolsByFile(conn, fileId);
-      await ladybugDb.upsertGraphIntegrityFileStateInTransaction(
-        conn,
-        createGraphIntegrityFileState(
-          repoId,
-          fileId,
-          relPath,
-          baselineSymbols,
-          [],
-        ),
-      );
+      await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
+        files: [
+          createGraphIntegrityFileState(
+            repoId,
+            fileId,
+            relPath,
+            baselineSymbols,
+            [],
+          ),
+        ],
+        fileless: [],
+      });
       await markGraphIntegrityVerified(repoId, "v-indexed", baseline.digest);
 
       const response = await handleFileWrite({

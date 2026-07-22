@@ -106,6 +106,10 @@ describe("missing symbol-card MCP error envelope", () => {
       prevVersionHash: null,
       versionHash: null,
     });
+    await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, REPO_ID, {
+      files: [],
+      fileless: [],
+    });
     await beginGraphIntegrityVersion(
       conn,
       REPO_ID,

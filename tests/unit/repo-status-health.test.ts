@@ -450,6 +450,13 @@ describe("repo status root availability", { concurrency: 1 }, () => {
           prevVersionHash: null,
           versionHash: null,
         });
+        if (repoId !== "integrity-unknown") {
+          await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+            conn,
+            repoId,
+            { files: [], fileless: [] },
+          );
+        }
       }
     });
     for (const repoId of [
