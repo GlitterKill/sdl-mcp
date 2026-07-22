@@ -356,6 +356,7 @@ jobs:
 
   background-integrity-benchmark:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     if: github.event_name != 'schedule'
     env:
       SDL_MCP_DISABLE_NATIVE_ADDON: "1"

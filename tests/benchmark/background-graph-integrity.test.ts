@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -10,67 +13,135 @@ import {
   FIXTURE_SEED,
   FIXTURE_SYMBOLS_PER_FILE,
   buildBenchmarkArtifact,
+  cleanupBenchmarkWorkRoot,
   createBenchmarkFixture,
   createBenchmarkLaneInputs,
+  createBenchmarkWorkRoot,
+  createWorkerReporter,
   evaluateBenchmarkChecks,
   nearestRankPercentile,
   runSynchronousControl,
   superviseBenchmarkWorker,
+  validateBenchmarkWorkRoot,
   type BenchmarkPartialProgress,
+  type BenchmarkWorkerMessage,
 } from "../../scripts/background-graph-integrity-benchmark.ts";
 
 type BenchmarkArtifact = ReturnType<typeof buildBenchmarkArtifact>;
 
 class FakeBenchmarkWorker extends EventEmitter {
   readonly events: string[];
+  alive: boolean;
   killed = false;
+  readonly pid: number | undefined;
 
-  constructor(events: string[]) {
+  constructor(events: string[], pid: number | null = 4242) {
     super();
     this.events = events;
+    this.pid = pid ?? undefined;
+    this.alive = pid !== null;
   }
 
-  kill(): boolean {
+  kill(signal: NodeJS.Signals = "SIGTERM"): boolean {
     this.killed = true;
-    this.events.push("kill");
+    this.events.push(signal);
     return true;
+  }
+
+  close(code: number | null, signal: NodeJS.Signals | null): void {
+    this.events.push("exit");
+    this.emit("exit", code, signal);
+    this.alive = false;
+    this.events.push("close");
+    this.emit("close", code, signal);
   }
 }
 
 class FakeWatchdogScheduler {
-  callback: (() => void) | undefined;
-  cleared = false;
-  delayMs: number | undefined;
+  private nextId = 1;
+  readonly timers = new Map<number, { callback: () => void; delayMs: number }>();
 
   setTimeout(callback: () => void, delayMs: number): number {
-    this.callback = callback;
-    this.delayMs = delayMs;
-    return 1;
+    const id = this.nextId++;
+    this.timers.set(id, { callback, delayMs });
+    return id;
   }
 
-  clearTimeout(): void {
-    this.cleared = true;
-    this.callback = undefined;
+  clearTimeout(handle: unknown): void {
+    this.timers.delete(handle as number);
   }
 
-  fire(): void {
-    const callback = this.callback;
-    this.callback = undefined;
-    callback?.();
+  fire(delayMs?: number): void {
+    const entry = [...this.timers.entries()].find(
+      ([, timer]) => delayMs === undefined || timer.delayMs === delayMs,
+    );
+    assert.ok(entry, `No pending timer${delayMs === undefined ? "" : ` for ${delayMs} ms`}`);
+    this.timers.delete(entry[0]);
+    entry[1].callback();
   }
+
+  get pendingCount(): number {
+    return this.timers.size;
+  }
+
+  get delays(): number[] {
+    return [...this.timers.values()].map((timer) => timer.delayMs);
+  }
+}
+
+const TERMINATION_GRACE_MS = 25;
+const FORCE_KILL_TIMEOUT_MS = 50;
+const DEATH_POLL_MS = 5;
+
+function supervisorOptions(
+  worker: FakeBenchmarkWorker,
+  scheduler: FakeWatchdogScheduler,
+  events: string[],
+  writeArtifact: (artifact: BenchmarkArtifact) => void,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    worker,
+    timeoutMs: BENCHMARK_TIMEOUT_MS,
+    terminationGraceMs: TERMINATION_GRACE_MS,
+    forceKillTimeoutMs: FORCE_KILL_TIMEOUT_MS,
+    deathPollMs: DEATH_POLL_MS,
+    scheduler,
+    platform: "linux" as NodeJS.Platform,
+    isProcessAlive: () => worker.alive,
+    async forceTerminate() {
+      events.push("force");
+      worker.close(null, "SIGKILL");
+    },
+    cleanupWorkRoot() {
+      events.push("cleanup");
+    },
+    createFailureArtifact,
+    writeArtifact,
+    ...overrides,
+  };
+}
+
+async function nextTurn<T>(promise: Promise<T>): Promise<T | "pending"> {
+  return Promise.race([
+    promise,
+    new Promise<"pending">((resolvePromise) =>
+      setImmediate(() => resolvePromise("pending")),
+    ),
+  ]);
 }
 
 function createArtifact(overrides: Partial<Parameters<typeof buildBenchmarkArtifact>[0]> = {}) {
   return buildBenchmarkArtifact({
-    commitSha: "0123456789abcdef",
+    commitSha: "0".repeat(40),
     os: "win32",
     cpu: "test cpu",
     node: "v24.0.0",
     ladybugDb: "0.18.1",
     addonMode: "disabled",
-    fixtureHash: "fixture-hash",
-    editSequenceHash: "edit-hash",
-    startingDatabaseHash: "database-hash",
+    fixtureHash: "a".repeat(64),
+    editSequenceHash: "b".repeat(64),
+    startingDatabaseHash: "c".repeat(64),
     cacheMode: "warm-serial",
     candidateForegroundSamplesMs: Array(20).fill(100),
     controlForegroundSamplesMs: Array(20).fill(1_000),
@@ -86,7 +157,7 @@ function createProgress(
   overrides: Partial<BenchmarkPartialProgress> = {},
 ): BenchmarkPartialProgress {
   return {
-    startingDatabaseHash: "database-hash",
+    startingDatabaseHash: "c".repeat(64),
     candidateForegroundSamplesMs: [],
     controlForegroundSamplesMs: [],
     backgroundVerificationSamplesMs: [],
@@ -207,7 +278,7 @@ describe("background graph integrity benchmark contract", () => {
     }
   });
 
-  it("kills and awaits the worker before writing a timeout artifact", async () => {
+  it("escalates a timed-out worker, confirms death, then writes partial evidence", async () => {
     const events: string[] = [];
     const worker = new FakeBenchmarkWorker(events);
     const scheduler = new FakeWatchdogScheduler();
@@ -215,23 +286,19 @@ describe("background graph integrity benchmark contract", () => {
     let written: BenchmarkArtifact | undefined;
     let resolved = false;
 
-    const supervision = superviseBenchmarkWorker({
-      worker,
-      timeoutMs: BENCHMARK_TIMEOUT_MS,
-      scheduler,
-      createFailureArtifact,
-      writeArtifact(artifact) {
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(worker, scheduler, events, (artifact) => {
         events.push("write");
         written = artifact;
-      },
-    }).then((result) => {
+      }),
+    ).then((result) => {
       resolved = true;
       return result;
     });
 
     worker.emit("message", {
       type: "metadata",
-      startingDatabaseHash: "partial-database-hash",
+      startingDatabaseHash: "c".repeat(64),
     });
     worker.emit("message", {
       type: "sample-start",
@@ -241,15 +308,15 @@ describe("background graph integrity benchmark contract", () => {
       type: "sample-end",
       sampleId: "candidate:measured:0",
       progress: createProgress({
-        startingDatabaseHash: "partial-database-hash",
         candidateForegroundSamplesMs: [111],
         backgroundVerificationSamplesMs: [222],
       }),
     });
     worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:1" });
-    assert.equal(scheduler.delayMs, BENCHMARK_TIMEOUT_MS);
-    scheduler.fire();
-    assert.equal(worker.killed, true);
+    worker.emit("message", { type: "capture", count: 1 });
+    assert.deepEqual(scheduler.delays, [BENCHMARK_TIMEOUT_MS]);
+    scheduler.fire(BENCHMARK_TIMEOUT_MS);
+    assert.deepEqual(events, ["SIGTERM"]);
     assert.equal(written, undefined);
 
     worker.emit("message", { type: "sample-end", sampleId: "candidate:measured:1" });
@@ -258,81 +325,53 @@ describe("background graph integrity benchmark contract", () => {
     assert.equal(resolved, false);
     assert.equal(written, undefined);
 
-    events.push("exit");
-    worker.emit("exit", null, "SIGTERM");
+    scheduler.fire(TERMINATION_GRACE_MS);
     const result = await supervision;
 
-    assert.deepEqual(events, ["kill", "exit", "write"]);
+    assert.deepEqual(events, [
+      "SIGTERM",
+      "force",
+      "exit",
+      "close",
+      "cleanup",
+      "write",
+    ]);
+    assert.equal(worker.alive, false);
+    assert.equal(scheduler.pendingCount, 0);
     assert.equal(result.timedOut, true);
     assert.equal(written?.timeoutCount, 1);
     assert.equal(written?.passed, false);
-    assert.equal(written?.startingDatabaseHash, "partial-database-hash");
+    assert.equal(written?.startingDatabaseHash, "c".repeat(64));
     assert.deepEqual(written?.rawSamplesMs.candidateForeground, [111]);
     assert.deepEqual(written?.rawSamplesMs.backgroundVerification, [222]);
+    assert.equal(written?.foregroundFullGraphCaptures, 1);
+    assert.equal(
+      written?.checks.find((check) => check.name === "foreground full-graph captures")
+        ?.passed,
+      false,
+    );
     assert.notStrictEqual(written, completed);
   });
 
-  it("preserves a completed worker artifact and never kills the normal path", async () => {
+  it("preserves a completed worker artifact and cleans only after close", async () => {
     const events: string[] = [];
     const worker = new FakeBenchmarkWorker(events);
     const scheduler = new FakeWatchdogScheduler();
     const completed = createArtifact();
     let written: BenchmarkArtifact | undefined;
 
-    const supervision = superviseBenchmarkWorker({
-      worker,
-      timeoutMs: BENCHMARK_TIMEOUT_MS,
-      scheduler,
-      createFailureArtifact,
-      writeArtifact(artifact) {
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(worker, scheduler, events, (artifact) => {
         events.push("write");
         written = artifact;
-      },
-    });
+      }),
+    );
 
-    worker.emit("message", { type: "sample-start", sampleId: "control:measured:19" });
+    worker.emit("message", { type: "metadata", startingDatabaseHash: "c".repeat(64) });
+    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:0" });
     worker.emit("message", {
       type: "sample-end",
-      sampleId: "control:measured:19",
-      progress: createProgress(),
-    });
-    worker.emit("message", { type: "complete", artifact: completed });
-    assert.equal(written, undefined);
-    events.push("exit");
-    worker.emit("exit", 0, null);
-
-    const result = await supervision;
-    assert.equal(worker.killed, false);
-    assert.equal(scheduler.cleared, true);
-    assert.strictEqual(result.artifact, completed);
-    assert.strictEqual(written, completed);
-    assert.deepEqual(events, ["exit", "write"]);
-  });
-
-  it("writes a failing artifact after an early worker crash and leaves no live child", async () => {
-    const events: string[] = [];
-    const worker = new FakeBenchmarkWorker(events);
-    const scheduler = new FakeWatchdogScheduler();
-    let written: BenchmarkArtifact | undefined;
-
-    const supervision = superviseBenchmarkWorker({
-      worker,
-      timeoutMs: BENCHMARK_TIMEOUT_MS,
-      scheduler,
-      createFailureArtifact,
-      writeArtifact(artifact) {
-        events.push("write");
-        written = artifact;
-      },
-    });
-
-    worker.emit("message", {
-      type: "sample-start",
-      sampleId: "control:measured:19",
-    });
-    worker.emit("message", {
-      type: "sample-end",
-      sampleId: "control:measured:19",
+      sampleId: "candidate:measured:0",
       progress: createProgress({
         candidateForegroundSamplesMs: Array(20).fill(100),
         controlForegroundSamplesMs: Array(20).fill(1_000),
@@ -340,8 +379,32 @@ describe("background graph integrity benchmark contract", () => {
         concurrentForegroundMs: 120,
       }),
     });
-    events.push("exit");
-    worker.emit("exit", 1, null);
+    worker.emit("message", { type: "complete", artifact: completed });
+    assert.equal(written, undefined);
+    worker.close(0, null);
+
+    const result = await supervision;
+    assert.equal(worker.killed, false);
+    assert.equal(scheduler.pendingCount, 0);
+    assert.strictEqual(result.artifact, completed);
+    assert.strictEqual(written, completed);
+    assert.deepEqual(events, ["exit", "close", "cleanup", "write"]);
+  });
+
+  it("writes a failing artifact and cleans after an early worker crash", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    let written: BenchmarkArtifact | undefined;
+
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(worker, scheduler, events, (artifact) => {
+        events.push("write");
+        written = artifact;
+      }),
+    );
+
+    worker.close(1, null);
     const result = await supervision;
 
     assert.equal(worker.killed, false);
@@ -353,7 +416,228 @@ describe("background graph integrity benchmark contract", () => {
         (check) => check.name === "worker process failures" && !check.passed,
       ),
     );
-    assert.deepEqual(events, ["exit", "write"]);
+    assert.deepEqual(events, ["exit", "close", "cleanup", "write"]);
+  });
+
+  it("settles a spawn error with no pid without waiting for an exit event", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events, null);
+    const scheduler = new FakeWatchdogScheduler();
+    let written: BenchmarkArtifact | undefined;
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(worker, scheduler, events, (artifact) => {
+        events.push("write");
+        written = artifact;
+      }),
+    );
+
+    worker.emit("error", new Error("spawn failed"));
+    const result = await nextTurn(supervision);
+
+    assert.notEqual(result, "pending");
+    assert.equal(written?.passed, false);
+    assert.equal(worker.killed, false);
+    assert.deepEqual(events, ["cleanup", "write"]);
+  });
+
+  it("rejects honestly when force termination cannot confirm worker death", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    let written: BenchmarkArtifact | undefined;
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(
+        worker,
+        scheduler,
+        events,
+        (artifact) => {
+          written = artifact;
+        },
+        {
+          async forceTerminate() {
+            events.push("force-failed");
+            throw new Error("force termination failed");
+          },
+        },
+      ),
+    );
+
+    worker.emit("message", { type: "metadata", startingDatabaseHash: "c".repeat(64) });
+    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:0" });
+    scheduler.fire(BENCHMARK_TIMEOUT_MS);
+    scheduler.fire(TERMINATION_GRACE_MS);
+
+    await assert.rejects(supervision, /force termination failed/);
+    assert.equal(written, undefined);
+    assert.equal(worker.alive, true);
+    assert.ok(!events.includes("cleanup"));
+  });
+
+  it("bounds a force-termination command that never settles", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(worker, scheduler, events, () => {}, {
+        forceTerminate: () => new Promise<void>(() => {}),
+      }),
+    );
+
+    worker.emit("message", { type: "metadata", startingDatabaseHash: "c".repeat(64) });
+    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:0" });
+    scheduler.fire(BENCHMARK_TIMEOUT_MS);
+    scheduler.fire(TERMINATION_GRACE_MS);
+    await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+    scheduler.fire(FORCE_KILL_TIMEOUT_MS);
+
+    await assert.rejects(supervision, /force termination command.*timed out/i);
+    assert.equal(worker.alive, true);
+    assert.ok(!events.includes("cleanup"));
+    assert.equal(scheduler.pendingCount, 0);
+  });
+
+  it("rejects malformed IPC and terminates before writing a failure artifact", async () => {
+    const malformedMessages: unknown[] = [
+      { type: "metadata", startingDatabaseHash: "not-a-hash" },
+      { type: "sample-start", sampleId: "candidate:measured:20" },
+      {
+        type: "sample-end",
+        sampleId: "candidate:measured:0",
+        progress: createProgress({ candidateForegroundSamplesMs: [Number.NaN] }),
+      },
+      {
+        type: "complete",
+        artifact: {
+          ...createArtifact(),
+          metricsMs: {
+            ...createArtifact().metricsMs,
+            concurrentForeground: Number.NaN,
+          },
+        },
+      },
+      { type: "complete", artifact: { ...createArtifact(), passed: false } },
+      { type: "unknown" },
+    ];
+
+    for (const malformed of malformedMessages) {
+      const events: string[] = [];
+      const worker = new FakeBenchmarkWorker(events);
+      const scheduler = new FakeWatchdogScheduler();
+      let written: BenchmarkArtifact | undefined;
+      const supervision = superviseBenchmarkWorker(
+        supervisorOptions(worker, scheduler, events, (artifact) => {
+          events.push("write");
+          written = artifact;
+        }),
+      );
+      if (
+        typeof malformed === "object" &&
+        malformed !== null &&
+        !(
+          Reflect.get(malformed, "type") === "metadata" &&
+          Reflect.get(malformed, "startingDatabaseHash") === "not-a-hash"
+        )
+      ) {
+        worker.emit("message", {
+          type: "metadata",
+          startingDatabaseHash: "c".repeat(64),
+        });
+      }
+      if (
+        typeof malformed === "object" &&
+        malformed !== null &&
+        Reflect.get(malformed, "type") === "sample-end"
+      ) {
+        worker.emit("message", {
+          type: "sample-start",
+          sampleId: "candidate:measured:0",
+        });
+      }
+
+      worker.emit("message", malformed);
+      assert.deepEqual(events, ["SIGTERM"]);
+      scheduler.fire(TERMINATION_GRACE_MS);
+      const result = await supervision;
+
+      assert.equal(result.artifact.passed, false);
+      assert.equal(written?.passed, false);
+      assert.ok(
+        written?.checks.some(
+          (check) => check.name === "worker process failures" && !check.passed,
+        ),
+      );
+      assert.equal(worker.alive, false);
+      assert.equal(scheduler.pendingCount, 0);
+    }
+  });
+
+  it("rejects non-monotonic capture evidence as a protocol fault", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    const supervision = superviseBenchmarkWorker(
+      supervisorOptions(worker, scheduler, events, () => {}),
+    );
+
+    worker.emit("message", { type: "metadata", startingDatabaseHash: "c".repeat(64) });
+    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:0" });
+    worker.emit("message", { type: "capture", count: 1 });
+    worker.emit("message", { type: "capture", count: 1 });
+    assert.deepEqual(events, ["SIGTERM"]);
+    scheduler.fire(TERMINATION_GRACE_MS);
+    const result = await supervision;
+
+    assert.equal(result.artifact.foregroundFullGraphCaptures, 1);
+    assert.equal(result.artifact.passed, false);
+  });
+
+  it("streams cumulative capture evidence synchronously from the worker reporter", () => {
+    const progress = createProgress();
+    const messages: BenchmarkWorkerMessage[] = [];
+    const reporter = createWorkerReporter(
+      progress,
+      async (message) => {
+        messages.push(message);
+      },
+      (message) => {
+        messages.push(message);
+      },
+    );
+
+    reporter.capture(1);
+
+    assert.equal(progress.foregroundFullGraphCaptures, 1);
+    assert.deepEqual(messages, [{ type: "capture", count: 1 }]);
+  });
+
+  it("creates and removes only validated benchmark roots beneath the temp root", () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "sdl-bgi-contract-"));
+    try {
+      const workRoot = createBenchmarkWorkRoot(sandbox);
+      assert.equal(validateBenchmarkWorkRoot(workRoot, sandbox), resolve(workRoot));
+      assert.equal(existsSync(workRoot), true);
+
+      cleanupBenchmarkWorkRoot(workRoot, sandbox);
+      assert.equal(existsSync(workRoot), false);
+
+      const unsafeRoot = join(sandbox, "not-a-benchmark-root");
+      mkdirSync(unsafeRoot);
+      assert.throws(
+        () => cleanupBenchmarkWorkRoot(unsafeRoot, sandbox),
+        /benchmark work root/i,
+      );
+      assert.equal(existsSync(unsafeRoot), true);
+      assert.throws(
+        () => validateBenchmarkWorkRoot(resolve(sandbox, "..", "outside"), sandbox),
+        /temporary directory/i,
+      );
+      assert.throws(
+        () => validateBenchmarkWorkRoot(sandbox, sandbox),
+        /benchmark work root/i,
+      );
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   });
 
   it("does not resolve the synchronous control before capture, compare, and publication", async () => {

@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import {
@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { cpus, platform, tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -51,6 +51,9 @@ export const FIXTURE_SYMBOLS_PER_FILE = 20;
 export const BENCHMARK_WARMUP_COUNT = 3;
 export const BENCHMARK_SAMPLE_COUNT = 20;
 export const BENCHMARK_TIMEOUT_MS = 30_000;
+const BENCHMARK_TERMINATION_GRACE_MS = 5_000;
+const BENCHMARK_FORCE_KILL_TIMEOUT_MS = 10_000;
+const BENCHMARK_DEATH_POLL_MS = 50;
 
 export const DEFAULT_THRESHOLDS = {
   candidateForegroundP50Ms: 500,
@@ -138,21 +141,31 @@ export type BenchmarkArtifact = ReturnType<typeof buildBenchmarkArtifact>;
 export type BenchmarkWorkerMessage =
   | { type: "metadata"; startingDatabaseHash: string }
   | { type: "sample-start"; sampleId: string }
+  | { type: "capture"; count: number }
   | {
       type: "sample-end";
       sampleId: string;
       progress: BenchmarkPartialProgress;
     }
-  | { type: "complete"; artifact: BenchmarkArtifact };
+  | { type: "complete"; artifact: BenchmarkArtifact }
+  | { type: "error"; message: string };
 
 interface BenchmarkWorker extends EventEmitter {
-  kill(): boolean;
+  readonly pid?: number;
+  kill(signal?: NodeJS.Signals | number): boolean;
 }
 
 interface BenchmarkSupervisorOptions {
   worker: BenchmarkWorker;
   timeoutMs: number;
+  terminationGraceMs?: number;
+  forceKillTimeoutMs?: number;
+  deathPollMs?: number;
   scheduler?: TimeoutScheduler;
+  platform?: NodeJS.Platform;
+  isProcessAlive?(pid: number): boolean;
+  forceTerminate?(worker: BenchmarkWorker, platform: NodeJS.Platform): Promise<void>;
+  cleanupWorkRoot?(): void;
   createFailureArtifact(
     timeoutCount: number,
     progress: BenchmarkPartialProgress,
@@ -175,6 +188,7 @@ interface BenchmarkSampleUpdate {
 
 interface BenchmarkSampleReporter {
   start(sampleId: string): Promise<void>;
+  capture(count: number): void;
   end(sampleId: string, update: BenchmarkSampleUpdate): Promise<void>;
 }
 
@@ -185,6 +199,36 @@ const nativeTimeoutScheduler: TimeoutScheduler = {
 
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+export function validateBenchmarkWorkRoot(
+  workRoot: string,
+  tempRoot = tmpdir(),
+): string {
+  const resolvedTempRoot = resolve(tempRoot);
+  const resolvedWorkRoot = resolve(workRoot);
+  const rel = relative(resolvedTempRoot, resolvedWorkRoot);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error("Benchmark work root must remain inside the temporary directory");
+  }
+  if (!rel || rel.includes(sep) || !rel.startsWith("sdl-bgi-")) {
+    throw new Error("Invalid benchmark work root");
+  }
+  return resolvedWorkRoot;
+}
+
+export function createBenchmarkWorkRoot(tempRoot = tmpdir()): string {
+  return mkdtempSync(join(resolve(tempRoot), "sdl-bgi-"));
+}
+
+export function cleanupBenchmarkWorkRoot(
+  workRoot: string,
+  tempRoot = tmpdir(),
+): void {
+  rmSync(validateBenchmarkWorkRoot(workRoot, tempRoot), {
+    recursive: true,
+    force: true,
+  });
 }
 
 function pad(value: number, width: number): string {
@@ -320,17 +364,365 @@ function copyBenchmarkProgress(
   };
 }
 
-function isWorkerMessage(message: unknown): message is BenchmarkWorkerMessage {
-  if (typeof message !== "object" || message === null || !("type" in message)) {
-    return false;
-  }
-  const type = Reflect.get(message, "type");
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isHash(value: unknown, length: number): value is string {
+  return typeof value === "string" && new RegExp(`^[0-9a-f]{${length}}$`, "u").test(value);
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return isNonNegativeFiniteNumber(value) && Number.isInteger(value);
+}
+
+function isSampleArray(value: unknown): value is number[] {
   return (
-    type === "metadata" ||
-    type === "sample-start" ||
-    type === "sample-end" ||
-    type === "complete"
+    Array.isArray(value) &&
+    value.length <= BENCHMARK_SAMPLE_COUNT &&
+    value.every(isNonNegativeFiniteNumber)
   );
+}
+
+function isSampleId(value: unknown): value is string {
+  if (value === "concurrent:0") return true;
+  if (typeof value !== "string") return false;
+  const match = /^(candidate|control):(warmup|measured):(\d+)$/u.exec(value);
+  if (!match) return false;
+  const index = Number(match[3]);
+  return match[2] === "warmup"
+    ? index < BENCHMARK_WARMUP_COUNT
+    : index < BENCHMARK_SAMPLE_COUNT;
+}
+
+function parseBenchmarkProgress(value: unknown): BenchmarkPartialProgress | undefined {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "startingDatabaseHash",
+      "candidateForegroundSamplesMs",
+      "controlForegroundSamplesMs",
+      "backgroundVerificationSamplesMs",
+      "concurrentForegroundMs",
+      "foregroundFullGraphCaptures",
+    ]) ||
+    !isHash(value.startingDatabaseHash, 64) ||
+    !isSampleArray(value.candidateForegroundSamplesMs) ||
+    !isSampleArray(value.controlForegroundSamplesMs) ||
+    !isSampleArray(value.backgroundVerificationSamplesMs) ||
+    value.backgroundVerificationSamplesMs.length !==
+      value.candidateForegroundSamplesMs.length ||
+    !isNonNegativeFiniteNumber(value.concurrentForegroundMs) ||
+    !isNonNegativeInteger(value.foregroundFullGraphCaptures)
+  ) {
+    return undefined;
+  }
+  return {
+    startingDatabaseHash: value.startingDatabaseHash,
+    candidateForegroundSamplesMs: [...value.candidateForegroundSamplesMs],
+    controlForegroundSamplesMs: [...value.controlForegroundSamplesMs],
+    backgroundVerificationSamplesMs: [
+      ...value.backgroundVerificationSamplesMs,
+    ],
+    concurrentForegroundMs: value.concurrentForegroundMs,
+    foregroundFullGraphCaptures: value.foregroundFullGraphCaptures,
+  };
+}
+
+function parseBenchmarkArtifact(value: unknown): BenchmarkArtifact | undefined {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "schemaVersion",
+      "commitSha",
+      "os",
+      "cpu",
+      "node",
+      "ladybugDb",
+      "addonMode",
+      "fixtureSeed",
+      "fixtureHash",
+      "editSequenceHash",
+      "startingDatabaseHash",
+      "cacheMode",
+      "warmupCount",
+      "sampleCount",
+      "timeoutMs",
+      "rawSamplesMs",
+      "metricsMs",
+      "timeoutCount",
+      "thresholds",
+      "foregroundFullGraphCaptures",
+      "checks",
+      "passed",
+    ]) ||
+    value.schemaVersion !== BENCHMARK_SCHEMA_VERSION ||
+    !isHash(value.commitSha, 40) ||
+    !isNonEmptyString(value.os) ||
+    !(value.cpu === null || isNonEmptyString(value.cpu)) ||
+    !isNonEmptyString(value.node) ||
+    !isNonEmptyString(value.ladybugDb) ||
+    !(value.addonMode === "disabled" || value.addonMode === "enabled") ||
+    value.fixtureSeed !== FIXTURE_SEED ||
+    !isHash(value.fixtureHash, 64) ||
+    !isHash(value.editSequenceHash, 64) ||
+    !isHash(value.startingDatabaseHash, 64) ||
+    value.cacheMode !== "warm-serial" ||
+    value.warmupCount !== BENCHMARK_WARMUP_COUNT ||
+    value.sampleCount !== BENCHMARK_SAMPLE_COUNT ||
+    value.timeoutMs !== BENCHMARK_TIMEOUT_MS ||
+    !isRecord(value.rawSamplesMs) ||
+    !hasExactKeys(value.rawSamplesMs, [
+      "candidateForeground",
+      "controlForeground",
+      "backgroundVerification",
+    ]) ||
+    !isSampleArray(value.rawSamplesMs.candidateForeground) ||
+    value.rawSamplesMs.candidateForeground.length !== BENCHMARK_SAMPLE_COUNT ||
+    !isSampleArray(value.rawSamplesMs.controlForeground) ||
+    value.rawSamplesMs.controlForeground.length !== BENCHMARK_SAMPLE_COUNT ||
+    !isSampleArray(value.rawSamplesMs.backgroundVerification) ||
+    value.rawSamplesMs.backgroundVerification.length !== BENCHMARK_SAMPLE_COUNT ||
+    !isRecord(value.metricsMs) ||
+    !isNonNegativeFiniteNumber(value.metricsMs.concurrentForeground) ||
+    !isNonNegativeInteger(value.timeoutCount) ||
+    !isNonNegativeInteger(value.foregroundFullGraphCaptures)
+  ) {
+    return undefined;
+  }
+  const expected = buildBenchmarkArtifact({
+    commitSha: value.commitSha,
+    os: value.os,
+    cpu: value.cpu,
+    node: value.node,
+    ladybugDb: value.ladybugDb,
+    addonMode: value.addonMode,
+    fixtureHash: value.fixtureHash,
+    editSequenceHash: value.editSequenceHash,
+    startingDatabaseHash: value.startingDatabaseHash,
+    cacheMode: value.cacheMode,
+    candidateForegroundSamplesMs: value.rawSamplesMs.candidateForeground,
+    controlForegroundSamplesMs: value.rawSamplesMs.controlForeground,
+    backgroundVerificationSamplesMs:
+      value.rawSamplesMs.backgroundVerification,
+    concurrentForegroundMs: value.metricsMs.concurrentForeground,
+    timeoutCount: value.timeoutCount,
+    foregroundFullGraphCaptures: value.foregroundFullGraphCaptures,
+  });
+  return JSON.stringify(value) === JSON.stringify(expected)
+    ? (value as BenchmarkArtifact)
+    : undefined;
+}
+
+function parseWorkerMessage(message: unknown): BenchmarkWorkerMessage | undefined {
+  if (!isRecord(message) || !isNonEmptyString(message.type)) return undefined;
+  switch (message.type) {
+    case "metadata":
+      return hasExactKeys(message, ["type", "startingDatabaseHash"]) &&
+        isHash(message.startingDatabaseHash, 64)
+        ? { type: "metadata", startingDatabaseHash: message.startingDatabaseHash }
+        : undefined;
+    case "sample-start":
+      return hasExactKeys(message, ["type", "sampleId"]) && isSampleId(message.sampleId)
+        ? { type: "sample-start", sampleId: message.sampleId }
+        : undefined;
+    case "capture":
+      return hasExactKeys(message, ["type", "count"]) &&
+        isNonNegativeInteger(message.count) &&
+        message.count > 0
+        ? { type: "capture", count: message.count }
+        : undefined;
+    case "sample-end": {
+      const progress = parseBenchmarkProgress(message.progress);
+      return hasExactKeys(message, ["type", "sampleId", "progress"]) &&
+        isSampleId(message.sampleId) &&
+        progress
+        ? { type: "sample-end", sampleId: message.sampleId, progress }
+        : undefined;
+    }
+    case "complete": {
+      const artifact = parseBenchmarkArtifact(message.artifact);
+      return hasExactKeys(message, ["type", "artifact"]) && artifact
+        ? { type: "complete", artifact }
+        : undefined;
+    }
+    case "error":
+      return hasExactKeys(message, ["type", "message"]) &&
+        isNonEmptyString(message.message) &&
+        message.message.length <= 4_096
+        ? { type: "error", message: message.message }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function arraysExtend(previous: readonly number[], next: readonly number[]): boolean {
+  return (
+    next.length >= previous.length &&
+    previous.every((value, index) => next[index] === value)
+  );
+}
+
+function progressIsMonotonic(
+  previous: BenchmarkPartialProgress,
+  next: BenchmarkPartialProgress,
+): boolean {
+  return (
+    (previous.startingDatabaseHash === "unavailable" ||
+      next.startingDatabaseHash === previous.startingDatabaseHash) &&
+    arraysExtend(
+      previous.candidateForegroundSamplesMs,
+      next.candidateForegroundSamplesMs,
+    ) &&
+    arraysExtend(
+      previous.controlForegroundSamplesMs,
+      next.controlForegroundSamplesMs,
+    ) &&
+    arraysExtend(
+      previous.backgroundVerificationSamplesMs,
+      next.backgroundVerificationSamplesMs,
+    ) &&
+    (previous.concurrentForegroundMs === Number.MAX_VALUE ||
+      next.concurrentForegroundMs === previous.concurrentForegroundMs) &&
+    next.foregroundFullGraphCaptures ===
+      previous.foregroundFullGraphCaptures
+  );
+}
+
+function artifactMatchesProgress(
+  artifact: BenchmarkArtifact,
+  progress: BenchmarkPartialProgress,
+): boolean {
+  return (
+    artifact.startingDatabaseHash === progress.startingDatabaseHash &&
+    JSON.stringify(artifact.rawSamplesMs.candidateForeground) ===
+      JSON.stringify(progress.candidateForegroundSamplesMs) &&
+    JSON.stringify(artifact.rawSamplesMs.controlForeground) ===
+      JSON.stringify(progress.controlForegroundSamplesMs) &&
+    JSON.stringify(artifact.rawSamplesMs.backgroundVerification) ===
+      JSON.stringify(progress.backgroundVerificationSamplesMs) &&
+    artifact.metricsMs.concurrentForeground === progress.concurrentForegroundMs &&
+    artifact.foregroundFullGraphCaptures ===
+      progress.foregroundFullGraphCaptures
+  );
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && "code" in error && error.code === "ESRCH");
+  }
+}
+
+async function forceTerminateWorker(
+  worker: BenchmarkWorker,
+  currentPlatform: NodeJS.Platform,
+): Promise<void> {
+  const pid = worker.pid;
+  if (pid === undefined) return;
+  if (currentPlatform !== "win32") {
+    worker.kill("SIGKILL");
+    return;
+  }
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    execFile(
+      "taskkill.exe",
+      ["/PID", String(pid), "/T", "/F"],
+      { windowsHide: true, timeout: BENCHMARK_FORCE_KILL_TIMEOUT_MS },
+      (error) => {
+        if (error) rejectPromise(error);
+        else resolvePromise();
+      },
+    );
+  });
+}
+
+function waitForOperationWithTimeout<T>(
+  operation: Promise<T>,
+  scheduler: TimeoutScheduler,
+  timeoutMs: number,
+  description: string,
+): Promise<T> {
+  return new Promise<T>((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const handle = scheduler.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      rejectPromise(new Error(`${description} timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
+    operation.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        scheduler.clearTimeout(handle);
+        resolvePromise(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        scheduler.clearTimeout(handle);
+        rejectPromise(error);
+      },
+    );
+  });
+}
+
+function waitForCloseOrTimeout(
+  closePromise: Promise<void>,
+  scheduler: TimeoutScheduler,
+  delayMs: number,
+): Promise<void> {
+  return new Promise<void>((resolvePromise) => {
+    let settled = false;
+    let handle: unknown;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (handle !== undefined) scheduler.clearTimeout(handle);
+      resolvePromise();
+    };
+    handle = scheduler.setTimeout(finish, delayMs);
+    closePromise.then(finish);
+  });
+}
+
+async function waitForProcessDeath(
+  pid: number,
+  alive: (processId: number) => boolean,
+  closePromise: Promise<void>,
+  scheduler: TimeoutScheduler,
+  pollMs: number,
+  timeoutMs: number,
+): Promise<void> {
+  let waitedMs = 0;
+  while (alive(pid)) {
+    if (waitedMs >= timeoutMs) {
+      throw new Error(`Worker process ${pid} remained alive after force termination`);
+    }
+    const delayMs = Math.min(pollMs, timeoutMs - waitedMs);
+    await waitForCloseOrTimeout(closePromise, scheduler, delayMs);
+    waitedMs += delayMs;
+  }
 }
 
 function addWorkerExitFailure(artifact: BenchmarkArtifact): BenchmarkArtifact {
@@ -348,6 +740,14 @@ export async function superviseBenchmarkWorker(
   options: BenchmarkSupervisorOptions,
 ): Promise<BenchmarkSupervisorResult> {
   const scheduler = options.scheduler ?? nativeTimeoutScheduler;
+  const terminationGraceMs =
+    options.terminationGraceMs ?? BENCHMARK_TERMINATION_GRACE_MS;
+  const forceKillTimeoutMs =
+    options.forceKillTimeoutMs ?? BENCHMARK_FORCE_KILL_TIMEOUT_MS;
+  const deathPollMs = options.deathPollMs ?? BENCHMARK_DEATH_POLL_MS;
+  const currentPlatform = options.platform ?? platform();
+  const alive = options.isProcessAlive ?? isProcessAlive;
+  const forceTerminate = options.forceTerminate ?? forceTerminateWorker;
   return new Promise<BenchmarkSupervisorResult>((resolvePromise, rejectPromise) => {
     let activeSampleId: string | undefined;
     let completedArtifact: BenchmarkArtifact | undefined;
@@ -357,6 +757,12 @@ export async function superviseBenchmarkWorker(
     let workerFailed = false;
     let ignoreMessages = false;
     let settled = false;
+    let failureStarted = false;
+    let closeCode: number | null = null;
+    let resolveClose!: () => void;
+    const closePromise = new Promise<void>((resolvePromise) => {
+      resolveClose = resolvePromise;
+    });
 
     const clearWatchdog = () => {
       if (watchdog !== undefined) {
@@ -364,78 +770,175 @@ export async function superviseBenchmarkWorker(
         watchdog = undefined;
       }
     };
-    const terminateWorker = (timeout: boolean) => {
-      if (ignoreMessages) return;
+    const rejectSupervisor = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearWatchdog();
+      rejectPromise(error);
+    };
+
+    const finish = () => {
+      if (settled) return;
+      const pid = options.worker.pid;
+      if (pid !== undefined && alive(pid)) {
+        rejectSupervisor(
+          new Error(`Worker process ${pid} was not confirmed dead before finalization`),
+        );
+        return;
+      }
+      settled = true;
+      clearWatchdog();
+      try {
+        let artifact: BenchmarkArtifact;
+        if (!timedOut && !workerFailed && closeCode === 0 && completedArtifact) {
+          artifact = completedArtifact;
+        } else {
+          artifact = options.createFailureArtifact(
+            timedOut ? 1 : 0,
+            copyBenchmarkProgress(progress),
+          );
+          if (!timedOut) artifact = addWorkerExitFailure(artifact);
+        }
+        options.cleanupWorkRoot?.();
+        options.writeArtifact(artifact);
+        resolvePromise({ artifact, timedOut });
+      } catch (error) {
+        rejectPromise(error);
+      }
+    };
+
+    const terminateWorker = async (timeout: boolean) => {
+      if (failureStarted || settled) return;
+      failureStarted = true;
       timedOut = timeout;
       workerFailed = !timeout;
       ignoreMessages = true;
       clearWatchdog();
-      options.worker.kill();
+      const pid = options.worker.pid;
+      if (pid === undefined) {
+        finish();
+        return;
+      }
+      try {
+        try {
+          options.worker.kill("SIGTERM");
+        } catch {
+          // Force termination below remains authoritative.
+        }
+        await waitForCloseOrTimeout(closePromise, scheduler, terminationGraceMs);
+        if (alive(pid)) {
+          try {
+            await waitForOperationWithTimeout(
+              forceTerminate(options.worker, currentPlatform),
+              scheduler,
+              forceKillTimeoutMs,
+              "Force termination command",
+            );
+          } catch (error) {
+            if (alive(pid)) throw error;
+          }
+          await waitForProcessDeath(
+            pid,
+            alive,
+            closePromise,
+            scheduler,
+            deathPollMs,
+            forceKillTimeoutMs,
+          );
+        }
+        finish();
+      } catch (error) {
+        rejectSupervisor(error);
+      }
     };
 
     options.worker.on("message", (message: unknown) => {
-      if (ignoreMessages || !isWorkerMessage(message)) return;
-      if (message.type === "metadata") {
+      if (ignoreMessages || settled) return;
+      const parsed = parseWorkerMessage(message);
+      if (!parsed) {
+        void terminateWorker(false);
+        return;
+      }
+      if (parsed.type === "metadata") {
+        if (
+          progress.startingDatabaseHash !== "unavailable" ||
+          activeSampleId !== undefined ||
+          completedArtifact !== undefined
+        ) {
+          void terminateWorker(false);
+          return;
+        }
         progress = {
           ...progress,
-          startingDatabaseHash: message.startingDatabaseHash,
+          startingDatabaseHash: parsed.startingDatabaseHash,
         };
         return;
       }
-      if (message.type === "sample-start") {
-        if (activeSampleId !== undefined || completedArtifact !== undefined) {
-          terminateWorker(false);
+      if (parsed.type === "sample-start") {
+        if (
+          progress.startingDatabaseHash === "unavailable" ||
+          activeSampleId !== undefined ||
+          completedArtifact !== undefined
+        ) {
+          void terminateWorker(false);
           return;
         }
-        activeSampleId = message.sampleId;
+        activeSampleId = parsed.sampleId;
         watchdog = scheduler.setTimeout(() => {
-          terminateWorker(true);
+          void terminateWorker(true);
         }, options.timeoutMs);
         return;
       }
-      if (message.type === "sample-end") {
-        if (activeSampleId !== message.sampleId) {
-          terminateWorker(false);
+      if (parsed.type === "capture") {
+        if (
+          activeSampleId === undefined ||
+          parsed.count !== progress.foregroundFullGraphCaptures + 1
+        ) {
+          void terminateWorker(false);
+          return;
+        }
+        progress = { ...progress, foregroundFullGraphCaptures: parsed.count };
+        return;
+      }
+      if (parsed.type === "sample-end") {
+        if (
+          activeSampleId !== parsed.sampleId ||
+          !progressIsMonotonic(progress, parsed.progress)
+        ) {
+          void terminateWorker(false);
           return;
         }
         clearWatchdog();
         activeSampleId = undefined;
-        progress = copyBenchmarkProgress(message.progress);
+        progress = copyBenchmarkProgress(parsed.progress);
         return;
       }
-      if (activeSampleId !== undefined || completedArtifact !== undefined) {
-        terminateWorker(false);
+      if (parsed.type === "error") {
+        void terminateWorker(false);
         return;
       }
-      completedArtifact = message.artifact;
+      if (
+        activeSampleId !== undefined ||
+        completedArtifact !== undefined ||
+        progress.startingDatabaseHash === "unavailable" ||
+        !artifactMatchesProgress(parsed.artifact, progress)
+      ) {
+        void terminateWorker(false);
+        return;
+      }
+      completedArtifact = parsed.artifact;
     });
 
     options.worker.on("error", () => {
-      terminateWorker(false);
+      void terminateWorker(false);
     });
 
     options.worker.on(
-      "exit",
+      "close",
       (code: number | null, _signal: NodeJS.Signals | null) => {
-        if (settled) return;
-        settled = true;
-        clearWatchdog();
-        try {
-          let artifact: BenchmarkArtifact;
-          if (!timedOut && !workerFailed && code === 0 && completedArtifact) {
-            artifact = completedArtifact;
-          } else {
-            artifact = options.createFailureArtifact(
-              timedOut ? 1 : 0,
-              copyBenchmarkProgress(progress),
-            );
-            if (!timedOut) artifact = addWorkerExitFailure(artifact);
-          }
-          options.writeArtifact(artifact);
-          resolvePromise({ artifact, timedOut });
-        } catch (error) {
-          rejectPromise(error);
-        }
+        closeCode = code;
+        resolveClose();
+        if (!failureStarted) finish();
       },
     );
   });
@@ -565,6 +1068,7 @@ async function runCandidateLane(
     await reporter.start(sampleId);
     const sample = await runCandidateSample(repoId, edit, () => {
       foregroundFullGraphCaptures += 1;
+      reporter.capture(foregroundFullGraphCaptures);
     });
     const update: BenchmarkSampleUpdate = { foregroundFullGraphCaptures };
     if (index >= BENCHMARK_WARMUP_COUNT) {
@@ -590,6 +1094,7 @@ async function runCandidateLane(
       },
       onForegroundFullGraphCapture() {
         foregroundFullGraphCaptures += 1;
+        reporter.capture(foregroundFullGraphCaptures);
       },
     },
   );
@@ -613,6 +1118,7 @@ async function runCandidateLane(
       },
       onForegroundFullGraphCapture() {
         foregroundFullGraphCaptures += 1;
+        reporter.capture(foregroundFullGraphCaptures);
       },
     },
   );
@@ -920,6 +1426,24 @@ function parseOutPath(argv: readonly string[]): string {
   return output;
 }
 
+function parseWorkerArgs(argv: readonly string[]): {
+  outputPath: string;
+  workRoot: string;
+} {
+  const workRootIndex = argv.indexOf("--work-root");
+  if (workRootIndex < 0 || !argv[workRootIndex + 1] || argv.length !== 4) {
+    throw new Error("Benchmark worker requires --out and --work-root");
+  }
+  const outIndex = argv.indexOf("--out");
+  if (outIndex < 0 || !argv[outIndex + 1]) {
+    throw new Error("Benchmark worker requires --out and --work-root");
+  }
+  return {
+    outputPath: parseOutPath(["--out", argv[outIndex + 1]]),
+    workRoot: validateBenchmarkWorkRoot(argv[workRootIndex + 1]),
+  };
+}
+
 function getBenchmarkMetadata(fixture: BenchmarkFixture) {
   return {
     commitSha: execFileSync("git", ["rev-parse", "HEAD"], {
@@ -972,14 +1496,27 @@ async function sendWorkerMessage(message: BenchmarkWorkerMessage): Promise<void>
   });
 }
 
-function createWorkerReporter(
+function sendWorkerMessageNow(message: BenchmarkWorkerMessage): void {
+  if (!process.send) {
+    throw new Error("Benchmark worker requires an IPC channel");
+  }
+  process.send(message);
+}
+
+export function createWorkerReporter(
   progress: BenchmarkPartialProgress,
+  send: (message: BenchmarkWorkerMessage) => Promise<void> = sendWorkerMessage,
+  sendNow: (message: BenchmarkWorkerMessage) => void = sendWorkerMessageNow,
 ): BenchmarkSampleReporter {
   return {
     async start(sampleId) {
       // IPC is outside the timed measurement; the parent watchdog covers the
       // complete DB operation and its exact-revision verification wait.
-      await sendWorkerMessage({ type: "sample-start", sampleId });
+      await send({ type: "sample-start", sampleId });
+    },
+    capture(count) {
+      progress.foregroundFullGraphCaptures = count;
+      sendNow({ type: "capture", count });
     },
     async end(sampleId, update) {
       if (update.candidateForegroundMs !== undefined) {
@@ -1000,7 +1537,7 @@ function createWorkerReporter(
         progress.foregroundFullGraphCaptures =
           update.foregroundFullGraphCaptures;
       }
-      await sendWorkerMessage({
+      await send({
         type: "sample-end",
         sampleId,
         progress: copyBenchmarkProgress(progress),
@@ -1009,7 +1546,7 @@ function createWorkerReporter(
   };
 }
 
-async function runBenchmarkWorker(): Promise<BenchmarkArtifact> {
+async function runBenchmarkWorker(workRoot: string): Promise<BenchmarkArtifact> {
   const fixture = createBenchmarkFixture();
   const metadata = getBenchmarkMetadata(fixture);
   const progress = emptyBenchmarkProgress();
@@ -1023,7 +1560,7 @@ async function runBenchmarkWorker(): Promise<BenchmarkArtifact> {
   ) {
     throw new Error("Candidate and control inputs are not byte-identical");
   }
-  const workRoot = mkdtempSync(join(tmpdir(), "sdl-bgi-"));
+  validateBenchmarkWorkRoot(workRoot);
   const repoRoot = join(workRoot, "repo");
   const configPath = join(workRoot, "sdlmcp.config.json");
   const baseDb = join(workRoot, "base.lbug");
@@ -1093,7 +1630,6 @@ async function runBenchmarkWorker(): Promise<BenchmarkArtifact> {
     restoreEnv("SDL_GRAPH_DB_PATH", previousEnv.graphDbPath);
     restoreEnv("SDL_GRAPH_DB_DIR", previousEnv.graphDbDir);
     restoreEnv("SDL_DB_PATH", previousEnv.dbPath);
-    rmSync(workRoot, { recursive: true, force: true });
   }
 }
 
@@ -1117,26 +1653,36 @@ function printBenchmarkResult(outputPath: string, artifact: BenchmarkArtifact): 
 async function runBenchmarkParent(outputPath: string): Promise<void> {
   const fixture = createBenchmarkFixture();
   const metadata = getBenchmarkMetadata(fixture);
-  const worker = spawn(
-    process.execPath,
-    [
-      "--experimental-strip-types",
-      fileURLToPath(import.meta.url),
-      "--worker",
-      "--out",
-      outputPath,
-    ],
-    {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: ["inherit", "inherit", "inherit", "ipc"],
-    },
-  );
+  const workRoot = createBenchmarkWorkRoot();
+  let worker: ReturnType<typeof spawn>;
+  try {
+    worker = spawn(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        fileURLToPath(import.meta.url),
+        "--worker",
+        "--out",
+        outputPath,
+        "--work-root",
+        workRoot,
+      ],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: ["inherit", "inherit", "inherit", "ipc"],
+      },
+    );
+  } catch (error) {
+    cleanupBenchmarkWorkRoot(workRoot);
+    throw error;
+  }
   const result = await superviseBenchmarkWorker({
     worker,
     timeoutMs: BENCHMARK_TIMEOUT_MS,
     createFailureArtifact: (timeoutCount, progress) =>
       buildArtifactFromProgress(metadata, progress, timeoutCount),
+    cleanupWorkRoot: () => cleanupBenchmarkWorkRoot(workRoot),
     writeArtifact: (artifact) => writeBenchmarkArtifact(outputPath, artifact),
   });
   printBenchmarkResult(outputPath, result.artifact);
@@ -1151,9 +1697,18 @@ function restoreEnv(name: string, value: string | undefined): void {
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv[0] === "--worker") {
-    parseOutPath(argv.slice(1));
-    const artifact = await runBenchmarkWorker();
-    await sendWorkerMessage({ type: "complete", artifact });
+    const workerArgs = parseWorkerArgs(argv.slice(1));
+    try {
+      const artifact = await runBenchmarkWorker(workerArgs.workRoot);
+      await sendWorkerMessage({ type: "complete", artifact });
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : String(error)).slice(
+        0,
+        4_096,
+      );
+      await sendWorkerMessage({ type: "error", message }).catch(() => {});
+      throw error;
+    }
     return;
   }
   await runBenchmarkParent(parseOutPath(argv));
