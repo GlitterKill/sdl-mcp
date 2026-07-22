@@ -7,8 +7,13 @@ import {
   type ServerNotification,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { getLadybugConn } from "./db/ladybug.js";
+import { IndexError } from "./domain/errors.js";
 import { errorToMcpResponse } from "./mcp/errors.js";
-import { runToolDispatch } from "./mcp/dispatch-limiter.js";
+import {
+  runIndexRefreshAdmission,
+  runToolDispatch,
+} from "./mcp/dispatch-limiter.js";
 import { logToolCall } from "./mcp/telemetry.js";
 import {
   buildCompactJsonSchema,
@@ -54,6 +59,8 @@ import {
 } from "./mcp/timing-diagnostics.js";
 import { SDL_MCP_SERVER_INSTRUCTIONS } from "./mcp/server-instructions.js";
 import { markActionArgsParsed } from "./gateway/dispatch-spine.js";
+import { classifyPublicGraphRetrieval } from "./mcp/public-graph-retrieval-admission.js";
+import { assertGraphRetrievalAvailable } from "./services/graph-retrieval-availability.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -664,26 +671,49 @@ export class MCPServer {
             tool.inputSchema,
             parseResult.data,
           );
-          if (toolContext.sessionId && isRecordValue(parsedArgs)) {
-            const referencedSymbolIds = extractReferencedSymbolIds(parsedArgs);
-            if (referencedSymbolIds.length > 0) {
-              wasteLedger.recordReferenced(
-                toolContext.sessionId,
-                referencedSymbolIds,
-              );
-            }
-          }
-
           try {
+            const dispatchTool = async (): Promise<unknown> => {
+              const graphAdmission = classifyPublicGraphRetrieval(
+                toolName,
+                parsedArgs,
+              );
+              if (graphAdmission.mode === "central") {
+                if (!graphAdmission.repoId) {
+                  throw new IndexError(
+                    'Graph retrieval requires an explicit repoId. Provide repoId. Run sdl.index.refresh with mode:"full" if the graph must be rebuilt and verified.',
+                  );
+                }
+                const conn = await getLadybugConn();
+                await assertGraphRetrievalAvailable(
+                  conn,
+                  graphAdmission.repoId,
+                );
+              }
+              if (toolContext.sessionId && isRecordValue(parsedArgs)) {
+                const referencedSymbolIds =
+                  extractReferencedSymbolIds(parsedArgs);
+                if (referencedSymbolIds.length > 0) {
+                  wasteLedger.recordReferenced(
+                    toolContext.sessionId,
+                    referencedSymbolIds,
+                  );
+                }
+              }
+              return tool.handler(parsedArgs, toolContext);
+            };
+
             // Pass the parsed (validated + coerced) data to the handler
             const dispatchStartedAt = timer.start();
-            const result = shouldBypassToolDispatch(toolName, parsedArgs)
-              ? await tool.handler(parsedArgs, toolContext)
-              : await runToolDispatch(
-                  () => tool.handler(parsedArgs, toolContext),
-                  undefined,
-                  toolName,
-                );
+            const runDispatch = () =>
+              shouldBypassToolDispatch(toolName, parsedArgs)
+                ? dispatchTool()
+                : runToolDispatch(dispatchTool, undefined, toolName);
+            // Refresh admission must happen before the outer dispatch lease.
+            // This also covers workflows, whose refresh step executes inside
+            // the workflow's single outer lease rather than acquiring its own.
+            const result = isPublicIndexRefresh(toolName, parsedArgs)
+              ? await runIndexRefreshAdmission(runDispatch, toolContext.signal)
+              : await runDispatch();
             timer.record("server.dispatch", dispatchStartedAt);
 
             // Inject _tokenUsage and strip _rawContext before serialization
@@ -1117,6 +1147,26 @@ export function shouldBypassToolDispatch(name: string, args: unknown): boolean {
     return false;
   }
   return isStatusOnlyWorkflow(args);
+}
+
+export function isPublicIndexRefresh(name: string, args: unknown): boolean {
+  if (name === "sdl.index.refresh") return true;
+  if (name === "sdl.repo") {
+    return extractStringField(args, "action") === "index.refresh";
+  }
+  if (name !== "sdl.workflow" || !args || typeof args !== "object") {
+    return false;
+  }
+  if ((args as { dryRun?: unknown }).dryRun === true) return false;
+  const steps = (args as { steps?: unknown }).steps;
+  return (
+    Array.isArray(steps) &&
+    steps.some((step) => {
+      if (step === null || typeof step !== "object") return false;
+      const fn = (step as { fn?: unknown }).fn;
+      return fn === "indexRefresh" || fn === "index.refresh";
+    })
+  );
 }
 
 function isStatusOnlyWorkflow(args: unknown): boolean {

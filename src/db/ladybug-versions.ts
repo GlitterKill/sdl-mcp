@@ -130,10 +130,11 @@ export async function getLatestVersion(
             v.reason AS reason,
             v.prevVersionHash AS prevVersionHash,
             v.versionHash AS versionHash
-     ORDER BY v.createdAt DESC
+     ORDER BY v.createdAt DESC, v.versionId DESC
      LIMIT 1`,
     // Note: ISO-8601 string sort is correct because all createdAt values
     // use Date.toISOString() which produces consistent UTC format with ms precision.
+    // versionId provides deterministic ordering when versions share a timestamp.
     { repoId },
   );
 
@@ -164,7 +165,7 @@ export async function getVersionsByRepo(
             v.reason AS reason,
             v.prevVersionHash AS prevVersionHash,
             v.versionHash AS versionHash
-     ORDER BY v.createdAt DESC
+     ORDER BY v.createdAt DESC, v.versionId DESC
      LIMIT $limit`,
     { repoId, limit: maxFetch },
   );

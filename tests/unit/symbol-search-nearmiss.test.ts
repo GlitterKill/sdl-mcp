@@ -10,6 +10,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { beginGraphIntegrityVersion } from "../../dist/db/ladybug-derived-state.js";
 import { buildIdentifierAwareFtsQuery } from "../../dist/retrieval/orchestrator.js";
 import { SymbolSearchResponseSchema } from "../../dist/mcp/tools.js";
 import { handleSymbolSearch } from "../../dist/mcp/tools/symbol.js";
@@ -55,6 +56,22 @@ describe("symbol.search identifier near misses", () => {
       configJson: "{}",
       createdAt: now,
     });
+    const versionId = `${repoId}:v1`;
+    await ladybugDb.createVersion(conn, {
+      versionId,
+      repoId,
+      createdAt: now,
+      reason: "test",
+      prevVersionHash: null,
+      versionHash: null,
+    });
+    await beginGraphIntegrityVersion(
+      conn,
+      repoId,
+      versionId,
+      "0".repeat(64),
+      true,
+    );
     await ladybugDb.upsertFile(conn, {
       fileId: "file-slice",
       repoId,

@@ -96,28 +96,41 @@ describe("patchSavedFile", () => {
     else process.env.SDL_CONFIG_PATH = prevConfigPath;
   });
 
-  it("replaces one file's durable symbols and edges transactionally", async () => {
+  it("patches a file without self-certifying a missing integrity manifest", async () => {
     const beforeState = await getDerivedState(repoId);
     assert.equal(beforeState?.graphIntegrityState, "verified");
+    assert.equal(beforeState?.graphIntegrityManifestEstablished, false);
 
-    const result = await patchSavedFile({
-      repoId,
-      filePath: "src/example.ts",
-      content: [
-        "export function alpha() {",
-        "  return gamma();",
-        "}",
-        "",
-        "export function gamma() {",
-        "  return 2;",
-        "}",
-      ].join("\n"),
-      language: "typescript",
-      version: 2,
-    });
+    let committed = false;
+    const result = await patchSavedFile(
+      {
+        repoId,
+        filePath: "src/example.ts",
+        content: [
+          "export function alpha() {",
+          "  return gamma();",
+          "}",
+          "",
+          "export function gamma() {",
+          "  return 2;",
+          "}",
+        ].join("\n"),
+        language: "typescript",
+        version: 2,
+      },
+      {
+        onCommitted() {
+          committed = true;
+        },
+        onForegroundFullGraphCapture() {
+          assert.fail("missing-manifest fallback must not capture the full graph");
+        },
+      },
+    );
 
     assert.strictEqual(result.symbolsUpserted, 2);
     assert.ok(result.edgesUpserted >= 1);
+    assert.equal(committed, false);
 
     const conn = await getLadybugConn();
     const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/example.ts");
@@ -135,9 +148,8 @@ describe("patchSavedFile", () => {
     assert.ok(outgoing.some((edge) => edge.toSymbolId === gamma!.symbolId));
 
     const afterState = await getDerivedState(repoId);
-    const captured = await capturePersistedGraphIntegrity(conn, repoId);
-    assert.equal(afterState?.graphIntegrityState, "verified");
-    assert.equal(afterState?.graphIntegrityVersionId, "v1");
-    assert.equal(afterState?.graphIntegrityDigest, captured.digest);
+    assert.equal(afterState?.graphIntegrityState, "unknown");
+    assert.equal(afterState?.graphIntegrityVersionId, null);
+    assert.equal(afterState?.graphIntegrityDigest, null);
   });
 });

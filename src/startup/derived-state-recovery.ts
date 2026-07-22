@@ -4,6 +4,7 @@ import {
   type DerivedStateSummary,
 } from "../db/ladybug-derived-state.js";
 import { enqueueDerivedRefresh } from "../indexer/derived-refresh-queue.js";
+import { startGraphIntegrityVerifierRecovery } from "../indexer/provider-first/background-graph-integrity-verifier.js";
 import { logger } from "../util/logger.js";
 
 export interface DerivedStateStartupRecoveryResult {
@@ -16,6 +17,7 @@ export interface DerivedStateStartupRecoveryResult {
 export interface DerivedStateStartupRecoveryDeps {
   getDerivedStateSummary?: typeof getDerivedStateSummary;
   enqueueDerivedRefresh?: typeof enqueueDerivedRefresh;
+  startGraphIntegrityVerifierRecovery?: typeof startGraphIntegrityVerifierRecovery;
   logInfo?: typeof logger.info;
   logWarn?: typeof logger.warn;
 }
@@ -52,6 +54,9 @@ export async function recoverStaleDerivedStateOnStartup(
 ): Promise<DerivedStateStartupRecoveryResult> {
   const readSummary = deps.getDerivedStateSummary ?? getDerivedStateSummary;
   const enqueue = deps.enqueueDerivedRefresh ?? enqueueDerivedRefresh;
+  const startVerifierRecovery =
+    deps.startGraphIntegrityVerifierRecovery ??
+    startGraphIntegrityVerifierRecovery;
   const logInfo = deps.logInfo ?? logger.info.bind(logger);
   const logWarn = deps.logWarn ?? logger.warn.bind(logger);
 
@@ -119,6 +124,8 @@ export async function recoverStaleDerivedStateOnStartup(
       });
     }
   }
+
+  await startVerifierRecovery();
 
   const summary = `Derived-state recovery: checked ${result.checked} repo(s), queued ${result.queued} stale repo(s), skipped ${result.skipped}, failed ${result.failed}.`;
   log(summary);

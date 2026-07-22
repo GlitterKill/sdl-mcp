@@ -6,7 +6,7 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import {
   getDerivedState,
-  graphIntegrityIsVerifiedForVersion,
+  graphIntegrityIsAvailableForVersion,
 } from "../db/ladybug-derived-state.js";
 import { scanRepository } from "../indexer/fileScanner.js";
 import { getEmbeddingFailureCount } from "../indexer/embeddings.js";
@@ -219,7 +219,7 @@ export async function getRepoHealthSnapshot(
   const callCounts = await ladybugDb.getCallEdgeResolutionCounts(conn, repoId);
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
   const derivedState = await getDerivedState(repoId);
-  const graphIntegrityReady = graphIntegrityIsVerifiedForVersion(
+  const graphIntegrityReady = graphIntegrityIsAvailableForVersion(
     derivedState,
     latestVersion?.versionId ?? null,
   );

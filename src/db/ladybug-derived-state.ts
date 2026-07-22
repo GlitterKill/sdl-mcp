@@ -9,7 +9,13 @@
 import type { Connection } from "kuzu";
 
 import { getLadybugConn, withWriteConn } from "./ladybug.js";
-import { exec, queryAll, querySingle } from "./ladybug-core.js";
+import {
+  assertSafeInt,
+  exec,
+  queryAll,
+  querySingle,
+  toNumber,
+} from "./ladybug-core.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import { logger } from "../util/logger.js";
 
@@ -34,6 +40,10 @@ export interface DerivedStateRow {
   graphIntegrityVersionId: string | null;
   graphIntegrityDigest: string | null;
   graphIntegrityError: string | null;
+  graphIntegrityRevision: number | null;
+  graphIntegrityVerifiedRevision: number | null;
+  graphIntegrityFilelessPruningSupported: boolean | null;
+  graphIntegrityManifestEstablished: boolean;
 }
 
 export interface DerivedStateDirtyFlags {
@@ -42,6 +52,13 @@ export interface DerivedStateDirtyFlags {
   algorithms?: boolean;
   summaries?: boolean;
   embeddings?: boolean;
+}
+
+function nullableInt64(value: unknown, name: string): number | null {
+  if (value === null || value === undefined) return null;
+  const number = toNumber(value);
+  assertSafeInt(number, name);
+  return number;
 }
 
 function normalizeRow(
@@ -68,6 +85,22 @@ function normalizeRow(
       (raw.graphIntegrityDigest as string | null) ?? null,
     graphIntegrityError:
       (raw.graphIntegrityError as string | null) ?? null,
+    graphIntegrityRevision: nullableInt64(
+      raw.graphIntegrityRevision,
+      "graphIntegrityRevision",
+    ),
+    graphIntegrityVerifiedRevision: nullableInt64(
+      raw.graphIntegrityVerifiedRevision,
+      "graphIntegrityVerifiedRevision",
+    ),
+    graphIntegrityFilelessPruningSupported:
+      raw.graphIntegrityFilelessPruningSupported === null ||
+      raw.graphIntegrityFilelessPruningSupported === undefined
+        ? null
+        : Boolean(raw.graphIntegrityFilelessPruningSupported),
+    graphIntegrityManifestEstablished: Boolean(
+      raw.graphIntegrityManifestEstablished,
+    ),
   };
 }
 
@@ -75,9 +108,16 @@ export async function getDerivedState(
   repoId: string,
 ): Promise<DerivedStateRow | null> {
   const conn = await getLadybugConn();
+  return getDerivedStateFromConnection(conn, repoId);
+}
+
+export async function getDerivedStateFromConnection(
+  conn: Connection,
+  repoId: string,
+): Promise<DerivedStateRow | null> {
   const rows = await queryAll<Record<string, unknown>>(
     conn,
-    "MATCH (d:DerivedState {repoId: $repoId}) RETURN d.repoId AS repoId, d.clustersDirty AS clustersDirty, d.processesDirty AS processesDirty, d.algorithmsDirty AS algorithmsDirty, d.summariesDirty AS summariesDirty, d.embeddingsDirty AS embeddingsDirty, d.targetVersionId AS targetVersionId, d.computedVersionId AS computedVersionId, d.updatedAt AS updatedAt, d.lastError AS lastError, d.graphIntegrityState AS graphIntegrityState, d.graphIntegrityVersionId AS graphIntegrityVersionId, d.graphIntegrityDigest AS graphIntegrityDigest, d.graphIntegrityError AS graphIntegrityError",
+    "MATCH (d:DerivedState {repoId: $repoId}) RETURN d.repoId AS repoId, d.clustersDirty AS clustersDirty, d.processesDirty AS processesDirty, d.algorithmsDirty AS algorithmsDirty, d.summariesDirty AS summariesDirty, d.embeddingsDirty AS embeddingsDirty, d.targetVersionId AS targetVersionId, d.computedVersionId AS computedVersionId, d.updatedAt AS updatedAt, d.lastError AS lastError, d.graphIntegrityState AS graphIntegrityState, d.graphIntegrityVersionId AS graphIntegrityVersionId, d.graphIntegrityDigest AS graphIntegrityDigest, d.graphIntegrityError AS graphIntegrityError, d.graphIntegrityRevision AS graphIntegrityRevision, d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision, d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported, d.graphIntegrityManifestEstablished AS graphIntegrityManifestEstablished",
     { repoId },
   );
   return normalizeRow(rows[0] ?? null);
@@ -162,57 +202,125 @@ export async function recordDerivedStateError(
   }
 }
 
-export async function markGraphIntegrityVerifying(
-  repoId: string,
-  versionId: string,
-): Promise<void> {
-  await setGraphIntegrityState(repoId, {
-    state: "verifying",
-    versionId,
-    digest: null,
-    error: null,
-  });
+export interface GraphIntegrityPendingRevision {
+  repoId: string;
+  versionId: string;
+  revision: number;
+  verifiedRevision: number | null;
 }
 
-export async function markGraphIntegrityVerified(
+export async function beginGraphIntegrityVersion(
+  conn: Connection,
   repoId: string,
   versionId: string,
   digest: string,
+  pruningSupported: boolean,
 ): Promise<void> {
-  await setGraphIntegrityState(repoId, {
-    state: "verified",
-    versionId,
-    digest,
-    error: null,
-  });
+  await exec(
+    conn,
+    `MERGE (d:DerivedState {repoId: $repoId})
+     SET d.graphIntegrityState = 'verified',
+         d.graphIntegrityVersionId = $versionId,
+         d.graphIntegrityRevision = 0,
+         d.graphIntegrityVerifiedRevision = 0,
+         d.graphIntegrityDigest = $graphIntegrityDigest,
+         d.graphIntegrityFilelessPruningSupported = $pruningSupported,
+         d.graphIntegrityError = NULL,
+         d.updatedAt = $updatedAt`,
+    {
+      repoId,
+      versionId,
+      graphIntegrityDigest: digest,
+      pruningSupported,
+      updatedAt: getCurrentTimestamp(),
+    },
+  );
 }
 
-/** Publish a digest only while the same verification attempt still owns state. */
-export async function markGraphIntegrityVerifiedIfVerifying(
+export async function advanceGraphIntegrityRevisionInTransaction(
+  conn: Connection,
   repoId: string,
   versionId: string,
-  digest: string,
-): Promise<boolean> {
-  const updatedAt = getCurrentTimestamp();
-  return withWriteConn(async (wConn) => {
-    const row = await querySingle<{ repoId: string }>(
+  expectedRevision: number,
+): Promise<number | null> {
+  const nextRevision = expectedRevision + 1;
+  assertSafeInt(expectedRevision, "expectedRevision");
+  assertSafeInt(nextRevision, "nextRevision");
+  // The supplied connection keeps this CAS inside the caller's transaction.
+  const row = await querySingle<{ revision: unknown }>(
+    conn,
+    `MATCH (d:DerivedState {repoId: $repoId})
+     WHERE d.graphIntegrityVersionId = $versionId
+       AND d.graphIntegrityRevision = $expectedRevision
+     SET d.graphIntegrityState = 'verifying',
+         d.graphIntegrityRevision = $nextRevision,
+         d.graphIntegrityError = NULL,
+         d.updatedAt = $updatedAt
+     RETURN d.graphIntegrityRevision AS revision`,
+    {
+      repoId,
+      versionId,
+      expectedRevision,
+      nextRevision,
+      updatedAt: getCurrentTimestamp(),
+    },
+  );
+  return nullableInt64(row?.revision, "graphIntegrityRevision");
+}
+
+/** Initialize revision zero only for a migrated synchronous verifier that still owns state. */
+export async function initializeGraphIntegrityRevisionIfVerifying(
+  repoId: string,
+  versionId: string,
+): Promise<number | null> {
+  return withWriteConn((wConn) =>
+    initializeGraphIntegrityVersionInTransaction(
       wConn,
-      `MATCH (d:DerivedState {repoId: $repoId})
-       WHERE d.graphIntegrityState = 'verifying'
-         AND d.graphIntegrityVersionId = $versionId
-       SET d.graphIntegrityState = 'verified',
-           d.graphIntegrityDigest = $graphIntegrityDigest,
-           d.graphIntegrityError = NULL,
-           d.updatedAt = $updatedAt
-       RETURN d.repoId AS repoId`,
-      { repoId, versionId, graphIntegrityDigest: digest, updatedAt },
-    );
-    return row !== null;
-  });
+      repoId,
+      versionId,
+      true,
+    ),
+  );
 }
 
-/** Publish failure only while the same verification attempt still owns state. */
-export async function markGraphIntegrityFailedIfVerifying(
+export async function initializeGraphIntegrityVersionInTransaction(
+  conn: Connection,
+  repoId: string,
+  versionId: string,
+  pruningSupported: boolean,
+  revision = 0,
+  verifiedRevision: number | null = null,
+): Promise<number | null> {
+  assertSafeInt(revision, "revision");
+  if (verifiedRevision !== null) {
+    assertSafeInt(verifiedRevision, "verifiedRevision");
+  }
+  const row = await querySingle<{ revision: unknown }>(
+    conn,
+    `MATCH (d:DerivedState {repoId: $repoId})
+     WHERE d.graphIntegrityState = 'verifying'
+       AND d.graphIntegrityVersionId = $versionId
+       AND d.graphIntegrityRevision IS NULL
+     SET d.graphIntegrityRevision = $revision,
+         d.graphIntegrityVerifiedRevision = $verifiedRevision,
+         d.graphIntegrityFilelessPruningSupported = $pruningSupported,
+         d.graphIntegrityError = NULL,
+         d.updatedAt = $updatedAt
+     RETURN d.graphIntegrityRevision AS revision`,
+    {
+      repoId,
+      versionId,
+      pruningSupported,
+      revision,
+      verifiedRevision,
+      updatedAt: getCurrentTimestamp(),
+    },
+  );
+  return nullableInt64(row?.revision, "graphIntegrityRevision");
+}
+
+/** Fail only the migrated, unrevisioned verification attempt that still owns state. */
+export async function markUnrevisionedGraphIntegrityFailedIfVerifying(
   repoId: string,
   versionId: string,
   error: string,
@@ -224,8 +332,8 @@ export async function markGraphIntegrityFailedIfVerifying(
       `MATCH (d:DerivedState {repoId: $repoId})
        WHERE d.graphIntegrityState = 'verifying'
          AND d.graphIntegrityVersionId = $versionId
+         AND d.graphIntegrityRevision IS NULL
        SET d.graphIntegrityState = 'failed',
-           d.graphIntegrityDigest = NULL,
            d.graphIntegrityError = $graphIntegrityError,
            d.updatedAt = $updatedAt
        RETURN d.repoId AS repoId`,
@@ -240,16 +348,174 @@ export async function markGraphIntegrityFailedIfVerifying(
   });
 }
 
-export async function markGraphIntegrityFailed(
+export async function listPendingGraphIntegrityRevisions(
+  repoId?: string,
+): Promise<GraphIntegrityPendingRevision[]> {
+  const conn = await getLadybugConn();
+  const rows = await queryAll<Record<string, unknown>>(
+    conn,
+    `MATCH (d:DerivedState)
+     WHERE d.graphIntegrityState = 'verifying'
+       AND d.graphIntegrityVersionId IS NOT NULL
+       AND d.graphIntegrityRevision IS NOT NULL
+       ${repoId === undefined ? "" : "AND d.repoId = $repoId"}
+       AND (
+         d.graphIntegrityVerifiedRevision IS NULL
+         OR d.graphIntegrityRevision > d.graphIntegrityVerifiedRevision
+       )
+     RETURN d.repoId AS repoId,
+            d.graphIntegrityVersionId AS versionId,
+            d.graphIntegrityRevision AS revision,
+            d.graphIntegrityVerifiedRevision AS verifiedRevision
+     ORDER BY d.repoId`,
+    repoId === undefined ? undefined : { repoId },
+  );
+  return rows.map((row) => ({
+    repoId: String(row.repoId),
+    versionId: String(row.versionId),
+    revision: nullableInt64(row.revision, "graphIntegrityRevision")!,
+    verifiedRevision:
+      row.verifiedRevision === null || row.verifiedRevision === undefined
+        ? null
+        : nullableInt64(
+            row.verifiedRevision,
+            "graphIntegrityVerifiedRevision",
+          ),
+  }));
+}
+
+export async function markGraphIntegrityVerifying(
   repoId: string,
   versionId: string,
-  error: string,
+): Promise<number | null> {
+  const updatedAt = getCurrentTimestamp();
+  return withWriteConn(async (wConn) => {
+    const row = await querySingle<{ revision: unknown }>(
+      wConn,
+      `MERGE (d:DerivedState {repoId: $repoId})
+       WITH d, d.graphIntegrityVersionId = $versionId AS sameVersion
+       SET d.graphIntegrityRevision = CASE
+             WHEN sameVersion THEN d.graphIntegrityRevision
+             ELSE NULL
+           END,
+           d.graphIntegrityFilelessPruningSupported = CASE
+             WHEN sameVersion THEN d.graphIntegrityFilelessPruningSupported
+             ELSE NULL
+           END,
+           d.graphIntegrityState = 'verifying',
+           d.graphIntegrityVersionId = $versionId,
+           d.graphIntegrityError = NULL,
+           d.updatedAt = $updatedAt
+       RETURN d.graphIntegrityRevision AS revision`,
+      { repoId, versionId, updatedAt },
+    );
+    return nullableInt64(row?.revision, "graphIntegrityRevision");
+  });
+}
+
+export async function markGraphIntegrityVerified(
+  repoId: string,
+  versionId: string,
+  digest: string,
 ): Promise<void> {
-  await setGraphIntegrityState(repoId, {
-    state: "failed",
-    versionId,
-    digest: null,
-    error: error.slice(0, 1024),
+  await withWriteConn(async (wConn) => {
+    await beginGraphIntegrityVersion(wConn, repoId, versionId, digest, true);
+  });
+}
+
+/** Publish a digest only while the same verification attempt still owns state. */
+export async function markGraphIntegrityVerifiedIfVerifying(
+  repoId: string,
+  versionId: string,
+  revision: number,
+  digest: string,
+): Promise<boolean> {
+  assertSafeInt(revision, "revision");
+  const updatedAt = getCurrentTimestamp();
+  return withWriteConn(async (wConn) => {
+    const row = await querySingle<{ repoId: string }>(
+      wConn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       WHERE d.graphIntegrityState = 'verifying'
+         AND d.graphIntegrityVersionId = $versionId
+         AND d.graphIntegrityRevision = $revision
+       SET d.graphIntegrityState = 'verified',
+           d.graphIntegrityVerifiedRevision = d.graphIntegrityRevision,
+           d.graphIntegrityDigest = $graphIntegrityDigest,
+           d.graphIntegrityError = NULL,
+           d.updatedAt = $updatedAt
+       RETURN d.repoId AS repoId`,
+      {
+        repoId,
+        versionId,
+        revision,
+        graphIntegrityDigest: digest,
+        updatedAt,
+      },
+    );
+    return row !== null;
+  });
+}
+
+/** Publish failure only while the same verification attempt still owns state. */
+export async function markGraphIntegrityFailedIfVerifying(
+  repoId: string,
+  versionId: string,
+  revision: number,
+  error: string,
+): Promise<boolean> {
+  assertSafeInt(revision, "revision");
+  const updatedAt = getCurrentTimestamp();
+  return withWriteConn(async (wConn) => {
+    const row = await querySingle<{ repoId: string }>(
+      wConn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       WHERE d.graphIntegrityState = 'verifying'
+         AND d.graphIntegrityVersionId = $versionId
+         AND d.graphIntegrityRevision = $revision
+       SET d.graphIntegrityState = 'failed',
+           d.graphIntegrityError = $graphIntegrityError,
+           d.updatedAt = $updatedAt
+       RETURN d.repoId AS repoId`,
+      {
+        repoId,
+        versionId,
+        revision,
+        graphIntegrityError: error.slice(0, 1024),
+        updatedAt,
+      },
+    );
+    return row !== null;
+  });
+}
+
+export async function markCurrentGraphIntegrityRevisionFailed(
+  repoId: string,
+  versionId: string,
+  revision: number,
+  error: string,
+): Promise<boolean> {
+  assertSafeInt(revision, "revision");
+  const updatedAt = getCurrentTimestamp();
+  return withWriteConn(async (wConn) => {
+    const row = await querySingle<{ repoId: string }>(
+      wConn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       WHERE d.graphIntegrityVersionId = $versionId
+         AND d.graphIntegrityRevision = $revision
+       SET d.graphIntegrityState = 'failed',
+           d.graphIntegrityError = $graphIntegrityError,
+           d.updatedAt = $updatedAt
+       RETURN d.repoId AS repoId`,
+      {
+        repoId,
+        versionId,
+        revision,
+        graphIntegrityError: error.slice(0, 1024),
+        updatedAt,
+      },
+    );
+    return row !== null;
   });
 }
 
@@ -263,6 +529,9 @@ export async function invalidateGraphIntegrity(
     `MERGE (d:DerivedState {repoId: $repoId})
      SET d.graphIntegrityState = 'unknown',
          d.graphIntegrityVersionId = NULL,
+         d.graphIntegrityRevision = NULL,
+         d.graphIntegrityVerifiedRevision = NULL,
+         d.graphIntegrityFilelessPruningSupported = NULL,
          d.graphIntegrityDigest = NULL,
          d.graphIntegrityError = NULL,
          d.updatedAt = $updatedAt`,
@@ -270,52 +539,52 @@ export async function invalidateGraphIntegrity(
   );
 }
 
-export function graphIntegrityIsVerifiedForVersion(
+export function graphIntegrityIsAvailableForVersion(
   row: Pick<
     DerivedStateRow,
-    "graphIntegrityState" | "graphIntegrityVersionId" | "graphIntegrityDigest"
+    | "graphIntegrityState"
+    | "graphIntegrityVersionId"
+    | "graphIntegrityRevision"
+    | "graphIntegrityFilelessPruningSupported"
+    | "graphIntegrityManifestEstablished"
   > | null,
   versionId: string | null,
 ): boolean {
   return Boolean(
     row &&
       versionId &&
-      row.graphIntegrityState === "verified" &&
       row.graphIntegrityVersionId === versionId &&
+      (row.graphIntegrityState === "verified" ||
+        row.graphIntegrityState === "verifying" ||
+        row.graphIntegrityState === "failed") &&
+      typeof row.graphIntegrityRevision === "number" &&
+      typeof row.graphIntegrityFilelessPruningSupported === "boolean" &&
+      row.graphIntegrityManifestEstablished === true,
+  );
+}
+
+export function graphIntegrityIsVerifiedForVersion(
+  row: Pick<
+    DerivedStateRow,
+    | "graphIntegrityState"
+    | "graphIntegrityVersionId"
+    | "graphIntegrityDigest"
+    | "graphIntegrityRevision"
+    | "graphIntegrityVerifiedRevision"
+    | "graphIntegrityFilelessPruningSupported"
+    | "graphIntegrityManifestEstablished"
+  > | null,
+  versionId: string | null,
+): boolean {
+  return Boolean(
+    graphIntegrityIsAvailableForVersion(row, versionId) &&
+      row?.graphIntegrityState === "verified" &&
+      typeof row.graphIntegrityVerifiedRevision === "number" &&
+      row.graphIntegrityRevision === row.graphIntegrityVerifiedRevision &&
       /^[a-f0-9]{64}$/.test(row.graphIntegrityDigest ?? ""),
   );
 }
 
-async function setGraphIntegrityState(
-  repoId: string,
-  state: {
-    state: GraphIntegrityState;
-    versionId: string;
-    digest: string | null;
-    error: string | null;
-  },
-): Promise<void> {
-  const updatedAt = getCurrentTimestamp();
-  await withWriteConn(async (wConn) => {
-    await exec(
-      wConn,
-      `MERGE (d:DerivedState {repoId: $repoId})
-       SET d.graphIntegrityState = $graphIntegrityState,
-           d.graphIntegrityVersionId = $graphIntegrityVersionId,
-           d.graphIntegrityDigest = $graphIntegrityDigest,
-           d.graphIntegrityError = $graphIntegrityError,
-           d.updatedAt = $updatedAt`,
-      {
-        repoId,
-        graphIntegrityState: state.state,
-        graphIntegrityVersionId: state.versionId,
-        graphIntegrityDigest: state.digest,
-        graphIntegrityError: state.error,
-        updatedAt,
-      },
-    );
-  });
-}
 
 function normalizeGraphIntegrityState(value: unknown): GraphIntegrityState {
   return value === "verifying" || value === "verified" || value === "failed"
@@ -348,6 +617,10 @@ export interface DerivedStateSummary {
   graphIntegrityState: GraphIntegrityState;
   graphIntegrityVersionId: string | null;
   graphIntegrityDigest: string | null;
+  graphIntegrityRevision: number | null;
+  graphIntegrityVerifiedRevision: number | null;
+  graphIntegrityFilelessPruningSupported: boolean | null;
+  graphIntegrityManifestEstablished: boolean;
   nextBestAction?: string;
 }
 
@@ -369,6 +642,11 @@ export async function getDerivedStateSummary(
     graphIntegrityState: row.graphIntegrityState,
     graphIntegrityVersionId: row.graphIntegrityVersionId,
     graphIntegrityDigest: row.graphIntegrityDigest,
+    graphIntegrityRevision: row.graphIntegrityRevision ?? null,
+    graphIntegrityVerifiedRevision: row.graphIntegrityVerifiedRevision ?? null,
+    graphIntegrityFilelessPruningSupported:
+      row.graphIntegrityFilelessPruningSupported ?? null,
+    graphIntegrityManifestEstablished: row.graphIntegrityManifestEstablished,
   };
   if (row.lastError) {
     summary.lastError = row.lastError;

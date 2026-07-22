@@ -2,25 +2,39 @@ import { createHash, type Hash } from "node:crypto";
 
 import type { Connection } from "kuzu";
 
+import { DatabaseError } from "../../domain/errors.js";
 import {
+  advanceGraphIntegrityRevisionInTransaction,
   getDerivedState,
   graphIntegrityIsVerifiedForVersion,
-  markGraphIntegrityFailed,
+  markCurrentGraphIntegrityRevisionFailed,
   markGraphIntegrityFailedIfVerifying,
   markGraphIntegrityVerifying,
   markGraphIntegrityVerifiedIfVerifying,
+  initializeGraphIntegrityRevisionIfVerifying,
+  initializeGraphIntegrityVersionInTransaction,
+  markUnrevisionedGraphIntegrityFailedIfVerifying,
 } from "../../db/ladybug-derived-state.js";
 import { classifyDependencyTarget } from "../../db/symbol-placeholders.js";
 import {
-  getPersistedGraphIntegrityFileReferenceCounts,
   getPersistedGraphIntegrityOtherRepoSymbolCount,
-  getPersistedGraphIntegrityReferenceCountPage,
   getPersistedGraphIntegritySourceReferenceCounts,
   getPersistedGraphIntegritySymbolPage,
-  hasPersistedGraphIntegrityFilelessSourceReferences,
+  GraphIntegrityManifestValidationError,
+  listGraphIntegrityFilelessStates,
+  listGraphIntegrityFileStates,
+  replaceGraphIntegrityManifestInTransaction,
+  type GraphIntegrityFileStateRecord,
+  type GraphIntegrityFilelessDelta,
+  type GraphIntegrityFilelessStateRecord,
   type GraphIntegritySymbolCursor,
 } from "../../db/ladybug-graph-integrity.js";
-import { getLadybugConn } from "../../db/ladybug.js";
+import {
+  getLadybugConn,
+  withExclusiveReadConnection,
+  withWriteConn,
+} from "../../db/ladybug.js";
+import { withReadOnlyTransaction } from "../../db/ladybug-core.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { EdgeRow, SymbolRow } from "../../db/ladybug-queries.js";
 import { logger } from "../../util/logger.js";
@@ -31,16 +45,25 @@ import type {
 } from "./materializer.js";
 
 const GRAPH_INTEGRITY_PAGE_SIZE = 512;
-const GRAPH_INTEGRITY_QUERY_PAGE_SIZE = 2_048;
-const GRAPH_INTEGRITY_REFERENCE_PAGE_SIZE = 2_048;
+// Larger read pages reduce repeated ordered Ladybug traversals while keeping
+// cancellation and result memory bounded.
+const GRAPH_INTEGRITY_QUERY_PAGE_SIZE = 16_384;
 const GRAPH_INTEGRITY_FILE_ID_CHUNK_SIZE = 256;
 const DIAGNOSTIC_STRING_LIMIT = 160;
-const PUBLIC_VERIFICATION_ERROR =
+export const GRAPH_INTEGRITY_VERIFICATION_FAILURE =
   "Persisted graph integrity verification failed";
 const INCREMENTAL_BASELINE_ERROR =
   'Incremental indexing requires a verified graph integrity baseline. Run sdl.index.refresh with mode:"full" first. If full verification also fails, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.';
 const FILELESS_SENTINEL = "";
-const activeVerifications = new Map<string, string>();
+interface ActiveGraphIntegrityVerification {
+  versionId: string;
+  revision: number | null;
+}
+
+const activeVerifications = new Map<
+  string,
+  ActiveGraphIntegrityVerification
+>();
 
 export type GraphIntegrityCanonicalSymbol = Pick<
   SymbolRow,
@@ -75,6 +98,36 @@ export interface GraphIntegrityEdgeReference {
   referenceCount: number;
 }
 
+export type GraphIntegrityFilelessReferenceTuple = readonly [
+  filelessSymbolId: string,
+  canonicalSymbolJson: string,
+  sourceSymbolId: string | null,
+  edgeType: string,
+  direction: "incoming" | "outgoing",
+  referenceCount: number,
+];
+
+type GraphIntegrityCanonicalSymbolTuple = readonly [
+  symbolId: string,
+  fileId: string,
+  relPath: string,
+  name: string,
+  signatureJson: string,
+  kind: string,
+  language: string,
+  rangeStartLine: number,
+  rangeStartCol: number,
+  rangeEndLine: number,
+  rangeEndCol: number,
+  source: string,
+  scipSymbol: string,
+  astFingerprint: string,
+  symbolStatus: "real" | "unresolved" | "external",
+  external: boolean,
+  placeholderKind: string,
+  placeholderTarget: string,
+];
+
 export interface GraphIntegrityEdgeWrite {
   symbolIdsToRefresh: readonly string[];
   edges: readonly EdgeRow[];
@@ -83,7 +136,10 @@ export interface GraphIntegrityEdgeWrite {
 export interface GraphIntegrityPass1Accumulator {
   symbolMapFileUpdates: ReadonlyMap<
     string,
-    { readonly symbols: readonly Pick<SymbolRow, "symbolId">[] }
+    {
+      readonly fileId: string;
+      readonly symbols: readonly Pick<SymbolRow, "symbolId">[];
+    }
   >;
   graphIntegrityFiles: Map<string, GraphIntegrityFileDigest>;
   graphIntegrityFilelessSymbols: Map<string, CanonicalSymbol>;
@@ -152,14 +208,16 @@ interface MutableFileDigest {
 
 export class GraphIntegrityVerificationError extends Error {
   constructor() {
-    super(PUBLIC_VERIFICATION_ERROR);
+    super(GRAPH_INTEGRITY_VERIFICATION_FAILURE);
   }
 }
 
 export interface GraphIntegrityVerificationOptions {
   persistFailureState?: typeof markGraphIntegrityFailedIfVerifying;
-  /** Test barrier used to prove invalidation wins after the final read. */
+  /** Test barrier used to prove a newer state wins after the final read. */
   afterCapture?: () => Promise<void>;
+  /** Exact synchronous session revision; never adopt a newer durable revision. */
+  expectedRevision?: number;
 }
 
 interface GraphIntegrityReferenceCount {
@@ -273,6 +331,22 @@ export class GraphIntegrityFilelessLivenessLedger {
     );
   }
 
+  remove(contribution: GraphIntegrityEdgeReference): void {
+    if (contribution.direction === "outgoing") {
+      this.disablePruning();
+      return;
+    }
+    this.adjust(
+      contribution.filelessSymbolId,
+      contribution.edgeType,
+      -contribution.referenceCount,
+    );
+  }
+
+  entries(): IterableIterator<[string, number]> {
+    return this.totals.entries();
+  }
+
   seedCurrentSourceReference(
     sourceSymbolId: string,
     reference: GraphIntegrityReferenceCount,
@@ -383,7 +457,14 @@ export class PersistedGraphIntegritySession {
   private files: Map<string, GraphIntegrityFileDigest> | undefined;
   private filelessSymbols: Map<string, CanonicalSymbol> | undefined;
   private filelessLiveness: GraphIntegrityFilelessLivenessLedger | undefined;
-  private readonly preparedBaselineFileIds = new Set<string>();
+  private readonly sourceFileIdBySymbolId = new Map<string, string>();
+  private readonly filelessReferencesByFileId = new Map<
+    string,
+    Map<string, GraphIntegrityEdgeReference>
+  >();
+  private stagedRevision: number | undefined;
+  private baselineRevision: number | undefined;
+  private activeVerification: ActiveGraphIntegrityVerification | undefined;
   private pass2ApplyChain: Promise<void> = Promise.resolve();
 
   constructor(
@@ -403,19 +484,19 @@ export class PersistedGraphIntegritySession {
 
   async begin(
     targetVersionId = this.reserveVersionId(),
-    affectedFileIds: readonly string[] = [],
+    _affectedFileIds: readonly string[] = [],
   ): Promise<void> {
     if (!this.enabled) return;
     if (this.files) {
       if (this.versionId !== targetVersionId) {
         throw new Error("Graph integrity version changed during indexing");
       }
-      await this.prepareBaselineFileReferences(affectedFileIds);
       return;
     }
 
     let baseline: GraphIntegrityExpectation | undefined;
     let baselineDigest: string | undefined;
+    let baselinePruningSupported = false;
     if (this.mode === "incremental") {
       const baselineConn = await getLadybugConn();
       const [latestVersion, state] = await Promise.all([
@@ -430,62 +511,101 @@ export class PersistedGraphIntegritySession {
         throw new Error(INCREMENTAL_BASELINE_ERROR);
       }
       baselineDigest = state.graphIntegrityDigest ?? undefined;
+      baselinePruningSupported =
+        state.graphIntegrityFilelessPruningSupported === true;
+      this.baselineRevision = state.graphIntegrityRevision ?? undefined;
     }
 
     this.versionId = targetVersionId;
-    await markGraphIntegrityVerifying(this.repoId, targetVersionId);
-    activeVerifications.set(this.repoId, targetVersionId);
+    const activeVerification: ActiveGraphIntegrityVerification = {
+      versionId: targetVersionId,
+      revision: null,
+    };
+    this.activeVerification = activeVerification;
+    activeVerifications.set(this.repoId, activeVerification);
     try {
+      activeVerification.revision = await markGraphIntegrityVerifying(
+        this.repoId,
+        targetVersionId,
+      );
       if (this.mode === "incremental") {
-        const filelessSymbols = new Map<string, CanonicalSymbol>();
         const baselineConn = await getLadybugConn();
-        baseline = await capturePersistedGraphIntegrityInternal(
+        const fileStates = await listGraphIntegrityFileStates(
           baselineConn,
           this.repoId,
-          (symbol) => {
-            if (symbol.fileId === FILELESS_SENTINEL) {
-              filelessSymbols.set(symbol.symbolId, symbol);
-            }
-          },
         );
-        if (baseline.digest !== baselineDigest) {
+        const filelessStates = await listGraphIntegrityFilelessStates(
+          baselineConn,
+          this.repoId,
+        );
+        const actual = await capturePersistedGraphIntegrity(
+          baselineConn,
+          this.repoId,
+        );
+        baseline = createGraphIntegrityExpectationFromManifest(
+          fileStates,
+          filelessStates,
+        );
+        if (
+          baseline.digest !== baselineDigest ||
+          compareGraphIntegrityExpectations(baseline, actual)
+        ) {
           logger.error("Persisted graph integrity baseline mismatch", {
             repoId: this.repoId,
             targetVersionId,
             expectedDigest: baselineDigest,
-            actualDigest: baseline.digest,
-            actualSymbolCount: baseline.symbolCount,
+            manifestDigest: baseline.digest,
+            actualDigest: actual.digest,
+            actualSymbolCount: actual.symbolCount,
           });
           throw new GraphIntegrityVerificationError();
         }
-        this.filelessSymbols = filelessSymbols;
+        this.filelessSymbols = new Map(
+          filelessStates.map((row) => [
+            row.symbolId,
+            parseGraphIntegrityCanonicalSymbol(row.canonicalSymbolJson),
+          ]),
+        );
         this.filelessLiveness = new GraphIntegrityFilelessLivenessLedger(true);
-        const otherRepoSymbolCount =
-          await getPersistedGraphIntegrityOtherRepoSymbolCount(
-            baselineConn,
-            this.repoId,
-          );
-        if (
-          !graphIntegrityPlaceholderPruningIsSafe(
-            baseline.symbolCount,
-            otherRepoSymbolCount,
-          ) ||
-          await hasPersistedGraphIntegrityFilelessSourceReferences(
-            baselineConn,
-            this.repoId,
-          )
-        ) {
+        if (!baselinePruningSupported) {
           this.filelessLiveness.disablePruning();
-        } else {
-          await seedPersistedReferenceCounts(
-            baselineConn,
-            this.repoId,
-            this.filelessLiveness,
+        }
+        const seededReferenceCounts = new Map<string, number>();
+        for (const file of fileStates) {
+          const references = parseGraphIntegrityFilelessReferences(
+            file.filelessReferencesJson,
           );
-          await this.prepareBaselineFileReferences(
-            affectedFileIds,
-            baselineConn,
+          for (const tuple of references) {
+            const reference = graphIntegrityReferenceFromTuple(tuple);
+            this.filelessLiveness.seedReferenceCount({
+              symbolId: reference.filelessSymbolId,
+              edgeType: reference.edgeType,
+              referenceCount: reference.referenceCount,
+            });
+            seededReferenceCounts.set(
+              reference.filelessSymbolId,
+              (seededReferenceCounts.get(reference.filelessSymbolId) ?? 0) +
+                reference.referenceCount,
+            );
+          }
+          this.filelessReferencesByFileId.set(
+            file.fileId,
+            new Map(references.map((tuple) => {
+              const reference = graphIntegrityReferenceFromTuple(tuple);
+              return [graphIntegrityEdgeReferenceKey(reference), reference];
+            })),
           );
+        }
+        for (const row of filelessStates) {
+          const residual =
+            row.referenceCount - (seededReferenceCounts.get(row.symbolId) ?? 0);
+          if (residual > 0) {
+            this.filelessLiveness.seedReferenceCount({
+              symbolId: row.symbolId,
+              edgeType: "manifest",
+              referenceCount: residual,
+            });
+          }
         }
       }
       this.files = new Map(
@@ -506,7 +626,7 @@ export class PersistedGraphIntegritySession {
   applyFile(file: GraphIntegrityFileDigest): void {
     if (!this.files) return;
     const previous = this.files.get(file.relPath);
-    if (previous) this.filelessLiveness?.removeFile(previous.fileId);
+    if (previous) this.clearFileReferences(previous.fileId);
     if (file.symbolCount === 0) this.files.delete(file.relPath);
     else this.files.set(file.relPath, file);
   }
@@ -516,6 +636,7 @@ export class PersistedGraphIntegritySession {
     this.removeFilelessSymbols(rows.symbols);
     const symbolsByFileId = new Map<string, typeof rows.symbols>();
     for (const symbol of rows.symbols) {
+      this.sourceFileIdBySymbolId.set(symbol.symbolId, symbol.fileId);
       const symbols = symbolsByFileId.get(symbol.fileId);
       if (symbols) symbols.push(symbol);
       else symbolsByFileId.set(symbol.fileId, [symbol]);
@@ -534,7 +655,7 @@ export class PersistedGraphIntegritySession {
       createGraphIntegrityFilelessEdgeReferences(
         rows.edges,
         this.filelessSymbols?.keys() ?? [],
-        { trackSources: this.mode === "incremental" },
+        { trackSources: true },
       ),
     );
   }
@@ -552,12 +673,31 @@ export class PersistedGraphIntegritySession {
     if (!this.filelessLiveness) return;
     for (const reference of references) {
       this.filelessLiveness.add(reference);
+      const fileId = reference.sourceSymbolId
+        ? this.sourceFileIdBySymbolId.get(reference.sourceSymbolId)
+        : undefined;
+      if (!fileId) continue;
+      let byReference = this.filelessReferencesByFileId.get(fileId);
+      if (!byReference) {
+        byReference = new Map();
+        this.filelessReferencesByFileId.set(fileId, byReference);
+      }
+      const key = graphIntegrityEdgeReferenceKey(reference);
+      const previous = byReference.get(key);
+      byReference.set(key, {
+        ...reference,
+        referenceCount:
+          (previous?.referenceCount ?? 0) + reference.referenceCount,
+      });
     }
   }
 
   applyPass1Accumulator(accumulator: GraphIntegrityPass1Accumulator): void {
     for (const update of accumulator.symbolMapFileUpdates.values()) {
       this.removeFilelessSymbols(update.symbols);
+      for (const symbol of update.symbols) {
+        this.sourceFileIdBySymbolId.set(symbol.symbolId, update.fileId);
+      }
     }
     for (const file of accumulator.graphIntegrityFiles.values()) {
       this.applyFile(file);
@@ -612,7 +752,7 @@ export class PersistedGraphIntegritySession {
       createGraphIntegrityFilelessEdgeReferences(
         write.edges,
         this.filelessSymbols.keys(),
-        { trackSources: this.mode === "incremental" },
+        { trackSources: true },
       ),
     );
   }
@@ -661,7 +801,7 @@ export class PersistedGraphIntegritySession {
     const removed = new Set(fileIds);
     for (const [relPath, file] of this.files) {
       if (removed.has(file.fileId)) {
-        this.filelessLiveness?.removeFile(file.fileId);
+        this.clearFileReferences(file.fileId);
         this.files.delete(relPath);
       }
     }
@@ -671,14 +811,49 @@ export class PersistedGraphIntegritySession {
     symbolIds: readonly string[],
     edgeType: string,
   ): void {
-    this.filelessLiveness?.removeOutgoing(symbolIds, edgeType);
+    const sources = new Set(symbolIds);
+    this.removeTrackedReferences(
+      (reference) =>
+        reference.edgeType === edgeType &&
+        reference.sourceSymbolId !== null &&
+        sources.has(reference.sourceSymbolId),
+    );
   }
 
   private removeReferencesToTargets(
     symbolIds: readonly string[],
     edgeType: string,
   ): void {
-    this.filelessLiveness?.removeTargets(symbolIds, edgeType);
+    const targets = new Set(symbolIds);
+    this.removeTrackedReferences(
+      (reference) =>
+        reference.edgeType === edgeType &&
+        targets.has(reference.filelessSymbolId),
+    );
+  }
+
+  private clearFileReferences(fileId: string): void {
+    const references = this.filelessReferencesByFileId.get(fileId);
+    if (!references) return;
+    for (const reference of references.values()) {
+      this.filelessLiveness?.remove(reference);
+    }
+    this.filelessReferencesByFileId.delete(fileId);
+  }
+
+  private removeTrackedReferences(
+    predicate: (reference: GraphIntegrityEdgeReference) => boolean,
+  ): void {
+    for (const [fileId, references] of this.filelessReferencesByFileId) {
+      for (const [key, reference] of references) {
+        if (!predicate(reference)) continue;
+        this.filelessLiveness?.remove(reference);
+        references.delete(key);
+      }
+      if (references.size === 0) {
+        this.filelessReferencesByFileId.delete(fileId);
+      }
+    }
   }
 
   async complete(versionId: string): Promise<void> {
@@ -686,7 +861,102 @@ export class PersistedGraphIntegritySession {
     if (this.versionId !== versionId) {
       throw new Error("Graph integrity version changed during indexing");
     }
-    const expectedFiles = [...this.files.values()];
+    try {
+      const stagedRevision = await this.stageManifest(versionId);
+      if (stagedRevision === undefined) {
+        throw new GraphIntegrityVerificationError();
+      }
+      await completeGraphIntegrityVerification(
+        this.repoId,
+        versionId,
+        this.createExpectedGraph(),
+        { expectedRevision: stagedRevision },
+      );
+    } finally {
+      if (activeVerifications.get(this.repoId) === this.activeVerification) {
+        activeVerifications.delete(this.repoId);
+      }
+      this.files = undefined;
+      this.filelessSymbols = undefined;
+      this.filelessLiveness = undefined;
+      this.sourceFileIdBySymbolId.clear();
+      this.filelessReferencesByFileId.clear();
+      this.stagedRevision = undefined;
+      this.baselineRevision = undefined;
+      this.activeVerification = undefined;
+      this.pass2ApplyChain = Promise.resolve();
+    }
+  }
+
+  async stageManifest(versionId: string): Promise<number | undefined> {
+    if (!this.files || this.stagedRevision !== undefined) {
+      return this.stagedRevision;
+    }
+    if (this.versionId !== versionId) {
+      throw new Error("Graph integrity version changed during indexing");
+    }
+    await this.pass2ApplyChain;
+    const manifest = this.createManifest();
+    const active = activeVerifications.get(this.repoId);
+    if (
+      !active ||
+      active !== this.activeVerification ||
+      active.versionId !== versionId
+    ) {
+      throw new GraphIntegrityVerificationError();
+    }
+    const revision = await withWriteConn((conn) =>
+      ladybugDb.withTransaction(conn, async (txConn) => {
+        let nextRevision: number | null;
+        if (active.revision === null) {
+          const initialRevision =
+            this.mode === "full" ? 0 : (this.baselineRevision ?? -1) + 1;
+          nextRevision = await initializeGraphIntegrityVersionInTransaction(
+            txConn,
+            this.repoId,
+            versionId,
+            this.filelessLiveness?.canPrune ?? false,
+            initialRevision,
+            this.mode === "full" ? null : this.baselineRevision ?? null,
+          );
+        } else {
+          nextRevision = await advanceGraphIntegrityRevisionInTransaction(
+            txConn,
+            this.repoId,
+            versionId,
+            active.revision,
+          );
+        }
+        if (nextRevision === null) {
+          throw new GraphIntegrityVerificationError();
+        }
+        await replaceGraphIntegrityManifestInTransaction(
+          txConn,
+          this.repoId,
+          manifest,
+        );
+        return nextRevision;
+      }),
+    );
+    this.stagedRevision = revision;
+    active.revision = revision;
+    return revision;
+  }
+
+  ownsStagedRevision(
+    versionId: string,
+    state: Awaited<ReturnType<typeof getDerivedState>>,
+  ): boolean {
+    return Boolean(
+      this.stagedRevision !== undefined &&
+        state?.graphIntegrityState === "verifying" &&
+        state.graphIntegrityVersionId === versionId &&
+        state.graphIntegrityRevision === this.stagedRevision,
+    );
+  }
+
+  private createExpectedGraph(): GraphIntegrityExpectation {
+    const expectedFiles = [...(this.files?.values() ?? [])];
     if (this.filelessSymbols && this.filelessSymbols.size > 0) {
       expectedFiles.push(
         createGraphIntegrityFileDigest({
@@ -696,54 +966,52 @@ export class PersistedGraphIntegritySession {
         }),
       );
     }
-    const expected = createGraphIntegrityExpectation(expectedFiles);
-    try {
-      await completeGraphIntegrityVerification(
-        this.repoId,
-        versionId,
-        expected,
-      );
-    } finally {
-      activeVerifications.delete(this.repoId);
-      this.files = undefined;
-      this.filelessSymbols = undefined;
-      this.filelessLiveness = undefined;
-      this.preparedBaselineFileIds.clear();
-      this.pass2ApplyChain = Promise.resolve();
-    }
+    return createGraphIntegrityExpectation(expectedFiles);
   }
 
-  private async prepareBaselineFileReferences(
-    fileIds: readonly string[],
-    conn?: Connection,
-  ): Promise<void> {
-    if (
-      this.mode !== "incremental" ||
-      !this.filelessLiveness?.canPrune ||
-      fileIds.length === 0
-    ) {
-      return;
-    }
-    const uniqueFileIds = [...new Set(fileIds)].filter(
-      (fileId) => !this.preparedBaselineFileIds.has(fileId),
-    );
-    if (uniqueFileIds.length === 0) return;
-    const readConn = conn ?? await getLadybugConn();
-    for (let offset = 0; offset < uniqueFileIds.length; offset += GRAPH_INTEGRITY_FILE_ID_CHUNK_SIZE) {
-      const chunk = uniqueFileIds.slice(
-        offset,
-        offset + GRAPH_INTEGRITY_FILE_ID_CHUNK_SIZE,
-      );
-      const rows = await getPersistedGraphIntegrityFileReferenceCounts(
-        readConn,
-        this.repoId,
-        chunk,
-      );
-      for (const row of rows) {
-        this.filelessLiveness.seedFileReferenceCount(row.fileId, row);
-      }
-      for (const fileId of chunk) this.preparedBaselineFileIds.add(fileId);
-    }
+  private createManifest(): {
+    files: GraphIntegrityFileStateRecord[];
+    fileless: GraphIntegrityFilelessStateRecord[];
+  } {
+    const filelessSymbols = this.filelessSymbols ?? new Map();
+    const files = [...(this.files?.values() ?? [])].map((file) => {
+      const references = [...(
+        this.filelessReferencesByFileId.get(file.fileId)?.values() ?? []
+      )]
+        .map((reference) => {
+          const symbol = filelessSymbols.get(reference.filelessSymbolId);
+          return symbol
+            ? graphIntegrityReferenceToTuple(reference, symbol)
+            : null;
+        })
+        .filter(
+          (tuple): tuple is GraphIntegrityFilelessReferenceTuple =>
+            tuple !== null,
+        )
+        .sort((left, right) =>
+          compareText(JSON.stringify(left), JSON.stringify(right)),
+        );
+      return {
+        stateId: JSON.stringify([this.repoId, file.fileId]),
+        repoId: this.repoId,
+        fileId: file.fileId,
+        relPath: file.relPath,
+        symbolCount: file.symbolCount,
+        digest: file.digest,
+        filelessReferencesJson: JSON.stringify(references),
+      };
+    });
+    const referenceCounts = new Map(this.filelessLiveness?.entries() ?? []);
+    const fileless = [...filelessSymbols.values()]
+      .sort((left, right) => compareText(left.symbolId, right.symbolId))
+      .map((symbol) => ({
+        stateId: JSON.stringify([this.repoId, symbol.symbolId]),
+        repoId: this.repoId,
+        symbolId: symbol.symbolId,
+        canonicalSymbolJson: serializeGraphIntegrityCanonicalSymbol(symbol),
+        referenceCount: referenceCounts.get(symbol.symbolId) ?? 0,
+      }));
+    return { files, fileless };
   }
 
   private async preparePass2SourceReferences(
@@ -768,13 +1036,31 @@ export class PersistedGraphIntegritySession {
         chunk,
         edgeType,
       );
+      const ambiguousSources = new Set<string>();
       for (const row of rows) {
-        this.filelessLiveness.seedCurrentSourceReference(
-          row.sourceSymbolId,
-          row,
-        );
+        const knownFileId = this.sourceFileIdBySymbolId.get(row.sourceSymbolId);
+        if (knownFileId && knownFileId !== row.fileId) {
+          ambiguousSources.add(row.sourceSymbolId);
+        } else {
+          this.sourceFileIdBySymbolId.set(row.sourceSymbolId, row.fileId);
+        }
+        if (row.symbolId !== null && row.referenceCount > 0) {
+          this.filelessLiveness.seedCurrentSourceReference(
+            row.sourceSymbolId,
+            { ...row, symbolId: row.symbolId },
+          );
+        }
       }
       for (const symbolId of chunk) {
+        if (
+          ambiguousSources.has(symbolId) ||
+          !this.sourceFileIdBySymbolId.has(symbolId)
+        ) {
+          // Without exact file ownership, retaining placeholders is safer than
+          // persisting an aggregate reference that a later file refresh cannot remove.
+          this.filelessLiveness.disablePruning();
+          continue;
+        }
         this.filelessLiveness.markCurrentSourcePrepared(symbolId, edgeType);
       }
     }
@@ -788,6 +1074,7 @@ export class PersistedGraphIntegritySession {
  */
 export async function verifyNoOpIncrementalGraphIntegrity(
   repoId: string,
+  options: Pick<GraphIntegrityVerificationOptions, "afterCapture"> = {},
 ): Promise<string> {
   const conn = await getLadybugConn();
   const [latestVersion, state] = await Promise.all([
@@ -797,12 +1084,15 @@ export async function verifyNoOpIncrementalGraphIntegrity(
   if (
     !latestVersion ||
     !state ||
-    !graphIntegrityIsVerifiedForVersion(state, latestVersion.versionId)
+    !graphIntegrityIsVerifiedForVersion(state, latestVersion.versionId) ||
+    typeof state.graphIntegrityRevision !== "number"
   ) {
     throw new Error(INCREMENTAL_BASELINE_ERROR);
   }
+  const expectedRevision = state.graphIntegrityRevision;
 
   const actual = await capturePersistedGraphIntegrity(conn, repoId);
+  await options.afterCapture?.();
   if (actual.digest !== state.graphIntegrityDigest) {
     logger.error("Persisted graph integrity no-op mismatch", {
       repoId,
@@ -811,10 +1101,11 @@ export async function verifyNoOpIncrementalGraphIntegrity(
       actualDigest: actual.digest,
       actualSymbolCount: actual.symbolCount,
     });
-    await markGraphIntegrityFailed(
+    await markCurrentGraphIntegrityRevisionFailed(
       repoId,
       latestVersion.versionId,
-      PUBLIC_VERIFICATION_ERROR,
+      expectedRevision,
+      GRAPH_INTEGRITY_VERIFICATION_FAILURE,
     );
     throw new GraphIntegrityVerificationError();
   }
@@ -848,11 +1139,20 @@ export async function ensureGraphIntegrityVerificationComplete(
 export async function failActiveGraphIntegrityVerification(
   repoId: string,
 ): Promise<void> {
-  const versionId = activeVerifications.get(repoId);
-  if (!versionId) return;
+  const verification = activeVerifications.get(repoId);
+  if (!verification) return;
   activeVerifications.delete(repoId);
+  const { versionId, revision } = verification;
   try {
-    await failGraphIntegrityVerification(repoId, versionId);
+    if (revision === null) {
+      await markUnrevisionedGraphIntegrityFailedIfVerifying(
+        repoId,
+        versionId,
+        "Persisted graph integrity verification did not complete",
+      );
+    } else {
+      await failGraphIntegrityVerification(repoId, versionId, revision);
+    }
   } catch (error) {
     logger.error("Failed to persist graph integrity failure state", {
       repoId,
@@ -895,6 +1195,240 @@ export function createGraphIntegrityFileDigest(params: {
   return finishMutableFileDigest(builder);
 }
 
+export function createGraphIntegrityFileState(
+  repoId: string,
+  fileId: string,
+  relPath: string,
+  symbols: readonly GraphIntegrityCanonicalSymbol[],
+  filelessReferences: readonly GraphIntegrityFilelessReferenceTuple[],
+): GraphIntegrityFileStateRecord {
+  const file = createGraphIntegrityFileDigest({ fileId, relPath, symbols });
+  const references = filelessReferences
+    .map(normalizeGraphIntegrityFilelessReference)
+    .sort((left, right) =>
+      compareText(JSON.stringify(left), JSON.stringify(right)),
+    );
+  return {
+    stateId: JSON.stringify([repoId, fileId]),
+    repoId,
+    fileId,
+    relPath: file.relPath,
+    symbolCount: file.symbolCount,
+    digest: file.digest,
+    filelessReferencesJson: JSON.stringify(references),
+  };
+}
+
+export function graphIntegrityFileStateMatchesDigest(
+  state: GraphIntegrityFileStateRecord,
+  file: GraphIntegrityFileDigest,
+): boolean {
+  return (
+    state.fileId === file.fileId &&
+    normalizeGraphIntegrityPath(state.relPath) === file.relPath &&
+    state.symbolCount === file.symbolCount &&
+    state.digest === file.digest
+  );
+}
+
+export function parseGraphIntegrityCanonicalSymbol(
+  json: string,
+): GraphIntegrityCanonicalSymbol {
+  const fields = parseGraphIntegrityArray(json, "canonical symbol");
+  if (
+    fields.length !== 18 ||
+    !fields.slice(0, 7).every((value) => typeof value === "string") ||
+    !fields.slice(7, 11).every(isSafeInteger) ||
+    !fields.slice(11, 15).every((value) => typeof value === "string") ||
+    typeof fields[15] !== "boolean" ||
+    typeof fields[16] !== "string" ||
+    typeof fields[17] !== "string" ||
+    fields[1] !== FILELESS_SENTINEL ||
+    fields[2] !== FILELESS_SENTINEL ||
+    !isGraphIntegritySymbolStatus(fields[14])
+  ) {
+    throw new Error("Malformed graph integrity canonical symbol JSON");
+  }
+
+  const canonical = fields as unknown as GraphIntegrityCanonicalSymbolTuple;
+  return {
+    symbolId: canonical[0],
+    fileId: canonical[1],
+    name: canonical[3],
+    signatureJson: canonical[4],
+    kind: canonical[5],
+    language: canonical[6],
+    rangeStartLine: canonical[7],
+    rangeStartCol: canonical[8],
+    rangeEndLine: canonical[9],
+    rangeEndCol: canonical[10],
+    source: canonical[11],
+    scipSymbol: canonical[12],
+    astFingerprint: canonical[13],
+    symbolStatus: canonical[14],
+    external: canonical[15],
+    placeholderKind: canonical[16],
+    placeholderTarget: canonical[17],
+  };
+}
+
+export function parseGraphIntegrityFilelessReferences(
+  json: string,
+): GraphIntegrityFilelessReferenceTuple[] {
+  return parseGraphIntegrityArray(json, "fileless references").map(
+    (value): GraphIntegrityFilelessReferenceTuple => {
+      if (
+        !Array.isArray(value) ||
+        value.length !== 6 ||
+        typeof value[0] !== "string" ||
+        typeof value[1] !== "string" ||
+        (value[2] !== null && typeof value[2] !== "string") ||
+        typeof value[3] !== "string" ||
+        (value[4] !== "incoming" && value[4] !== "outgoing") ||
+        !Number.isSafeInteger(value[5]) ||
+        (value[5] as number) < 0
+      ) {
+        throw new Error("Malformed graph integrity fileless reference JSON");
+      }
+      const canonical = parseGraphIntegrityCanonicalSymbol(value[1]);
+      if (canonical.symbolId !== value[0]) {
+        throw new Error("Graph integrity fileless reference identity mismatch");
+      }
+      return [value[0], value[1], value[2], value[3], value[4], value[5] as number];
+    },
+  );
+}
+
+export function createGraphIntegrityFilelessDelta(
+  repoId: string,
+  current: ReadonlyMap<string, GraphIntegrityFilelessStateRecord>,
+  previous: readonly GraphIntegrityFilelessReferenceTuple[],
+  next: readonly GraphIntegrityFilelessReferenceTuple[],
+  pruningSupported: boolean,
+): GraphIntegrityFilelessDelta {
+  const previousBySymbol = aggregateGraphIntegrityFilelessReferences(previous);
+  const nextBySymbol = aggregateGraphIntegrityFilelessReferences(next);
+  const touched = [...new Set([...previousBySymbol.keys(), ...nextBySymbol.keys()])]
+    .sort(compareText);
+  const upserts: GraphIntegrityFilelessStateRecord[] = [];
+  const deleteSymbolIds: string[] = [];
+
+  for (const symbolId of touched) {
+    const existing = current.get(symbolId);
+    if (
+      existing &&
+      (existing.repoId !== repoId ||
+        existing.stateId !== JSON.stringify([repoId, symbolId]))
+    ) {
+      throw new Error("Graph integrity fileless state identity mismatch");
+    }
+    const existingCanonicalSymbolJson = existing
+      ? normalizeGraphIntegrityCanonicalSymbolJson(
+          symbolId,
+          existing.canonicalSymbolJson,
+        )
+      : undefined;
+    const currentReferenceCount = existing?.referenceCount ?? 0;
+    const previousReferenceCount =
+      previousBySymbol.get(symbolId)?.referenceCount ?? 0;
+    if (currentReferenceCount < previousReferenceCount) {
+      throw new DatabaseError(
+        "Graph integrity fileless baseline reference count is inconsistent",
+      );
+    }
+    const referenceCount =
+      currentReferenceCount -
+      previousReferenceCount +
+      (nextBySymbol.get(symbolId)?.referenceCount ?? 0);
+    if (!Number.isSafeInteger(referenceCount) || referenceCount < 0) {
+      throw new Error("Graph integrity fileless reference count is invalid");
+    }
+    if (referenceCount === 0 && pruningSupported) {
+      if (existing) deleteSymbolIds.push(symbolId);
+      continue;
+    }
+    const canonicalSymbolJson =
+      nextBySymbol.get(symbolId)?.canonicalSymbolJson ??
+      existingCanonicalSymbolJson ??
+      previousBySymbol.get(symbolId)?.canonicalSymbolJson;
+    if (!canonicalSymbolJson) {
+      throw new Error("Graph integrity fileless canonical symbol is missing");
+    }
+    upserts.push({
+      stateId: JSON.stringify([repoId, symbolId]),
+      repoId,
+      symbolId,
+      canonicalSymbolJson,
+      referenceCount,
+    });
+  }
+  return { upserts, deleteSymbolIds };
+}
+
+export function createGraphIntegrityFilelessReferenceTuples(
+  references: readonly GraphIntegrityEdgeReference[],
+  symbols: readonly GraphIntegrityCanonicalSymbol[],
+  current: ReadonlyMap<string, GraphIntegrityFilelessStateRecord>,
+): GraphIntegrityFilelessReferenceTuple[] {
+  const symbolById = new Map(symbols.map((symbol) => [symbol.symbolId, symbol]));
+  return references
+    .map((reference): GraphIntegrityFilelessReferenceTuple => {
+      const existing = current.get(reference.filelessSymbolId);
+      const symbol = symbolById.get(reference.filelessSymbolId);
+      if (!existing && !symbol) {
+        throw new Error("Graph integrity fileless canonical symbol is missing");
+      }
+      const canonicalSymbolJson = existing
+        ? normalizeGraphIntegrityCanonicalSymbolJson(
+            reference.filelessSymbolId,
+            existing.canonicalSymbolJson,
+          )
+        : serializeGraphIntegrityCanonicalSymbol(symbol!);
+      return [
+        reference.filelessSymbolId,
+        canonicalSymbolJson,
+        reference.sourceSymbolId,
+        reference.edgeType,
+        reference.direction,
+        reference.referenceCount,
+      ];
+    })
+    .sort((left, right) => compareText(JSON.stringify(left), JSON.stringify(right)));
+}
+
+export function createGraphIntegrityExpectationFromManifest(
+  files: readonly GraphIntegrityFileStateRecord[],
+  fileless: readonly GraphIntegrityFilelessStateRecord[],
+): GraphIntegrityExpectation {
+  const digests: GraphIntegrityFileDigest[] = files.map((file) => ({
+    fileId: file.fileId,
+    relPath: normalizeGraphIntegrityPath(file.relPath),
+    symbolCount: file.symbolCount,
+    digest: file.digest,
+    pages: [],
+  }));
+  if (fileless.length > 0) {
+    const symbols = fileless.map((row) => {
+      if (row.stateId !== JSON.stringify([row.repoId, row.symbolId])) {
+        throw new Error("Graph integrity fileless state identity mismatch");
+      }
+      const symbol = parseGraphIntegrityCanonicalSymbol(row.canonicalSymbolJson);
+      if (symbol.symbolId !== row.symbolId) {
+        throw new Error("Graph integrity fileless state identity mismatch");
+      }
+      return symbol;
+    });
+    digests.push(
+      createGraphIntegrityFileDigest({
+        fileId: FILELESS_SENTINEL,
+        relPath: FILELESS_SENTINEL,
+        symbols,
+      }),
+    );
+  }
+  return createGraphIntegrityExpectation(digests);
+}
+
 /**
  * Build canonical fileless Symbol rows from provider externals and non-real
  * dependency targets before persistence. Real cross-file targets are omitted:
@@ -904,6 +1438,7 @@ export function createGraphIntegrityFilelessSymbols(rows: {
   symbols: readonly Pick<SymbolRow, "symbolId">[];
   externalSymbols: readonly ProviderFirstExternalSymbolRow[];
   edges: readonly EdgeRow[];
+  canonicalizeDependencyPlaceholders?: boolean;
 }): CanonicalSymbol[] {
   const fileBackedIds = new Set(rows.symbols.map((symbol) => symbol.symbolId));
   const fileless = new Map<string, CanonicalSymbol>();
@@ -942,12 +1477,13 @@ export function createGraphIntegrityFilelessSymbols(rows: {
       ? classifyDependencyTarget(edge.toSymbolId)
       : edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
     if (metadata.symbolStatus === "real") continue;
+    const canonical = rows.canonicalizeDependencyPlaceholders ?? true;
     fileless.set(edge.toSymbolId, {
       symbolId: edge.toSymbolId,
       fileId: FILELESS_SENTINEL,
-      name: edge.toSymbolId,
-      kind: "unknown",
-      language: "unknown",
+      name: canonical ? edge.toSymbolId : "",
+      kind: canonical ? "unknown" : "",
+      language: canonical ? "unknown" : "",
       rangeStartLine: 0,
       rangeStartCol: 0,
       rangeEndLine: 0,
@@ -955,7 +1491,7 @@ export function createGraphIntegrityFilelessSymbols(rows: {
       signatureJson: null,
       source: "treesitter",
       scipSymbol: null,
-      astFingerprint: edge.toSymbolId,
+      astFingerprint: canonical ? edge.toSymbolId : "",
       symbolStatus: metadata.symbolStatus,
       external: metadata.symbolStatus === "external",
       placeholderKind: metadata.placeholderKind ?? "",
@@ -1003,25 +1539,6 @@ export function graphIntegrityPlaceholderPruningIsSafe(
 ): boolean {
   return expectedRepoSymbolCount + otherRepoSymbolCount <=
     ladybugDb.LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT;
-}
-
-async function seedPersistedReferenceCounts(
-  conn: Connection,
-  repoId: string,
-  ledger: GraphIntegrityFilelessLivenessLedger,
-): Promise<void> {
-  let after: { symbolId: string; edgeType: string } | undefined;
-  while (true) {
-    const rows = await getPersistedGraphIntegrityReferenceCountPage(conn, {
-      repoId,
-      after,
-      limit: GRAPH_INTEGRITY_REFERENCE_PAGE_SIZE,
-    });
-    if (rows.length === 0) return;
-    for (const row of rows) ledger.seedReferenceCount(row);
-    const last = rows.at(-1)!;
-    after = { symbolId: last.symbolId, edgeType: last.edgeType };
-  }
 }
 
 function graphIntegrityEdgeReferenceKey(
@@ -1134,20 +1651,55 @@ export function createGraphIntegrityExpectation(
 export async function capturePersistedGraphIntegrity(
   conn: Connection,
   repoId: string,
+  options: { checkCancelled?: () => void } = {},
 ): Promise<GraphIntegrityExpectation> {
-  return capturePersistedGraphIntegrityInternal(conn, repoId);
+  return capturePersistedGraphIntegrityInternal(
+    conn,
+    repoId,
+    undefined,
+    options.checkCancelled,
+  );
+}
+
+function graphIntegrityReferenceFromTuple(
+  tuple: GraphIntegrityFilelessReferenceTuple,
+): GraphIntegrityEdgeReference {
+  return {
+    filelessSymbolId: tuple[0],
+    sourceSymbolId: tuple[2],
+    edgeType: tuple[3],
+    direction: tuple[4],
+    referenceCount: tuple[5],
+  };
+}
+
+function graphIntegrityReferenceToTuple(
+  reference: GraphIntegrityEdgeReference,
+  symbol: CanonicalSymbol,
+): GraphIntegrityFilelessReferenceTuple {
+  return [
+    reference.filelessSymbolId,
+    serializeGraphIntegrityCanonicalSymbol(symbol),
+    reference.sourceSymbolId,
+    reference.edgeType,
+    reference.direction,
+    reference.referenceCount,
+  ];
 }
 
 async function capturePersistedGraphIntegrityInternal(
   conn: Connection,
   repoId: string,
   onSymbol?: (symbol: CanonicalSymbol) => void,
+  checkCancelled?: () => void,
 ): Promise<GraphIntegrityExpectation> {
   const files: GraphIntegrityFileDigest[] = [];
   let current: MutableFileDigest | undefined;
   let cursor: GraphIntegritySymbolCursor | undefined;
 
   while (true) {
+    // Cancellation is cooperative: never interrupt a native Ladybug query.
+    checkCancelled?.();
     const rows = await getPersistedGraphIntegritySymbolPage(
       conn,
       {
@@ -1195,9 +1747,71 @@ async function capturePersistedGraphIntegrityInternal(
       fileId: last.fileId,
       symbolId: last.symbolId,
     };
+    if (rows.length < GRAPH_INTEGRITY_QUERY_PAGE_SIZE) break;
   }
   if (current) files.push(finishMutableFileDigest(current));
   return createGraphIntegrityExpectation(files);
+}
+
+/** @internal Background-only snapshot scan and revision-CAS publication. */
+export async function verifyPersistedGraphIntegrityRevision(
+  repoId: string,
+  versionId: string,
+  revision: number,
+  options: {
+    checkCancelled?: () => void;
+    /** @internal Minimal test hook proving the read lease closes before CAS. */
+    persistSuccessState?: typeof markGraphIntegrityVerifiedIfVerifying;
+  } = {},
+): Promise<"verified" | "failed" | "stale"> {
+  const snapshot = await withExclusiveReadConnection((conn) =>
+    withReadOnlyTransaction(conn, async () => {
+      options.checkCancelled?.();
+      const files = await listGraphIntegrityFileStates(conn, repoId);
+      options.checkCancelled?.();
+      const fileless = await listGraphIntegrityFilelessStates(conn, repoId);
+      options.checkCancelled?.();
+      let expected: GraphIntegrityExpectation;
+      try {
+        expected = createGraphIntegrityExpectationFromManifest(files, fileless);
+      } catch (error) {
+        if (error instanceof GraphIntegrityManifestValidationError) throw error;
+        throw new GraphIntegrityManifestValidationError(
+          error instanceof Error
+            ? error.message
+            : "Graph integrity manifest is invalid",
+        );
+      }
+      const actual = await capturePersistedGraphIntegrity(conn, repoId, {
+        checkCancelled: options.checkCancelled,
+      });
+      return { actual, mismatch: compareGraphIntegrityExpectations(expected, actual) };
+    }),
+  );
+  options.checkCancelled?.();
+
+  // The read transaction and exclusive lease must end before acquiring the
+  // single writer for the tiny publication CAS.
+  if (snapshot.mismatch) {
+    logger.error("Persisted graph integrity background mismatch", {
+      repoId,
+      versionId,
+      revision,
+      mismatch: snapshot.mismatch,
+    });
+    const published = await markGraphIntegrityFailedIfVerifying(
+      repoId,
+      versionId,
+      revision,
+      GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+    );
+    return published ? "failed" : "stale";
+  }
+
+  const published = await (
+    options.persistSuccessState ?? markGraphIntegrityVerifiedIfVerifying
+  )(repoId, versionId, revision, snapshot.actual.digest);
+  return published ? "verified" : "stale";
 }
 
 /**
@@ -1275,7 +1889,20 @@ export async function completeGraphIntegrityVerification(
   options: GraphIntegrityVerificationOptions = {},
 ): Promise<void> {
   const startedAt = Date.now();
+  let verificationRevision: number | null = options.expectedRevision ?? null;
   try {
+    const verificationState = await getDerivedState(repoId);
+    if (
+      !verificationState ||
+      verificationState.graphIntegrityState !== "verifying" ||
+      verificationState.graphIntegrityVersionId !== versionId ||
+      (options.expectedRevision !== undefined &&
+        verificationState.graphIntegrityRevision !== options.expectedRevision)
+    ) {
+      throw new GraphIntegrityVerificationError();
+    }
+    verificationRevision ??= verificationState.graphIntegrityRevision ?? null;
+
     const actual = await capturePersistedGraphIntegrity(
       await getLadybugConn(),
       repoId,
@@ -1290,9 +1917,21 @@ export async function completeGraphIntegrityVerification(
       });
       throw new GraphIntegrityVerificationError();
     }
+    if (verificationRevision === null) {
+      verificationRevision =
+        await initializeGraphIntegrityRevisionIfVerifying(repoId, versionId);
+    }
+    if (verificationRevision === null) {
+      logger.error("Persisted graph integrity publish lost verification state", {
+        repoId,
+        versionId,
+      });
+      throw new GraphIntegrityVerificationError();
+    }
     const published = await markGraphIntegrityVerifiedIfVerifying(
       repoId,
       versionId,
+      verificationRevision,
       actual.digest,
     );
     if (!published) {
@@ -1317,11 +1956,20 @@ export async function completeGraphIntegrityVerification(
       });
     }
     try {
-      await (options.persistFailureState ?? markGraphIntegrityFailedIfVerifying)(
-        repoId,
-        versionId,
-        PUBLIC_VERIFICATION_ERROR,
-      );
+      if (verificationRevision === null) {
+        await markUnrevisionedGraphIntegrityFailedIfVerifying(
+          repoId,
+          versionId,
+          GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+        );
+      } else {
+        await (options.persistFailureState ?? markGraphIntegrityFailedIfVerifying)(
+          repoId,
+          versionId,
+          verificationRevision,
+          GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+        );
+      }
     } catch (stateError) {
       logger.error("Failed to persist graph integrity failure state", {
         repoId,
@@ -1337,10 +1985,12 @@ export async function completeGraphIntegrityVerification(
 export async function failGraphIntegrityVerification(
   repoId: string,
   versionId: string,
+  revision: number,
 ): Promise<void> {
   await markGraphIntegrityFailedIfVerifying(
     repoId,
     versionId,
+    revision,
     "Persisted graph integrity verification did not complete",
   );
 }
@@ -1368,14 +2018,43 @@ function normalizeGraphIntegrityPath(relPath: string): string {
     : normalizePath(relPath);
 }
 
-function appendCanonicalSymbol(
-  builder: MutableFileDigest,
+interface AggregatedGraphIntegrityFilelessReference {
+  canonicalSymbolJson: string;
+  referenceCount: number;
+}
+
+function parseGraphIntegrityArray(json: string, label: string): unknown[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw new Error(`Malformed graph integrity ${label} JSON`);
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`Malformed graph integrity ${label} JSON`);
+  }
+  return value;
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+function isGraphIntegritySymbolStatus(
+  value: unknown,
+): value is NonNullable<CanonicalSymbol["symbolStatus"]> {
+  return value === "real" || value === "unresolved" || value === "external";
+}
+
+function canonicalSymbolFields(
   symbol: CanonicalSymbol,
-): void {
-  const serialized = `${JSON.stringify([
+  fileId: string,
+  relPath: string,
+): GraphIntegrityCanonicalSymbolTuple {
+  return [
     symbol.symbolId,
-    builder.fileId,
-    builder.relPath,
+    fileId,
+    relPath,
     symbol.name ?? "",
     symbol.signatureJson ?? "",
     symbol.kind ?? "",
@@ -1391,7 +2070,84 @@ function appendCanonicalSymbol(
     symbol.external ?? false,
     symbol.placeholderKind ?? "",
     symbol.placeholderTarget ?? "",
-  ])}\n`;
+  ];
+}
+
+function serializeGraphIntegrityCanonicalSymbol(
+  symbol: CanonicalSymbol,
+): string {
+  return JSON.stringify(
+    canonicalSymbolFields(symbol, FILELESS_SENTINEL, FILELESS_SENTINEL),
+  );
+}
+
+function normalizeGraphIntegrityCanonicalSymbolJson(
+  symbolId: string,
+  json: string,
+): string {
+  const canonical = parseGraphIntegrityCanonicalSymbol(json);
+  if (canonical.symbolId !== symbolId) {
+    throw new Error("Graph integrity fileless state identity mismatch");
+  }
+  return serializeGraphIntegrityCanonicalSymbol(canonical);
+}
+
+function normalizeGraphIntegrityFilelessReference(
+  reference: GraphIntegrityFilelessReferenceTuple,
+): GraphIntegrityFilelessReferenceTuple {
+  const canonicalSymbolJson = normalizeGraphIntegrityCanonicalSymbolJson(
+    reference[0],
+    reference[1],
+  );
+  if (
+    (reference[2] !== null && typeof reference[2] !== "string") ||
+    typeof reference[3] !== "string" ||
+    (reference[4] !== "incoming" && reference[4] !== "outgoing") ||
+    !Number.isSafeInteger(reference[5]) ||
+    reference[5] < 0
+  ) {
+    throw new Error("Malformed graph integrity fileless reference");
+  }
+  return [
+    reference[0],
+    canonicalSymbolJson,
+    reference[2],
+    reference[3],
+    reference[4],
+    reference[5],
+  ];
+}
+
+function aggregateGraphIntegrityFilelessReferences(
+  references: readonly GraphIntegrityFilelessReferenceTuple[],
+): Map<string, AggregatedGraphIntegrityFilelessReference> {
+  const aggregated = new Map<string, AggregatedGraphIntegrityFilelessReference>();
+  for (const input of references) {
+    const reference = normalizeGraphIntegrityFilelessReference(input);
+    const previous = aggregated.get(reference[0]);
+    if (previous && previous.canonicalSymbolJson !== reference[1]) {
+      throw new Error("Graph integrity fileless canonical symbol mismatch");
+    }
+    const referenceCount =
+      (previous?.referenceCount ?? 0) + reference[5];
+    if (!Number.isSafeInteger(referenceCount)) {
+      throw new Error("Graph integrity fileless reference count is invalid");
+    }
+    aggregated.set(reference[0], {
+      canonicalSymbolJson: reference[1],
+      referenceCount,
+    });
+  }
+  return aggregated;
+}
+
+function appendCanonicalSymbol(
+  builder: MutableFileDigest,
+  symbol: CanonicalSymbol,
+): void {
+  const serialized = `${JSON.stringify(
+    canonicalSymbolFields(symbol, builder.fileId, builder.relPath),
+  )}\n`;
   builder.digest.update(serialized);
   builder.pageDigest.update(serialized);
   builder.symbolCount++;

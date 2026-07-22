@@ -182,7 +182,7 @@ describe("index.refresh async mode schema", () => {
     );
   });
 
-  it("handler supports asyncMode flag", async () => {
+  it("handler supports asyncMode outside the tool dispatch context", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/mcp/tools/repo.ts", "utf8");
     assert.ok(
@@ -190,8 +190,12 @@ describe("index.refresh async mode schema", () => {
       "handleIndexRefresh should read asyncMode from request",
     );
     assert.ok(
-      src.includes("bgRefresh().then("),
-      "Async mode should fire-and-forget bgRefresh (detached from request signal)",
+      src.includes("runOutsideToolDispatchContext(bgRefresh)"),
+      "Async mode should detach backgroundRefresh from tool dispatch ownership",
+    );
+    assert.ok(
+      src.includes("backgroundRefresh.then("),
+      "Async mode should observe the detached backgroundRefresh promise",
     );
   });
 });

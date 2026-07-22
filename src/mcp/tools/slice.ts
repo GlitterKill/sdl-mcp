@@ -63,6 +63,7 @@ import {
 } from "../errors.js";
 import { pickDepLabel } from "../../util/depLabels.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
+import { assertGraphRetrievalAvailable } from "../../services/graph-retrieval-availability.js";
 import type { ToolContext } from "../../server.js";
 import {
   safeJsonParseOptional,
@@ -775,6 +776,7 @@ export async function handleSliceRefresh(
   if (!handleRow) {
     throw new NotFoundError(`Slice handle not found: ${sliceHandle}`);
   }
+  await assertGraphRetrievalAvailable(conn, handleRow.repoId);
 
   // Default knownVersion to the slice handle's maxVersion when not provided
   const knownVersion =
@@ -902,7 +904,6 @@ export async function handleSliceSpilloverGet(
   if (handleRow.repoId !== request.repoId) {
     throw new ValidationError("repoId does not own this handle");
   }
-
   recordToolTrace({
     repoId: handleRow.repoId,
     taskType: "slice",

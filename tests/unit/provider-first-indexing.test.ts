@@ -15,6 +15,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rename as fsRename } from "node:fs/promises";
 
+import { Connection } from "kuzu";
+
 import {
   type AppConfig,
   IndexingConfigSchema,
@@ -70,6 +72,17 @@ import {
   summarizeProviderFirstShadowActivationReadiness,
 } from "../../dist/indexer/provider-first/shadow-activation.js";
 import {
+  cancelAndWaitForGraphIntegrityVerifier,
+  notifyGraphIntegrityVerifier,
+} from "../../dist/indexer/provider-first/background-graph-integrity-verifier.js";
+import {
+  createGraphIntegrityExpectationFromManifest,
+  createGraphIntegrityFileDigest,
+  createGraphIntegrityFileState,
+  failActiveGraphIntegrityVerification,
+  PersistedGraphIntegritySession,
+} from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
+import {
   collectLegacyFallbackShadowRows,
   mergeProviderFirstGraphRows,
 } from "../../dist/indexer/provider-first/legacy-shadow-rows.js";
@@ -90,6 +103,7 @@ import {
   withWriteConn,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import * as derivedState from "../../dist/db/ladybug-derived-state.js";
 import {
   createBaseSchema,
   createSecondaryIndexes,
@@ -10541,35 +10555,237 @@ describe("provider-first indexing foundation", () => {
     }
   });
 
+  it("cancels the verifier lease and preserves the active graph when shadow ownership is stale", async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "sdl-provider-first-handoff-guard-"));
+    const activePath = join(root, "active.lbug");
+    const shadowPath = join(root, "shadow.lbug");
+    const repoId = "stale-shadow-owner";
+    const row = shadowLifecycleSymbolRow(repoId, "active");
+    const fileState = createGraphIntegrityFileState(
+      repoId,
+      row.fileId,
+      "src/active.ts",
+      [row],
+      [],
+    );
+    const expectation = createGraphIntegrityExpectationFromManifest(
+      [fileState],
+      [],
+    );
+    let releasePageResolve!: () => void;
+    const releasePage = new Promise<void>((resolve) => {
+      releasePageResolve = resolve;
+    });
+    try {
+      await closeLadybugDb();
+      await initLadybugDb(activePath);
+      await withWriteConn(async (conn) => {
+        await ladybugDb.upsertRepo(conn, {
+          repoId,
+          rootPath: root,
+          configJson: "{}",
+          createdAt: "2026-07-21T00:00:00.000Z",
+        });
+        await ladybugDb.upsertFile(conn, {
+          fileId: row.fileId,
+          repoId,
+          relPath: "src/active.ts",
+          contentHash: "a".repeat(64),
+          language: "typescript",
+          byteSize: 10,
+          lastIndexedAt: "2026-07-21T00:00:00.000Z",
+        });
+        await ladybugDb.upsertKnownFileSymbols(conn, [row]);
+        await ladybugDb.createVersion(conn, {
+          versionId: "v1",
+          repoId,
+          createdAt: "2026-07-21T00:00:00.000Z",
+          reason: "test",
+          prevVersionHash: null,
+          versionHash: null,
+        });
+        await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+          conn,
+          repoId,
+          { files: [fileState], fileless: [] },
+        );
+        await derivedState.beginGraphIntegrityVersion(
+          conn,
+          repoId,
+          "v1",
+          expectation.digest,
+          true,
+        );
+        assert.equal(
+          await derivedState.advanceGraphIntegrityRevisionInTransaction(
+            conn,
+            repoId,
+            "v1",
+            0,
+          ),
+          1,
+        );
+      });
+      mkdirSync(shadowPath);
+      writeFileSync(join(shadowPath, "marker.txt"), "shadow", "utf8");
+
+      const statements = new WeakMap<object, string>();
+      let pageStartedResolve!: () => void;
+      const pageStarted = new Promise<void>((resolve) => {
+        pageStartedResolve = resolve;
+      });
+      let exclusiveCloses = 0;
+      const originalPrepare = Connection.prototype.prepare;
+      const originalExecute = Connection.prototype.execute;
+      const originalClose = Connection.prototype.close;
+      t.mock.method(Connection.prototype, "prepare", async function (statement) {
+        const prepared = await originalPrepare.call(this, statement);
+        statements.set(prepared, statement);
+        return prepared;
+      });
+      t.mock.method(
+        Connection.prototype,
+        "execute",
+        async function (prepared, params, progressCallback) {
+          if (
+            statements
+              .get(prepared)
+              ?.includes("OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]")
+          ) {
+            pageStartedResolve();
+            await releasePage;
+          }
+          return originalExecute.call(this, prepared, params, progressCallback);
+        },
+      );
+      t.mock.method(Connection.prototype, "close", async function () {
+        await originalClose.call(this);
+        exclusiveCloses += 1;
+      });
+
+      notifyGraphIntegrityVerifier(repoId);
+      await pageStarted;
+
+      const session = new PersistedGraphIntegritySession(repoId, "full", true);
+      await session.begin("v2");
+      session.applyFile(
+        createGraphIntegrityFileDigest({
+          fileId: row.fileId,
+          relPath: "src/active.ts",
+          symbols: [row],
+        }),
+      );
+      assert.equal(await session.stageManifest("v2"), 0);
+      assert.equal(
+        await withWriteConn((conn) =>
+          derivedState.advanceGraphIntegrityRevisionInTransaction(
+            conn,
+            repoId,
+            "v2",
+            0,
+          ),
+        ),
+        1,
+      );
+
+      let closeCalls = 0;
+      let activationSettled = false;
+      const activationPromise = activateProviderFirstShadowDbWithHandoff({
+        activeDbPath: activePath,
+        shadowDbPath: shadowPath,
+        generationId: "stale-revision",
+        prepareHandoff: async () => {
+          await cancelAndWaitForGraphIntegrityVerifier(repoId);
+          if (
+            !session.ownsStagedRevision(
+              "v2",
+              await derivedState.getDerivedState(repoId),
+            )
+          ) {
+            throw new Error("revision advanced");
+          }
+        },
+        closeActiveDb: async () => {
+          closeCalls += 1;
+          await closeLadybugDb({ preserveCloseHooks: true });
+        },
+        reopenActiveDb: async (path) => {
+          await initLadybugDb(path);
+        },
+      }).finally(() => {
+        activationSettled = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(activationSettled, false);
+      assert.equal(closeCalls, 0);
+      releasePageResolve();
+
+      const activation = await activationPromise;
+
+      assert.equal(activation.status, "failed");
+      assert.match(activation.reasons.join(" "), /revision advanced/);
+      assert.equal(closeCalls, 0);
+      assert.ok(exclusiveCloses >= 1);
+      assert.equal(readFileSync(join(shadowPath, "marker.txt"), "utf8"), "shadow");
+      assert.deepEqual(
+        (await ladybugDb.getSymbolsByFile(await getLadybugConn(), row.fileId))
+          .map((symbol) => symbol.symbolId),
+        [row.symbolId],
+      );
+      assert.deepEqual(
+        (await ladybugDb.listGraphIntegrityFileStates(
+          await getLadybugConn(),
+          repoId,
+        )).map((state) => state.relPath),
+        ["src/active.ts"],
+      );
+      await failActiveGraphIntegrityVerification(repoId);
+    } finally {
+      releasePageResolve();
+      await cancelAndWaitForGraphIntegrityVerifier(repoId).catch(() => {});
+      await failActiveGraphIntegrityVerification(repoId).catch(() => {});
+      await closeLadybugDb().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("restores the active DB when post-handoff validation fails", async () => {
     const root = mkdtempSync(
       join(tmpdir(), "sdl-provider-first-handoff-validation-"),
     );
+    const activePath = join(root, "active.lbug");
+    const shadowPath = join(root, "shadow.lbug");
+    const repoId = "rollback-shadow-owner";
     try {
-      const activePath = join(root, "active.lbug");
-      const shadowPath = join(root, "shadow.lbug");
-      mkdirSync(activePath);
-      mkdirSync(shadowPath);
-      writeFileSync(join(activePath, "marker.txt"), "active", "utf8");
-      writeFileSync(join(shadowPath, "marker.txt"), "shadow", "utf8");
+      await closeLadybugDb();
+      await seedShadowLifecycleDb(activePath, root, repoId, "active");
+      await seedShadowLifecycleDb(shadowPath, root, repoId, "shadow");
+      await initLadybugDb(activePath);
       let reopenCalls = 0;
 
       const activation = await activateProviderFirstShadowDbWithHandoff({
         activeDbPath: activePath,
         shadowDbPath: shadowPath,
         generationId: "provider-first:fts-validation",
-        closeActiveDb: async () => {},
+        closeActiveDb: () => closeLadybugDb({ preserveCloseHooks: true }),
         reopenActiveDb: async (path) => {
           reopenCalls++;
-          assert.equal(
-            readFileSync(join(path, "marker.txt"), "utf8"),
-            reopenCalls === 1 ? "shadow" : "active",
-          );
+          await initLadybugDb(path);
         },
-        validateActivatedDb: async (path) => {
-          assert.equal(
-            readFileSync(join(path, "marker.txt"), "utf8"),
-            "shadow",
+        validateActivatedDb: async () => {
+          assert.deepEqual(
+            (await ladybugDb.getSymbolsByFile(
+              await getLadybugConn(),
+              `${repoId}:src/shadow.ts`,
+            )).map((symbol) => symbol.name),
+            ["shadow"],
+          );
+          assert.deepEqual(
+            (await ladybugDb.listGraphIntegrityFileStates(
+              await getLadybugConn(),
+              repoId,
+            )).map((state) => state.relPath),
+            ["src/shadow.ts"],
           );
           throw new Error("critical Symbol FTS validation failed");
         },
@@ -10582,11 +10798,22 @@ describe("provider-first indexing foundation", () => {
         /critical Symbol FTS validation failed.*previous active DB was restored/,
       );
       assert.equal(reopenCalls, 2);
-      assert.equal(
-        readFileSync(join(activePath, "marker.txt"), "utf8"),
-        "active",
+      assert.deepEqual(
+        (await ladybugDb.getSymbolsByFile(
+          await getLadybugConn(),
+          `${repoId}:src/active.ts`,
+        )).map((symbol) => symbol.name),
+        ["active"],
+      );
+      assert.deepEqual(
+        (await ladybugDb.listGraphIntegrityFileStates(
+          await getLadybugConn(),
+          repoId,
+        )).map((state) => state.relPath),
+        ["src/active.ts"],
       );
     } finally {
+      await closeLadybugDb().catch(() => {});
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -11026,6 +11253,83 @@ function canonicalProjectionForRows(
       placeholderTarget: symbol.placeholderTarget ?? "",
     }))
     .sort((left, right) => left.symbolId.localeCompare(right.symbolId));
+}
+
+function shadowLifecycleSymbolRow(repoId: string, name: string): SymbolRow {
+  return {
+    symbolId: `${repoId}:sym:${name}`,
+    repoId,
+    fileId: `${repoId}:src/${name}.ts`,
+    kind: "function",
+    name,
+    exported: true,
+    visibility: "public",
+    language: "typescript",
+    rangeStartLine: 1,
+    rangeStartCol: 0,
+    rangeEndLine: 3,
+    rangeEndCol: 1,
+    astFingerprint: `${repoId}:fingerprint:${name}`,
+    signatureJson: JSON.stringify({ name }),
+    summary: null,
+    invariantsJson: null,
+    sideEffectsJson: null,
+    source: "scip",
+    scipSymbol: `scip-typescript npm fixture 1.0.0 ${repoId}/${name}().`,
+    updatedAt: "2026-07-21T00:00:00.000Z",
+  };
+}
+
+async function seedShadowLifecycleDb(
+  dbPath: string,
+  rootPath: string,
+  repoId: string,
+  name: string,
+): Promise<void> {
+  const row = shadowLifecycleSymbolRow(repoId, name);
+  const relPath = `src/${name}.ts`;
+  const fileState = createGraphIntegrityFileState(
+    repoId,
+    row.fileId,
+    relPath,
+    [row],
+    [],
+  );
+  const expectation = createGraphIntegrityExpectationFromManifest(
+    [fileState],
+    [],
+  );
+  await initLadybugDb(dbPath);
+  await withWriteConn(async (conn) => {
+    await ladybugDb.upsertRepo(conn, {
+      repoId,
+      rootPath,
+      configJson: "{}",
+      createdAt: "2026-07-21T00:00:00.000Z",
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId: row.fileId,
+      repoId,
+      relPath,
+      contentHash: name.repeat(64).slice(0, 64),
+      language: "typescript",
+      byteSize: 10,
+      lastIndexedAt: "2026-07-21T00:00:00.000Z",
+    });
+    await ladybugDb.upsertKnownFileSymbols(conn, [row]);
+    await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
+      files: [fileState],
+      fileless: [],
+    });
+    await derivedState.beginGraphIntegrityVersion(
+      conn,
+      repoId,
+      `v-${name}`,
+      expectation.digest,
+      true,
+    );
+  });
+  await closeLadybugDb();
 }
 
 async function assertCanonicalProjection(

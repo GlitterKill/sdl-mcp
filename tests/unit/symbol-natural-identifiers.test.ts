@@ -12,6 +12,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { beginGraphIntegrityVersion } from "../../dist/db/ladybug-derived-state.js";
 import {
   SymbolGetCardRequestSchema,
   
@@ -57,6 +58,7 @@ describe("symbol natural identifiers", () => {
       prevVersionHash: null,
       versionHash: "hash-v1",
     });
+    await beginGraphIntegrityVersion(conn, "repo", "v1", "0".repeat(64), true);
 
     await ladybugDb.upsertFile(conn, {
       fileId: "file-tree",

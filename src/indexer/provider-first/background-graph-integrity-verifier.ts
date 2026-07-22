@@ -1,0 +1,288 @@
+import {
+  WATCHER_REINDEX_MAX_ATTEMPTS,
+  WATCHER_REINDEX_RETRY_BASE_MS,
+  WATCHER_REINDEX_RETRY_MAX_MS,
+} from "../../config/constants.js";
+import {
+  listPendingGraphIntegrityRevisions,
+  markGraphIntegrityFailedIfVerifying,
+  type GraphIntegrityPendingRevision,
+} from "../../db/ladybug-derived-state.js";
+import { GraphIntegrityManifestValidationError } from "../../db/ladybug-graph-integrity.js";
+import { logger } from "../../util/logger.js";
+import {
+  GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+  hasActiveGraphIntegrityVerification,
+  verifyPersistedGraphIntegrityRevision,
+} from "./persisted-graph-integrity.js";
+
+const RECOVERY_SWEEP_MS = 5_000;
+
+class VerificationCancelledError extends Error {}
+
+interface WorkerCancellation {
+  controller: AbortController | undefined;
+  stopRequested: boolean;
+}
+
+interface WorkerEntry {
+  cancellation: WorkerCancellation;
+  task: Promise<void>;
+  wakePending: boolean;
+}
+
+const workers = new Map<string, WorkerEntry>();
+const quiescedRepos = new Map<string, number>();
+let recoveryTimer: NodeJS.Timeout | undefined;
+let recoveryStart: Promise<boolean> | undefined;
+let recoveryReady = false;
+let notificationsStopped = false;
+let stopPromise: Promise<void> | undefined;
+
+function checkCancelled(signal: AbortSignal): void {
+  if (signal.aborted) throw new VerificationCancelledError();
+}
+
+async function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, delayMs);
+    timer.unref();
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
+async function verifyWithRetry(
+  pending: GraphIntegrityPendingRevision,
+  signal: AbortSignal,
+): Promise<void> {
+  for (let attempt = 0; attempt < WATCHER_REINDEX_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      checkCancelled(signal);
+      await verifyPersistedGraphIntegrityRevision(
+        pending.repoId,
+        pending.versionId,
+        pending.revision,
+        { checkCancelled: () => checkCancelled(signal) },
+      );
+      return;
+    } catch (error) {
+      if (error instanceof VerificationCancelledError) return;
+      const deterministic =
+        error instanceof GraphIntegrityManifestValidationError;
+      if (deterministic || attempt + 1 >= WATCHER_REINDEX_MAX_ATTEMPTS) {
+        if (signal.aborted) return;
+        logger.error("Background graph integrity verification failed", {
+          repoId: pending.repoId,
+          versionId: pending.versionId,
+          revision: pending.revision,
+          attempts: attempt + 1,
+          deterministic,
+          errorType: error instanceof Error ? error.name : typeof error,
+        });
+        try {
+          await markGraphIntegrityFailedIfVerifying(
+            pending.repoId,
+            pending.versionId,
+            pending.revision,
+            GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+          );
+        } catch (publicationError) {
+          logger.error("Failed to publish graph integrity retry exhaustion", {
+            repoId: pending.repoId,
+            versionId: pending.versionId,
+            revision: pending.revision,
+            error:
+              publicationError instanceof Error
+                ? publicationError.message
+                : String(publicationError),
+          });
+        }
+        return;
+      }
+      const delayMs = Math.min(
+        WATCHER_REINDEX_RETRY_MAX_MS,
+        WATCHER_REINDEX_RETRY_BASE_MS * 2 ** attempt,
+      );
+      await waitForRetry(delayMs, signal);
+    }
+  }
+}
+
+async function runWorker(repoId: string, entry: WorkerEntry): Promise<void> {
+  while (!entry.cancellation.stopRequested) {
+    if (hasActiveGraphIntegrityVerification(repoId)) return;
+    entry.wakePending = false;
+    let pending: GraphIntegrityPendingRevision | undefined;
+    try {
+      pending = (await listPendingGraphIntegrityRevisions(repoId))[0];
+    } catch (error) {
+      logger.error("Failed to load pending graph integrity revision", {
+        repoId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    if (
+      entry.cancellation.stopRequested ||
+      hasActiveGraphIntegrityVerification(repoId)
+    ) return;
+    // A wake arriving during the durable read may represent a newer commit.
+    if (entry.wakePending) continue;
+    if (!pending) return;
+
+    const controller = new AbortController();
+    entry.cancellation.controller = controller;
+    await verifyWithRetry(pending, controller.signal);
+    entry.cancellation.controller = undefined;
+    // Always reload DerivedState after completion, cancellation, or stale CAS.
+  }
+}
+
+function startWorker(repoId: string): void {
+  const entry: WorkerEntry = {
+    cancellation: { controller: undefined, stopRequested: false },
+    task: Promise.resolve(),
+    wakePending: false,
+  };
+  workers.set(repoId, entry);
+  entry.task = runWorker(repoId, entry).finally(() => {
+    if (workers.get(repoId) === entry) workers.delete(repoId);
+  });
+}
+
+export function notifyGraphIntegrityVerifier(repoId: string): boolean {
+  if (notificationsStopped || quiescedRepos.has(repoId)) return false;
+  if (hasActiveGraphIntegrityVerification(repoId)) return false;
+  const entry = workers.get(repoId);
+  if (!entry) {
+    startWorker(repoId);
+    return true;
+  }
+  if (entry.cancellation.stopRequested) return false;
+  entry.wakePending = true;
+  entry.cancellation.controller?.abort();
+  return true;
+}
+
+export async function cancelAndWaitForGraphIntegrityVerifier(
+  repoId: string,
+): Promise<void> {
+  const entry = workers.get(repoId);
+  if (!entry) return;
+  entry.wakePending = false;
+  entry.cancellation.stopRequested = true;
+  entry.cancellation.controller?.abort();
+  await entry.task;
+}
+
+/**
+ * Prevent verifier admission while a repository crosses a destructive lifecycle
+ * boundary. The block is installed before cancellation so a captured recovery
+ * sweep cannot recreate the worker after cancellation completes.
+ */
+export async function withGraphIntegrityVerifierQuiesced<T>(
+  repoId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  quiescedRepos.set(repoId, (quiescedRepos.get(repoId) ?? 0) + 1);
+  try {
+    await cancelAndWaitForGraphIntegrityVerifier(repoId);
+    return await operation();
+  } finally {
+    const remaining = (quiescedRepos.get(repoId) ?? 1) - 1;
+    if (remaining > 0) quiescedRepos.set(repoId, remaining);
+    else quiescedRepos.delete(repoId);
+  }
+}
+
+export async function cancelAndWaitForAllGraphIntegrityVerifiers(): Promise<void> {
+  const entries = [...workers.entries()];
+  for (const [, entry] of entries) {
+    entry.wakePending = false;
+    entry.cancellation.stopRequested = true;
+    entry.cancellation.controller?.abort();
+  }
+  await Promise.all(entries.map(([, entry]) => entry.task));
+}
+
+/** @internal Deterministic recovery hook; production uses the fixed sweep. */
+export async function runGraphIntegrityVerifierRecoverySweep(): Promise<void> {
+  const pending = await listPendingGraphIntegrityRevisions();
+  for (const revision of pending) {
+    if (!workers.has(revision.repoId)) {
+      notifyGraphIntegrityVerifier(revision.repoId);
+    }
+  }
+}
+
+function beginRecoverySweep(): Promise<boolean> {
+  if (recoveryStart) return recoveryStart;
+  const task = runGraphIntegrityVerifierRecoverySweep()
+    .then(() => true)
+    .catch((error: unknown) => {
+      logger.error("Graph integrity recovery sweep failed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+      return false;
+    })
+    .finally(() => {
+      if (recoveryStart === task) recoveryStart = undefined;
+    });
+  recoveryStart = task;
+  return task;
+}
+
+export async function startGraphIntegrityVerifierRecovery(): Promise<void> {
+  if (stopPromise) await stopPromise;
+  if (notificationsStopped) return;
+  if (!recoveryTimer) {
+    const timer = setInterval(() => {
+      void beginRecoverySweep().then((succeeded) => {
+        if (succeeded && recoveryTimer === timer) recoveryReady = true;
+      });
+    }, RECOVERY_SWEEP_MS);
+    timer.unref();
+    recoveryTimer = timer;
+  }
+  if (recoveryReady) return;
+
+  const activeTimer = recoveryTimer;
+  const succeeded = await beginRecoverySweep();
+  if (succeeded && recoveryTimer === activeTimer) recoveryReady = true;
+}
+
+export async function stopGraphIntegrityVerifierRecovery(): Promise<void> {
+  if (stopPromise) return stopPromise;
+  notificationsStopped = true;
+  if (recoveryTimer) clearInterval(recoveryTimer);
+  recoveryTimer = undefined;
+  recoveryReady = false;
+  const activeRecovery = recoveryStart;
+  const task = (async () => {
+    await activeRecovery;
+    await cancelAndWaitForAllGraphIntegrityVerifiers();
+  })().finally(() => {
+    if (stopPromise === task) stopPromise = undefined;
+  });
+  stopPromise = task;
+  await task;
+}
+
+/** @internal Reset process admission state after a test has drained all work. */
+export function _resetGraphIntegrityVerifierForTesting(): void {
+  if (recoveryTimer || recoveryStart || stopPromise || workers.size > 0) {
+    throw new Error("Graph integrity verifier must be stopped before reset");
+  }
+  quiescedRepos.clear();
+  notificationsStopped = false;
+  recoveryReady = false;
+}

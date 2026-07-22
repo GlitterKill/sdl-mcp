@@ -2,6 +2,7 @@ import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert";
 import { z } from "zod";
 import {
+  isPublicIndexRefresh,
   isMetadataOnlyTool,
   MCPServer,
   shouldBypassToolDispatch,
@@ -93,6 +94,72 @@ describe("MCPServer", () => {
         shouldBypassToolDispatch("sdl.workflow", {
           repoId: "sdl-mcp",
           steps: [{ fn: "runtime.execute", args: { runtime: "node" } }],
+        }),
+        false,
+      );
+    });
+  });
+
+  describe("public index refresh admission classification", () => {
+    it("matches the exact flat, gateway, and workflow refresh surfaces", () => {
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.index.refresh", {
+          repoId: "sdl-mcp",
+          mode: "full",
+        }),
+        true,
+      );
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.repo", {
+          repoId: "sdl-mcp",
+          action: "index.refresh",
+        }),
+        true,
+      );
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.workflow", {
+          repoId: "sdl-mcp",
+          steps: [{ fn: "indexRefresh", args: { mode: "full" } }],
+        }),
+        true,
+      );
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.workflow", {
+          repoId: "sdl-mcp",
+          steps: [{ fn: "index.refresh", args: { mode: "full" } }],
+        }),
+        true,
+      );
+    });
+
+    it("does not admit lookalike actions or workflow dry runs", () => {
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.repo", {
+          repoId: "sdl-mcp",
+          action: "repo.status",
+        }),
+        false,
+      );
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.workflow", {
+          repoId: "sdl-mcp",
+          steps: [{ fn: "index.refresh.extra", args: { mode: "full" } }],
+        }),
+        false,
+      );
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.workflow", {
+          repoId: "sdl-mcp",
+          dryRun: true,
+          steps: [{ fn: "indexRefresh", args: { mode: "full" } }],
+        }),
+        false,
+      );
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.workflow", {
+          repoId: "sdl-mcp",
+          dryRun: true,
+          steps: [{ fn: "index.refresh", args: { mode: "full" } }],
         }),
         false,
       );

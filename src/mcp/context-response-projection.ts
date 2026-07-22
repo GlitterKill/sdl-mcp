@@ -858,6 +858,8 @@ function projectDerivedStateForModel(value: unknown): unknown {
   copyIfPresent(value, projected, "lastError");
   copyIfPresent(value, projected, "graphIntegrityState");
   copyIfPresent(value, projected, "graphIntegrityVersionId");
+  copyIfPresent(value, projected, "graphIntegrityRevision");
+  copyIfPresent(value, projected, "graphIntegrityVerifiedRevision");
   copyIfPresent(value, projected, "graphIntegrityDigest");
   copyIfPresent(value, projected, "nextBestAction");
   return projected;

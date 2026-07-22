@@ -36,8 +36,8 @@ describe("repo status health fields", () => {
     assert.ok(source.includes("const watcherHealth = includeExpensiveStatus"));
     assert.ok(source.includes("const prefetchStats = includeExpensiveStatus"));
     assert.ok(
-      source.includes("graphIntegrityIsVerifiedForVersion("),
-      "repo.status must gate even cached health against current integrity state",
+      source.includes("graphIntegrityIsAvailableForVersion("),
+      "repo.status must keep current verifying and failed graphs readable",
     );
     assert.ok(source.includes("serverInfo: getServerInfo(),"));
   });
@@ -195,6 +195,8 @@ describe("repo status health fields", () => {
         updatedAt: null,
         graphIntegrityState: "verified",
         graphIntegrityVersionId: "v1",
+        graphIntegrityRevision: 3,
+        graphIntegrityVerifiedRevision: 3,
         graphIntegrityDigest: "a".repeat(64),
       },
     });
@@ -211,6 +213,8 @@ describe("repo status health fields", () => {
       "verified",
     );
     assert.strictEqual(parsed.derivedState?.graphIntegrityVersionId, "v1");
+    assert.strictEqual(parsed.derivedState?.graphIntegrityRevision, 3);
+    assert.strictEqual(parsed.derivedState?.graphIntegrityVerifiedRevision, 3);
     assert.strictEqual(
       parsed.derivedState?.graphIntegrityDigest,
       "a".repeat(64),
@@ -240,6 +244,8 @@ describe("repo status health fields", () => {
         updatedAt: "2026-07-16T01:02:03.000Z",
         graphIntegrityState: "failed",
         graphIntegrityVersionId: "v2",
+        graphIntegrityRevision: 4,
+        graphIntegrityVerifiedRevision: 3,
         graphIntegrityDigest: null,
         graphIntegrityError: "nondeterministic internal mismatch detail",
         nextBestAction:
@@ -254,6 +260,38 @@ describe("repo status health fields", () => {
       parsed.derivedState?.nextBestAction,
       'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph. If full verification fails again, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.',
     );
+  });
+
+  it("projects integrity ownership fields in deterministic semantic order", async () => {
+    const { projectToolResultForModelContent } = await import(
+      "../../dist/mcp/context-response-projection.js"
+    );
+    const projected = projectToolResultForModelContent("sdl.repo.status", {
+      repoId: "sdl-mcp",
+      rootAvailability: { status: "available" },
+      latestVersionId: "v2",
+      filesIndexed: 1,
+      symbolsIndexed: 1,
+      derivedState: {
+        stale: false,
+        graphIntegrityState: "verifying",
+        graphIntegrityVersionId: "v2",
+        graphIntegrityRevision: 4,
+        graphIntegrityVerifiedRevision: 3,
+        graphIntegrityDigest: "a".repeat(64),
+        nextBestAction: "Wait for background verification.",
+      },
+    }) as { derivedState: Record<string, unknown> };
+
+    assert.deepStrictEqual(Object.keys(projected.derivedState), [
+      "stale",
+      "graphIntegrityState",
+      "graphIntegrityVersionId",
+      "graphIntegrityRevision",
+      "graphIntegrityVerifiedRevision",
+      "graphIntegrityDigest",
+      "nextBestAction",
+    ]);
   });
 
   it("accepts compact standard/full telemetry fields when requested", () => {
@@ -383,6 +421,8 @@ describe("repo status root availability", { concurrency: 1 }, () => {
       ["configured-missing", configuredMissingRoot],
       ["file-root", fileRoot],
       ["integrity-unknown", availableRoot],
+      ["integrity-verifying", availableRoot],
+      ["integrity-failed", availableRoot],
     ]);
     await withWriteConn(async (conn) => {
       for (const [repoId, rootPath] of roots) {
@@ -410,6 +450,13 @@ describe("repo status root availability", { concurrency: 1 }, () => {
           prevVersionHash: null,
           versionHash: null,
         });
+        if (repoId !== "integrity-unknown") {
+          await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+            conn,
+            repoId,
+            { files: [], fileless: [] },
+          );
+        }
       }
     });
     for (const repoId of [
@@ -425,6 +472,32 @@ describe("repo status root availability", { concurrency: 1 }, () => {
         "a".repeat(64),
       );
     }
+    await withWriteConn(async (conn) => {
+      for (const repoId of ["integrity-verifying", "integrity-failed"]) {
+        await derivedState.beginGraphIntegrityVersion(
+          conn,
+          repoId,
+          `${repoId}-v1`,
+          "a".repeat(64),
+          true,
+        );
+        assert.strictEqual(
+          await derivedState.advanceGraphIntegrityRevisionInTransaction(
+            conn,
+            repoId,
+            `${repoId}-v1`,
+            0,
+          ),
+          1,
+        );
+      }
+    });
+    await derivedState.markGraphIntegrityFailedIfVerifying(
+      "integrity-failed",
+      "integrity-failed-v1",
+      1,
+      "test failure",
+    );
   });
 
   after(async () => {
@@ -507,6 +580,51 @@ describe("repo status root availability", { concurrency: 1 }, () => {
     assert.deepStrictEqual(status.rootAvailability, { status: "available" });
     assert.strictEqual(status.healthAvailable, false);
     assert.strictEqual(status.healthScore, null);
+  });
+
+  it("keeps current verifying and failed graphs available without claiming latest verification", async () => {
+    const repoModule = await import("../../dist/mcp/tools/repo.js");
+    repoModule._setRepoStatusHealthLoaderForTesting(async (repoId) => ({
+      repoId,
+      score: 90,
+      available: true,
+      components: {
+        freshness: 1,
+        coverage: 1,
+        errorRate: 1,
+        edgeQuality: 1,
+        callResolution: 1,
+        embeddingFailures: 0,
+      },
+      indexedFiles: 1,
+      indexedSymbols: 1,
+      totalEligibleFiles: 1,
+      totalCallEdges: 0,
+      resolvedCallEdges: 0,
+      minutesSinceLastIndex: 0,
+    }));
+    try {
+      for (const repoId of ["integrity-verifying", "integrity-failed"]) {
+        const status = await repoModule.handleRepoStatus({
+          repoId,
+          detail: "standard",
+        });
+        assert.strictEqual(status.healthAvailable, true, repoId);
+        assert.strictEqual(status.healthScore, 90, repoId);
+        assert.strictEqual(status.derivedState?.graphIntegrityRevision, 1);
+        assert.strictEqual(status.derivedState?.graphIntegrityVerifiedRevision, 0);
+        assert.notStrictEqual(status.derivedState?.graphIntegrityState, "verified");
+      }
+
+      const unknown = await repoModule.handleRepoStatus({
+        repoId: "integrity-unknown",
+        detail: "standard",
+      });
+      assert.strictEqual(unknown.healthAvailable, false);
+      assert.strictEqual(unknown.healthScore, null);
+    } finally {
+      repoModule._setRepoStatusHealthLoaderForTesting();
+    }
   });
 
   it("does not enter the repository-scan health path for minimal status", async () => {

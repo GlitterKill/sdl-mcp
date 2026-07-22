@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -33,6 +34,7 @@ import {
   setCachedSlice,
 } from "../../dist/graph/sliceCache.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
+import { processWatchedFileChange } from "../../dist/indexer/watcher.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
 import {
   indexExistsForTable,
@@ -90,6 +92,94 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(integrity?.graphIntegrityState, "verified");
     assert.equal(integrity?.graphIntegrityVersionId, result.versionId);
     assert.match(integrity?.graphIntegrityDigest ?? "", /^[a-f0-9]{64}$/);
+    assert.equal(integrity?.graphIntegrityRevision, 0);
+    assert.equal(integrity?.graphIntegrityVerifiedRevision, 0);
+    assert.equal(integrity?.graphIntegrityFilelessPruningSupported, true);
+    assert.ok(
+      (await ladybugDb.listGraphIntegrityFileStates(conn, repoId)).length > 0,
+      "full indexing should persist its independently built file manifest",
+    );
+  });
+
+  it("commits watcher delete and rename manifests in one incremental revision", async () => {
+    const repoId = await initIndexedRepo("auto");
+    const deletedPath = join(repoDir, "src", "deleted.ts");
+    const renamedPath = join(repoDir, "src", "renamed.ts");
+    const movedPath = join(repoDir, "src", "moved.ts");
+    writeFileSync(
+      deletedPath,
+      "export function deleted() { return unresolvedDeleted(); }\n",
+      "utf8",
+    );
+    writeFileSync(renamedPath, "export const renamed = 1;\n", "utf8");
+    await indexRepo(repoId, "full");
+
+    const conn = await getLadybugConn();
+    const before = await ladybugDb.listGraphIntegrityFileStates(conn, repoId);
+    const deletedState = before.find((row) => row.relPath === "src/deleted.ts");
+    const renamedState = before.find((row) => row.relPath === "src/renamed.ts");
+    assert.ok(deletedState);
+    assert.ok(renamedState);
+    const deletedReferences: unknown = JSON.parse(
+      deletedState.filelessReferencesJson,
+    );
+    assert.ok(Array.isArray(deletedReferences));
+    const deletedFilelessIds = deletedReferences.map((tuple) => {
+      assert.ok(Array.isArray(tuple));
+      assert.equal(typeof tuple[0], "string");
+      return tuple[0];
+    });
+    assert.ok(deletedFilelessIds.length > 0);
+    writeFileSync(
+      join(repoDir, "src", "index.ts"),
+      "export function main() { return 2; }\n",
+      "utf8",
+    );
+    rmSync(deletedPath);
+    renameSync(renamedPath, movedPath);
+
+    let result: Awaited<ReturnType<typeof indexRepo>> | undefined;
+    await processWatchedFileChange({
+      repoId,
+      filePath: deletedPath,
+      async indexRepo(changedRepoId, mode) {
+        result = await indexRepo(changedRepoId, mode);
+        return result;
+      },
+      async patchSavedFileFn() {
+        throw new Error("file was deleted");
+      },
+    });
+    assert.ok(result);
+    const state = await getDerivedState(repoId);
+    const afterConn = await getLadybugConn();
+    const after = await ladybugDb.listGraphIntegrityFileStates(afterConn, repoId);
+    const afterFileless = await ladybugDb.listGraphIntegrityFilelessStates(
+      afterConn,
+      repoId,
+    );
+
+    assert.equal(state?.graphIntegrityState, "verified");
+    assert.equal(state?.graphIntegrityVersionId, result.versionId);
+    assert.equal(state?.graphIntegrityRevision, 1);
+    assert.equal(state?.graphIntegrityVerifiedRevision, 1);
+    assert.equal(
+      after.some((row) => row.fileId === deletedState.fileId),
+      false,
+    );
+    assert.equal(
+      after.some((row) => row.fileId === renamedState.fileId),
+      false,
+    );
+    assert.ok(after.some((row) => row.relPath === "src/moved.ts"));
+    assert.equal(
+      afterFileless.some((row) => deletedFilelessIds.includes(row.symbolId)),
+      false,
+    );
+    assert.notEqual(
+      after.find((row) => row.relPath === "src/index.ts")?.digest,
+      before.find((row) => row.relPath === "src/index.ts")?.digest,
+    );
   });
 
   it("falls back cleanly when provenance fails before provider graph persistence", async () => {
@@ -170,6 +260,16 @@ describe("provider-first indexRepo fallback", () => {
     assert.deepEqual(
       result.providerFirstExecution.shadowBuild?.finalization?.actualCounts,
       result.providerFirstExecution.shadowBuild?.finalization?.expectedCounts,
+    );
+    assert.ok(
+      (result.providerFirstExecution.shadowBuild?.finalization?.actualCounts
+        ?.graphIntegrityFileStates ?? 0) > 0,
+    );
+    assert.equal(
+      result.providerFirstExecution.shadowBuild?.finalization?.actualCounts
+        ?.graphIntegrityFileStateRepoLinks,
+      result.providerFirstExecution.shadowBuild?.finalization?.actualCounts
+        ?.graphIntegrityFileStates,
     );
     assert.equal(
       result.providerFirstExecution.shadowBuild?.activationResult?.status,
@@ -540,6 +640,15 @@ describe("provider-first indexRepo fallback", () => {
       scipFixture: "complete",
       scopedSourceFileList: ["src/index.ts"],
     });
+    await withWriteConn((conn) =>
+      ladybugDb.beginGraphIntegrityVersion(
+        conn,
+        repoId,
+        "verified-before-subset",
+        "a".repeat(64),
+        true,
+      ),
+    );
 
     const result = await indexRepo(repoId, "full");
 
@@ -561,6 +670,11 @@ describe("provider-first indexRepo fallback", () => {
       "__providerFirstActiveScipInput__",
     );
     assert.equal(activeInputRecord, null);
+    const integrity = await getDerivedState(repoId);
+    assert.equal(integrity?.graphIntegrityState, "unknown");
+    assert.equal(integrity?.graphIntegrityVersionId, null);
+    assert.equal(integrity?.graphIntegrityRevision, null);
+    assert.equal(integrity?.graphIntegrityVerifiedRevision, null);
   });
 
   it("scans before SCIP fact collection so DB reads do not run under retained provider heap", async () => {

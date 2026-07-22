@@ -17,6 +17,7 @@ import {
   resolveLadybugWriteChunkSize,
   type LadybugWriteChunkOptions,
 } from "./ladybug-batching.js";
+import { deleteGraphIntegrityManifestInTransaction } from "./ladybug-graph-integrity.js";
 
 export interface MetricsRow {
   symbolId: string;
@@ -131,6 +132,7 @@ export async function deleteRepo(
   repoId: string,
 ): Promise<void> {
   await withTransaction(conn, async (txConn) => {
+    await deleteGraphIntegrityManifestInTransaction(txConn, repoId);
     // Capture owned identifiers before deleting files so file-backed and
     // fileless (for example external SCIP placeholder) symbols share one
     // deterministic cleanup path.
@@ -365,6 +367,8 @@ export async function deleteRepo(
       "SemanticDiagnostic",
       "SemanticPrecisionMetric",
       "DerivedState",
+      "GraphIntegrityFileState",
+      "GraphIntegrityFilelessState",
     ]) {
       await exec(
         txConn,

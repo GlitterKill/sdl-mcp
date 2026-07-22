@@ -84,9 +84,15 @@ import {
 } from "../../services/repo-lifecycle.js";
 import {
   getDerivedStateSummary,
+  graphIntegrityIsAvailableForVersion,
   graphIntegrityIsVerifiedForVersion,
   graphIntegrityNextBestAction,
 } from "../../db/ladybug-derived-state.js";
+import { withGraphIntegrityVerifierQuiesced } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
+import {
+  retainIndexRefreshAdmissionUntil,
+  runOutsideToolDispatchContext,
+} from "../dispatch-limiter.js";
 
 // Health snapshot cache with 30s TTL to avoid expensive recomputation.
 // lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
@@ -633,14 +639,16 @@ export async function handleRepoUnregister(
       );
     }
 
-    await withWriteConn(async (writeConn) => {
-      if (!(await ladybugDb.getRepo(writeConn, repoId))) {
-        throw new NotFoundError(`Repository not found: ${repoId}`);
-      }
-      await ladybugDb.deleteRepo(writeConn, repoId);
-      removal.commitTombstone();
-      tombstoned = true;
-    });
+    await withGraphIntegrityVerifierQuiesced(repoId, () =>
+      withWriteConn(async (writeConn) => {
+        if (!(await ladybugDb.getRepo(writeConn, repoId))) {
+          throw new NotFoundError(`Repository not found: ${repoId}`);
+        }
+        await ladybugDb.deleteRepo(writeConn, repoId);
+        removal.commitTombstone();
+        tombstoned = true;
+      }),
+    );
   } finally {
     if (!tombstoned) removal.abort();
   }
@@ -865,17 +873,25 @@ function compactPrefetchStatsForStatus(
         error: err instanceof Error ? err.message : String(err),
       });
     }
-    const graphIntegrityReady = graphIntegrityIsVerifiedForVersion(
+    const graphIntegrityAvailable = graphIntegrityIsAvailableForVersion(
+      derivedState,
+      latestVersion?.versionId ?? null,
+    );
+    const latestGraphRevisionVerified = graphIntegrityIsVerifiedForVersion(
       derivedState,
       latestVersion?.versionId ?? null,
     );
     if (
       derivedState?.graphIntegrityState === "verified" &&
-      !graphIntegrityReady
+      !latestGraphRevisionVerified
     ) {
       derivedState = {
         ...derivedState,
-        nextBestAction: graphIntegrityNextBestAction("version-mismatch"),
+        nextBestAction: graphIntegrityNextBestAction(
+          derivedState.graphIntegrityManifestEstablished
+            ? "version-mismatch"
+            : "unknown",
+        ),
       };
     }
     if (!rootAvailable && derivedState) {
@@ -885,7 +901,7 @@ function compactPrefetchStatsForStatus(
         nextBestAction: rootRecoveryAction,
       };
     }
-    const effectiveHealth = rootAvailable && graphIntegrityReady
+    const effectiveHealth = rootAvailable && graphIntegrityAvailable
       ? health
       : unavailableHealth.snapshot;
 
@@ -946,7 +962,7 @@ function compactPrefetchStatsForStatus(
             healthNote:
               'Health omitted because detail:"minimal" skips health computation. Use detail:"standard" to inspect health.',
           }
-        : !graphIntegrityReady
+        : !graphIntegrityAvailable
           ? {
               healthNote:
                 derivedState?.nextBestAction ??
@@ -1124,7 +1140,14 @@ export async function handleIndexRefresh(
       await runPostRefresh(conn);
       return toResponse(result);
     });
-    bgRefresh().then(
+    // Detached indexing must acquire its own synthetic dispatch lease. Only
+    // clear dispatch ownership; refresh-admission ownership stays inherited.
+    const backgroundRefresh = runOutsideToolDispatchContext(bgRefresh);
+    // The MCP response returns immediately, but the process-wide public
+    // refresh admission lease must remain owned until the actual index work
+    // settles. Outside public dispatch (watcher/CLI), this is a safe no-op.
+    retainIndexRefreshAdmissionUntil(backgroundRefresh);
+    backgroundRefresh.then(
       (result) =>
         logger.info("Async index refresh completed", {
           repoId,

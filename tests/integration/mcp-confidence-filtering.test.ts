@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { beginGraphIntegrityVersion } from "../../dist/db/ladybug-derived-state.js";
 import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
 import { handleSliceBuild } from "../../dist/mcp/tools/slice.js";
 
@@ -43,6 +44,7 @@ describe("MCP confidence-aware filtering", () => {
       prevVersionHash: null,
       versionHash: "v1-hash",
     });
+    await beginGraphIntegrityVersion(conn, repoId, "v1", "0".repeat(64), true);
 
     await ladybugDb.upsertFile(conn, {
       fileId: "file-1",

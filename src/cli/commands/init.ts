@@ -751,7 +751,8 @@ def is_repo_internal_path(path):
 
 def is_indexed(value):
     text = norm(value)
-    return "/src/" in text or "src/" in text or any(ext in text for ext in indexed_extensions)
+    extension = os.path.splitext(text)[1]
+    return re.search(r"(?:^|/)src(?:/|$)", text) is not None or extension in indexed_extensions
 
 try:
     data = json.loads(os.environ.get("PAYLOAD", "") or "{}")
@@ -775,7 +776,7 @@ targets_repo = within(cwd, repo_root) or norm(repo_root) in norm(serialized) or 
 if not targets_repo:
     sys.exit(0)
 
-indexed = any(is_indexed(path) for path in paths) or is_indexed(serialized)
+indexed = any(is_indexed(path) for path in paths)
 if tool_name == "Read":
     deny(INDEXED_READ_REASON if indexed else NON_INDEXED_READ_REASON)
 else:
@@ -1283,7 +1284,7 @@ function buildCodexPreToolUseHook(pidfilePath: string): string {
   return `#!/usr/bin/env node
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, extname, isAbsolute, resolve } from "node:path";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pidfilePath = ${JSON.stringify(pidfilePath)};
@@ -1455,15 +1456,10 @@ function targetsRepo(input, serializedToolInput, toolInput, candidatePaths) {
 
 function containsIndexedSourcePath(value) {
   const normalized = normalize(value);
-  if (normalized.includes("/src/") || normalized.includes("src/")) {
+  if (/(?:^|\\/)src(?:\\/|$)/.test(normalized)) {
     return true;
   }
-  for (const extension of indexedExtensions) {
-    if (normalized.includes(extension)) {
-      return true;
-    }
-  }
-  return false;
+  return indexedExtensions.has(extname(normalized));
 }
 
 function fileOperation(toolName) {
@@ -1496,14 +1492,13 @@ function internalCommandLooksAllowed(command) {
   );
 }
 
-function nativeFileReason(toolName, toolInput, serializedToolInput, candidatePaths) {
+function nativeFileReason(toolName, candidatePaths) {
   const operation = fileOperation(toolName);
   if (!operation) {
     return null;
   }
   const indexed =
-    candidatePaths.some((path) => containsIndexedSourcePath(path)) ||
-    containsIndexedSourcePath(serializedToolInput);
+    candidatePaths.some((path) => containsIndexedSourcePath(path));
   if (operation === "read") {
     return indexed ? INDEXED_READ_REASON : NON_INDEXED_READ_REASON;
   }
@@ -1592,7 +1587,7 @@ if (!targetsRepo(hookInput, toolInputJson, toolInput, candidatePaths)) {
 }
 
 if (isNativeFileTool(toolName)) {
-  deny(nativeFileReason(toolName, toolInput, toolInputJson, candidatePaths));
+  deny(nativeFileReason(toolName, candidatePaths));
   process.exit(0);
 }
 

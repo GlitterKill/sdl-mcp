@@ -2,12 +2,17 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+  _getIndexRefreshAdmissionStatsForTesting,
   configureToolDispatchLimiter,
   getToolDispatchLimiter,
   getToolDispatchStats,
   isInToolDispatch,
   resetToolDispatchLimiter,
+  retainIndexRefreshAdmissionUntil,
+  runIndexRefreshAdmission,
+  runOutsideToolDispatchContext,
   runToolDispatch,
+  ToolDispatchQueueCapacityError,
   ToolDispatchQueueTimeoutError,
   waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
@@ -285,6 +290,250 @@ describe("tool dispatch limiter", () => {
     });
 
     assert.strictEqual(isInToolDispatch(), false);
+  });
+
+  it("clears only dispatch context for retained detached work and restores it after failure", async () => {
+    let rejectBackground!: (reason?: unknown) => void;
+    let releaseRetained!: () => void;
+    const backgroundFailure = new Promise<void>((_resolve, reject) => {
+      rejectBackground = reject;
+    });
+    const retainedAfterFailure = new Promise<void>((resolve) => {
+      releaseRetained = resolve;
+    });
+
+    const response = await runIndexRefreshAdmission(() =>
+      runToolDispatch(async () => {
+        assert.strictEqual(isInToolDispatch(), true);
+        const background = runOutsideToolDispatchContext(async () => {
+          assert.strictEqual(isInToolDispatch(), false);
+          // Refresh-admission ALS must survive while only dispatch ALS clears.
+          retainIndexRefreshAdmissionUntil(retainedAfterFailure);
+          await backgroundFailure;
+        });
+        retainIndexRefreshAdmissionUntil(background);
+        assert.strictEqual(isInToolDispatch(), true);
+        return "accepted";
+      }),
+    );
+    assert.strictEqual(response, "accepted");
+    await delay(0);
+    assert.strictEqual(getToolDispatchStats().active, 0);
+
+    const queued = runIndexRefreshAdmission(async () => "released");
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 1);
+    rejectBackground(new Error("injected detached failure"));
+    await delay(10);
+    assert.strictEqual(
+      _getIndexRefreshAdmissionStatsForTesting().queued,
+      1,
+      "the second retained promise still owns refresh admission",
+    );
+    releaseRetained();
+
+    assert.strictEqual(await queued, "released");
+    await delay(0);
+    assert.strictEqual(isInToolDispatch(), false);
+    assert.strictEqual(getToolDispatchStats().active, 0);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().active, 0);
+  });
+
+  it("releases refresh admission when synchronous dispatch rejects", async () => {
+    await assert.rejects(
+      runIndexRefreshAdmission(async () => {
+        throw new Error("injected refresh failure");
+      }),
+      /injected refresh failure/,
+    );
+
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().active, 0);
+    assert.strictEqual(await runIndexRefreshAdmission(async () => "next"), "next");
+  });
+
+  it("holds admission through retained rejection and releases afterward", async () => {
+    let rejectBackground!: (reason?: unknown) => void;
+    const background = new Promise<void>((_resolve, reject) => {
+      rejectBackground = reject;
+    });
+    const firstResponse = await runIndexRefreshAdmission(async () => {
+      retainIndexRefreshAdmissionUntil(background);
+      return "accepted";
+    });
+    assert.strictEqual(firstResponse, "accepted");
+
+    const second = runIndexRefreshAdmission(async () => "next");
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 1);
+    rejectBackground(new Error("background failed"));
+
+    assert.strictEqual(await second, "next");
+    // The response resolves inside the admitted task; the limiter's finally
+    // releases its slot on the following microtask.
+    await delay(0);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().active, 0);
+  });
+
+  it("retains every transferred promise and ignores transfer outside admission", async () => {
+    // Internal watcher/CLI refresh paths do not own public admission.
+    retainIndexRefreshAdmissionUntil(Promise.resolve());
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().active, 0);
+
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const second = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    assert.strictEqual(
+      await runIndexRefreshAdmission(async () => {
+        retainIndexRefreshAdmissionUntil(first);
+        retainIndexRefreshAdmissionUntil(second);
+        return "accepted";
+      }),
+      "accepted",
+    );
+
+    const queued = runIndexRefreshAdmission(async () => "released");
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 1);
+    releaseFirst();
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 1);
+    releaseSecond();
+    assert.strictEqual(await queued, "released");
+  });
+
+  it("reset rejects queued refresh admission and clears its test ledger", async () => {
+    let release!: () => void;
+    const background = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    assert.strictEqual(
+      await runIndexRefreshAdmission(async () => {
+        retainIndexRefreshAdmissionUntil(background);
+        return "accepted";
+      }),
+      "accepted",
+    );
+    const queued = runIndexRefreshAdmission(async () => "never");
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 1);
+
+    resetToolDispatchLimiter();
+    await assert.rejects(queued, /queue cleared/);
+    assert.deepStrictEqual(_getIndexRefreshAdmissionStatsForTesting(), {
+      active: 0,
+      queued: 0,
+      maxConcurrency: 1,
+      totalActiveMs: 0,
+      totalQueueMs: 0,
+      totalRuns: 0,
+      peakQueued: 0,
+      peakActive: 0,
+    });
+    release();
+    await delay(10);
+  });
+
+  it("uses the injected short queue timeout for refresh admission", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 8, queueTimeoutMs: 20 });
+    let release!: () => void;
+    const background = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    assert.strictEqual(
+      await runIndexRefreshAdmission(async () => {
+        retainIndexRefreshAdmissionUntil(background);
+        return "accepted";
+      }),
+      "accepted",
+    );
+
+    try {
+      await assert.rejects(
+        runIndexRefreshAdmission(async () => "late"),
+        (error: unknown) => {
+          assert.ok(error instanceof ToolDispatchQueueTimeoutError);
+          assert.match(error.message, /timed out after 20ms/);
+          assert.match(error.message, /index-refresh-admission/);
+          assert.strictEqual(error.classification, "unavailable");
+          assert.strictEqual(error.retryable, true);
+          return true;
+        },
+      );
+    } finally {
+      release();
+      await delay(0);
+    }
+  });
+
+  it("bounds the public refresh admission queue", async () => {
+    let release!: () => void;
+    const background = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    assert.strictEqual(
+      await runIndexRefreshAdmission(async () => {
+        retainIndexRefreshAdmissionUntil(background);
+        return "accepted";
+      }),
+      "accepted",
+    );
+
+    const queued = Array.from({ length: 8 }, (_, index) =>
+      runIndexRefreshAdmission(async () => `queued-${index}`),
+    );
+    const queuedSettled = Promise.allSettled(queued);
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 8);
+
+    try {
+      await assert.rejects(
+        runIndexRefreshAdmission(async () => "overflow"),
+        (error: unknown) => {
+          assert.ok(error instanceof ToolDispatchQueueCapacityError);
+          assert.match(error.message, /queue capacity of 8/);
+          assert.strictEqual(error.classification, "unavailable");
+          assert.strictEqual(error.retryable, true);
+          return true;
+        },
+      );
+    } finally {
+      resetToolDispatchLimiter();
+      release();
+      await queuedSettled;
+    }
+  });
+
+  it("removes disconnected refresh requests from the admission queue", async () => {
+    let release!: () => void;
+    const background = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    assert.strictEqual(
+      await runIndexRefreshAdmission(async () => {
+        retainIndexRefreshAdmissionUntil(background);
+        return "accepted";
+      }),
+      "accepted",
+    );
+
+    const controller = new AbortController();
+    const queued = runIndexRefreshAdmission(
+      async () => "must-not-run",
+      controller.signal,
+    );
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 1);
+
+    controller.abort(new Error("client disconnected"));
+    await assert.rejects(queued, /client disconnected/);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 0);
+    release();
+    await delay(0);
   });
 
   it("waits until active dispatch work drains to the allowance", async () => {

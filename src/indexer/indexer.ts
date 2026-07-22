@@ -70,6 +70,11 @@ import { recoverMissingMetricsForRepo } from "../graph/metrics-recovery.js";
 import { clearSliceCache } from "../graph/sliceCache.js";
 import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
+import { withRepoWriteHeavyLock } from "./derived-refresh-queue.js";
+import {
+  resolveEffectiveIndexMode,
+  resolvePostIndexSessionTimeoutMs,
+} from "./index-mode.js";
 import {
   fileIdForPath,
   loadExistingSymbolMaps,
@@ -159,6 +164,7 @@ import {
   summarizeProviderFirstShadowActivationReadiness,
 } from "./provider-first/shadow-activation.js";
 import { finalizeProviderFirstShadowDb } from "./provider-first/shadow-finalization.js";
+import { withGraphIntegrityVerifierQuiesced } from "./provider-first/background-graph-integrity-verifier.js";
 import {
   ensureGraphIntegrityVerificationComplete,
   failActiveGraphIntegrityVerification,
@@ -1977,18 +1983,7 @@ async function assessNoOpIncrementalRecovery(params: {
 
 const INDEX_DISPATCH_IDLE_TIMEOUT_MS = 30_000;
 
-export function resolvePostIndexSessionTimeoutMs(
-  repoId: string,
-  liveRepos: RepoConfig[],
-  storedRepoConfig: RepoConfig,
-): number | undefined {
-  // Prefer the live config file so timeout tuning does not require
-  // re-registering an existing repository.
-  return (
-    liveRepos.find((repo) => repo.repoId === repoId)
-      ?.postIndexSessionTimeoutMs ?? storedRepoConfig.postIndexSessionTimeoutMs
-  );
-}
+export { resolvePostIndexSessionTimeoutMs };
 
 export async function indexRepo(
   repoId: string,
@@ -2046,23 +2041,30 @@ export async function indexRepo(
       );
     }
 
-    // Flush WAL before large indexing runs open their own transactions.
-    // Incremental refreshes are often tiny/no-op and can run frequently;
-    // forcing CHECKPOINT on every incremental call can become a contention
-    // hotspot under mixed read/write stress.
-    if (mode === "full") {
-      await preIndexCheckpoint();
-    }
-    const result = await indexRepoImpl(
-      repoId,
-      mode,
-      onProgress,
-      signal,
-      options,
-      scipPreRefreshResult,
-    );
-    await ensureGraphIntegrityVerificationComplete(repoId);
-    return result;
+    const effectiveMode = await resolveEffectiveIndexMode(repoId, mode);
+    const runEffectiveIndex = async (): Promise<IndexResult> => {
+      // Flush WAL before large indexing runs open their own transactions.
+      // Incremental refreshes are often tiny/no-op and can run frequently;
+      // forcing CHECKPOINT on every incremental call can become a contention
+      // hotspot under mixed read/write stress.
+      if (effectiveMode === "full") {
+        await preIndexCheckpoint();
+      }
+      const result = await indexRepoImpl(
+        repoId,
+        effectiveMode,
+        onProgress,
+        signal,
+        options,
+        scipPreRefreshResult,
+      );
+      await ensureGraphIntegrityVerificationComplete(repoId);
+      return result;
+    };
+
+    return effectiveMode === "full"
+      ? withGraphIntegrityVerifierQuiesced(repoId, runEffectiveIndex)
+      : runEffectiveIndex();
   };
 
   const resultPromise = withIndexingGate(() =>
@@ -2090,28 +2092,6 @@ async function indexRepoImpl(
   options?: IndexRepoOptions,
   scipPreRefresh?: ScipPreRefreshDiagnostics,
 ): Promise<IndexResult> {
-  // Auto-upgrade incremental → full on a fresh repo (no files indexed yet).
-  // Callers (CLI delegated path, MCP `sdl.index.refresh`, watcher first-run)
-  // can request "incremental" without checking DB state. Running as
-  // incremental on empty data is a correctness no-op but defeats every
-  // full-mode optimisation: pass-2 still does the per-file
-  // `deleteOutgoingEdgesByTypeForSymbols` round-trip against an empty
-  // edge table, the pass-1→pass-2 drain awaits instead of overlapping,
-  // and `preIndexCheckpoint()` is skipped. Detecting fileCount===0 once
-  // here lets every code path benefit without each caller duplicating
-  // the check.
-  if (mode === "incremental") {
-    const probeConn = await getLadybugConn();
-    const fileCount = await ladybugDb.getFileCount(probeConn, repoId);
-    if (fileCount === 0) {
-      logger.info(
-        "indexRepo: upgrading mode 'incremental' → 'full' (repo has no indexed files)",
-        { repoId },
-      );
-      mode = "full";
-    }
-  }
-
   const startTime = Date.now();
   const phaseTimings: Record<string, number> | null = options?.includeTimings
     ? {}
@@ -2551,6 +2531,7 @@ async function indexRepoImpl(
     semanticDeferred?: boolean,
   ): Promise<ProviderFirstShadowBuildSummary | undefined> => {
     if (!shadowBuild) return undefined;
+    await graphIntegrity.stageManifest(versionId);
     let finalizedShadowBuild = shadowBuild;
     const shadowDbPath =
       shadowBuild.status === "staged" &&
@@ -2613,51 +2594,68 @@ async function indexRepoImpl(
         "shadowActivate",
         "providerFirstShadowActivate",
         () =>
-          activateProviderFirstShadowDbWithHandoff({
-            activeDbPath,
-            shadowDbPath,
-            generationId: finalizedShadowBuild.generationId,
-            closeActiveDb: () => closeLadybugDb({ preserveCloseHooks: true }),
-            reopenActiveDb: async (path) => {
-              await initLadybugDb(path, {
-                bufferPoolBytes:
-                  appConfig.graphDatabase?.bufferPoolBytes ?? undefined,
-              });
-            },
-            validateActivatedDb: async () => {
-              // Shadow staging cannot load the FTS extension safely beside the
-              // live pool. Validate the required index immediately after the
-              // handoff so a failure triggers the activation rollback path.
-              await ensureCriticalSymbolFtsIndex({
-                recordTiming: recordIndexSubphaseTiming,
-              });
-              const retrievalConfig = appConfig.semantic?.enabled
-                ? appConfig.semantic.retrieval
-                : undefined;
-              const symbolFtsIndexName =
-                retrievalConfig && retrievalConfig.fts?.enabled !== false
-                  ? (retrievalConfig.fts?.indexName ?? "symbol_search_text_v1")
-                  : undefined;
-              if (symbolFtsIndexName) {
-                const { indexExistsForTable, showIndexes } = await import(
-                  "../retrieval/index-lifecycle.js"
-                );
-                const indexes = await showIndexes(await getLadybugConn());
+          withRepoWriteHeavyLock(repoId, () =>
+            withGraphIntegrityVerifierQuiesced(repoId, () =>
+              activateProviderFirstShadowDbWithHandoff({
+              activeDbPath,
+              shadowDbPath,
+              generationId: finalizedShadowBuild.generationId,
+              prepareHandoff: async () => {
                 if (
-                  !indexExistsForTable(
-                    indexes,
-                    "Symbol",
-                    symbolFtsIndexName,
-                    "fts",
+                  !graphIntegrity.ownsStagedRevision(
+                    versionId,
+                    await getDerivedState(repoId),
                   )
                 ) {
                   throw new Error(
-                    `required Symbol FTS index ${symbolFtsIndexName} is absent after shadow handoff`,
+                    "shadow activation lost its graph integrity revision",
                   );
                 }
-              }
-            },
-          }),
+              },
+              closeActiveDb: () =>
+                closeLadybugDb({ preserveCloseHooks: true }),
+              reopenActiveDb: async (path) => {
+                await initLadybugDb(path, {
+                  bufferPoolBytes:
+                    appConfig.graphDatabase?.bufferPoolBytes ?? undefined,
+                });
+              },
+              validateActivatedDb: async () => {
+                // Shadow staging cannot load the FTS extension safely beside the
+                // live pool. Validate the required index immediately after the
+                // handoff so a failure triggers the activation rollback path.
+                await ensureCriticalSymbolFtsIndex({
+                  recordTiming: recordIndexSubphaseTiming,
+                });
+                const retrievalConfig = appConfig.semantic?.enabled
+                  ? appConfig.semantic.retrieval
+                  : undefined;
+                const symbolFtsIndexName =
+                  retrievalConfig && retrievalConfig.fts?.enabled !== false
+                    ? (retrievalConfig.fts?.indexName ?? "symbol_search_text_v1")
+                    : undefined;
+                if (symbolFtsIndexName) {
+                  const { indexExistsForTable, showIndexes } = await import(
+                    "../retrieval/index-lifecycle.js"
+                  );
+                  const indexes = await showIndexes(await getLadybugConn());
+                  if (
+                    !indexExistsForTable(
+                      indexes,
+                      "Symbol",
+                      symbolFtsIndexName,
+                      "fts",
+                    )
+                  ) {
+                    throw new Error(
+                      `required Symbol FTS index ${symbolFtsIndexName} is absent after shadow handoff`,
+                    );
+                  }
+                }
+              },
+              }),
+            ),
+          ),
       );
       if (finalizedShadowBuild.activationResult.status === "activated") {
         if (semanticDeferred) {
@@ -3239,6 +3237,8 @@ async function indexRepoImpl(
                   // in another transaction makes large provider-first writes
                   // crash in LadybugDB's native transaction handling.
                   await materializeProviderFacts(conn, materializedRows, {
+                    graphIntegrityExpectationsTracked:
+                      !scopedSourceFileListActive,
                     replaceFileSymbols: true,
                     deleteExistingFileSymbols:
                       activeMaterializationPlan.deleteExistingFileSymbols,

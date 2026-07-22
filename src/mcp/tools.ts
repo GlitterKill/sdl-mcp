@@ -752,6 +752,8 @@ const RepoStatusRawResponseSchema = z.object({
         "failed",
       ]),
       graphIntegrityVersionId: z.string().nullable(),
+      graphIntegrityRevision: z.number().int().nonnegative().nullable(),
+      graphIntegrityVerifiedRevision: z.number().int().nonnegative().nullable(),
       graphIntegrityDigest: z.string().nullable(),
       nextBestAction: z.string().optional(),
     })
@@ -805,6 +807,13 @@ const RepoStatusCompactResponseSchema = z.object({
         .enum(["unknown", "verifying", "verified", "failed"])
         .optional(),
       graphIntegrityVersionId: z.string().nullable().optional(),
+      graphIntegrityRevision: z.number().int().nonnegative().nullable().optional(),
+      graphIntegrityVerifiedRevision: z
+        .number()
+        .int()
+        .nonnegative()
+        .nullable()
+        .optional(),
       graphIntegrityDigest: z.string().nullable().optional(),
       nextBestAction: z.string().optional(),
     })

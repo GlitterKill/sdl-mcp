@@ -1,7 +1,19 @@
 import type { Connection } from "kuzu";
 
-import { queryAll, querySingle, toBoolean, toNumber } from "./ladybug-core.js";
+import { DatabaseError } from "../domain/errors.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  toBoolean,
+  toNumber,
+} from "./ladybug-core.js";
 import type { SymbolStatus } from "./symbol-placeholders.js";
+
+const GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE = 256;
+
+/** Marker for deterministic persisted-manifest corruption. */
+export class GraphIntegrityManifestValidationError extends DatabaseError {}
 
 export interface PersistedGraphIntegritySymbolRow {
   symbolId: string;
@@ -47,8 +59,450 @@ export interface PersistedGraphIntegrityFileReferenceCount
 }
 
 export interface PersistedGraphIntegritySourceReferenceCount
-  extends PersistedGraphIntegrityReferenceCount {
+  extends Omit<PersistedGraphIntegrityReferenceCount, "symbolId"> {
   sourceSymbolId: string;
+  fileId: string;
+  symbolId: string | null;
+}
+
+export interface GraphIntegrityFileStateRecord {
+  stateId: string;
+  repoId: string;
+  fileId: string;
+  relPath: string;
+  symbolCount: number;
+  digest: string;
+  filelessReferencesJson: string;
+}
+
+export interface GraphIntegrityFilelessStateRecord {
+  stateId: string;
+  repoId: string;
+  symbolId: string;
+  canonicalSymbolJson: string;
+  referenceCount: number;
+}
+
+export interface GraphIntegrityManifest {
+  files: readonly GraphIntegrityFileStateRecord[];
+  fileless: readonly GraphIntegrityFilelessStateRecord[];
+}
+
+export interface GraphIntegrityFilelessDelta {
+  upserts: readonly GraphIntegrityFilelessStateRecord[];
+  deleteSymbolIds: readonly string[];
+}
+
+interface RawGraphIntegrityFileStateRecord
+  extends Omit<GraphIntegrityFileStateRecord, "symbolCount"> {
+  symbolCount: unknown;
+}
+
+interface RawGraphIntegrityFilelessStateRecord
+  extends Omit<GraphIntegrityFilelessStateRecord, "referenceCount"> {
+  referenceCount: unknown;
+}
+
+function graphIntegrityFileStateId(repoId: string, fileId: string): string {
+  return JSON.stringify([repoId, fileId]);
+}
+
+function graphIntegrityFilelessStateId(
+  repoId: string,
+  symbolId: string,
+): string {
+  return JSON.stringify([repoId, symbolId]);
+}
+
+function assertFileStateIdentity(row: GraphIntegrityFileStateRecord): void {
+  if (row.stateId !== graphIntegrityFileStateId(row.repoId, row.fileId)) {
+    throw new GraphIntegrityManifestValidationError(
+      "Graph integrity file state identity is inconsistent",
+    );
+  }
+}
+
+function assertFilelessStateIdentity(
+  row: GraphIntegrityFilelessStateRecord,
+): void {
+  if (row.stateId !== graphIntegrityFilelessStateId(row.repoId, row.symbolId)) {
+    throw new GraphIntegrityManifestValidationError(
+      "Graph integrity fileless state identity is inconsistent",
+    );
+  }
+}
+
+function mapFileState(
+  row: RawGraphIntegrityFileStateRecord,
+): GraphIntegrityFileStateRecord {
+  const mapped = { ...row, symbolCount: toNumber(row.symbolCount) };
+  assertFileStateIdentity(mapped);
+  return mapped;
+}
+
+function mapFilelessState(
+  row: RawGraphIntegrityFilelessStateRecord,
+): GraphIntegrityFilelessStateRecord {
+  const mapped = { ...row, referenceCount: toNumber(row.referenceCount) };
+  assertFilelessStateIdentity(mapped);
+  return mapped;
+}
+
+export async function getGraphIntegrityFileState(
+  conn: Connection,
+  repoId: string,
+  fileId: string,
+): Promise<GraphIntegrityFileStateRecord | null> {
+  const row = await querySingle<RawGraphIntegrityFileStateRecord>(
+    conn,
+    `MATCH (f:GraphIntegrityFileState {stateId: $stateId})
+     MATCH (f)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+     WHERE f.repoId = $repoId AND f.fileId = $fileId
+     RETURN f.stateId AS stateId, f.repoId AS repoId, f.fileId AS fileId,
+            f.relPath AS relPath, f.symbolCount AS symbolCount,
+            f.digest AS digest, f.filelessReferencesJson AS filelessReferencesJson`,
+    { stateId: graphIntegrityFileStateId(repoId, fileId), repoId, fileId },
+  );
+  return row ? mapFileState(row) : null;
+}
+
+/** Return whether the repository has any persisted manifest row. */
+export async function upsertGraphIntegrityFileStateInTransaction(
+  conn: Connection,
+  row: GraphIntegrityFileStateRecord,
+): Promise<void> {
+  assertFileStateIdentity(row);
+  await exec(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})
+     MERGE (f:GraphIntegrityFileState {stateId: $stateId})
+     SET f.repoId = $repoId, f.fileId = $fileId, f.relPath = $relPath,
+         f.symbolCount = $symbolCount, f.digest = $digest,
+         f.filelessReferencesJson = $filelessReferencesJson
+     MERGE (f)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(r)`,
+    { ...row },
+  );
+}
+
+export async function deleteGraphIntegrityFileStateInTransaction(
+  conn: Connection,
+  repoId: string,
+  fileId: string,
+): Promise<void> {
+  const params = {
+    stateId: graphIntegrityFileStateId(repoId, fileId),
+    repoId,
+    fileId,
+  };
+  await exec(
+    conn,
+    `MATCH (f:GraphIntegrityFileState {stateId: $stateId})-[rel:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+     WHERE f.repoId = $repoId AND f.fileId = $fileId
+     DELETE rel, f`,
+    params,
+  );
+}
+
+export async function listGraphIntegrityFileStates(
+  conn: Connection,
+  repoId: string,
+): Promise<GraphIntegrityFileStateRecord[]> {
+  const rows = await queryAll<RawGraphIntegrityFileStateRecord>(
+    conn,
+    `MATCH (:Repo {repoId: $repoId})<-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]-(f:GraphIntegrityFileState)
+     WHERE f.repoId = $repoId
+     RETURN f.stateId AS stateId, f.repoId AS repoId, f.fileId AS fileId,
+            f.relPath AS relPath, f.symbolCount AS symbolCount,
+            f.digest AS digest, f.filelessReferencesJson AS filelessReferencesJson
+     ORDER BY f.relPath ASC, f.fileId ASC`,
+    { repoId },
+  );
+  return rows.map(mapFileState);
+}
+
+export async function upsertGraphIntegrityFilelessStateInTransaction(
+  conn: Connection,
+  row: GraphIntegrityFilelessStateRecord,
+): Promise<void> {
+  assertFilelessStateIdentity(row);
+  await exec(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})
+     MERGE (s:GraphIntegrityFilelessState {stateId: $stateId})
+     SET s.repoId = $repoId, s.symbolId = $symbolId,
+         s.canonicalSymbolJson = $canonicalSymbolJson,
+         s.referenceCount = $referenceCount
+     MERGE (s)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(r)`,
+    { ...row },
+  );
+}
+
+export async function deleteGraphIntegrityFilelessStateInTransaction(
+  conn: Connection,
+  repoId: string,
+  symbolId: string,
+): Promise<void> {
+  const params = {
+    stateId: graphIntegrityFilelessStateId(repoId, symbolId),
+    repoId,
+    symbolId,
+  };
+  await exec(
+    conn,
+    `MATCH (s:GraphIntegrityFilelessState {stateId: $stateId})-[rel:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+     WHERE s.repoId = $repoId AND s.symbolId = $symbolId
+     DELETE rel, s`,
+    params,
+  );
+}
+
+export async function listGraphIntegrityFilelessStates(
+  conn: Connection,
+  repoId: string,
+): Promise<GraphIntegrityFilelessStateRecord[]> {
+  const rows = await queryAll<RawGraphIntegrityFilelessStateRecord>(
+    conn,
+    `MATCH (:Repo {repoId: $repoId})<-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]-(s:GraphIntegrityFilelessState)
+     WHERE s.repoId = $repoId
+     RETURN s.stateId AS stateId, s.repoId AS repoId, s.symbolId AS symbolId,
+            s.canonicalSymbolJson AS canonicalSymbolJson,
+            s.referenceCount AS referenceCount
+     ORDER BY s.symbolId ASC`,
+    { repoId },
+  );
+  return rows.map(mapFilelessState);
+}
+
+export async function getGraphIntegrityFilelessStates(
+  conn: Connection,
+  repoId: string,
+  symbolIds: readonly string[],
+): Promise<GraphIntegrityFilelessStateRecord[]> {
+  const uniqueSymbolIds = [...new Set(symbolIds)];
+  const states: GraphIntegrityFilelessStateRecord[] = [];
+  for (
+    let offset = 0;
+    offset < uniqueSymbolIds.length;
+    offset += GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE
+  ) {
+    const rows = await queryAll<RawGraphIntegrityFilelessStateRecord>(
+      conn,
+      `MATCH (:Repo {repoId: $repoId})<-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]-(s:GraphIntegrityFilelessState)
+       WHERE s.repoId = $repoId AND s.symbolId IN $symbolIds
+       RETURN s.stateId AS stateId, s.repoId AS repoId, s.symbolId AS symbolId,
+              s.canonicalSymbolJson AS canonicalSymbolJson,
+              s.referenceCount AS referenceCount
+       ORDER BY s.symbolId ASC`,
+      {
+        repoId,
+        symbolIds: uniqueSymbolIds.slice(
+          offset,
+          offset + GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE,
+        ),
+      },
+    );
+    states.push(...rows.map(mapFilelessState));
+  }
+  return states;
+}
+
+export async function ownsGraphIntegrityRevision(
+  conn: Connection,
+  repoId: string,
+  versionId: string,
+  revision: number,
+): Promise<boolean> {
+  if (!Number.isSafeInteger(revision)) {
+    throw new DatabaseError("Graph integrity revision must be a safe integer");
+  }
+  const row = await querySingle<{ repoId: string }>(
+    conn,
+    `MATCH (d:DerivedState {repoId: $repoId})
+     WHERE d.graphIntegrityVersionId = $versionId
+       AND d.graphIntegrityRevision = $revision
+     RETURN d.repoId AS repoId`,
+    { repoId, versionId, revision },
+  );
+  return row !== null;
+}
+
+/** Apply one saved-file manifest delta on the caller-owned graph transaction. */
+export async function applyGraphIntegrityFilePatchInTransaction(
+  conn: Connection,
+  file: GraphIntegrityFileStateRecord,
+  fileless: GraphIntegrityFilelessDelta,
+): Promise<void> {
+  for (const row of fileless.upserts) {
+    assertFilelessStateIdentity(row);
+    if (row.repoId !== file.repoId) {
+      throw new DatabaseError(
+        "Graph integrity fileless state belongs to another repository",
+      );
+    }
+  }
+  await upsertGraphIntegrityFileStateInTransaction(conn, file);
+  for (
+    let offset = 0;
+    offset < fileless.upserts.length;
+    offset += GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE
+  ) {
+    const rows = fileless.upserts.slice(
+      offset,
+      offset + GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE,
+    );
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (r:Repo {repoId: $repoId})
+       MERGE (s:GraphIntegrityFilelessState {stateId: row.stateId})
+       SET s.repoId = row.repoId, s.symbolId = row.symbolId,
+           s.canonicalSymbolJson = row.canonicalSymbolJson,
+           s.referenceCount = row.referenceCount
+       MERGE (s)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(r)`,
+      { repoId: file.repoId, rows },
+    );
+  }
+  for (
+    let offset = 0;
+    offset < fileless.deleteSymbolIds.length;
+    offset += GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE
+  ) {
+    const rows = fileless.deleteSymbolIds
+      .slice(offset, offset + GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE)
+      .map((symbolId) => ({
+        symbolId,
+        stateId: graphIntegrityFilelessStateId(file.repoId, symbolId),
+      }));
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (s:Symbol {symbolId: row.symbolId})-[rel:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)-[:FILE_IN_REPO]->(:Repo {repoId: $repoId})
+       DELETE rel`,
+      { repoId: file.repoId, rows },
+    );
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (s:GraphIntegrityFilelessState)-[rel:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.stateId = row.stateId
+         AND s.repoId = $repoId
+         AND s.symbolId = row.symbolId
+       DELETE rel, s`,
+      { repoId: file.repoId, rows },
+    );
+  }
+}
+
+export async function deleteGraphIntegrityManifestInTransaction(
+  conn: Connection,
+  repoId: string,
+): Promise<void> {
+  await exec(
+    conn,
+    `MATCH (:Repo {repoId: $repoId})<-[rel:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]-(f:GraphIntegrityFileState)
+     WHERE f.repoId = $repoId
+     DELETE rel, f`,
+    { repoId },
+  );
+  await exec(
+    conn,
+    `MATCH (:Repo {repoId: $repoId})<-[rel:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]-(s:GraphIntegrityFilelessState)
+     WHERE s.repoId = $repoId
+     DELETE rel, s`,
+    { repoId },
+  );
+  await exec(
+    conn,
+    `MERGE (d:DerivedState {repoId: $repoId})
+     SET d.graphIntegrityManifestEstablished = false`,
+    { repoId },
+  );
+}
+
+export async function replaceGraphIntegrityManifestInTransaction(
+  conn: Connection,
+  repoId: string,
+  manifest: GraphIntegrityManifest,
+): Promise<void> {
+  const fileStateIds = new Set<string>();
+  const fileIds = new Set<string>();
+  for (const row of manifest.files) {
+    assertFileStateIdentity(row);
+    if (row.repoId !== repoId) {
+      throw new Error("Graph integrity file state belongs to another repository");
+    }
+    if (fileStateIds.has(row.stateId) || fileIds.has(row.fileId)) {
+      throw new DatabaseError("Duplicate graph integrity file state identity");
+    }
+    fileStateIds.add(row.stateId);
+    fileIds.add(row.fileId);
+  }
+  const filelessStateIds = new Set<string>();
+  const symbolIds = new Set<string>();
+  for (const row of manifest.fileless) {
+    assertFilelessStateIdentity(row);
+    if (row.repoId !== repoId) {
+      throw new Error("Graph integrity fileless state belongs to another repository");
+    }
+    if (filelessStateIds.has(row.stateId) || symbolIds.has(row.symbolId)) {
+      throw new DatabaseError(
+        "Duplicate graph integrity fileless state identity",
+      );
+    }
+    filelessStateIds.add(row.stateId);
+    symbolIds.add(row.symbolId);
+  }
+
+  await deleteGraphIntegrityManifestInTransaction(conn, repoId);
+  for (
+    let offset = 0;
+    offset < manifest.files.length;
+    offset += GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE
+  ) {
+    const rows = manifest.files.slice(
+      offset,
+      offset + GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE,
+    );
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (r:Repo {repoId: $repoId})
+       MERGE (f:GraphIntegrityFileState {stateId: row.stateId})
+       SET f.repoId = row.repoId, f.fileId = row.fileId, f.relPath = row.relPath,
+           f.symbolCount = row.symbolCount, f.digest = row.digest,
+           f.filelessReferencesJson = row.filelessReferencesJson
+       MERGE (f)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(r)`,
+      { repoId, rows },
+    );
+  }
+  for (
+    let offset = 0;
+    offset < manifest.fileless.length;
+    offset += GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE
+  ) {
+    const rows = manifest.fileless.slice(
+      offset,
+      offset + GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE,
+    );
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (r:Repo {repoId: $repoId})
+       MERGE (s:GraphIntegrityFilelessState {stateId: row.stateId})
+       SET s.repoId = row.repoId, s.symbolId = row.symbolId,
+           s.canonicalSymbolJson = row.canonicalSymbolJson,
+           s.referenceCount = row.referenceCount
+       MERGE (s)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(r)`,
+      { repoId, rows },
+    );
+  }
+  await exec(
+    conn,
+    `MERGE (d:DerivedState {repoId: $repoId})
+     SET d.graphIntegrityManifestEstablished = true`,
+    { repoId },
+  );
 }
 
 /**
@@ -103,6 +557,8 @@ export async function getPersistedGraphIntegritySymbolPage(
   },
 ): Promise<PersistedGraphIntegritySymbolRow[]> {
   const hasCursor = params.after !== undefined;
+  // Membership endpoints are not unique. Filter the candidate range first,
+  // then collapse logical tuples before ordering and limiting the page.
   const rows = await queryAll<RawPersistedGraphIntegritySymbolRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
@@ -118,6 +574,7 @@ export async function getPersistedGraphIntegritySymbolPage(
             )`
          : ""
      }
+     WITH DISTINCT s, fileId, relPath
      RETURN s.symbolId AS symbolId,
             fileId,
             relPath,
@@ -251,7 +708,11 @@ export async function getPersistedGraphIntegrityFileReferenceCounts(
   }));
 }
 
-/** Read exact pre-write liveness for pass-2 sources that were not reindexed. */
+/**
+ * Read exact pre-write liveness and file ownership for pass-2 sources that
+ * were not reindexed. A source with no matching edge returns one null-target
+ * ownership row so its first new fileless reference remains attributable.
+ */
 export async function getPersistedGraphIntegritySourceReferenceCounts(
   conn: Connection,
   repoId: string,
@@ -261,15 +722,19 @@ export async function getPersistedGraphIntegritySourceReferenceCounts(
   if (sourceSymbolIds.length === 0) return [];
   const rows = await queryAll<RawPersistedGraphIntegritySourceReferenceCount>(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)-[:SYMBOL_IN_REPO]->(r)
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[:SYMBOL_IN_FILE]->(f:File)-[:FILE_IN_REPO]->(r)
      WHERE a.symbolId IN $sourceSymbolIds
-       AND coalesce(d.edgeType, '') = $edgeType
+     WITH DISTINCT r, a, f
+     OPTIONAL MATCH (a)-[d:DEPENDS_ON]->(b:Symbol)-[:SYMBOL_IN_REPO]->(r)
+     WHERE coalesce(d.edgeType, '') = $edgeType
        AND NOT (b)-[:SYMBOL_IN_FILE]->(:File)
+     WITH DISTINCT a, f, b, d
      RETURN a.symbolId AS sourceSymbolId,
+            f.fileId AS fileId,
             b.symbolId AS symbolId,
-            coalesce(d.edgeType, '') AS edgeType,
-            count(*) AS referenceCount
-     ORDER BY sourceSymbolId ASC, symbolId ASC, edgeType ASC`,
+            $edgeType AS edgeType,
+            count(d) AS referenceCount
+     ORDER BY sourceSymbolId ASC, fileId ASC, coalesce(symbolId, '') ASC, edgeType ASC`,
     { repoId, sourceSymbolIds, edgeType },
   );
   return rows.map((row) => ({

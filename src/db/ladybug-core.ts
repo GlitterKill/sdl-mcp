@@ -767,6 +767,30 @@ export interface TransactionTimingOptions {
   ) => Promise<T>;
 }
 
+/** Execute a callback against one stable, non-writing database snapshot. */
+export async function withReadOnlyTransaction<T>(
+  conn: Connection,
+  fn: () => Promise<T>,
+): Promise<T> {
+  await exec(conn, "BEGIN TRANSACTION READ ONLY");
+  try {
+    const result = await fn();
+    await exec(conn, "COMMIT");
+    return result;
+  } catch (err) {
+    try {
+      await exec(conn, "ROLLBACK");
+    } catch (rollbackErr) {
+      logger.warn("Read-only transaction rollback failed", {
+        rollbackError:
+          rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+        originalError: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
+}
+
 export async function withTransaction<T>(
   conn: Connection,
   fn: (conn: Connection) => Promise<T>,

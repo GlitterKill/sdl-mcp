@@ -12,12 +12,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 describe("init agent enforcement", () => {
+  let tempRoot: string;
   let tempDir: string;
   let originalSDLConfig: string | undefined;
   let originalSDLConfigPath: string | undefined;
 
   beforeEach(() => {
-    tempDir = join(tmpdir(), `sdl-mcp-init-enforce-test-${Date.now()}`);
+    tempRoot = join(tmpdir(), `sdl-mcp-init-enforce-test-${Date.now()}`);
+    // The parent path intentionally contains a source-extension substring.
+    tempDir = join(tempRoot, ".codex", "repo");
     mkdirSync(tempDir, { recursive: true });
     originalSDLConfig = process.env.SDL_CONFIG;
     originalSDLConfigPath = process.env.SDL_CONFIG_PATH;
@@ -36,7 +39,7 @@ describe("init agent enforcement", () => {
       process.env.SDL_CONFIG_PATH = originalSDLConfigPath;
     }
 
-    rmSync(tempDir, { recursive: true, force: true });
+    rmSync(tempRoot, { recursive: true, force: true });
   });
 
   it("bootstraps root agent docs from templates", async () => {
@@ -314,6 +317,15 @@ describe("init agent enforcement", () => {
           tool_input: { file_path: join(tempDir, "docs", "guide.md") },
         },
         /file\.write/,
+      ],
+      [
+        {
+          hook_event_name: "PreToolUse",
+          cwd: tempDir,
+          tool_name: "Write",
+          tool_input: { file_path: join(tempDir, "generated", "worker.ts") },
+        },
+        /targeting:"identifier"/,
       ],
       [
         {

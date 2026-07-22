@@ -113,6 +113,28 @@ describe("Sync Artifact Model", () => {
       outputPath: join(syncDir, "test.sdl-artifact.json"),
     });
     await markGraphIntegrityVerified(repoId, "v-test", "a".repeat(64));
+    await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+      await getLadybugConn(),
+      repoId,
+      {
+        files: [{
+          stateId: JSON.stringify([repoId, "file-1"]),
+          repoId,
+          fileId: "file-1",
+          relPath: "test.ts",
+          symbolCount: 0,
+          digest: "b".repeat(64),
+          filelessReferencesJson: "[]",
+        }],
+        fileless: [{
+          stateId: JSON.stringify([repoId, "external-symbol"]),
+          repoId,
+          symbolId: "external-symbol",
+          canonicalSymbolJson: "{}",
+          referenceCount: 1,
+        }],
+      },
+    );
     assert.equal(
       (await getDerivedState(repoId))?.graphIntegrityState,
       "verified",
@@ -131,6 +153,14 @@ describe("Sync Artifact Model", () => {
     assert.equal(integrity?.graphIntegrityState, "unknown");
     assert.equal(integrity?.graphIntegrityVersionId, null);
     assert.equal(integrity?.graphIntegrityDigest, null);
+    assert.deepEqual(
+      await ladybugDb.listGraphIntegrityFileStates(await getLadybugConn(), repoId),
+      [],
+    );
+    assert.deepEqual(
+      await ladybugDb.listGraphIntegrityFilelessStates(await getLadybugConn(), repoId),
+      [],
+    );
   });
 
   it("round-trips enrichment metadata through sync artifacts", async () => {

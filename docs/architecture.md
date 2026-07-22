@@ -245,7 +245,7 @@ flowchart TD
 
 Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write serialization prevents graph corruption.
 
-### Graph Schema (22 Node Tables, 14 Edge Tables)
+### Graph Schema (24 Node Tables, 16 Edge Tables)
 
 **Core nodes:**
 
@@ -275,6 +275,8 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | **Audit**         | auditId, repoId, action, timestamp                                                                       |
 | **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingJinaCode*, embeddingNomic*                 |
 | **SchemaVersion** | version, appliedAt                                                                                       |
+| **GraphIntegrityFileState** | stateId, repoId, fileId, relPath, symbolCount, digest, filelessReferencesJson |
+| **GraphIntegrityFilelessState** | stateId, repoId, symbolId, canonicalSymbolJson, referenceCount |
 
 **Semantic nodes:**
 
@@ -312,6 +314,8 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | **MEMORY_OF_FILE**       | Memory → File      | —                                                  |
 | **FILE_SUMMARY_IN_REPO** | FileSummary → Repo | —                                                  |
 | **SUMMARY_OF_FILE**      | FileSummary → File | —                                                  |
+| **GRAPH_INTEGRITY_FILE_STATE_IN_REPO** | GraphIntegrityFileState → Repo | —                              |
+| **GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO** | GraphIntegrityFilelessState → Repo | —                      |
 
 ### Query Modules
 
@@ -332,7 +336,63 @@ Each module owns a specific domain of queries:
 | `ladybug-slices.ts`            | Slice handles, lease expiry                                                         |
 | `ladybug-memories.ts`          | Memory nodes, symbol/file links, staleness                                          |
 | `ladybug-file-summaries.ts`    | FileSummary nodes — file-level summaries with searchText and embeddings             |
+| `ladybug-graph-integrity.ts`   | File and fileless manifest rows, revision ownership checks, and atomic patch helpers |
 | `ladybug-usage.ts`             | Token usage tracking, savings metrics                                               |
+
+### Persisted graph integrity ownership
+
+Full and ordinary incremental indexing build file and fileless manifest rows from independent index output and verify them synchronously. `DerivedState.graphIntegrityManifestEstablished` records successful manifest replacement, including a valid empty manifest, so a saved-file edit can distinguish an omitted symbol-free file from missing legacy manifest state. A saved-file edit validates the affected trusted file state, then uses one serialized foreground transaction to commit the graph patch, file-manifest changes, fileless-manifest changes, and one monotonic `DerivedState.graphIntegrityRevision`. The transaction marks the exact Version and revision as `verifying`, preserves `graphIntegrityVerifiedRevision`, and lets the edit return immediately after the commit.
+
+Each repository owns at most one running background verifier and one coalesced latest wake. The verifier leases an exclusive read connection, opens one read-only transaction, and reads both manifest tables plus canonical Symbol rows in deterministic pages from the same stable snapshot. The verifier closes the snapshot and connection before it publishes a result.
+
+The publication compare-and-set requires the captured Version and revision to remain current. A successful check publishes `verified` and advances `graphIntegrityVerifiedRevision`; a failed check publishes `failed` and preserves the last verified revision. If a newer Version or revision owns the repository, the compare-and-set performs no write, and the coalesced wake leaves the newer owner responsible for verification.
+
+Startup recovery scans persisted `verifying` rows after migrations and repository bootstrap, then requeues each exact Version and revision. Full-index activation, unregister, database close, and shutdown first block new verifier admission, then cancel active work between page queries and wait for the snapshot connection to close before they swap, delete, or close graph state.
+
+`sdl.repo.status` reports the current ownership through `graphIntegrityVersionId` and `graphIntegrityRevision`, and it reports successful verification history through `graphIntegrityVerifiedRevision`. The graph remains readable during `verifying` and after `failed` when the current Version still owns a valid manifest, revision, and pruning-support marker; a null or older verified revision does not remove that availability. Only `verified` with equal current and verified revisions proves the latest revision, while `unknown` or missing-manifest guidance fails graph admission closed and directs the operator to a full refresh.
+
+```mermaid
+sequenceDiagram
+    accTitle: Saved-file graph integrity verification lifecycle
+    accDescr: A foreground edit commits graph and manifest ownership atomically and returns. A background verifier checks one exclusive snapshot, publishes only for the exact Version and revision, recovers pending work at startup, reports current and verified state, and closes its snapshot before destructive lifecycle work.
+    participant C as Caller
+    participant F as Foreground edit
+    participant D as LadybugDB
+    participant V as Background verifier
+    participant L as Lifecycle coordinator
+    participant S as repo.status
+
+    C->>F: Apply saved-file edit
+    F->>D: Commit graph, file and fileless manifests, revision N, state verifying
+    D-->>F: Atomic commit succeeds
+    F-->>C: Return immediately
+    F->>V: Coalesce wake for Version V and revision N
+    V->>D: Lease exclusive connection and begin read-only snapshot
+    D-->>V: Stable manifests and canonical graph pages
+    V->>D: Close snapshot and release connection
+    alt Version V and revision N still own current state
+        alt Verification succeeds
+            V->>D: CAS state verified and verified revision N
+        else Verification fails
+            V->>D: CAS state failed and preserve verified revision
+        end
+    else A newer Version or revision owns current state
+        V->>D: CAS no-op, newer owner remains responsible
+    end
+    S->>D: Read current Version, current revision, verified revision, and state
+    D-->>S: Report graph availability and latest-verification proof separately
+    opt Startup finds persisted verifying ownership
+        L->>D: Scan and requeue the exact Version and revision
+        L->>V: Wake repository verifier
+    end
+    opt Full activation, unregister, database close, or shutdown
+        L->>V: Block admission and cancel active work
+        V-->>L: Close snapshot and release connection
+        L->>D: Swap, delete, or close graph state
+    end
+```
+
+Saved-file verification does not recompute PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state. Their existing refresh and recovery rules still apply.
 
 ---
 

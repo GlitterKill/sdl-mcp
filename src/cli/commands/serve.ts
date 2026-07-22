@@ -60,12 +60,28 @@ import {
   stopRuntimeProbes,
 } from "../../observability/index.js";
 import type { ObservabilityService } from "../../observability/index.js";
+import {
+  stopGraphIntegrityVerifierRecovery,
+} from "../../indexer/provider-first/background-graph-integrity-verifier.js";
 
 function writeStderrLine(message: string): boolean {
   return safeWriteStderr(`${message}\n`);
 }
 
+async function stopGraphIntegrityVerifier(): Promise<void> {
+  await stopGraphIntegrityVerifierRecovery();
+}
+
 async function closeDbAfterStartupFailure(): Promise<void> {
+  try {
+    await stopGraphIntegrityVerifier();
+  } catch (error) {
+    writeStderrLine(
+      `[sdl-mcp] Graph integrity verifier cleanup after startup failure failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   try {
     await closeLadybugDb();
   } catch (error) {
@@ -160,6 +176,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       }
     }
   });
+  shutdownMgr.addCleanup("graphIntegrityVerifier", stopGraphIntegrityVerifier);
   shutdownMgr.addCleanup("db", () => closeLadybugDb());
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP

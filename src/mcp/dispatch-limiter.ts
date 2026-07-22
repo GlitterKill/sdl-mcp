@@ -19,6 +19,16 @@ import {
 
 let limiter: ConcurrencyLimiter | null = null;
 const dispatchContext = new AsyncLocalStorage<boolean>();
+let indexRefreshAdmissionLimiter: ConcurrencyLimiter | null = null;
+let configuredQueueTimeoutMs = 30_000;
+const INDEX_REFRESH_ADMISSION_MAX_QUEUE = 8;
+
+interface IndexRefreshAdmissionContext {
+  retainedPromises: Promise<unknown>[];
+}
+
+const indexRefreshAdmissionContext =
+  new AsyncLocalStorage<IndexRefreshAdmissionContext>();
 /**
  * Normal (non-indexing) max concurrency. Reapplied when indexing finishes.
  * Tracked separately so `setMaxConcurrency(INDEXING_DISPATCH_CAP)` during
@@ -91,6 +101,31 @@ export class ToolDispatchQueueTimeoutError extends Error {
         : []),
     ];
     Object.setPrototypeOf(this, ToolDispatchQueueTimeoutError.prototype);
+  }
+}
+
+export class ToolDispatchQueueCapacityError extends Error {
+  readonly code = "RUNTIME_ERROR";
+  readonly classification = "unavailable";
+  readonly retryable = true;
+  readonly suggestedRetryDelayMs = 1_000;
+  readonly details: string[];
+
+  constructor(maxQueued: number, stats: ToolDispatchStats, label: string) {
+    super(
+      `Tool dispatch queue capacity of ${maxQueued} reached for ${label} ` +
+        `(active=${stats.active}, queued=${stats.queued}, max=${stats.maxConcurrency})`,
+    );
+    this.name = "ToolDispatchQueueCapacityError";
+    this.details = [
+      `label=${label}`,
+      `active=${stats.active}`,
+      `queued=${stats.queued}`,
+      `max=${stats.maxConcurrency}`,
+      `queueCapacity=${maxQueued}`,
+      `indexingActive=${stats.indexingActive}`,
+    ];
+    Object.setPrototypeOf(this, ToolDispatchQueueCapacityError.prototype);
   }
 }
 
@@ -181,8 +216,138 @@ export async function runToolDispatch<T>(
   }
 }
 
+function getIndexRefreshAdmissionLimiter(): ConcurrencyLimiter {
+  indexRefreshAdmissionLimiter ??= new ConcurrencyLimiter({
+    maxConcurrency: 1,
+    queueTimeoutMs: configuredQueueTimeoutMs,
+  });
+  return indexRefreshAdmissionLimiter;
+}
+
+function getIndexRefreshAdmissionToolStats(): ToolDispatchStats {
+  const admission = getIndexRefreshAdmissionLimiter().getStats();
+  return {
+    ...getToolDispatchStats(),
+    ...admission,
+    configuredMax: 1,
+    activeLabels: admission.active > 0 ? ["index-refresh-admission"] : [],
+  };
+}
+
+/**
+ * Serialize public index-refresh envelopes before they consume a normal tool
+ * dispatch slot. LadybugDB has one writer, and indexRepo waits for every other
+ * dispatch lease to drain before destructive work, so admitting two refresh
+ * envelopes to the normal limiter can make each wait on the other's lease.
+ *
+ * The caller receives the tool response as soon as dispatch completes. The
+ * admission slot can outlive that response when async refresh handling retains
+ * it through retainIndexRefreshAdmissionUntil().
+ */
+export async function runIndexRefreshAdmission<T>(
+  fn: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const admissionLimiter = getIndexRefreshAdmissionLimiter();
+  const admission = admissionLimiter.getStats();
+  if (admission.queued >= INDEX_REFRESH_ADMISSION_MAX_QUEUE) {
+    throw new ToolDispatchQueueCapacityError(
+      INDEX_REFRESH_ADMISSION_MAX_QUEUE,
+      getIndexRefreshAdmissionToolStats(),
+      "index-refresh-admission",
+    );
+  }
+
+  let resolveResponse!: (value: T) => void;
+  let rejectResponse!: (reason?: unknown) => void;
+  let responseSettled = false;
+  const response = new Promise<T>((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+
+  const admissionLifecycle = admissionLimiter.run(
+    async () => {
+      const context: IndexRefreshAdmissionContext = { retainedPromises: [] };
+      try {
+        const result = await indexRefreshAdmissionContext.run(context, fn);
+        responseSettled = true;
+        resolveResponse(result);
+      } catch (error) {
+        responseSettled = true;
+        rejectResponse(error);
+        return;
+      }
+
+      // Async refresh returns its operation response before bgRefresh settles.
+      // Retaining here transfers ownership without keeping a dispatch slot.
+      await Promise.allSettled(context.retainedPromises);
+    },
+    undefined,
+    signal,
+  );
+
+  // Queue failures happen before fn runs, so forward them to the tool caller.
+  // Errors after the response settles belong to retained background work and
+  // must not create an unhandled rejection or alter the response already sent.
+  void admissionLifecycle.catch((error: unknown) => {
+    if (!responseSettled) {
+      if (error instanceof ConcurrencyQueueTimeoutError) {
+        rejectResponse(
+          new ToolDispatchQueueTimeoutError(
+            error.timeoutMs,
+            getIndexRefreshAdmissionToolStats(),
+            "index-refresh-admission",
+          ),
+        );
+        return;
+      }
+      rejectResponse(error);
+    }
+  });
+
+  return response;
+}
+
+/**
+ * Keep the active public refresh admission lease until promise settles.
+ * Calls outside an admitted refresh are intentionally harmless so internal
+ * watcher/CLI refresh behavior remains unchanged.
+ */
+export function retainIndexRefreshAdmissionUntil(
+  promise: Promise<unknown>,
+): void {
+  indexRefreshAdmissionContext.getStore()?.retainedPromises.push(promise);
+}
+
+/** Test-only diagnostics for deterministic admission assertions. */
+export function _getIndexRefreshAdmissionStatsForTesting(): ConcurrencyLimiterStats {
+  return (
+    indexRefreshAdmissionLimiter?.getStats() ?? {
+      active: 0,
+      queued: 0,
+      maxConcurrency: 1,
+      totalActiveMs: 0,
+      totalQueueMs: 0,
+      totalRuns: 0,
+      peakQueued: 0,
+      peakActive: 0,
+    }
+  );
+}
+
 export function isInToolDispatch(): boolean {
   return dispatchContext.getStore() === true;
+}
+
+/**
+ * Start detached work without inheriting the caller's dispatch ownership.
+ * Other async-local contexts, such as refresh admission, remain intact.
+ */
+export function runOutsideToolDispatchContext<T>(
+  fn: () => Promise<T>,
+): Promise<T> {
+  return dispatchContext.run(false, fn);
 }
 
 export function getToolDispatchStats(): ToolDispatchStats {
@@ -252,6 +417,7 @@ export function configureToolDispatchLimiter(opts: {
   const nextMax = opts.maxConcurrency ?? 8;
   const nextTimeout = opts.queueTimeoutMs ?? 30_000;
   configuredMax = nextMax;
+  configuredQueueTimeoutMs = nextTimeout;
 
   if (limiter) {
     // Reshape in place rather than replacing — in-flight tool calls keep
@@ -281,8 +447,13 @@ export function resetToolDispatchLimiter(): void {
   if (limiter) {
     limiter.clearQueue();
   }
+  if (indexRefreshAdmissionLimiter) {
+    indexRefreshAdmissionLimiter.clearQueue();
+  }
   limiter = null;
+  indexRefreshAdmissionLimiter = null;
   configuredMax = 8;
+  configuredQueueTimeoutMs = 30_000;
   activeDispatchLabels.clear();
   setIndexingStateListener(null);
 }

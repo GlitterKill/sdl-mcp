@@ -68,6 +68,8 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       `CREATE (:SemanticDiagnostic {id: 'semantic_diagnostic_${id}', repoId: '${repoId}'})`,
       `CREATE (:SemanticPrecisionMetric {id: 'semantic_metric_${id}', repoId: '${repoId}'})`,
       `CREATE (:DerivedState {repoId: '${repoId}'})`,
+      `CREATE (:GraphIntegrityFileState {stateId: '["${repoId}","file_${id}"]', repoId: '${repoId}', fileId: 'file_${id}', relPath: 'src/${id}.ts', symbolCount: 1, digest: '${"a".repeat(64)}', filelessReferencesJson: '[]'})`,
+      `CREATE (:GraphIntegrityFilelessState {stateId: '["${repoId}","placeholder_${id}"]', repoId: '${repoId}', symbolId: 'placeholder_${id}', canonicalSymbolJson: '{}', referenceCount: 1})`,
       `MATCH (f:File {fileId: 'file_${id}'}), (r:Repo {repoId: '${repoId}'}) CREATE (f)-[:FILE_IN_REPO]->(r)`,
       `MATCH (s:Symbol {symbolId: 'symbol_${id}'}), (f:File {fileId: 'file_${id}'}) CREATE (s)-[:SYMBOL_IN_FILE]->(f)`,
       `MATCH (s:Symbol), (r:Repo {repoId: '${repoId}'}) WHERE s.symbolId IN ['symbol_${id}', 'placeholder_${id}'] CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
@@ -84,6 +86,8 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       `MATCH (m:Memory {memoryId: 'memory_${id}'}), (f:File {fileId: 'file_${id}'}) CREATE (m)-[:MEMORY_OF_FILE]->(f)`,
       `MATCH (s:FileSummary {fileId: 'file_${id}'}), (r:Repo {repoId: '${repoId}'}) CREATE (s)-[:FILE_SUMMARY_IN_REPO]->(r)`,
       `MATCH (s:FileSummary {fileId: 'file_${id}'}), (f:File {fileId: 'file_${id}'}) CREATE (s)-[:SUMMARY_OF_FILE]->(f)`,
+      `MATCH (f:GraphIntegrityFileState {repoId: '${repoId}'}), (r:Repo {repoId: '${repoId}'}) CREATE (f)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(r)`,
+      `MATCH (s:GraphIntegrityFilelessState {repoId: '${repoId}'}), (r:Repo {repoId: '${repoId}'}) CREATE (s)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(r)`,
     ];
     for (const statement of statements) await exec(statement);
   }
@@ -147,6 +151,8 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       "SemanticDiagnostic",
       "SemanticPrecisionMetric",
       "DerivedState",
+      "GraphIntegrityFileState",
+      "GraphIntegrityFilelessState",
     ];
     for (const table of repoScopedTables) {
       assert.strictEqual(
@@ -193,6 +199,8 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       MEMORY_OF_FILE: 1,
       FILE_SUMMARY_IN_REPO: 1,
       SUMMARY_OF_FILE: 1,
+      GRAPH_INTEGRITY_FILE_STATE_IN_REPO: 1,
+      GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO: 1,
     };
     for (const [relation, expected] of Object.entries(relationCounts)) {
       assert.strictEqual(

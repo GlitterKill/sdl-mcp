@@ -91,6 +91,19 @@ export * from "./ladybug-semantic.js";
 
 // Graph algorithm adapter (PageRank, K-core, Louvain, shortest-path)
 export * from "./ladybug-algorithms.js";
+export {
+  advanceGraphIntegrityRevisionInTransaction,
+  beginGraphIntegrityVersion,
+  graphIntegrityIsAvailableForVersion,
+  graphIntegrityIsVerifiedForVersion,
+  initializeGraphIntegrityVersionInTransaction,
+  invalidateGraphIntegrity,
+  listPendingGraphIntegrityRevisions,
+  markCurrentGraphIntegrityRevisionFailed,
+  markGraphIntegrityFailedIfVerifying,
+  markGraphIntegrityVerifiedIfVerifying,
+  type GraphIntegrityPendingRevision,
+} from "./ladybug-derived-state.js";
 // Shadow cluster (Louvain) operations
 export * from "./ladybug-shadow-clusters.js";
 
@@ -148,12 +161,25 @@ export {
 } from "./ladybug-retrieval.js";
 export { countRowsInNodeTable } from "./ladybug-index-lifecycle.js";
 export {
+  deleteGraphIntegrityFileStateInTransaction,
+  deleteGraphIntegrityFilelessStateInTransaction,
+  deleteGraphIntegrityManifestInTransaction,
+  getGraphIntegrityFileState,
   getPersistedGraphIntegrityFileReferenceCounts,
   getPersistedGraphIntegrityOtherRepoSymbolCount,
   getPersistedGraphIntegrityReferenceCountPage,
   getPersistedGraphIntegritySourceReferenceCounts,
   getPersistedGraphIntegritySymbolPage,
   hasPersistedGraphIntegrityFilelessSourceReferences,
+  listGraphIntegrityFileStates,
+  listGraphIntegrityFilelessStates,
+  replaceGraphIntegrityManifestInTransaction,
+  upsertGraphIntegrityFileStateInTransaction,
+  upsertGraphIntegrityFilelessStateInTransaction,
+  type GraphIntegrityFileStateRecord,
+  type GraphIntegrityFilelessDelta,
+  type GraphIntegrityFilelessStateRecord,
+  type GraphIntegrityManifest,
   type GraphIntegritySymbolCursor,
   type PersistedGraphIntegrityFileReferenceCount,
   type PersistedGraphIntegrityReferenceCount,

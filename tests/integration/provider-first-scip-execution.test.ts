@@ -11,6 +11,7 @@ import {
   withWriteConn,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
 import {
   materializeProviderFacts,
   providerFactsToGraphRows,
@@ -279,6 +280,35 @@ describe("provider-first SCIP materialization", () => {
       () => materializeFacts(facts),
       /duplicate Symbol primary key/i,
     );
+  });
+
+  it("invalidates integrity when provider rows are written without independent expectations", async () => {
+    graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-db-"));
+    await initRepo(graphDbPath);
+    await withWriteConn((conn) =>
+      ladybugDb.beginGraphIntegrityVersion(
+        conn,
+        REPO_ID,
+        "verified-version",
+        "a".repeat(64),
+        true,
+      ),
+    );
+
+    const facts = normalizeScipProviderFacts({
+      repoId: REPO_ID,
+      generationId: "gen-direct-write",
+      providerId: "scip-typescript",
+      providerVersion: "1.0.0",
+      documents: [documentForExternal("api")],
+      externalSymbols: [externalSymbol("api")],
+    });
+    await materializeFacts(facts);
+
+    const state = await getDerivedState(REPO_ID);
+    assert.equal(state?.graphIntegrityState, "unknown");
+    assert.equal(state?.graphIntegrityRevision, null);
+    assert.equal(state?.graphIntegrityVerifiedRevision, null);
   });
 });
 

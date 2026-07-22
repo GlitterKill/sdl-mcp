@@ -112,7 +112,7 @@
     },
     {
       "tool": "sdl.repo.status",
-      "reason": "Timestamp telemetry is model-gated; live root availability, health, watcher, graph-integrity lifecycle, and index state remain intentionally live."
+      "reason": "Timestamp telemetry is model-gated; deterministic graph-integrity state and revision fields are public, while live root availability, health, watcher, and index state remain intentionally live."
     },
     {
       "tool": "sdl.index.refresh",

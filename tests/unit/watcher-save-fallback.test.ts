@@ -20,21 +20,24 @@ describe("processWatchedFileChange", () => {
     assert.deepStrictEqual(calls, ["patch"]);
   });
 
-  it("falls back to incremental reindex when file patching fails", async () => {
+  it("routes delete and rename patch failures through one incremental reindex", async () => {
     const calls: string[] = [];
 
     await processWatchedFileChange({
       repoId: "demo-repo",
-      filePath: "src/example.ts",
-      async indexRepo() {
-        calls.push("index");
+      filePath: "src/deleted.ts",
+      async indexRepo(repoId, mode) {
+        calls.push(`index:${repoId}:${mode}`);
       },
-      async patchSavedFileFn() {
-        calls.push("patch");
-        throw new Error("boom");
+      async patchSavedFileFn({ filePath }) {
+        calls.push(`patch:${filePath}`);
+        throw new Error("file was deleted or renamed");
       },
     });
 
-    assert.deepStrictEqual(calls, ["patch", "index"]);
+    assert.deepStrictEqual(calls, [
+      "patch:src/deleted.ts",
+      "index:demo-repo:incremental",
+    ]);
   });
 });

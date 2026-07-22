@@ -232,6 +232,9 @@ let readPoolIndex = 0;
 
 let writeConn: LadybugConnection | null = null;
 let writeLimiter: ConcurrencyLimiter | null = null;
+let dbClosePromise: Promise<void> | null = null;
+let preserveCloseHooksForCurrentClose = false;
+const activeExclusiveReadLeases = new Set<Promise<void>>();
 const sessionWriteBodyLimiters = new WeakMap<
   LadybugConnection,
   ConcurrencyLimiter
@@ -520,10 +523,21 @@ async function createConnection(
 ): Promise<LadybugConnection> {
   const modules = await loadLadybug();
   const conn = new modules.Connection(db);
-  if ("setMaxNumThreadForExec" in conn) {
-    await (
-      conn as unknown as LadybugConnectionWithThreads
-    ).setMaxNumThreadForExec(1);
+  try {
+    if ("setMaxNumThreadForExec" in conn) {
+      await (
+        conn as unknown as LadybugConnectionWithThreads
+      ).setMaxNumThreadForExec(1);
+    }
+  } catch (err) {
+    try {
+      await conn.close();
+    } catch (closeErr) {
+      logger.warn("Error closing LadybugDB connection after setup failure", {
+        error: closeErr instanceof Error ? closeErr.message : String(closeErr),
+      });
+    }
+    throw err;
   }
   return conn;
 }
@@ -904,6 +918,47 @@ export async function recycleReadConnection(
  */
 export async function getLadybugConn(): Promise<LadybugConnection> {
   return getLadybugReadConn();
+}
+
+/**
+ * Run a read against a temporary connection owned by the callback.
+ * Long-lived snapshots use this instead of occupying a round-robin pool slot.
+ */
+export async function withExclusiveReadConnection<T>(
+  fn: (conn: LadybugConnection) => Promise<T>,
+): Promise<T> {
+  if (dbClosePromise) {
+    throw new DatabaseError("LadybugDB is closing, cannot start a read lease");
+  }
+
+  const db = await getLadybugDb();
+  if (dbClosePromise) {
+    throw new DatabaseError("LadybugDB is closing, cannot start a read lease");
+  }
+
+  let releaseLease!: () => void;
+  const lease = new Promise<void>((resolve) => {
+    releaseLease = resolve;
+  });
+  activeExclusiveReadLeases.add(lease);
+
+  let conn: LadybugConnection | undefined;
+  try {
+    conn = await createConnection(db);
+    return await fn(conn);
+  } finally {
+    if (conn) {
+      try {
+        await conn.close();
+      } catch (err) {
+        logger.warn("Error closing LadybugDB exclusive read connection", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    activeExclusiveReadLeases.delete(lease);
+    releaseLease();
+  }
 }
 
 export async function withWriteConn<T>(
@@ -1345,9 +1400,26 @@ export async function buildDeferredIndexes(
   logger.info("Deferred indexes built", { durationMs: Date.now() - startMs });
 }
 
-export async function closeLadybugDb(
+export function closeLadybugDb(
   options: CloseLadybugDbOptions = {},
 ): Promise<void> {
+  if (!dbClosePromise) {
+    preserveCloseHooksForCurrentClose = options.preserveCloseHooks === true;
+    dbClosePromise = closeLadybugDbImpl().finally(() => {
+      dbClosePromise = null;
+      preserveCloseHooksForCurrentClose = false;
+    });
+  } else if (!options.preserveCloseHooks) {
+    // Concurrent close callers share one operation. Clearing wins so a caller
+    // cannot accidentally retain hooks requested for disposal by another.
+    preserveCloseHooksForCurrentClose = false;
+  }
+  return dbClosePromise;
+}
+
+async function closeLadybugDbImpl(): Promise<void> {
+  await Promise.allSettled([...activeExclusiveReadLeases]);
+
   // Best-effort flush of any audit events queued by the post-index buffer
   // (src/mcp/audit-buffer.ts). Done before the writeLimiter drain so the
   // events have a chance to commit while the limiter still accepts work.
@@ -1510,7 +1582,7 @@ export async function closeLadybugDb(
       });
     }
   }
-  if (!options.preserveCloseHooks) {
+  if (!preserveCloseHooksForCurrentClose) {
     closeHooks.length = 0;
   }
   logger.debug("LadybugDB closed");

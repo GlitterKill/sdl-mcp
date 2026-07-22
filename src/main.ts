@@ -35,6 +35,9 @@ import { startPrefetchPolicy } from "./startup/prefetch-startup.js";
 import { loadConfiguredAdapterPlugins } from "./startup/plugins.js";
 import { installProcessHandlers } from "./startup/process-handlers.js";
 import { safeWriteStderr } from "./util/stdio-safety.js";
+import {
+  stopGraphIntegrityVerifierRecovery,
+} from "./indexer/provider-first/background-graph-integrity-verifier.js";
 
 import { resetScorerPool } from "./graph/slice/beam-search-engine.js";
 
@@ -57,7 +60,20 @@ if (!getLogFilePath()) {
 
 const log = (msg: string) => safeWriteStderr(`[sdl-mcp] ${msg}\n`);
 
+async function stopGraphIntegrityVerifier(): Promise<void> {
+  await stopGraphIntegrityVerifierRecovery();
+}
+
 async function closeDbAfterStartupFailure(): Promise<void> {
+  try {
+    await stopGraphIntegrityVerifier();
+  } catch (error) {
+    log(
+      `Graph integrity verifier cleanup after startup failure failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   try {
     await closeLadybugDb();
   } catch (error) {
@@ -109,6 +125,7 @@ async function main(): Promise<void> {
       }
     }
   });
+  shutdownMgr.addCleanup("graphIntegrityVerifier", stopGraphIntegrityVerifier);
   shutdownMgr.addCleanup("db", () => closeLadybugDb());
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
 

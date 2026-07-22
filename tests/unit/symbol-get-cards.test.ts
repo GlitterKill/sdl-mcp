@@ -15,6 +15,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { beginGraphIntegrityVersion } from "../../dist/db/ladybug-derived-state.js";
 
 /**
  * Tests for handleSymbolGetCard — the batch symbol card API.
@@ -167,6 +168,23 @@ describe("handleSymbolGetCard", () => {
       sideEffectsJson: null,
       updatedAt: now,
     });
+
+    const versionId = `${REPO_ID}:v1`;
+    await ladybugDb.createVersion(conn, {
+      versionId,
+      repoId: REPO_ID,
+      createdAt: now,
+      reason: "test",
+      prevVersionHash: null,
+      versionHash: null,
+    });
+    await beginGraphIntegrityVersion(
+      conn,
+      REPO_ID,
+      versionId,
+      "0".repeat(64),
+      true,
+    );
   });
 
   after(async () => {
