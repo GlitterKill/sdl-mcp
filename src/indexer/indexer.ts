@@ -72,6 +72,10 @@ import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
 import { withRepoWriteHeavyLock } from "./derived-refresh-queue.js";
 import {
+  resolveEffectiveIndexMode,
+  resolvePostIndexSessionTimeoutMs,
+} from "./index-mode.js";
+import {
   fileIdForPath,
   loadExistingSymbolMaps,
   initPass2Context,
@@ -1979,35 +1983,7 @@ async function assessNoOpIncrementalRecovery(params: {
 
 const INDEX_DISPATCH_IDLE_TIMEOUT_MS = 30_000;
 
-export function resolvePostIndexSessionTimeoutMs(
-  repoId: string,
-  liveRepos: RepoConfig[],
-  storedRepoConfig: RepoConfig,
-): number | undefined {
-  // Prefer the live config file so timeout tuning does not require
-  // re-registering an existing repository.
-  return (
-    liveRepos.find((repo) => repo.repoId === repoId)
-      ?.postIndexSessionTimeoutMs ?? storedRepoConfig.postIndexSessionTimeoutMs
-  );
-}
-
-async function resolveEffectiveIndexMode(
-  repoId: string,
-  requestedMode: "full" | "incremental",
-): Promise<"full" | "incremental"> {
-  if (requestedMode === "full") return "full";
-
-  const probeConn = await getLadybugConn();
-  const fileCount = await ladybugDb.getFileCount(probeConn, repoId);
-  if (fileCount > 0) return "incremental";
-
-  logger.info(
-    "indexRepo: upgrading mode 'incremental' → 'full' (repo has no indexed files)",
-    { repoId },
-  );
-  return "full";
-}
+export { resolvePostIndexSessionTimeoutMs };
 
 export async function indexRepo(
   repoId: string,
