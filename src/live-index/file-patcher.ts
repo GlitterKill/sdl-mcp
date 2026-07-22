@@ -12,6 +12,7 @@ import {
   getGraphIntegrityFilelessStates,
   getGraphIntegrityFileState,
   GraphIntegrityManifestValidationError,
+  hasGraphIntegrityManifestState,
   ownsGraphIntegrityRevision,
   type GraphIntegrityFileStateRecord,
   type GraphIntegrityFilelessStateRecord,
@@ -173,6 +174,14 @@ async function patchSavedFileUnlocked(
       return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
     }
   }
+  // Full indexing intentionally omits symbol-free files from the manifest.
+  // Trust that absence only when another persisted row proves this repository
+  // owns a manifest; a wholly missing legacy manifest must still fail closed.
+  const hasTrustedFileBaseline =
+    trustedFileState !== null ||
+    (integrityBaseline !== undefined &&
+      existingSymbols.length === 0 &&
+      (await hasGraphIntegrityManifestState(conn, request.repoId)));
 
   const parseResult =
     request.parseResult ??
@@ -264,16 +273,18 @@ async function patchSavedFileUnlocked(
   }));
   let nextFileState: ReturnType<typeof createGraphIntegrityFileState> | undefined;
   let filelessDelta: ReturnType<typeof createGraphIntegrityFilelessDelta> | undefined;
-  if (integrityBaseline && trustedFileState) {
+  if (integrityBaseline && hasTrustedFileBaseline) {
     let previousReferences: ReturnType<
       typeof parseGraphIntegrityFilelessReferences
-    >;
-    try {
-      previousReferences = parseGraphIntegrityFilelessReferences(
-        trustedFileState.filelessReferencesJson,
-      );
-    } catch {
-      return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    > = [];
+    if (trustedFileState) {
+      try {
+        previousReferences = parseGraphIntegrityFilelessReferences(
+          trustedFileState.filelessReferencesJson,
+        );
+      } catch {
+        return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+      }
     }
 
     const existingEdges = await ladybugDb.getEdgesFromSymbols(
@@ -462,7 +473,7 @@ async function patchSavedFileUnlocked(
 
         if (
           integrityBaseline &&
-          trustedFileState &&
+          hasTrustedFileBaseline &&
           nextFileState &&
           filelessDelta
         ) {

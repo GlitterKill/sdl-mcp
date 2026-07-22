@@ -165,6 +165,7 @@ export {
   deleteGraphIntegrityFilelessStateInTransaction,
   deleteGraphIntegrityManifestInTransaction,
   getGraphIntegrityFileState,
+  hasGraphIntegrityManifestState,
   getPersistedGraphIntegrityFileReferenceCounts,
   getPersistedGraphIntegrityOtherRepoSymbolCount,
   getPersistedGraphIntegrityReferenceCountPage,

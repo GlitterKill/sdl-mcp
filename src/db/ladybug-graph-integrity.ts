@@ -166,6 +166,30 @@ export async function getGraphIntegrityFileState(
   return row ? mapFileState(row) : null;
 }
 
+/** Return whether the repository has any persisted manifest row. */
+export async function hasGraphIntegrityManifestState(
+  conn: Connection,
+  repoId: string,
+): Promise<boolean> {
+  const fileState = await querySingle<{ stateId: string }>(
+    conn,
+    `MATCH (f:GraphIntegrityFileState)-[:GRAPH_INTEGRITY_FILE_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+     RETURN f.stateId AS stateId
+     LIMIT 1`,
+    { repoId },
+  );
+  if (fileState) return true;
+
+  const filelessState = await querySingle<{ stateId: string }>(
+    conn,
+    `MATCH (s:GraphIntegrityFilelessState)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(:Repo {repoId: $repoId})
+     RETURN s.stateId AS stateId
+     LIMIT 1`,
+    { repoId },
+  );
+  return filelessState !== null;
+}
+
 export async function upsertGraphIntegrityFileStateInTransaction(
   conn: Connection,
   row: GraphIntegrityFileStateRecord,
