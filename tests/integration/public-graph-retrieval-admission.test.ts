@@ -13,21 +13,30 @@ import { after, before, describe, it } from "node:test";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Connection } from "kuzu";
 import { z } from "zod";
 
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import {
   closeLadybugDb,
+  getLadybugConn,
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
-import { withTransaction } from "../../dist/db/ladybug-core.js";
+import {
+  clearPreparedStatementCache,
+  withTransaction,
+} from "../../dist/db/ladybug-core.js";
 import * as derivedState from "../../dist/db/ladybug-derived-state.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   createGraphIntegrityExpectationFromManifest,
   createGraphIntegrityFileState,
 } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
+import {
+  resetToolDispatchLimiter,
+  waitForToolDispatchIdle,
+} from "../../dist/mcp/dispatch-limiter.js";
 import { createMCPServer, MCPServer } from "../../dist/server.js";
 
 const TEMP_BASE =
@@ -50,6 +59,14 @@ type PublicCall = {
   name: string;
   arguments: Record<string, unknown>;
 };
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 async function connect(server: MCPServer): Promise<Client> {
   const [clientTransport, serverTransport] =
@@ -75,6 +92,81 @@ function assertUnavailable(response: ErrorEnvelope, label: string): void {
     response.structuredContent?.error?.message ?? "",
     /[A-Z]:\\|\.lbug|revision \d/i,
     label,
+  );
+}
+
+function assertWorkflowSucceeded(response: unknown, label: string): void {
+  const envelope = response as {
+    isError?: boolean;
+    structuredContent?: {
+      results?: Array<{
+        fn?: string;
+        status?: string;
+        result?: unknown;
+      }>;
+    };
+  };
+  assert.notEqual(envelope.isError, true, label);
+  assert.ok(envelope.structuredContent?.results?.length, label);
+  for (const step of envelope.structuredContent.results) {
+    // Compact workflow projection represents success as { fn, result } and
+    // only emits status for failures (or when telemetry is requested).
+    assert.deepEqual(Object.keys(step), ["fn", "result"], label);
+    assert.equal(typeof step.fn, "string", label);
+    assert.equal(step.status, undefined, label);
+    assert.notEqual(step.result, undefined, label);
+  }
+}
+
+function isSliceBuildCall(call: PublicCall): boolean {
+  if (call.name === "sdl.slice.build") return true;
+  if (call.name === "sdl.retrieve") return call.arguments.op === "sliceBuild";
+  if (call.name === "sdl.query") return call.arguments.action === "slice.build";
+  if (call.name !== "sdl.workflow") return false;
+  const steps = call.arguments.steps;
+  return Array.isArray(steps)
+    && steps.some(
+      (step) =>
+        typeof step === "object"
+        && step !== null
+        && (step as { fn?: unknown }).fn === "sliceBuild",
+    );
+}
+
+function findSliceHandles(
+  value: unknown,
+  handles = new Set<string>(),
+): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) findSliceHandles(item, handles);
+    return handles;
+  }
+  if (typeof value !== "object" || value === null) return handles;
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "sliceHandle" && typeof item === "string") handles.add(item);
+    findSliceHandles(item, handles);
+  }
+  return handles;
+}
+
+function serializeWithStableSliceHandle(response: unknown, label: string): string {
+  const handles = [...findSliceHandles(response)];
+  assert.equal(handles.length, 1, `${label}: one generated slice handle`);
+  const [handle] = handles;
+  assert.match(handle, /^[0-9a-f]{32}$/, `${label}: generated slice handle`);
+
+  // slice.build intentionally uses crypto.randomBytes(16). Replace only that
+  // exact handle and the formatter's exact eight-character display prefix.
+  return JSON.stringify(response)
+    .replaceAll(handle, "<generated-slice-handle>")
+    .replaceAll(handle.slice(0, 8), "<generated-slice-handle-prefix>");
+}
+
+function assertNoAdmissionFields(response: unknown, label: string): void {
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /"(?:admission|graphRetrievalAvailable|graphIntegrityState|graphIntegrityRevision|graphIntegrityVerifiedRevision)"/,
+    `${label}: admission remains response-transparent`,
   );
 }
 
@@ -519,6 +611,63 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     }
   });
 
+  it("holds one dispatch lease from central admission through handler completion", async (t) => {
+    resetToolDispatchLimiter();
+    for (let index = 0; index < 8; index += 1) {
+      clearPreparedStatementCache(await getLadybugConn());
+    }
+    const statements = new WeakMap<object, string>();
+    const admissionStarted = deferred();
+    const releaseAdmission = deferred();
+    const originalPrepare = Connection.prototype.prepare;
+    const originalExecute = Connection.prototype.execute;
+    let blocked = false;
+
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      const prepared = await originalPrepare.call(this, statement);
+      statements.set(prepared, statement);
+      return prepared;
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        const statement = statements.get(prepared);
+        if (
+          !blocked &&
+          statement?.includes("MATCH (v:Version)") &&
+          statement.includes("VERSION_OF_REPO")
+        ) {
+          blocked = true;
+          admissionStarted.resolve();
+          await releaseAdmission.promise;
+        }
+        return originalExecute.call(this, prepared, params, progressCallback);
+      },
+    );
+
+    const call = client.callTool({
+      name: "sdl.symbol.search",
+      arguments: { repoId: "verified", query: "alpha", semantic: false },
+    });
+    await admissionStarted.promise;
+    try {
+      assert.equal(
+        await waitForToolDispatchIdle({
+          activeAllowance: 0,
+          timeoutMs: 20,
+          pollMs: 1,
+          label: "public-admission-race-test",
+        }),
+        false,
+      );
+    } finally {
+      releaseAdmission.resolve();
+    }
+    const response = (await call) as ErrorEnvelope;
+    assert.notEqual(response.isError, true);
+  });
+
   it("keeps current verified, verifying, and failed manifests readable", async () => {
     for (const repoId of ["verified", "verifying", "failed"]) {
       const response = (await client.callTool({
@@ -555,7 +704,11 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     }
   });
 
-  it("allows every public graph family for a verified current manifest", async () => {
+  it("keeps every centrally gated verified graph route byte-stable", async (t) => {
+    t.mock.timers.enable({
+      apis: ["Date"],
+      now: new Date("2026-07-21T12:00:00.000Z"),
+    });
     const repoId = "verified";
     const symbolId = `${repoId}:alpha`;
     const fromVersion = `${repoId}:v0`;
@@ -629,7 +782,19 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
       },
       {
         name: "sdl.query",
+        arguments: { repoId, action: "symbol.getCard", symbolId },
+      },
+      {
+        name: "sdl.query",
         arguments: { repoId, action: "slice.build", entrySymbols: [symbolId] },
+      },
+      {
+        name: "sdl.query",
+        arguments: {
+          repoId,
+          action: "slice.spillover.get",
+          spilloverHandle: `${repoId}-refresh-handle`,
+        },
       },
       {
         name: "sdl.query",
@@ -649,6 +814,26 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
         arguments: { repoId, action: "code.getSkeleton", symbolId },
       },
       {
+        name: "sdl.code",
+        arguments: {
+          repoId,
+          action: "code.getHotPath",
+          symbolId,
+          identifiersToFind: ["alpha"],
+        },
+      },
+      {
+        name: "sdl.code",
+        arguments: {
+          repoId,
+          action: "code.needWindow",
+          symbolId,
+          reason: "Inspect alpha",
+          expectedLines: 20,
+          identifiersToFind: ["alpha"],
+        },
+      },
+      {
         name: "sdl.repo",
         arguments: { repoId, action: "repo.overview", level: "stats" },
       },
@@ -663,43 +848,124 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
         name: "sdl.workflow",
         arguments: {
           repoId,
+          steps: [{ fn: "symbolGetCard", args: { symbolId } }],
+        },
+      },
+      {
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
           steps: [{ fn: "sliceBuild", args: { entrySymbols: [symbolId] } }],
+        },
+      },
+      {
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          steps: [
+            {
+              fn: "sliceSpilloverGet",
+              args: { spilloverHandle: `${repoId}-refresh-handle` },
+            },
+          ],
+        },
+      },
+      {
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          steps: [{ fn: "deltaGet", args: { fromVersion, toVersion } }],
+        },
+      },
+      {
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          steps: [
+            { fn: "prRiskAnalyze", args: { fromVersion, toVersion } },
+          ],
+        },
+      },
+      {
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          steps: [{ fn: "codeSkeleton", args: { symbolId } }],
+        },
+      },
+      {
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          steps: [
+            {
+              fn: "codeHotPath",
+              args: { symbolId, identifiersToFind: ["alpha"] },
+            },
+          ],
+        },
+      },
+      {
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          steps: [
+            {
+              fn: "codeNeedWindow",
+              args: {
+                symbolId,
+                reason: "Inspect alpha",
+                expectedLines: 20,
+                identifiersToFind: ["alpha"],
+              },
+            },
+          ],
+        },
+      },
+      {
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          steps: [{ fn: "repoOverview", args: { level: "stats" } }],
         },
       },
     ];
 
     for (const call of calls) {
-      const response = (await client.callTool(call)) as ErrorEnvelope;
+      const first = (await client.callTool(call)) as ErrorEnvelope;
+      const second = (await client.callTool(call)) as ErrorEnvelope;
+      const label = `${call.name}:${String(
+        call.arguments.action
+          ?? call.arguments.op
+          ?? (Array.isArray(call.arguments.steps)
+            ? (call.arguments.steps[0] as { fn?: unknown } | undefined)?.fn
+            : "flat"),
+      )}`;
       assert.notEqual(
-        response.isError,
+        first.isError,
         true,
-        `${call.name}:${String(call.arguments.action ?? call.arguments.op ?? "flat")} ${JSON.stringify(response.structuredContent)}`,
+        `${label} ${JSON.stringify(first.structuredContent)}`,
       );
-    }
-  });
-
-  it("keeps verified symbol and slice payloads byte-stable", async () => {
-    for (const call of [
-      {
-        name: "sdl.symbol.search",
-        arguments: {
-          repoId: "verified",
-          query: "alpha",
-          semantic: false,
-          wireFormat: "json",
-        },
-      },
-      {
-        name: "sdl.slice.spillover.get",
-        arguments: {
-          repoId: "verified",
-          spilloverHandle: "verified-refresh-handle",
-        },
-      },
-    ]) {
-      const first = await client.callTool(call);
-      const second = await client.callTool(call);
-      assert.equal(JSON.stringify(second), JSON.stringify(first), call.name);
+      assertNoAdmissionFields(first, label);
+      assertNoAdmissionFields(second, label);
+      if (isSliceBuildCall(call)) {
+        assert.notEqual(
+          [...findSliceHandles(second)][0],
+          [...findSliceHandles(first)][0],
+          `${label}: random handle exception remains explicit`,
+        );
+        assert.equal(
+          serializeWithStableSliceHandle(second, label),
+          serializeWithStableSliceHandle(first, label),
+          label,
+        );
+      } else {
+        assert.equal(JSON.stringify(second), JSON.stringify(first), label);
+      }
+      if (call.name === "sdl.workflow") {
+        assertWorkflowSucceeded(first, label);
+        assertWorkflowSucceeded(second, label);
+      }
     }
   });
 
@@ -738,10 +1004,18 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
       const first = await client.callTool(call);
       const second = await client.callTool(call);
       assert.equal(JSON.stringify(second), JSON.stringify(first), call.name);
+      if (call.name === "sdl.workflow") {
+        assertWorkflowSucceeded(first, call.name);
+        assertWorkflowSucceeded(second, call.name);
+      }
     }
   });
 
-  it("gates real file windows but leaves their preview mutation route available", async () => {
+  it("keeps real file-window envelopes byte-stable", async (t) => {
+    t.mock.timers.enable({
+      apis: ["Date"],
+      now: new Date("2026-07-21T12:00:00.000Z"),
+    });
     const preview = (await client.callTool({
       name: "sdl.file",
       arguments: {
@@ -761,7 +1035,7 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     assert.ok(planHandle);
 
     for (const op of ["previewWindow", "sourceWindow"]) {
-      const response = (await client.callTool({
+      const call = {
         name: "sdl.file",
         arguments: {
           op,
@@ -772,8 +1046,15 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
           expectedLines: 20,
           identifiersToFind: ["alpha"],
         },
-      })) as ErrorEnvelope;
-      assert.notEqual(response.isError, true, `${op}:${JSON.stringify(response.structuredContent)}`);
+      };
+      const first = (await client.callTool(call)) as ErrorEnvelope;
+      const second = (await client.callTool(call)) as ErrorEnvelope;
+      assert.notEqual(
+        first.isError,
+        true,
+        `${op}:${JSON.stringify(first.structuredContent)}`,
+      );
+      assert.equal(JSON.stringify(second), JSON.stringify(first), op);
     }
   });
 

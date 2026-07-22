@@ -11,8 +11,11 @@ surfaces available.
 ## Public admission boundary
 
 `MCPServer` applies one admission check after the canonical tool name and
-validated arguments are known, but before dispatch. A pure declarative
-classifier marks each versioned code-graph read as central or conditional:
+validated arguments are known. For centrally gated calls, classification,
+availability lookup, waste-ledger accounting, and the handler execute inside
+one dispatch lease; admission runs immediately before the handler. A pure
+declarative classifier marks each versioned code-graph read as central or
+conditional:
 
 - Registered flat and gateway actions: symbol search/single-card lookup, slice
   build/refresh/spillover, delta, PR risk, code window/skeleton/hot path, and
@@ -66,6 +69,15 @@ failures.
 - Disposable real-DB MCP tests cover unknown/no-manifest rejection and
   byte-identical verified success for context, code tools, all retrieve ops,
   delta, PR risk, and repository overview.
+- Repeated verified calls compare the full serialized MCP envelope, preserving
+  key order and proving admission adds no response fields. The pre-existing
+  `slice.build` exception is explicit: every build creates its handle with
+  `crypto.randomBytes(16)`, and the full handle plus its eight-character
+  display prefix are the only normalized occurrences for flat, retrieve,
+  gateway, and workflow comparisons. The surrounding envelope remains
+  byte-identical; handle generation behavior is unchanged.
+- A blocked admission query proves the admission lookup and handler share one
+  dispatch lease, so full-index quiescence cannot enter between them.
 - A real blocked verifier lease proves legacy/direct full indexing cancels and
   closes the lease before destructive reset. Additional cases cover explicit
   full, incremental-to-full upgrade, failure release, and unchanged ordinary
