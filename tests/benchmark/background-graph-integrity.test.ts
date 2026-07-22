@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 
 import {
@@ -14,8 +15,101 @@ import {
   evaluateBenchmarkChecks,
   nearestRankPercentile,
   runSynchronousControl,
-  withHardTimeout,
+  superviseBenchmarkWorker,
+  type BenchmarkPartialProgress,
 } from "../../scripts/background-graph-integrity-benchmark.ts";
+
+type BenchmarkArtifact = ReturnType<typeof buildBenchmarkArtifact>;
+
+class FakeBenchmarkWorker extends EventEmitter {
+  readonly events: string[];
+  killed = false;
+
+  constructor(events: string[]) {
+    super();
+    this.events = events;
+  }
+
+  kill(): boolean {
+    this.killed = true;
+    this.events.push("kill");
+    return true;
+  }
+}
+
+class FakeWatchdogScheduler {
+  callback: (() => void) | undefined;
+  cleared = false;
+  delayMs: number | undefined;
+
+  setTimeout(callback: () => void, delayMs: number): number {
+    this.callback = callback;
+    this.delayMs = delayMs;
+    return 1;
+  }
+
+  clearTimeout(): void {
+    this.cleared = true;
+    this.callback = undefined;
+  }
+
+  fire(): void {
+    const callback = this.callback;
+    this.callback = undefined;
+    callback?.();
+  }
+}
+
+function createArtifact(overrides: Partial<Parameters<typeof buildBenchmarkArtifact>[0]> = {}) {
+  return buildBenchmarkArtifact({
+    commitSha: "0123456789abcdef",
+    os: "win32",
+    cpu: "test cpu",
+    node: "v24.0.0",
+    ladybugDb: "0.18.1",
+    addonMode: "disabled",
+    fixtureHash: "fixture-hash",
+    editSequenceHash: "edit-hash",
+    startingDatabaseHash: "database-hash",
+    cacheMode: "warm-serial",
+    candidateForegroundSamplesMs: Array(20).fill(100),
+    controlForegroundSamplesMs: Array(20).fill(1_000),
+    backgroundVerificationSamplesMs: Array(20).fill(300),
+    concurrentForegroundMs: 120,
+    timeoutCount: 0,
+    foregroundFullGraphCaptures: 0,
+    ...overrides,
+  });
+}
+
+function createProgress(
+  overrides: Partial<BenchmarkPartialProgress> = {},
+): BenchmarkPartialProgress {
+  return {
+    startingDatabaseHash: "database-hash",
+    candidateForegroundSamplesMs: [],
+    controlForegroundSamplesMs: [],
+    backgroundVerificationSamplesMs: [],
+    concurrentForegroundMs: Number.MAX_VALUE,
+    foregroundFullGraphCaptures: 0,
+    ...overrides,
+  };
+}
+
+function createFailureArtifact(
+  timeoutCount: number,
+  progress = createProgress(),
+): BenchmarkArtifact {
+  return createArtifact({
+    startingDatabaseHash: progress.startingDatabaseHash,
+    candidateForegroundSamplesMs: progress.candidateForegroundSamplesMs,
+    controlForegroundSamplesMs: progress.controlForegroundSamplesMs,
+    backgroundVerificationSamplesMs: progress.backgroundVerificationSamplesMs,
+    concurrentForegroundMs: progress.concurrentForegroundMs,
+    timeoutCount,
+    foregroundFullGraphCaptures: progress.foregroundFullGraphCaptures,
+  });
+}
 
 describe("background graph integrity benchmark contract", () => {
   it("generates the stable 1,500 by 20 fixture and edit sequence", () => {
@@ -113,24 +207,153 @@ describe("background graph integrity benchmark contract", () => {
     }
   });
 
-  it("times out through injected timing without sleeping", async () => {
-    let scheduledMs = 0;
-    await assert.rejects(
-      withHardTimeout(
-        new Promise<never>(() => {}),
-        BENCHMARK_TIMEOUT_MS,
-        {
-          setTimeout(callback, delayMs) {
-            scheduledMs = delayMs;
-            callback();
-            return 1;
-          },
-          clearTimeout() {},
-        },
+  it("kills and awaits the worker before writing a timeout artifact", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    const completed = createArtifact();
+    let written: BenchmarkArtifact | undefined;
+    let resolved = false;
+
+    const supervision = superviseBenchmarkWorker({
+      worker,
+      timeoutMs: BENCHMARK_TIMEOUT_MS,
+      scheduler,
+      createFailureArtifact,
+      writeArtifact(artifact) {
+        events.push("write");
+        written = artifact;
+      },
+    }).then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    worker.emit("message", {
+      type: "metadata",
+      startingDatabaseHash: "partial-database-hash",
+    });
+    worker.emit("message", {
+      type: "sample-start",
+      sampleId: "candidate:measured:0",
+    });
+    worker.emit("message", {
+      type: "sample-end",
+      sampleId: "candidate:measured:0",
+      progress: createProgress({
+        startingDatabaseHash: "partial-database-hash",
+        candidateForegroundSamplesMs: [111],
+        backgroundVerificationSamplesMs: [222],
+      }),
+    });
+    worker.emit("message", { type: "sample-start", sampleId: "candidate:measured:1" });
+    assert.equal(scheduler.delayMs, BENCHMARK_TIMEOUT_MS);
+    scheduler.fire();
+    assert.equal(worker.killed, true);
+    assert.equal(written, undefined);
+
+    worker.emit("message", { type: "sample-end", sampleId: "candidate:measured:1" });
+    worker.emit("message", { type: "complete", artifact: completed });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(resolved, false);
+    assert.equal(written, undefined);
+
+    events.push("exit");
+    worker.emit("exit", null, "SIGTERM");
+    const result = await supervision;
+
+    assert.deepEqual(events, ["kill", "exit", "write"]);
+    assert.equal(result.timedOut, true);
+    assert.equal(written?.timeoutCount, 1);
+    assert.equal(written?.passed, false);
+    assert.equal(written?.startingDatabaseHash, "partial-database-hash");
+    assert.deepEqual(written?.rawSamplesMs.candidateForeground, [111]);
+    assert.deepEqual(written?.rawSamplesMs.backgroundVerification, [222]);
+    assert.notStrictEqual(written, completed);
+  });
+
+  it("preserves a completed worker artifact and never kills the normal path", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    const completed = createArtifact();
+    let written: BenchmarkArtifact | undefined;
+
+    const supervision = superviseBenchmarkWorker({
+      worker,
+      timeoutMs: BENCHMARK_TIMEOUT_MS,
+      scheduler,
+      createFailureArtifact,
+      writeArtifact(artifact) {
+        events.push("write");
+        written = artifact;
+      },
+    });
+
+    worker.emit("message", { type: "sample-start", sampleId: "control:measured:19" });
+    worker.emit("message", {
+      type: "sample-end",
+      sampleId: "control:measured:19",
+      progress: createProgress(),
+    });
+    worker.emit("message", { type: "complete", artifact: completed });
+    assert.equal(written, undefined);
+    events.push("exit");
+    worker.emit("exit", 0, null);
+
+    const result = await supervision;
+    assert.equal(worker.killed, false);
+    assert.equal(scheduler.cleared, true);
+    assert.strictEqual(result.artifact, completed);
+    assert.strictEqual(written, completed);
+    assert.deepEqual(events, ["exit", "write"]);
+  });
+
+  it("writes a failing artifact after an early worker crash and leaves no live child", async () => {
+    const events: string[] = [];
+    const worker = new FakeBenchmarkWorker(events);
+    const scheduler = new FakeWatchdogScheduler();
+    let written: BenchmarkArtifact | undefined;
+
+    const supervision = superviseBenchmarkWorker({
+      worker,
+      timeoutMs: BENCHMARK_TIMEOUT_MS,
+      scheduler,
+      createFailureArtifact,
+      writeArtifact(artifact) {
+        events.push("write");
+        written = artifact;
+      },
+    });
+
+    worker.emit("message", {
+      type: "sample-start",
+      sampleId: "control:measured:19",
+    });
+    worker.emit("message", {
+      type: "sample-end",
+      sampleId: "control:measured:19",
+      progress: createProgress({
+        candidateForegroundSamplesMs: Array(20).fill(100),
+        controlForegroundSamplesMs: Array(20).fill(1_000),
+        backgroundVerificationSamplesMs: Array(20).fill(300),
+        concurrentForegroundMs: 120,
+      }),
+    });
+    events.push("exit");
+    worker.emit("exit", 1, null);
+    const result = await supervision;
+
+    assert.equal(worker.killed, false);
+    assert.equal(result.timedOut, false);
+    assert.equal(written?.timeoutCount, 0);
+    assert.equal(written?.passed, false);
+    assert.ok(
+      written?.checks.some(
+        (check) => check.name === "worker process failures" && !check.passed,
       ),
-      /30,000 ms/,
     );
-    assert.equal(scheduledMs, BENCHMARK_TIMEOUT_MS);
+    assert.deepEqual(events, ["exit", "write"]);
   });
 
   it("does not resolve the synchronous control before capture, compare, and publication", async () => {

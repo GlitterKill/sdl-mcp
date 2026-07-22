@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import type { EventEmitter } from "node:events";
 import {
   cpSync,
   existsSync,
@@ -14,7 +15,7 @@ import {
 import { cpus, platform, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { invalidateConfigCache } from "../dist/config/loadConfig.js";
 import {
@@ -99,7 +100,7 @@ export interface BenchmarkCheck {
   passed: boolean;
 }
 
-interface BenchmarkArtifactInput {
+export interface BenchmarkArtifactInput {
   commitSha: string;
   os: string;
   cpu: string | null;
@@ -118,18 +119,63 @@ interface BenchmarkArtifactInput {
   foregroundFullGraphCaptures: number;
 }
 
-interface TimeoutScheduler {
+export interface TimeoutScheduler {
   setTimeout(callback: () => void, delayMs: number): unknown;
   clearTimeout(handle: unknown): void;
 }
 
-export class BenchmarkTimeoutError extends Error {
-  readonly timeoutMs: number;
+export interface BenchmarkPartialProgress {
+  startingDatabaseHash: string;
+  candidateForegroundSamplesMs: number[];
+  controlForegroundSamplesMs: number[];
+  backgroundVerificationSamplesMs: number[];
+  concurrentForegroundMs: number;
+  foregroundFullGraphCaptures: number;
+}
 
-  constructor(timeoutMs: number) {
-    super(`Benchmark sample exceeded ${timeoutMs.toLocaleString("en-US")} ms`);
-    this.timeoutMs = timeoutMs;
-  }
+export type BenchmarkArtifact = ReturnType<typeof buildBenchmarkArtifact>;
+
+export type BenchmarkWorkerMessage =
+  | { type: "metadata"; startingDatabaseHash: string }
+  | { type: "sample-start"; sampleId: string }
+  | {
+      type: "sample-end";
+      sampleId: string;
+      progress: BenchmarkPartialProgress;
+    }
+  | { type: "complete"; artifact: BenchmarkArtifact };
+
+interface BenchmarkWorker extends EventEmitter {
+  kill(): boolean;
+}
+
+interface BenchmarkSupervisorOptions {
+  worker: BenchmarkWorker;
+  timeoutMs: number;
+  scheduler?: TimeoutScheduler;
+  createFailureArtifact(
+    timeoutCount: number,
+    progress: BenchmarkPartialProgress,
+  ): BenchmarkArtifact;
+  writeArtifact(artifact: BenchmarkArtifact): void;
+}
+
+interface BenchmarkSupervisorResult {
+  artifact: BenchmarkArtifact;
+  timedOut: boolean;
+}
+
+interface BenchmarkSampleUpdate {
+  candidateForegroundMs?: number;
+  controlForegroundMs?: number;
+  backgroundVerificationMs?: number;
+  concurrentForegroundMs?: number;
+  foregroundFullGraphCaptures?: number;
+}
+
+interface BenchmarkSampleReporter {
+  start(sampleId: string): Promise<void>;
+  end(sampleId: string, update: BenchmarkSampleUpdate): Promise<void>;
 }
 
 const nativeTimeoutScheduler: TimeoutScheduler = {
@@ -250,24 +296,146 @@ function check(
   return { name, actual, comparator, threshold, passed };
 }
 
-export async function withHardTimeout<T>(
-  operation: Promise<T>,
-  timeoutMs: number,
-  scheduler: TimeoutScheduler = nativeTimeoutScheduler,
-): Promise<T> {
-  return new Promise<T>((resolvePromise, rejectPromise) => {
-    const handle = scheduler.setTimeout(
-      () => rejectPromise(new BenchmarkTimeoutError(timeoutMs)),
-      timeoutMs,
-    );
-    operation.then(
-      (value) => {
-        scheduler.clearTimeout(handle);
-        resolvePromise(value);
-      },
-      (error: unknown) => {
-        scheduler.clearTimeout(handle);
-        rejectPromise(error);
+function emptyBenchmarkProgress(): BenchmarkPartialProgress {
+  return {
+    startingDatabaseHash: "unavailable",
+    candidateForegroundSamplesMs: [],
+    controlForegroundSamplesMs: [],
+    backgroundVerificationSamplesMs: [],
+    concurrentForegroundMs: Number.MAX_VALUE,
+    foregroundFullGraphCaptures: 0,
+  };
+}
+
+function copyBenchmarkProgress(
+  progress: BenchmarkPartialProgress,
+): BenchmarkPartialProgress {
+  return {
+    ...progress,
+    candidateForegroundSamplesMs: [...progress.candidateForegroundSamplesMs],
+    controlForegroundSamplesMs: [...progress.controlForegroundSamplesMs],
+    backgroundVerificationSamplesMs: [
+      ...progress.backgroundVerificationSamplesMs,
+    ],
+  };
+}
+
+function isWorkerMessage(message: unknown): message is BenchmarkWorkerMessage {
+  if (typeof message !== "object" || message === null || !("type" in message)) {
+    return false;
+  }
+  const type = Reflect.get(message, "type");
+  return (
+    type === "metadata" ||
+    type === "sample-start" ||
+    type === "sample-end" ||
+    type === "complete"
+  );
+}
+
+function addWorkerExitFailure(artifact: BenchmarkArtifact): BenchmarkArtifact {
+  return {
+    ...artifact,
+    checks: [
+      ...artifact.checks,
+      check("worker process failures", 1, "=", 0),
+    ],
+    passed: false,
+  };
+}
+
+export async function superviseBenchmarkWorker(
+  options: BenchmarkSupervisorOptions,
+): Promise<BenchmarkSupervisorResult> {
+  const scheduler = options.scheduler ?? nativeTimeoutScheduler;
+  return new Promise<BenchmarkSupervisorResult>((resolvePromise, rejectPromise) => {
+    let activeSampleId: string | undefined;
+    let completedArtifact: BenchmarkArtifact | undefined;
+    let progress = emptyBenchmarkProgress();
+    let watchdog: unknown;
+    let timedOut = false;
+    let workerFailed = false;
+    let ignoreMessages = false;
+    let settled = false;
+
+    const clearWatchdog = () => {
+      if (watchdog !== undefined) {
+        scheduler.clearTimeout(watchdog);
+        watchdog = undefined;
+      }
+    };
+    const terminateWorker = (timeout: boolean) => {
+      if (ignoreMessages) return;
+      timedOut = timeout;
+      workerFailed = !timeout;
+      ignoreMessages = true;
+      clearWatchdog();
+      options.worker.kill();
+    };
+
+    options.worker.on("message", (message: unknown) => {
+      if (ignoreMessages || !isWorkerMessage(message)) return;
+      if (message.type === "metadata") {
+        progress = {
+          ...progress,
+          startingDatabaseHash: message.startingDatabaseHash,
+        };
+        return;
+      }
+      if (message.type === "sample-start") {
+        if (activeSampleId !== undefined || completedArtifact !== undefined) {
+          terminateWorker(false);
+          return;
+        }
+        activeSampleId = message.sampleId;
+        watchdog = scheduler.setTimeout(() => {
+          terminateWorker(true);
+        }, options.timeoutMs);
+        return;
+      }
+      if (message.type === "sample-end") {
+        if (activeSampleId !== message.sampleId) {
+          terminateWorker(false);
+          return;
+        }
+        clearWatchdog();
+        activeSampleId = undefined;
+        progress = copyBenchmarkProgress(message.progress);
+        return;
+      }
+      if (activeSampleId !== undefined || completedArtifact !== undefined) {
+        terminateWorker(false);
+        return;
+      }
+      completedArtifact = message.artifact;
+    });
+
+    options.worker.on("error", () => {
+      terminateWorker(false);
+    });
+
+    options.worker.on(
+      "exit",
+      (code: number | null, _signal: NodeJS.Signals | null) => {
+        if (settled) return;
+        settled = true;
+        clearWatchdog();
+        try {
+          let artifact: BenchmarkArtifact;
+          if (!timedOut && !workerFailed && code === 0 && completedArtifact) {
+            artifact = completedArtifact;
+          } else {
+            artifact = options.createFailureArtifact(
+              timedOut ? 1 : 0,
+              copyBenchmarkProgress(progress),
+            );
+            if (!timedOut) artifact = addWorkerExitFailure(artifact);
+          }
+          options.writeArtifact(artifact);
+          resolvePromise({ artifact, timedOut });
+        } catch (error) {
+          rejectPromise(error);
+        }
       },
     );
   });
@@ -371,7 +539,6 @@ interface LaneResult {
   backgroundSamplesMs: number[];
   concurrentForegroundMs: number;
   foregroundFullGraphCaptures: number;
-  timeoutCount: number;
 }
 
 interface PatchCommit {
@@ -383,87 +550,81 @@ async function runCandidateLane(
   repoId: string,
   serialEdits: readonly BenchmarkEdit[],
   concurrentEdits: readonly BenchmarkEdit[],
+  reporter: BenchmarkSampleReporter,
 ): Promise<LaneResult> {
   const foregroundSamplesMs: number[] = [];
   const backgroundSamplesMs: number[] = [];
   let foregroundFullGraphCaptures = 0;
-  let timeoutCount = 0;
 
   for (const [index, edit] of serialEdits.entries()) {
-    try {
-      const sample = await withHardTimeout(
-        runCandidateSample(repoId, edit, () => {
-          foregroundFullGraphCaptures += 1;
-        }),
-        BENCHMARK_TIMEOUT_MS,
-      );
-      if (index >= BENCHMARK_WARMUP_COUNT) {
-        foregroundSamplesMs.push(sample.foregroundMs);
-        backgroundSamplesMs.push(sample.backgroundMs);
-      }
-    } catch (error) {
-      if (error instanceof BenchmarkTimeoutError) timeoutCount += 1;
-      else throw error;
-      break;
+    const measuredIndex = index - BENCHMARK_WARMUP_COUNT;
+    const sampleId =
+      index < BENCHMARK_WARMUP_COUNT
+        ? `candidate:warmup:${index}`
+        : `candidate:measured:${measuredIndex}`;
+    await reporter.start(sampleId);
+    const sample = await runCandidateSample(repoId, edit, () => {
+      foregroundFullGraphCaptures += 1;
+    });
+    const update: BenchmarkSampleUpdate = { foregroundFullGraphCaptures };
+    if (index >= BENCHMARK_WARMUP_COUNT) {
+      foregroundSamplesMs.push(sample.foregroundMs);
+      backgroundSamplesMs.push(sample.backgroundMs);
+      update.candidateForegroundMs = sample.foregroundMs;
+      update.backgroundVerificationMs = sample.backgroundMs;
     }
+    await reporter.end(sampleId, update);
   }
 
   let concurrentForegroundMs = Number.MAX_VALUE;
-  if (timeoutCount === 0) {
-    try {
-      const [firstEdit, secondEdit] = concurrentEdits;
-      if (!firstEdit || !secondEdit) throw new Error("Concurrent edits are missing");
-      let firstRevision: number | undefined;
-      await patchSavedFile(
-        { repoId, filePath: firstEdit.relPath, ...firstEdit },
-        {
-          onCommitted(revision) {
-            firstRevision = revision;
-          },
-          onForegroundFullGraphCapture() {
-            foregroundFullGraphCaptures += 1;
-          },
-        },
-      );
-      const firstState = await getDerivedState(repoId);
-      if (
-        firstRevision === undefined ||
-        firstState?.graphIntegrityRevision !== firstRevision ||
-        firstState.graphIntegrityState !== "verifying"
-      ) {
-        throw new Error(
-          "The first concurrent edit was not still verifying before the second edit",
-        );
-      }
-      let secondRevision: number | undefined;
-      const secondStart = performance.now();
-      await withHardTimeout(
-        patchSavedFile(
-          { repoId, filePath: secondEdit.relPath, ...secondEdit },
-          {
-            onCommitted(revision) {
-              secondRevision = revision;
-            },
-            onForegroundFullGraphCapture() {
-              foregroundFullGraphCaptures += 1;
-            },
-          },
-        ),
-        BENCHMARK_TIMEOUT_MS,
-      );
-      concurrentForegroundMs = performance.now() - secondStart;
-      if (secondRevision === undefined) {
-        throw new Error("Concurrent candidate edit did not publish a revision");
-      }
-      await withHardTimeout(
-        waitForExactVerifiedRevision(repoId, secondRevision),
-        BENCHMARK_TIMEOUT_MS,
-      );
-    } catch (error) {
-      if (error instanceof BenchmarkTimeoutError) timeoutCount += 1;
-      else throw error;
-    }
+  const [firstEdit, secondEdit] = concurrentEdits;
+  if (!firstEdit || !secondEdit) throw new Error("Concurrent edits are missing");
+  const sampleId = "concurrent:0";
+  await reporter.start(sampleId);
+  let firstRevision: number | undefined;
+  await patchSavedFile(
+    { repoId, filePath: firstEdit.relPath, ...firstEdit },
+    {
+      onCommitted(revision) {
+        firstRevision = revision;
+      },
+      onForegroundFullGraphCapture() {
+        foregroundFullGraphCaptures += 1;
+      },
+    },
+  );
+  const firstState = await getDerivedState(repoId);
+  if (
+    firstRevision === undefined ||
+    firstState?.graphIntegrityRevision !== firstRevision ||
+    firstState.graphIntegrityState !== "verifying"
+  ) {
+    throw new Error(
+      "The first concurrent edit was not still verifying before the second edit",
+    );
   }
+  let secondRevision: number | undefined;
+  const secondStart = performance.now();
+  await patchSavedFile(
+    { repoId, filePath: secondEdit.relPath, ...secondEdit },
+    {
+      onCommitted(revision) {
+        secondRevision = revision;
+      },
+      onForegroundFullGraphCapture() {
+        foregroundFullGraphCaptures += 1;
+      },
+    },
+  );
+  concurrentForegroundMs = performance.now() - secondStart;
+  if (secondRevision === undefined) {
+    throw new Error("Concurrent candidate edit did not publish a revision");
+  }
+  await waitForExactVerifiedRevision(repoId, secondRevision);
+  await reporter.end(sampleId, {
+    concurrentForegroundMs,
+    foregroundFullGraphCaptures,
+  });
 
   await cancelAndWaitForAllGraphIntegrityVerifiers();
   return {
@@ -471,7 +632,6 @@ async function runCandidateLane(
     backgroundSamplesMs,
     concurrentForegroundMs,
     foregroundFullGraphCaptures,
-    timeoutCount,
   };
 }
 
@@ -533,31 +693,32 @@ async function waitForExactVerifiedRevision(
 async function runControlLane(
   repoId: string,
   serialEdits: readonly BenchmarkEdit[],
-): Promise<{ foregroundSamplesMs: number[]; timeoutCount: number }> {
+  reporter: BenchmarkSampleReporter,
+): Promise<{ foregroundSamplesMs: number[] }> {
   const foregroundSamplesMs: number[] = [];
-  let timeoutCount = 0;
   const observer: SavedFilePatchObserver = {
     onCommitted() {},
     onForegroundFullGraphCapture() {},
   };
 
   for (const [index, edit] of serialEdits.entries()) {
+    const measuredIndex = index - BENCHMARK_WARMUP_COUNT;
+    const sampleId =
+      index < BENCHMARK_WARMUP_COUNT
+        ? `control:warmup:${index}`
+        : `control:measured:${measuredIndex}`;
+    await reporter.start(sampleId);
     const startedAt = performance.now();
-    try {
-      await withHardTimeout(
-        runControlSample(repoId, edit, observer),
-        BENCHMARK_TIMEOUT_MS,
-      );
-      if (index >= BENCHMARK_WARMUP_COUNT) {
-        foregroundSamplesMs.push(performance.now() - startedAt);
-      }
-    } catch (error) {
-      if (error instanceof BenchmarkTimeoutError) timeoutCount += 1;
-      else throw error;
-      break;
+    await runControlSample(repoId, edit, observer);
+    const update: BenchmarkSampleUpdate = {};
+    if (index >= BENCHMARK_WARMUP_COUNT) {
+      const foregroundMs = performance.now() - startedAt;
+      foregroundSamplesMs.push(foregroundMs);
+      update.controlForegroundMs = foregroundMs;
     }
+    await reporter.end(sampleId, update);
   }
-  return { foregroundSamplesMs, timeoutCount };
+  return { foregroundSamplesMs };
 }
 
 async function runControlSample(
@@ -759,8 +920,100 @@ function parseOutPath(argv: readonly string[]): string {
   return output;
 }
 
-async function runBenchmark(outputPath: string): Promise<void> {
+function getBenchmarkMetadata(fixture: BenchmarkFixture) {
+  return {
+    commitSha: execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    }).trim(),
+    os: platform(),
+    cpu: cpus()[0]?.model ?? null,
+    node: process.version,
+    ladybugDb: JSON.parse(
+      readFileSync(resolve("node_modules", "kuzu", "package.json"), "utf8"),
+    ).version as string,
+    addonMode:
+      process.env.SDL_MCP_DISABLE_NATIVE_ADDON === "1"
+        ? ("disabled" as const)
+        : ("enabled" as const),
+    fixtureHash: fixture.fixtureHash,
+    editSequenceHash: fixture.editSequenceHash,
+  };
+}
+
+function buildArtifactFromProgress(
+  metadata: ReturnType<typeof getBenchmarkMetadata>,
+  progress: BenchmarkPartialProgress,
+  timeoutCount: number,
+): BenchmarkArtifact {
+  return buildBenchmarkArtifact({
+    ...metadata,
+    startingDatabaseHash: progress.startingDatabaseHash,
+    cacheMode: "warm-serial",
+    candidateForegroundSamplesMs: progress.candidateForegroundSamplesMs,
+    controlForegroundSamplesMs: progress.controlForegroundSamplesMs,
+    backgroundVerificationSamplesMs:
+      progress.backgroundVerificationSamplesMs,
+    concurrentForegroundMs: progress.concurrentForegroundMs,
+    timeoutCount,
+    foregroundFullGraphCaptures: progress.foregroundFullGraphCaptures,
+  });
+}
+
+async function sendWorkerMessage(message: BenchmarkWorkerMessage): Promise<void> {
+  if (!process.send) {
+    throw new Error("Benchmark worker requires an IPC channel");
+  }
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    process.send!(message, (error) => {
+      if (error) rejectPromise(error);
+      else resolvePromise();
+    });
+  });
+}
+
+function createWorkerReporter(
+  progress: BenchmarkPartialProgress,
+): BenchmarkSampleReporter {
+  return {
+    async start(sampleId) {
+      // IPC is outside the timed measurement; the parent watchdog covers the
+      // complete DB operation and its exact-revision verification wait.
+      await sendWorkerMessage({ type: "sample-start", sampleId });
+    },
+    async end(sampleId, update) {
+      if (update.candidateForegroundMs !== undefined) {
+        progress.candidateForegroundSamplesMs.push(update.candidateForegroundMs);
+      }
+      if (update.controlForegroundMs !== undefined) {
+        progress.controlForegroundSamplesMs.push(update.controlForegroundMs);
+      }
+      if (update.backgroundVerificationMs !== undefined) {
+        progress.backgroundVerificationSamplesMs.push(
+          update.backgroundVerificationMs,
+        );
+      }
+      if (update.concurrentForegroundMs !== undefined) {
+        progress.concurrentForegroundMs = update.concurrentForegroundMs;
+      }
+      if (update.foregroundFullGraphCaptures !== undefined) {
+        progress.foregroundFullGraphCaptures =
+          update.foregroundFullGraphCaptures;
+      }
+      await sendWorkerMessage({
+        type: "sample-end",
+        sampleId,
+        progress: copyBenchmarkProgress(progress),
+      });
+    },
+  };
+}
+
+async function runBenchmarkWorker(): Promise<BenchmarkArtifact> {
   const fixture = createBenchmarkFixture();
+  const metadata = getBenchmarkMetadata(fixture);
+  const progress = emptyBenchmarkProgress();
+  const reporter = createWorkerReporter(progress);
   const lanes = createBenchmarkLaneInputs(fixture);
   if (
     sha256(JSON.stringify(lanes.candidate.files)) !==
@@ -801,54 +1054,36 @@ async function runBenchmark(outputPath: string): Promise<void> {
     if (candidateStartHash !== controlStartHash) {
       throw new Error("Candidate and control database clones are not byte-identical");
     }
+    progress.startingDatabaseHash = candidateStartHash;
+    await sendWorkerMessage({
+      type: "metadata",
+      startingDatabaseHash: candidateStartHash,
+    });
 
     await openDatabase(candidateDb);
     const candidate = await runCandidateLane(
       repoId,
       lanes.candidate.edits,
       fixture.concurrentEdits,
+      reporter,
     );
     await closeLadybugDb();
 
     await openDatabase(controlDb);
-    const control = await runControlLane(repoId, lanes.control.edits);
+    const control = await runControlLane(repoId, lanes.control.edits, reporter);
     await closeLadybugDb();
 
-    const artifact = buildBenchmarkArtifact({
-      commitSha: execFileSync("git", ["rev-parse", "HEAD"], {
-        cwd: process.cwd(),
-        encoding: "utf8",
-      }).trim(),
-      os: platform(),
-      cpu: cpus()[0]?.model ?? null,
-      node: process.version,
-      ladybugDb: JSON.parse(
-        readFileSync(resolve("node_modules", "kuzu", "package.json"), "utf8"),
-      ).version as string,
-      addonMode:
-        process.env.SDL_MCP_DISABLE_NATIVE_ADDON === "1"
-          ? "disabled"
-          : "enabled",
-      fixtureHash: fixture.fixtureHash,
-      editSequenceHash: fixture.editSequenceHash,
+    return buildBenchmarkArtifact({
+      ...metadata,
       startingDatabaseHash: candidateStartHash,
       cacheMode: "warm-serial",
       candidateForegroundSamplesMs: candidate.foregroundSamplesMs,
       controlForegroundSamplesMs: control.foregroundSamplesMs,
       backgroundVerificationSamplesMs: candidate.backgroundSamplesMs,
       concurrentForegroundMs: candidate.concurrentForegroundMs,
-      timeoutCount: candidate.timeoutCount + control.timeoutCount,
+      timeoutCount: 0,
       foregroundFullGraphCaptures: candidate.foregroundFullGraphCaptures,
     });
-    mkdirSync(dirname(outputPath), { recursive: true });
-    writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
-    console.log(`${artifact.passed ? "PASS" : "FAIL"} ${outputPath}`);
-    for (const item of artifact.checks) {
-      console.log(
-        `${item.passed ? "PASS" : "FAIL"} ${item.name}: ${item.actual} ${item.comparator} ${item.threshold}`,
-      );
-    }
-    if (!artifact.passed) process.exitCode = 1;
   } finally {
     await cancelAndWaitForAllGraphIntegrityVerifiers().catch(() => {});
     await closeLadybugDb().catch(() => {});
@@ -862,13 +1097,66 @@ async function runBenchmark(outputPath: string): Promise<void> {
   }
 }
 
+function writeBenchmarkArtifact(
+  outputPath: string,
+  artifact: BenchmarkArtifact,
+): void {
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+}
+
+function printBenchmarkResult(outputPath: string, artifact: BenchmarkArtifact): void {
+  console.log(`${artifact.passed ? "PASS" : "FAIL"} ${outputPath}`);
+  for (const item of artifact.checks) {
+    console.log(
+      `${item.passed ? "PASS" : "FAIL"} ${item.name}: ${item.actual} ${item.comparator} ${item.threshold}`,
+    );
+  }
+}
+
+async function runBenchmarkParent(outputPath: string): Promise<void> {
+  const fixture = createBenchmarkFixture();
+  const metadata = getBenchmarkMetadata(fixture);
+  const worker = spawn(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      fileURLToPath(import.meta.url),
+      "--worker",
+      "--out",
+      outputPath,
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["inherit", "inherit", "inherit", "ipc"],
+    },
+  );
+  const result = await superviseBenchmarkWorker({
+    worker,
+    timeoutMs: BENCHMARK_TIMEOUT_MS,
+    createFailureArtifact: (timeoutCount, progress) =>
+      buildArtifactFromProgress(metadata, progress, timeoutCount),
+    writeArtifact: (artifact) => writeBenchmarkArtifact(outputPath, artifact),
+  });
+  printBenchmarkResult(outputPath, result.artifact);
+  if (!result.artifact.passed) process.exitCode = 1;
+}
+
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
 
 async function main(): Promise<void> {
-  await runBenchmark(parseOutPath(process.argv.slice(2)));
+  const argv = process.argv.slice(2);
+  if (argv[0] === "--worker") {
+    parseOutPath(argv.slice(1));
+    const artifact = await runBenchmarkWorker();
+    await sendWorkerMessage({ type: "complete", artifact });
+    return;
+  }
+  await runBenchmarkParent(parseOutPath(argv));
 }
 
 if (
