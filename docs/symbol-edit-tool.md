@@ -45,6 +45,21 @@ For TypeScript, TSX, JavaScript, and JSX, preview uses the TypeScript-family Tre
 
 If a saved-file write succeeds but graph or live-index sync fails, SDL-MCP keeps the file write and returns the existing `indexUpdate.applied = false` guidance instead of rolling the file back.
 
+## Graph integrity after a saved edit
+
+A successful saved-file apply commits the graph patch, its independently constructed manifest changes, and one new graph-integrity revision in the same LadybugDB transaction. The edit returns after that commit. A repository-owned worker then verifies the exact revision from a stable read-only snapshot and publishes the result through a Version-and-revision compare-and-set.
+
+Call `sdl.repo.status` after the edit when your task needs verification state. Compare these fields under `derivedState`:
+
+| Status | Meaning | Action |
+| --- | --- | --- |
+| `graphIntegrityState: "verified"` and equal current and verified revisions | The worker verified the current graph revision. | Continue normally. |
+| `graphIntegrityState: "verifying"` and current revision greater than verified revision | The saved graph is available, but the current revision is not verified yet. | Continue reading when pending verification is acceptable, or poll `repo.status` when the task requires proof of the latest revision. |
+| `graphIntegrityState: "failed"` with a non-null verified revision | The current manifest-backed graph remains available, but the latest verification attempt failed. | Follow `nextBestAction`; run a full refresh before claiming the latest revision is verified. |
+| `graphIntegrityState: "unknown"`, a null current revision, or missing manifest guidance | SDL-MCP has no trusted manifest for the current graph. | Run `sdl.index.refresh` with `mode: "full"`. |
+
+Saved-file verification does not refresh PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state. Their existing refresh and recovery rules still apply.
+
 ## Backup behavior
 
 When `createBackup` is enabled, `symbol.edit` creates temporary rollback copies for internal safety. SDL-MCP removes those copies after full success and does not retain or return a user backup path. Use `file.write` when you need a retained sibling `.bak` and a successful `backupPath` response.

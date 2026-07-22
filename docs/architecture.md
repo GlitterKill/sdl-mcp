@@ -245,7 +245,7 @@ flowchart TD
 
 Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write serialization prevents graph corruption.
 
-### Graph Schema (22 Node Tables, 14 Edge Tables)
+### Graph Schema (24 Node Tables, 16 Edge Tables)
 
 **Core nodes:**
 
@@ -275,6 +275,8 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | **Audit**         | auditId, repoId, action, timestamp                                                                       |
 | **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingJinaCode*, embeddingNomic*                 |
 | **SchemaVersion** | version, appliedAt                                                                                       |
+| **GraphIntegrityFileState** | stateId, repoId, fileId, relPath, symbolCount, digest, filelessReferencesJson |
+| **GraphIntegrityFilelessState** | stateId, repoId, symbolId, canonicalSymbolJson, referenceCount |
 
 **Semantic nodes:**
 
@@ -312,6 +314,8 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | **MEMORY_OF_FILE**       | Memory → File      | —                                                  |
 | **FILE_SUMMARY_IN_REPO** | FileSummary → Repo | —                                                  |
 | **SUMMARY_OF_FILE**      | FileSummary → File | —                                                  |
+| **GRAPH_INTEGRITY_FILE_STATE_IN_REPO** | GraphIntegrityFileState → Repo | —                              |
+| **GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO** | GraphIntegrityFilelessState → Repo | —                      |
 
 ### Query Modules
 
@@ -332,7 +336,18 @@ Each module owns a specific domain of queries:
 | `ladybug-slices.ts`            | Slice handles, lease expiry                                                         |
 | `ladybug-memories.ts`          | Memory nodes, symbol/file links, staleness                                          |
 | `ladybug-file-summaries.ts`    | FileSummary nodes — file-level summaries with searchText and embeddings             |
+| `ladybug-graph-integrity.ts`   | File and fileless manifest rows, revision ownership checks, and atomic patch helpers |
 | `ladybug-usage.ts`             | Token usage tracking, savings metrics                                               |
+
+### Persisted graph integrity ownership
+
+Full and ordinary incremental indexing build file and fileless manifest rows from independent index output and verify them synchronously. Saved-file edits validate only the affected trusted file state, then commit graph rows, manifest changes, and one monotonic `DerivedState.graphIntegrityRevision` in the same serialized write transaction. The transaction preserves `graphIntegrityVerifiedRevision` until an independent verifier publishes the exact new revision.
+
+Each repository has at most one running background verifier and one coalesced latest wake. The verifier leases an exclusive read connection, opens one read-only transaction, reads both manifest tables through their `Repo` relationships, and scans canonical Symbol rows in deterministic pages from the same snapshot. It closes the snapshot and connection before using the production Version-and-revision compare-and-set to publish success or failure, so stale work cannot overwrite a newer edit.
+
+Startup recovery scans persisted `verifying` rows after migrations and repository bootstrap, then requeues their exact revisions. Full-index activation, unregister, database close, and shutdown block new verifier admission, cancel active work between page queries, and wait for the read lease to close before swapping, deleting, or closing graph state.
+
+The graph remains readable during `verifying` and after `failed` when the current Version still has a valid manifest, revision, and pruning-support marker. Those states do not claim that the latest revision is verified. An `unknown` state or missing manifest fails graph admission closed and directs the operator to a full refresh. Saved-file verification does not recompute PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state.
 
 ---
 

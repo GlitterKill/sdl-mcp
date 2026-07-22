@@ -67,6 +67,7 @@
     "bench:ppr": "node scripts/bench-ppr-weight.ts",
     "bench:delta-slice": "node scripts/bench-delta-slice-set-oriented.ts",
     "benchmark:provider-first-fallback": "node scripts/provider-first-fallback-benchmark.ts",
+    "benchmark:background-graph-integrity": "node --experimental-strip-types scripts/background-graph-integrity-benchmark.ts",
     "benchmark:record-trace": "node scripts/record-trace.ts",
     "benchmark:setup-external": "node scripts/setup-external-benchmark-repos.ts",
     "benchmark:external": "node scripts/external-benchmark-runner.mjs",

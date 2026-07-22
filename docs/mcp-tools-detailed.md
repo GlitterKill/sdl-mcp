@@ -10,6 +10,12 @@ This page remains at its original URL so existing links continue to work.
 
 Use `repo.unregister` only for runtime registrations. It requires `confirmRepoId` to exactly match `repoId`, rejects configured repositories until their entry is removed from `SDL_CONFIG`, and rejects dirty live buffers unless `discardDrafts: true` is explicit. Successful removal returns only `{ ok: true, repoId, removed: true }` and deletes repository-owned graph data while preserving unrelated repositories and global content-addressed nodes.
 
+## Repository graph integrity status
+
+`sdl.repo.status` reports graph integrity under `derivedState`. The `graphIntegrityRevision` field identifies the current persisted graph revision, while `graphIntegrityVerifiedRevision` identifies the last revision that an independent verification snapshot published successfully. Equal values with `graphIntegrityState: "verified"` prove the current revision.
+
+The `verifying` and `failed` states can remain graph-readable when the current Version has a valid manifest and revision metadata. They do not claim that the latest revision is verified. Follow `nextBestAction` after a failure, and run a full refresh when the state is `unknown`, the manifest is missing, or the current revision is null.
+
 ## Symbol search misses
 
 `sdl.symbol.search` searches symbol names; it does not add file-path matches to symbol ranking. When a search has no useful result and its query is clearly path-like (a slash or backslash, a known source extension, or an exact indexed repository-relative path), the response includes one structured `nextBestAction`. Call `sdl.context` with the supplied arguments to retry using `options.focusPaths: [query]`. Ordinary symbol-name misses do not receive this path-specific hint.

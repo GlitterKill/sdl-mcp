@@ -354,6 +354,60 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: node --experimental-strip-types scripts/check-benchmark-claims.ts --in .benchmark/matrix-smoke/aggregate.json --profile smoke
 
+  background-integrity-benchmark:
+    runs-on: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
+    env:
+      SDL_MCP_DISABLE_NATIVE_ADDON: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Setup tree-sitter
+        uses: ./.github/actions/setup-tree-sitter
+
+      - name: Setup LadybugDB native binary
+        shell: bash
+        run: |
+          if [ -f node_modules/kuzu/install.js ] && [ ! -f node_modules/kuzu/lbugjs.node ]; then
+            echo "Running upstream kuzu install.js to copy platform binary..."
+            cd node_modules/kuzu && node install.js
+          else
+            echo "LadybugDB binary available (split package or already installed)"
+          fi
+
+      - name: Build all
+        run: npm run build:all
+
+      - name: Run background graph integrity benchmark
+        run: npm run benchmark:background-graph-integrity -- --out .benchmark/background-graph-integrity/${{ runner.os }}-${{ github.sha }}.json
+
+      - name: Upload background graph integrity benchmark
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: background-graph-integrity-${{ runner.os }}
+          path: .benchmark/background-graph-integrity/${{ runner.os }}-${{ github.sha }}.json
+          if-no-files-found: error
+
   native-build:
     runs-on: ${{ matrix.os }}
     if: github.event_name != 'schedule'
