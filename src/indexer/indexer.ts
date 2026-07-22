@@ -1992,6 +1992,23 @@ export function resolvePostIndexSessionTimeoutMs(
   );
 }
 
+async function resolveEffectiveIndexMode(
+  repoId: string,
+  requestedMode: "full" | "incremental",
+): Promise<"full" | "incremental"> {
+  if (requestedMode === "full") return "full";
+
+  const probeConn = await getLadybugConn();
+  const fileCount = await ladybugDb.getFileCount(probeConn, repoId);
+  if (fileCount > 0) return "incremental";
+
+  logger.info(
+    "indexRepo: upgrading mode 'incremental' → 'full' (repo has no indexed files)",
+    { repoId },
+  );
+  return "full";
+}
+
 export async function indexRepo(
   repoId: string,
   mode: "full" | "incremental",
@@ -2048,23 +2065,30 @@ export async function indexRepo(
       );
     }
 
-    // Flush WAL before large indexing runs open their own transactions.
-    // Incremental refreshes are often tiny/no-op and can run frequently;
-    // forcing CHECKPOINT on every incremental call can become a contention
-    // hotspot under mixed read/write stress.
-    if (mode === "full") {
-      await preIndexCheckpoint();
-    }
-    const result = await indexRepoImpl(
-      repoId,
-      mode,
-      onProgress,
-      signal,
-      options,
-      scipPreRefreshResult,
-    );
-    await ensureGraphIntegrityVerificationComplete(repoId);
-    return result;
+    const effectiveMode = await resolveEffectiveIndexMode(repoId, mode);
+    const runEffectiveIndex = async (): Promise<IndexResult> => {
+      // Flush WAL before large indexing runs open their own transactions.
+      // Incremental refreshes are often tiny/no-op and can run frequently;
+      // forcing CHECKPOINT on every incremental call can become a contention
+      // hotspot under mixed read/write stress.
+      if (effectiveMode === "full") {
+        await preIndexCheckpoint();
+      }
+      const result = await indexRepoImpl(
+        repoId,
+        effectiveMode,
+        onProgress,
+        signal,
+        options,
+        scipPreRefreshResult,
+      );
+      await ensureGraphIntegrityVerificationComplete(repoId);
+      return result;
+    };
+
+    return effectiveMode === "full"
+      ? withGraphIntegrityVerifierQuiesced(repoId, runEffectiveIndex)
+      : runEffectiveIndex();
   };
 
   const resultPromise = withIndexingGate(() =>
@@ -2092,28 +2116,6 @@ async function indexRepoImpl(
   options?: IndexRepoOptions,
   scipPreRefresh?: ScipPreRefreshDiagnostics,
 ): Promise<IndexResult> {
-  // Auto-upgrade incremental → full on a fresh repo (no files indexed yet).
-  // Callers (CLI delegated path, MCP `sdl.index.refresh`, watcher first-run)
-  // can request "incremental" without checking DB state. Running as
-  // incremental on empty data is a correctness no-op but defeats every
-  // full-mode optimisation: pass-2 still does the per-file
-  // `deleteOutgoingEdgesByTypeForSymbols` round-trip against an empty
-  // edge table, the pass-1→pass-2 drain awaits instead of overlapping,
-  // and `preIndexCheckpoint()` is skipped. Detecting fileCount===0 once
-  // here lets every code path benefit without each caller duplicating
-  // the check.
-  if (mode === "incremental") {
-    const probeConn = await getLadybugConn();
-    const fileCount = await ladybugDb.getFileCount(probeConn, repoId);
-    if (fileCount === 0) {
-      logger.info(
-        "indexRepo: upgrading mode 'incremental' → 'full' (repo has no indexed files)",
-        { repoId },
-      );
-      mode = "full";
-    }
-  }
-
   const startTime = Date.now();
   const phaseTimings: Record<string, number> | null = options?.includeTimings
     ? {}
