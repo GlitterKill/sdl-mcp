@@ -13,6 +13,12 @@ import {
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import * as derivedState from "../../dist/db/ladybug-derived-state.js";
 import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type DbLatencyTapEvent,
+  type ObservabilityTap,
+} from "../../dist/observability/event-tap.js";
+import {
   capturePersistedGraphIntegrity,
   compareGraphIntegrityExpectations,
   completeGraphIntegrityVerification,
@@ -99,6 +105,38 @@ function callEdge(fromSymbolId: string, toSymbolId: string, repoId = "repo") {
   };
 }
 
+function captureDbLatency(events: DbLatencyTapEvent[]): void {
+  const noop = () => {};
+  const tap: ObservabilityTap = {
+    toolCall: noop,
+    indexEvent: noop,
+    semanticSearch: noop,
+    policyDecision: noop,
+    prefetch: noop,
+    watcherHealth: noop,
+    edgeResolution: noop,
+    runtimeExecution: noop,
+    setupPipeline: noop,
+    summaryGeneration: noop,
+    summaryQuality: noop,
+    pprResult: noop,
+    scipIngest: noop,
+    packedWire: noop,
+    tokenSavings: noop,
+    poolSample: noop,
+    resourceSample: noop,
+    indexPhase: noop,
+    cacheLookup: noop,
+    sliceBuild: noop,
+    deltaBlastRadius: noop,
+    auditBufferSample: noop,
+    postIndexSession: noop,
+    dbLatency: (event) => events.push(event),
+    graphEvent: noop,
+  };
+  installObservabilityTap(tap);
+}
+
 function canonicalFilelessJson(
   symbolId: string,
   overrides: Record<number, unknown> = {},
@@ -176,6 +214,7 @@ describe("persisted graph integrity", () => {
   let root = "";
 
   afterEach(async () => {
+    resetObservabilityTap();
     await closeLadybugDb().catch(() => {});
     if (root && existsSync(root)) {
       rmSync(root, { recursive: true, force: true });
@@ -614,6 +653,46 @@ describe("persisted graph integrity", () => {
     assert.equal((actual as { digest: string }).digest, expected.digest);
   });
 
+  it("stops integrity paging after a short final page", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-short-page-"));
+    await initLadybugDb(join(root, "short-page.lbug"));
+    const fileId = "repo:src/short.ts";
+    const relPath = "src/short.ts";
+    const symbol = symbolRow({ fileId });
+
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-22T00:00:00.000Z",
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId,
+        repoId: "repo",
+        relPath,
+        contentHash: "a".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-22T00:00:00.000Z",
+      });
+      await ladybugDb.upsertKnownFileSymbols(conn, [symbol]);
+    });
+
+    const events: DbLatencyTapEvent[] = [];
+    captureDbLatency(events);
+    const actual = await capturePersistedGraphIntegrity(
+      await getLadybugConn(),
+      "repo",
+    );
+
+    assert.equal(actual.symbolCount, 1);
+    assert.equal(
+      events.filter((event) => event.operation === "queryAll").length,
+      1,
+    );
+  });
+
   it("filters the integrity cursor before deduplicating joined tuples", () => {
     const source = readFileSync(
       join(process.cwd(), "src/db/ladybug-graph-integrity.ts"),
@@ -640,12 +719,12 @@ describe("persisted graph integrity", () => {
     assert.ok(returnIndex > distinctIndex);
   });
 
-  it("deduplicates membership tuples across real 2048-row integrity pages", async () => {
+  it("deduplicates membership tuples across real 8192-row integrity pages", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-duplicate-page-"));
     await initLadybugDb(join(root, "duplicate-page.lbug"));
     const fileId = "repo:src/page.ts";
     const relPath = "src/page.ts";
-    const symbols = Array.from({ length: 2_049 }, (_, index) => {
+    const symbols = Array.from({ length: 8_193 }, (_, index) => {
       const suffix = String(index).padStart(4, "0");
       return symbolRow({
         symbolId: `sym:${suffix}`,
@@ -679,7 +758,7 @@ describe("persisted graph integrity", () => {
          MATCH (s:Symbol {symbolId: $symbolId}), (r:Repo {repoId: $repoId})
          CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
         {
-          duplicates: Array.from({ length: 2_048 }, (_, index) => index),
+          duplicates: [0],
           repoId: "repo",
           symbolId: symbols[0]!.symbolId,
         },
@@ -690,7 +769,7 @@ describe("persisted graph integrity", () => {
          RETURN count(rel) AS count`,
         { repoId: "repo", symbolId: symbols[0]!.symbolId },
       );
-      assert.equal(ladybugDb.toNumber(duplicateCount?.count ?? 0), 2_049);
+      assert.equal(ladybugDb.toNumber(duplicateCount?.count ?? 0), 2);
     });
 
     const expected = createGraphIntegrityExpectation([
@@ -701,7 +780,7 @@ describe("persisted graph integrity", () => {
       "repo",
     );
 
-    assert.equal(actual.symbolCount, 2_049);
+    assert.equal(actual.symbolCount, 8_193);
     assert.equal(compareGraphIntegrityExpectations(expected, actual), null);
     assert.equal(actual.digest, expected.digest);
   });

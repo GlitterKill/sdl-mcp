@@ -60,6 +60,10 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
+// The guard proves an admission deadlock without mistaking two serialized,
+// real full refreshes on a slower hosted Windows runner for one.
+const DEADLOCK_TIMEOUT_MS = 30_000;
+
 async function waitFor(
   predicate: () => boolean,
   message: string,
@@ -77,7 +81,10 @@ async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> 
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), 10_000);
+        timer = setTimeout(
+          () => reject(new Error(message)),
+          DEADLOCK_TIMEOUT_MS,
+        );
       }),
     ]);
   } finally {
