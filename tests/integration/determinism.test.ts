@@ -12,6 +12,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { registerCodeModeTools } from "../../dist/code-mode/index.js";
 import { getContinuation } from "../../dist/code-mode/workflow-truncation.js";
+import { SHUTDOWN_FORCE_EXIT_TIMEOUT_MS } from "../../dist/config/constants.js";
 import type { CodeModeConfig } from "../../dist/config/types.js";
 import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
 import type { MCPServer } from "../../dist/server.js";
@@ -24,8 +25,9 @@ import {
   SliceRefreshResponseSchema,
 } from "../../dist/mcp/tools.js";
 import { z } from "zod";
-import { spawnSync } from "node:child_process";
+import { type ChildProcess, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import {
   cpSync,
   readFileSync,
@@ -163,7 +165,25 @@ async function spawnServer(): Promise<ServerHandle> {
   return {
     client,
     close: async () => {
-      await client.close();
+      const child = (
+        transport as unknown as { _process?: ChildProcess }
+      )._process;
+      if (!child) {
+        await client.close();
+        return;
+      }
+
+      // The SDK force-terminates after two seconds, but SDL-MCP reserves up to
+      // 60 seconds for database checkpointing and its remaining cleanup.
+      const closed = once(child, "close", {
+        signal: AbortSignal.timeout(SHUTDOWN_FORCE_EXIT_TIMEOUT_MS + 5_000),
+      });
+      child.stdin?.end();
+      try {
+        await closed;
+      } finally {
+        await client.close();
+      }
     },
   };
 }

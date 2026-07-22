@@ -21,6 +21,11 @@ import {
   type ScanRepoForIndexResult,
 } from "./scanner.js";
 import {
+  filterProviderFirstFallbackScan,
+  filterProviderFirstIncrementalScan,
+  providerFirstIncrementalChangedFiles,
+} from "./provider-first/scan-scope.js";
+import {
   buildPreloadedFileSummarySymbolFactsFromRows,
   finalizeIndexing,
   materializeFileSummaries,
@@ -1788,55 +1793,6 @@ function providerRowsHaveMaterialization(
     rows.externalSymbols.length > 0 ||
     rows.edges.length > 0
   );
-}
-
-function filterProviderFirstFallbackScan(
-  scan: ScanRepoForIndexResult,
-  fallbackPaths: ReadonlySet<string>,
-): ScanRepoForIndexResult {
-  const existingByPath = new Map<string, ladybugDb.FileRow>();
-  for (const [relPath, file] of scan.existingByPath) {
-    if (fallbackPaths.has(relPath)) {
-      existingByPath.set(relPath, file);
-    }
-  }
-
-  return {
-    ...scan,
-    files: scan.files.filter((file) => fallbackPaths.has(file.path)),
-    existingByPath,
-    removedFileIds: [],
-    allFilesUnchanged: false,
-  };
-}
-
-function providerFirstIncrementalChangedFiles(
-  scan: ScanRepoForIndexResult,
-): ScanRepoForIndexResult["files"] {
-  return scan.files.filter((file) =>
-    isScannedFileChanged(file, scan.existingByPath.get(file.path)),
-  );
-}
-
-function filterProviderFirstIncrementalScan(
-  scan: ScanRepoForIndexResult,
-  changedFiles: ScanRepoForIndexResult["files"],
-): ScanRepoForIndexResult {
-  const changedPaths = new Set(changedFiles.map((file) => file.path));
-  const existingByPath = new Map<string, ladybugDb.FileRow>();
-  for (const [relPath, file] of scan.existingByPath) {
-    if (changedPaths.has(relPath)) {
-      existingByPath.set(relPath, file);
-    }
-  }
-
-  return {
-    ...scan,
-    files: changedFiles,
-    existingByPath,
-    allFilesUnchanged:
-      changedFiles.length === 0 && scan.removedFileIds.length === 0,
-  };
 }
 
 async function runProviderFirstIncrementalScipIo(params: {
