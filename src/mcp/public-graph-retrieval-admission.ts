@@ -93,6 +93,10 @@ export function classifyPublicGraphRetrieval(
   args: unknown,
 ): PublicGraphRetrievalAdmission {
   const request = asRecord(args);
+  // Dry-run workflows validate schemas and references without executing steps.
+  if (toolName === "sdl.workflow" && request?.dryRun === true) {
+    return { mode: "excluded" };
+  }
   const central =
     GRAPH_FLAT_TOOLS.has(toolName) ||
     toolName === "sdl.context" ||

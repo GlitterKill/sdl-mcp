@@ -155,6 +155,14 @@ describe("MCPServer", () => {
         }),
         false,
       );
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.workflow", {
+          repoId: "sdl-mcp",
+          dryRun: true,
+          steps: [{ fn: "index.refresh", args: { mode: "full" } }],
+        }),
+        false,
+      );
     });
   });
 

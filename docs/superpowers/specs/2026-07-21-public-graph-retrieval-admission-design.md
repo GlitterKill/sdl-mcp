@@ -24,6 +24,9 @@ conditional:
 - Workflows containing any of those graph-backed actions.
 - File gateway preview/source window operations.
 
+Dry-run workflows are excluded before step classification because they only
+validate schemas and references; they never invoke graph or refresh handlers.
+
 The classifier explicitly marks each surface as centrally gated,
 conditionally gated, or excluded. `slice.refresh` is the only conditional
 operation: its stable public schema is handle-only, so the existing
@@ -35,6 +38,11 @@ runtime/response/usage, buffer, feedback, semantic-enrichment status, and
 memory records. It uses exact canonical names and exact validated action/op
 values, never prefixes or substrings. A centrally classified call without a
 repository ID fails closed with typed deterministic full-refresh guidance.
+When the latest Version is absent, admission checks repository existence only
+on that exceptional path. An absent repository passes through so its handler
+preserves the established `NOT_FOUND` response; a registered repository with
+no Version remains failed closed with `INDEX_ERROR` guidance. The normal
+latest-Version path performs no additional repository lookup.
 
 Existing symbol and centrally gated slice handler-local guards are removed
 after real MCP dispatch tests prove the shared boundary. The conditional
@@ -88,6 +96,12 @@ dispatch/indexing-gate path.
 - A classified envelope missing its repository identity returns one exact,
   typed deterministic error without invoking the handler or inferring another
   repository.
+- Real MCP calls preserve the canonical `NOT_FOUND` response for an absent
+  repository while registered repositories without a Version remain failed
+  closed. A query-count assertion prevents an extra repository lookup on the
+  normal latest-Version path.
+- Real dry-run workflows validate graph schemas and references without a graph
+  availability query, graph handler invocation, or refresh FIFO admission.
 - Disposable real-DB MCP tests cover unknown/no-manifest rejection and
   byte-identical verified success for context, code tools, all retrieve ops,
   delta, PR risk, and repository overview.

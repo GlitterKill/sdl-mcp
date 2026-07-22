@@ -17,6 +17,12 @@ export async function assertGraphRetrievalAvailable(
   repoId: string,
 ): Promise<void> {
   const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
+  if (!latestVersion) {
+    // Preserve handler-owned NOT_FOUND contracts for repositories that do not
+    // exist. Registered repositories without a Version still fail closed.
+    const repo = await ladybugDb.getRepo(conn, repoId);
+    if (!repo) return;
+  }
   const derivedState = await getDerivedStateFromConnection(conn, repoId);
   if (
     graphIntegrityIsAvailableForVersion(

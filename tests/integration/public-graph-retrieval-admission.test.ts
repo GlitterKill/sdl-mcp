@@ -34,6 +34,7 @@ import {
   createGraphIntegrityFileState,
 } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
 import {
+  _getIndexRefreshAdmissionStatsForTesting,
   resetToolDispatchLimiter,
   waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
@@ -91,6 +92,25 @@ function assertUnavailable(response: ErrorEnvelope, label: string): void {
   assert.doesNotMatch(
     response.structuredContent?.error?.message ?? "",
     /[A-Z]:\\|\.lbug|revision \d/i,
+    label,
+  );
+}
+
+function assertRepositoryNotFound(
+  response: ErrorEnvelope,
+  repoId: string,
+  label: string,
+): void {
+  assert.equal(response.isError, true, label);
+  assert.equal(response.structuredContent?.error?.code, "NOT_FOUND", label);
+  assert.equal(
+    response.structuredContent?.error?.message,
+    `Repository not found: ${repoId}`,
+    label,
+  );
+  assert.doesNotMatch(
+    response.structuredContent?.error?.message ?? "",
+    /Graph retrieval|sdl\.index\.refresh|mode:"full"/,
     label,
   );
 }
@@ -303,6 +323,17 @@ async function seedRepo(
   }
 }
 
+async function seedRepoWithoutVersion(repoId: string): Promise<void> {
+  await withWriteConn((conn) =>
+    ladybugDb.upsertRepo(conn, {
+      repoId,
+      rootPath: TEST_ROOT,
+      configJson: JSON.stringify({ policy: {} }),
+      createdAt: NOW,
+    }),
+  );
+}
+
 function centralCalls(repoId: string): PublicCall[] {
   const symbolId = `${repoId}:alpha`;
   const fromVersion = `${repoId}:v0`;
@@ -498,6 +529,7 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     await seedRepo("verifying", "verifying");
     await seedRepo("failed", "failed");
     await seedRepo("unknown", "unknown");
+    await seedRepoWithoutVersion("empty");
 
     server = await createMCPServer({
       gatewayConfig: {
@@ -546,6 +578,129 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
       const response = (await client.callTool(call)) as ErrorEnvelope;
       assertUnavailable(response, `${call.name}:${String(call.arguments.action ?? call.arguments.op ?? "flat")}`);
     }
+  });
+
+  it("preserves handler-owned NOT_FOUND responses for unregistered repositories", async () => {
+    const repoId = "unregistered";
+    for (const call of [
+      {
+        name: "sdl.symbol.search",
+        arguments: { repoId, query: "alpha", semantic: false },
+      },
+      {
+        name: "sdl.query",
+        arguments: { repoId, action: "symbol.search", query: "alpha" },
+      },
+    ]) {
+      const response = (await client.callTool(call)) as ErrorEnvelope;
+      assertRepositoryNotFound(response, repoId, call.name);
+    }
+  });
+
+  it("keeps a registered repository without a Version failed closed", async () => {
+    const response = (await client.callTool({
+      name: "sdl.symbol.search",
+      arguments: { repoId: "empty", query: "alpha", semantic: false },
+    })) as ErrorEnvelope;
+    assertUnavailable(response, "registered repository without Version");
+  });
+
+  it("dry-runs graph and refresh workflows without DB or refresh admission", async (t) => {
+    const originalExecute = Connection.prototype.execute;
+    let dbExecutions = 0;
+    const observedDryRuns: Array<{
+      results?: unknown[];
+      dryRun?: {
+        valid?: boolean;
+        validation?: Array<{
+          fn?: string;
+          action?: string;
+          valid?: boolean;
+          issues?: string[];
+          pendingSchemaValidation?: boolean;
+        }>;
+      };
+    }> = [];
+    server.registerPostDispatchHook(async (toolName, args, result) => {
+      if (
+        toolName === "sdl.workflow" &&
+        typeof args === "object" &&
+        args !== null &&
+        (args as { dryRun?: unknown }).dryRun === true
+      ) {
+        observedDryRuns.push(result as (typeof observedDryRuns)[number]);
+      }
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        dbExecutions += 1;
+        return originalExecute.call(this, prepared, params, progressCallback);
+      },
+    );
+    const refreshRunsBefore =
+      _getIndexRefreshAdmissionStatsForTesting().totalRuns;
+
+    for (const repoId of ["empty", "unregistered"]) {
+      const validResponse = (await client.callTool({
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          dryRun: true,
+          steps: [
+            {
+              fn: "symbolSearch",
+              args: { repoId, query: "alpha", semantic: false },
+            },
+          ],
+        },
+      })) as { isError?: boolean; structuredContent?: { results?: unknown[] } };
+      assert.notEqual(validResponse.isError, true, repoId);
+      assert.deepEqual(validResponse.structuredContent?.results, [], repoId);
+      const validDryRun = observedDryRuns.at(-1)?.dryRun;
+      assert.equal(validDryRun?.valid, true, repoId);
+
+      const invalidResponse = (await client.callTool({
+        name: "sdl.workflow",
+        arguments: {
+          repoId,
+          dryRun: true,
+          onError: "continue",
+          steps: [
+            { fn: "symbolSearch", args: {} },
+            {
+              fn: "symbolGetCard",
+              args: { symbolId: "$0.results.0.symbolId" },
+            },
+            { fn: "index.refresh", args: { mode: "full" } },
+          ],
+        },
+      })) as { isError?: boolean; structuredContent?: { results?: unknown[] } };
+      assert.notEqual(invalidResponse.isError, true, repoId);
+      assert.deepEqual(invalidResponse.structuredContent?.results, [], repoId);
+      const invalidDryRun = observedDryRuns.at(-1)?.dryRun;
+      assert.equal(invalidDryRun?.valid, false, repoId);
+      const validation = invalidDryRun?.validation;
+      assert.equal(validation?.length, 3, repoId);
+      assert.equal(validation?.[0]?.valid, false, repoId);
+      assert.ok(validation?.[0]?.issues?.length, repoId);
+      assert.equal(validation?.[1]?.pendingSchemaValidation, true, repoId);
+      assert.equal(validation?.[2]?.action, "index.refresh", repoId);
+    }
+
+    assert.equal(observedDryRuns.length, 4);
+    assert.equal(
+      JSON.stringify(observedDryRuns[1]?.dryRun?.validation),
+      JSON.stringify(observedDryRuns[3]?.dryRun?.validation),
+      "dry-run schema and reference validation depends on repository state",
+    );
+    assert.equal(dbExecutions, 0, "dry-run workflow executed a DB-backed handler");
+    assert.equal(
+      _getIndexRefreshAdmissionStatsForTesting().totalRuns,
+      refreshRunsBefore,
+      "dry-run index refresh acquired public refresh admission",
+    );
   });
 
   it("keeps handle-only slice refresh conditionally gated", async () => {
@@ -622,6 +777,7 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     const originalPrepare = Connection.prototype.prepare;
     const originalExecute = Connection.prototype.execute;
     let blocked = false;
+    let repoLookups = 0;
 
     t.mock.method(Connection.prototype, "prepare", async function (statement) {
       const prepared = await originalPrepare.call(this, statement);
@@ -633,6 +789,12 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
       "execute",
       async function (prepared, params, progressCallback) {
         const statement = statements.get(prepared);
+        if (
+          statement?.includes("MATCH (r:Repo {repoId: $repoId})") &&
+          statement.includes("RETURN r.repoId AS repoId")
+        ) {
+          repoLookups += 1;
+        }
         if (
           !blocked &&
           statement?.includes("MATCH (v:Version)") &&
@@ -666,6 +828,7 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     }
     const response = (await call) as ErrorEnvelope;
     assert.notEqual(response.isError, true);
+    assert.equal(repoLookups, 1, "normal admission added a Repo lookup");
   });
 
   it("keeps current verified, verifying, and failed manifests readable", async () => {

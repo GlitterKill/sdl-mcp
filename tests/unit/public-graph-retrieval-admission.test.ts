@@ -506,6 +506,23 @@ describe("public graph retrieval admission classifier", () => {
     );
   });
 
+  it("excludes every dry-run workflow before inspecting graph step names", () => {
+    for (const definition of GATEWAY_ACTION_DEFINITIONS) {
+      for (const fn of [definition.action, definition.fn]) {
+        assert.ok(fn);
+        assert.deepEqual(
+          classifyPublicGraphRetrieval("sdl.workflow", {
+            repoId: REPO_ID,
+            dryRun: true,
+            steps: [{ fn, args: {} }],
+          }),
+          { mode: "excluded" },
+          fn,
+        );
+      }
+    }
+  });
+
   it("returns only the explicit top-level repoId for gated calls", () => {
     assert.deepEqual(classifyPublicGraphRetrieval("sdl.context", {}), {
       mode: "central",
