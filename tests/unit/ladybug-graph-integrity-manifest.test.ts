@@ -251,6 +251,17 @@ describe("graph integrity manifest persistence", () => {
         (await listFiles(conn, "repo-a")).map((row) => [row.fileId, row.digest]),
         [["new", "repo-a:new"]],
       );
+      assert.equal(
+        (
+          await querySingle<{ established: boolean }>(
+            conn,
+            `MATCH (d:DerivedState {repoId: $repoId})
+             RETURN d.graphIntegrityManifestEstablished AS established`,
+            { repoId: "repo-a" },
+          )
+        )?.established,
+        true,
+      );
 
       await assert.rejects(
         withTransaction(conn, async (tx) => {
@@ -274,6 +285,17 @@ describe("graph integrity manifest persistence", () => {
       await deleteManifest(conn, "repo-a");
       assert.deepEqual(await listFiles(conn, "repo-a"), []);
       assert.deepEqual(await listFileless(conn, "repo-a"), []);
+      assert.equal(
+        (
+          await querySingle<{ established: boolean }>(
+            conn,
+            `MATCH (d:DerivedState {repoId: $repoId})
+             RETURN d.graphIntegrityManifestEstablished AS established`,
+            { repoId: "repo-a" },
+          )
+        )?.established,
+        false,
+      );
       assert.deepEqual(
         (await listFiles(conn, "repo-b")).map((row) => row.fileId),
         ["keep"],

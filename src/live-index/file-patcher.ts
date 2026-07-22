@@ -12,7 +12,6 @@ import {
   getGraphIntegrityFilelessStates,
   getGraphIntegrityFileState,
   GraphIntegrityManifestValidationError,
-  hasGraphIntegrityManifestState,
   ownsGraphIntegrityRevision,
   type GraphIntegrityFileStateRecord,
   type GraphIntegrityFilelessStateRecord,
@@ -175,13 +174,13 @@ async function patchSavedFileUnlocked(
     }
   }
   // Full indexing intentionally omits symbol-free files from the manifest.
-  // Trust that absence only when another persisted row proves this repository
-  // owns a manifest; a wholly missing legacy manifest must still fail closed.
+  // The durable marker distinguishes a valid empty manifest from legacy state
+  // that was marked verified without ever persisting manifest ownership.
   const hasTrustedFileBaseline =
     trustedFileState !== null ||
     (integrityBaseline !== undefined &&
       existingSymbols.length === 0 &&
-      (await hasGraphIntegrityManifestState(conn, request.repoId)));
+      derivedState?.graphIntegrityManifestEstablished === true);
 
   const parseResult =
     request.parseResult ??

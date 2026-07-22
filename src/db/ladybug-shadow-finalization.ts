@@ -2205,6 +2205,7 @@ async function readDerivedStateRow(
     graphIntegrityRevision: unknown;
     graphIntegrityVerifiedRevision: unknown;
     graphIntegrityFilelessPruningSupported: unknown;
+    graphIntegrityManifestEstablished: unknown;
   }>(
     conn,
     `MATCH (d:DerivedState {repoId: $repoId})
@@ -2224,7 +2225,8 @@ async function readDerivedStateRow(
             d.graphIntegrityError AS graphIntegrityError,
             d.graphIntegrityRevision AS graphIntegrityRevision,
             d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision,
-            d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported`,
+            d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported,
+            d.graphIntegrityManifestEstablished AS graphIntegrityManifestEstablished`,
     { repoId },
   );
   if (!row) return null;
@@ -2270,6 +2272,9 @@ async function readDerivedStateRow(
       row.graphIntegrityFilelessPruningSupported == null
         ? null
         : toBoolean(row.graphIntegrityFilelessPruningSupported),
+    graphIntegrityManifestEstablished: toBoolean(
+      row.graphIntegrityManifestEstablished,
+    ),
   };
 }
 
@@ -2300,7 +2305,8 @@ async function upsertDerivedState(
          d.graphIntegrityError = $graphIntegrityError,
          d.graphIntegrityRevision = $graphIntegrityRevision,
          d.graphIntegrityVerifiedRevision = $graphIntegrityVerifiedRevision,
-         d.graphIntegrityFilelessPruningSupported = $graphIntegrityFilelessPruningSupported`,
+         d.graphIntegrityFilelessPruningSupported = $graphIntegrityFilelessPruningSupported,
+         d.graphIntegrityManifestEstablished = $graphIntegrityManifestEstablished`,
     { ...row },
   );
 }

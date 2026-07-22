@@ -114,6 +114,7 @@ Add nullable properties:
 graphIntegrityRevision INT64
 graphIntegrityVerifiedRevision INT64
 graphIntegrityFilelessPruningSupported BOOLEAN
+graphIntegrityManifestEstablished BOOLEAN DEFAULT false
 ~~~
 
 Add node tables:
@@ -131,6 +132,8 @@ GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO(FROM GraphIntegrityFilelessState TO Repo)
 ~~~
 
 Follow src/db/migrations/m022-add-graph-integrity-state.ts error handling so every DDL statement tolerates a rerun after partial completion. Register m023 and let LADYBUG_SCHEMA_VERSION derive from the registry.
+
+Set `graphIntegrityManifestEstablished` only after the manifest replacement completes, including an empty replacement, and clear it when the manifest is deleted. Saved-file patching may trust an absent file row only when this marker is true and the file has no existing canonical symbols.
 
 - [ ] **Step 4: Add minimal revision APIs**
 

@@ -99,6 +99,7 @@ describe("patchSavedFile", () => {
   it("patches a file without self-certifying a missing integrity manifest", async () => {
     const beforeState = await getDerivedState(repoId);
     assert.equal(beforeState?.graphIntegrityState, "verified");
+    assert.equal(beforeState?.graphIntegrityManifestEstablished, false);
 
     let committed = false;
     const result = await patchSavedFile(

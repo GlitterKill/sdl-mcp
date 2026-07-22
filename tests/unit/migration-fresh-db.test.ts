@@ -86,6 +86,7 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
         graphIntegrityRevision: bigint | null;
         graphIntegrityVerifiedRevision: bigint | null;
         graphIntegrityFilelessPruningSupported: boolean | null;
+        graphIntegrityManifestEstablished: boolean;
       }>(
         conn,
         `MATCH (d:DerivedState {repoId: $repoId})
@@ -95,7 +96,8 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
                 d.graphIntegrityError AS graphIntegrityError,
                  d.graphIntegrityRevision AS graphIntegrityRevision,
                  d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision,
-                 d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported`,
+                 d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported,
+                 d.graphIntegrityManifestEstablished AS graphIntegrityManifestEstablished`,
         { repoId: "fresh-repo" },
       );
       assert.deepEqual(integrityRows, [
@@ -107,6 +109,7 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
           graphIntegrityRevision: null,
           graphIntegrityVerifiedRevision: null,
           graphIntegrityFilelessPruningSupported: null,
+          graphIntegrityManifestEstablished: false,
         },
       ]);
 

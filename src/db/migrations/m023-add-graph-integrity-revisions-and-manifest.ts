@@ -11,6 +11,7 @@ const DDL = [
   "ALTER TABLE DerivedState ADD graphIntegrityRevision INT64 DEFAULT NULL",
   "ALTER TABLE DerivedState ADD graphIntegrityVerifiedRevision INT64 DEFAULT NULL",
   "ALTER TABLE DerivedState ADD graphIntegrityFilelessPruningSupported BOOLEAN DEFAULT NULL",
+  "ALTER TABLE DerivedState ADD graphIntegrityManifestEstablished BOOLEAN DEFAULT false",
   `CREATE NODE TABLE IF NOT EXISTS GraphIntegrityFileState (
     stateId STRING PRIMARY KEY,
     repoId STRING,
@@ -51,6 +52,7 @@ export async function up(conn: Connection): Promise<void> {
      SET d.graphIntegrityState = 'unknown',
          d.graphIntegrityRevision = NULL,
          d.graphIntegrityVerifiedRevision = NULL,
-         d.graphIntegrityFilelessPruningSupported = NULL`,
+         d.graphIntegrityFilelessPruningSupported = NULL,
+         d.graphIntegrityManifestEstablished = false`,
   );
 }

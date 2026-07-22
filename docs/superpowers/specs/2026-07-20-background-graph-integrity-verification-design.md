@@ -64,8 +64,11 @@ Add these fields to `DerivedState`:
 - `graphIntegrityRevision`: the latest committed live-graph mutation for the current Version.
 - `graphIntegrityVerifiedRevision`: the latest revision successfully verified for the current Version.
 - `graphIntegrityFilelessPruningSupported`: whether the trusted manifest has enough fileless-liveness history to apply existing placeholder-pruning rules during live edits.
+- `graphIntegrityManifestEstablished`: whether full or incremental indexing has durably replaced the repository manifest, including a valid empty manifest.
 
 Keep `graphIntegrityVersionId` as the owning Version. Full indexing establishes a new Version and initializes both revision counters to `0`. Each later graph mutation calculates `newRevision = previousRevision + 1` inside the owning write transaction and maps LadybugDB integers through the existing number-conversion helpers.
+
+Saved-file patching trusts an absent per-file row only when the durable manifest marker is true and the file has no existing canonical symbols. This distinguishes a valid empty manifest or omitted symbol-free file from legacy state that was marked verified without ever establishing manifest ownership.
 
 `graphIntegrityDigest` records the digest of `graphIntegrityVerifiedRevision`. Consumers must require all of the following before describing the latest graph as verified:
 

@@ -89,70 +89,6 @@ describe("sdl.file.write", () => {
     });
   });
 
-  async function seedManifestBackedVersion(
-    conn: Awaited<ReturnType<typeof getLadybugConn>>,
-    versionId: string,
-    reason: string,
-  ): Promise<void> {
-    const relPath = `src/baseline-${versionId}.ts`;
-    const fileId = generateFileId(repoId, relPath);
-    const symbolId = `baseline-${versionId}`;
-    const content = "export function baseline() { return 1; }";
-    const now = "2026-07-21T12:00:00.000Z";
-    mkdirSync(join(testDir, "src"), { recursive: true });
-    writeFileSync(join(testDir, relPath), content, "utf-8");
-    await ladybugDb.upsertFile(conn, {
-      fileId,
-      repoId,
-      relPath,
-      contentHash: `baseline-${versionId}`,
-      language: "typescript",
-      byteSize: Buffer.byteLength(content),
-      lastIndexedAt: now,
-    });
-    await ladybugDb.upsertSymbolBatch(conn, [
-      {
-        symbolId,
-        repoId,
-        fileId,
-        kind: "function",
-        name: "baseline",
-        exported: true,
-        visibility: "public",
-        language: "typescript",
-        rangeStartLine: 1,
-        rangeStartCol: 0,
-        rangeEndLine: 1,
-        rangeEndCol: content.length,
-        astFingerprint: symbolId,
-        signatureJson: JSON.stringify({ name: "baseline" }),
-        summary: null,
-        invariantsJson: null,
-        sideEffectsJson: null,
-        source: "treesitter",
-        scipSymbol: null,
-        updatedAt: now,
-      },
-    ]);
-    await ladybugDb.createVersion(conn, {
-      versionId,
-      repoId,
-      createdAt: now,
-      reason,
-      prevVersionHash: null,
-      versionHash: null,
-    });
-    const baseline = await capturePersistedGraphIntegrity(conn, repoId);
-    const symbols = await ladybugDb.getSymbolsByFile(conn, fileId);
-    await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
-      files: [
-        createGraphIntegrityFileState(repoId, fileId, relPath, symbols, []),
-      ],
-      fileless: [],
-    });
-    await markGraphIntegrityVerified(repoId, versionId, baseline.digest);
-  }
-
   afterEach(async () => {
     await cancelAndWaitForGraphIntegrityVerifier(repoId);
     await closeLadybugDb();
@@ -303,11 +239,21 @@ describe("sdl.file.write", () => {
       mkdirSync(join(testDir, "src"), { recursive: true });
 
       const conn = await getLadybugConn();
-      await seedManifestBackedVersion(
-        conn,
-        "v-new-indexed",
-        "new indexed file.write baseline",
-      );
+      const now = "2026-07-21T12:00:00.000Z";
+      await ladybugDb.createVersion(conn, {
+        versionId: "v-new-indexed",
+        repoId,
+        createdAt: now,
+        reason: "new indexed file.write baseline",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      const baseline = await capturePersistedGraphIntegrity(conn, repoId);
+      await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
+        files: [],
+        fileless: [],
+      });
+      await markGraphIntegrityVerified(repoId, "v-new-indexed", baseline.digest);
 
       const response = await handleFileWrite({
         repoId,
@@ -322,6 +268,7 @@ describe("sdl.file.write", () => {
       const committedState = await getDerivedState(repoId);
       assert.equal(committedState?.graphIntegrityVersionId, "v-new-indexed");
       assert.equal(committedState?.graphIntegrityRevision, 1);
+      assert.equal(committedState?.graphIntegrityManifestEstablished, true);
       const manifest = createGraphIntegrityExpectationFromManifest(
         await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
         await ladybugDb.listGraphIntegrityFilelessStates(conn, repoId),
@@ -358,11 +305,20 @@ describe("sdl.file.write", () => {
         byteSize: Buffer.byteLength(baselineContent),
         lastIndexedAt: now,
       });
-      await seedManifestBackedVersion(
-        conn,
-        "v-symbol-free",
-        "symbol-free indexed file.write baseline",
-      );
+      await ladybugDb.createVersion(conn, {
+        versionId: "v-symbol-free",
+        repoId,
+        createdAt: now,
+        reason: "symbol-free indexed file.write baseline",
+        prevVersionHash: null,
+        versionHash: null,
+      });
+      const baseline = await capturePersistedGraphIntegrity(conn, repoId);
+      await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
+        files: [],
+        fileless: [],
+      });
+      await markGraphIntegrityVerified(repoId, "v-symbol-free", baseline.digest);
 
       const response = await handleFileWrite({
         repoId,
@@ -376,6 +332,7 @@ describe("sdl.file.write", () => {
       const committedState = await getDerivedState(repoId);
       assert.equal(committedState?.graphIntegrityVersionId, "v-symbol-free");
       assert.equal(committedState?.graphIntegrityRevision, 1);
+      assert.equal(committedState?.graphIntegrityManifestEstablished, true);
       const manifest = createGraphIntegrityExpectationFromManifest(
         await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
         await ladybugDb.listGraphIntegrityFilelessStates(conn, repoId),

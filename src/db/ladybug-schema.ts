@@ -498,7 +498,8 @@ export const NODE_TABLES: string[] = [
     graphIntegrityError STRING,
     graphIntegrityRevision INT64,
     graphIntegrityVerifiedRevision INT64,
-    graphIntegrityFilelessPruningSupported BOOLEAN
+    graphIntegrityFilelessPruningSupported BOOLEAN,
+    graphIntegrityManifestEstablished BOOLEAN DEFAULT false
   )`,
 ];
 
