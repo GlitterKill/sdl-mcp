@@ -719,13 +719,13 @@ describe("persisted graph integrity", () => {
     assert.ok(returnIndex > distinctIndex);
   });
 
-  it("deduplicates membership tuples across real 8192-row integrity pages", async () => {
+  it("deduplicates membership tuples across real 16384-row integrity pages", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-duplicate-page-"));
     await initLadybugDb(join(root, "duplicate-page.lbug"));
     const fileId = "repo:src/page.ts";
     const relPath = "src/page.ts";
-    const symbols = Array.from({ length: 8_193 }, (_, index) => {
-      const suffix = String(index).padStart(4, "0");
+    const symbols = Array.from({ length: 16_385 }, (_, index) => {
+      const suffix = String(index).padStart(5, "0");
       return symbolRow({
         symbolId: `sym:${suffix}`,
         fileId,
@@ -775,12 +775,18 @@ describe("persisted graph integrity", () => {
     const expected = createGraphIntegrityExpectation([
       createGraphIntegrityFileDigest({ fileId, relPath, symbols }),
     ]);
+    const events: DbLatencyTapEvent[] = [];
+    captureDbLatency(events);
     const actual = await capturePersistedGraphIntegrity(
       await getLadybugConn(),
       "repo",
     );
 
-    assert.equal(actual.symbolCount, 8_193);
+    assert.equal(actual.symbolCount, 16_385);
+    assert.equal(
+      events.filter((event) => event.operation === "queryAll").length,
+      2,
+    );
     assert.equal(compareGraphIntegrityExpectations(expected, actual), null);
     assert.equal(actual.digest, expected.digest);
   });

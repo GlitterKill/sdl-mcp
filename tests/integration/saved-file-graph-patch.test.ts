@@ -176,7 +176,29 @@ describe("saved file graph patch", () => {
         invariantsJson: null,
         sideEffectsJson: null,
         source: "scip",
+        packageName: "fixture",
+        packageVersion: "1.0.0",
         scipSymbol: "scip-alpha",
+        updatedAt: now,
+      },
+      {
+        symbolId: "stable-beta",
+        repoId,
+        fileId: durableFileId,
+        kind: "function",
+        name: "beta",
+        exported: true,
+        visibility: "public",
+        language: "typescript",
+        rangeStartLine: 5,
+        rangeStartCol: 0,
+        rangeEndLine: 7,
+        rangeEndCol: 1,
+        astFingerprint: "baseline-beta",
+        signatureJson: JSON.stringify({ name: "beta" }),
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
         updatedAt: now,
       },
     ]);
@@ -278,19 +300,51 @@ describe("saved file graph patch", () => {
     else process.env.SDL_CONFIG_PATH = prevConfigPath;
   });
 
-  it("serializes concurrent saved-file integrity patches for the same repository", async () => {
+  it("serializes concurrent saved-file integrity patches for the same repository", async (t) => {
     const startingState = await getDerivedState(repoId);
     assert.equal(startingState?.graphIntegrityState, "verified");
     const startingRevision = startingState!.graphIntegrityRevision!;
+    await clearTestPreparedStatementCaches();
+    const statements = new WeakMap<object, string>();
+    const matchedBatchRowCounts: number[] = [];
+    const originalPrepare = Connection.prototype.prepare;
+    const originalExecute = Connection.prototype.execute;
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      const prepared = await originalPrepare.call(this, statement);
+      statements.set(prepared, statement);
+      return prepared;
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        const statement = statements.get(prepared);
+        if (
+          statement?.includes("UNWIND $rows AS row") &&
+          statement.includes("MERGE (s:Symbol {symbolId: row.symbolId})")
+        ) {
+          const rows = (
+            params as { rows?: Array<{ name?: unknown }> } | undefined
+          )?.rows;
+          if (
+            rows?.length === 2 &&
+            rows.every((row) => row.name === "alpha" || row.name === "beta")
+          ) {
+            matchedBatchRowCounts.push(rows.length);
+          }
+        }
+        return originalExecute.call(this, prepared, params, progressCallback);
+      },
+    );
     const request = {
       repoId,
       filePath: "src/example.ts",
       content: [
         "export function alpha() {",
-        "  return gamma() + missing();",
+        "  return beta() + missing();",
         "}",
         "",
-        "export function gamma() {",
+        "export function beta() {",
         "  return 2;",
         "}",
       ].join("\n"),
@@ -316,6 +370,7 @@ describe("saved file graph patch", () => {
     assert.ok(patched.every((result) => result.fileId === durableFileId));
     assert.deepStrictEqual(revisions, [startingRevision + 1, startingRevision + 2]);
     assert.equal(foregroundCaptures, 0);
+    assert.deepStrictEqual(matchedBatchRowCounts, [2, 2]);
 
     const conn = await getLadybugConn();
     const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/example.ts");
@@ -328,7 +383,23 @@ describe("saved file graph patch", () => {
     const symbols = await ladybugDb.getSymbolsByFile(conn, durableFileId);
     const alpha = symbols.find((symbol) => symbol.name === "alpha");
     assert.equal(alpha?.source, "scip");
+    assert.equal(alpha?.packageName, "fixture");
+    assert.equal(alpha?.packageVersion, "1.0.0");
     assert.equal(alpha?.scipSymbol, "scip-alpha");
+    const membershipCounts = await ladybugDb.querySingle<{
+      fileCount: unknown;
+      repoCount: unknown;
+    }>(
+      conn,
+      `MATCH (s:Symbol {symbolId: $symbolId})
+       OPTIONAL MATCH (s)-[fileRel:SYMBOL_IN_FILE]->(:File {fileId: $fileId})
+       OPTIONAL MATCH (s)-[repoRel:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       RETURN count(DISTINCT fileRel) AS fileCount,
+              count(DISTINCT repoRel) AS repoCount`,
+      { symbolId: "scip-alpha", fileId: durableFileId, repoId },
+    );
+    assert.equal(ladybugDb.toNumber(membershipCounts?.fileCount ?? 0), 1);
+    assert.equal(ladybugDb.toNumber(membershipCounts?.repoCount ?? 0), 1);
 
     const state = await getDerivedState(repoId);
     assert.equal(state?.graphIntegrityVersionId, "v1");
@@ -723,6 +794,8 @@ describe("saved file graph patch", () => {
     const alpha = symbols.find((symbol) => symbol.name === "alpha");
     assert.equal(alpha?.symbolId, "scip-alpha");
     assert.equal(alpha?.source, "scip");
+    assert.equal(alpha?.packageName, "fixture");
+    assert.equal(alpha?.packageVersion, "1.0.0");
     assert.equal(alpha?.scipSymbol, "scip-alpha");
 
     const committedState = await getDerivedState(repoId);

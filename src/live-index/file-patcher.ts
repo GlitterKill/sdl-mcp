@@ -394,25 +394,31 @@ async function patchSavedFileUnlocked(
           // SCIP edges (resolverId === "scip") are preserved.
           await ladybugDb.deleteNonScipOutgoingEdges(txConn, matchedOldIds);
 
-          // Upsert each matched symbol with updated properties from tree-sitter.
-          // Build a lookup from new symbolId -> parse result symbol for fast access.
+          // Batch matched symbols so a saved-file edit does not pay one native
+          // LadybugDB round trip per symbol. Null provider fields tell the batch
+          // upsert to preserve the existing SCIP identity on stable symbol IDs.
           const newSymbolLookup = new Map(
             parsedSymbols.map((s) => [s.symbolId, s]),
           );
-
-          for (const { old: oldSym, new: newSym } of diff.matched) {
-            const freshSymbol = newSymbolLookup.get(newSym.symbolId);
-            if (!freshSymbol) continue;
-
-            // Preserve the old stable ID and provider identity. upsertSymbol refreshes
-            // parser-owned fields without overwriting source or scipSymbol, so existing
-            // edges, metrics, embeddings, and SCIP provenance remain linked.
-            await ladybugDb.upsertSymbol(txConn, {
-              ...freshSymbol,
-              symbolId: oldSym.symbolId,
-              updatedAt: now,
-            });
-          }
+          const matchedSymbols = diff.matched.flatMap(
+            ({ old: oldSym, new: newSym }) => {
+              const freshSymbol = newSymbolLookup.get(newSym.symbolId);
+              return freshSymbol
+                ? [
+                    {
+                      ...freshSymbol,
+                      symbolId: oldSym.symbolId,
+                      source: null,
+                      packageName: null,
+                      packageVersion: null,
+                      scipSymbol: null,
+                      updatedAt: now,
+                    },
+                  ]
+                : [];
+            },
+          );
+          await ladybugDb.upsertSymbolBatch(txConn, matchedSymbols);
 
           // Insert fresh tree-sitter edges for matched symbols.
           // Filter to edges originating from matched old symbol IDs.

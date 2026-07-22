@@ -45,9 +45,9 @@ import type {
 } from "./materializer.js";
 
 const GRAPH_INTEGRITY_PAGE_SIZE = 512;
-// Larger read pages avoid repeating the ordered Ladybug traversal for every
-// 2,048 symbols while keeping cancellation and result memory bounded.
-const GRAPH_INTEGRITY_QUERY_PAGE_SIZE = 8_192;
+// Larger read pages reduce repeated ordered Ladybug traversals while keeping
+// cancellation and result memory bounded.
+const GRAPH_INTEGRITY_QUERY_PAGE_SIZE = 16_384;
 const GRAPH_INTEGRITY_FILE_ID_CHUNK_SIZE = 256;
 const DIAGNOSTIC_STRING_LIMIT = 160;
 export const GRAPH_INTEGRITY_VERIFICATION_FAILURE =
