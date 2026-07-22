@@ -148,6 +148,17 @@ function extractErrorMeta(
   for (const [key, value] of Object.entries(meta)) {
     if (value instanceof Error) {
       result[key] = value.message;
+      if (value instanceof AggregateError) {
+        result[`${key}Errors`] = value.errors.map((child) =>
+          child instanceof Error
+            ? {
+                name: child.name,
+                message: child.message,
+                ...(child.stack ? { stack: child.stack } : {}),
+              }
+            : { message: String(child) },
+        );
+      }
       if (value.stack) {
         result[`${key}Stack`] = value.stack;
       }

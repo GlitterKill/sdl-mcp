@@ -86,11 +86,14 @@ export interface MaterializeProviderFactsOptions {
    */
   deleteExistingFileSymbols?: boolean;
   /**
-   * Use COPY-based symbol and edge writers that require the active graph to
-   * have no existing rows for the same provider-owned symbols/relationships.
-   * Safe for fresh databases or after deleteExistingFileSymbols ran.
+   * Use the COPY-based Symbol writer only when later Symbol mutations are safe.
    */
   useKnownFreshWriters?: boolean;
+  /**
+   * Use the known-fresh edge path independently from the Symbol writer. This
+   * defaults to useKnownFreshWriters for existing callers.
+   */
+  useKnownFreshEdgeWriter?: boolean;
   /**
    * Controls provider edge writes independently from symbol updates. Large
    * repeat runs may skip edge replacement when stale cleanup was intentionally
@@ -350,6 +353,8 @@ export async function materializeProviderFacts(
     options.deleteExistingFileSymbols ?? options.replaceFileSymbols;
   const useKnownFreshWriters =
     options.useKnownFreshWriters ?? options.replaceFileSymbols;
+  const useKnownFreshEdgeWriter =
+    options.useKnownFreshEdgeWriter ?? useKnownFreshWriters;
   const writeEdges = options.writeEdges ?? true;
   const pruneExternalSymbols = options.pruneExternalSymbols ?? true;
 
@@ -407,7 +412,7 @@ export async function materializeProviderFacts(
       await measurePhase("insertEdges", async () => {
         if (!writeEdges) return;
         await ladybugDb.insertEdges(txConn, rows.edges, {
-          ...(useKnownFreshWriters
+          ...(useKnownFreshEdgeWriter
             ? {
                 skipSourceRepoLink: true,
                 skipExistingRelationshipProbe: true,

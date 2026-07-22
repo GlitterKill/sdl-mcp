@@ -1,6 +1,8 @@
 import type { Connection } from "kuzu";
 
+import { IndexError } from "../domain/errors.js";
 import { resolveLadybugWriteChunkSize } from "./ladybug-batching.js";
+import { LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT } from "./ladybug-symbols.js";
 import {
   exec,
   execDdl,
@@ -14,13 +16,13 @@ import { normalizePath } from "../util/paths.js";
 
 const PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE = 256;
 
-/** Retire provider-owned symbols and every graph row that depends on them. */
-export async function deleteProviderReplacementSymbols(
+/** Collect the exact persisted Symbol rows a provider replacement would retire. */
+async function collectProviderReplacementSymbolIds(
   conn: Connection,
   repoId: string,
   fileIds: readonly string[],
   incomingSymbolIds: readonly string[],
-): Promise<void> {
+): Promise<string[]> {
   // Symbol fan-out is much larger than file fan-out, so deliberately keep the
   // discovery chunks below the generic write size.
   const fileChunkSize = Math.min(
@@ -57,7 +59,47 @@ export async function deleteProviderReplacementSymbols(
     for (const row of rows) symbolIds.add(row.symbolId);
   }
 
-  const uniqueSymbolIds = [...symbolIds];
+  return [...symbolIds];
+}
+
+export async function countProviderReplacementSymbols(
+  conn: Connection,
+  repoId: string,
+  fileIds: readonly string[],
+  incomingSymbolIds: readonly string[],
+): Promise<number> {
+  return (
+    await collectProviderReplacementSymbolIds(
+      conn,
+      repoId,
+      fileIds,
+      incomingSymbolIds,
+    )
+  ).length;
+}
+
+/** Retire provider-owned symbols and every graph row that depends on them. */
+export async function deleteProviderReplacementSymbols(
+  conn: Connection,
+  repoId: string,
+  fileIds: readonly string[],
+  incomingSymbolIds: readonly string[],
+): Promise<void> {
+  const uniqueSymbolIds = await collectProviderReplacementSymbolIds(
+    conn,
+    repoId,
+    fileIds,
+    incomingSymbolIds,
+  );
+  if (uniqueSymbolIds.length > LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT) {
+    throw new IndexError(
+      `Provider Symbol replacement would retire ${uniqueSymbolIds.length} rows, exceeding the LadybugDB safety limit of ${LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT}. A fresh database rebuild is required.`,
+    );
+  }
+  const symbolChunkSize = Math.min(
+    resolveLadybugWriteChunkSize("symbols"),
+    PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE * 4,
+  );
   for (let i = 0; i < uniqueSymbolIds.length; i += symbolChunkSize) {
     const chunk = uniqueSymbolIds.slice(i, i + symbolChunkSize);
     const fileCleanupIds = i === 0 ? [...fileIds] : [];

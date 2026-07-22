@@ -47,7 +47,11 @@ import {
   shouldUseBatchPersistAccumulator,
   shouldUseRustPass1Engine,
 } from "../../dist/indexer/indexer.js";
-import { shouldReuseProviderFirstFullGraph } from "../../dist/indexer/indexer-pass1-policy.js";
+import {
+  ProviderFirstIncrementalReplacementError,
+  resolveProviderFirstIncrementalMaterializationPlan,
+  shouldReuseProviderFirstFullGraph,
+} from "../../dist/indexer/indexer-pass1-policy.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
 import {
   executeProviderFirstScipIncremental,
@@ -7916,7 +7920,7 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
-  it("uses merge-safe symbols and skips edge copy when provider rows are not known fresh", async () => {
+  it("uses merge-safe symbols for large plans while preserving the fresh edge fast path", async () => {
     const statements: string[] = [];
     const emittedAt = "2026-05-25T12:00:00.000Z";
     const rows = providerFactsToGraphRows({
@@ -7986,31 +7990,77 @@ describe("provider-first indexing foundation", () => {
       0,
       "large repeat materialization should not use the slow generic edge writer",
     );
+
+    const freshStatements: string[] = [];
+    const freshPlan = resolveProviderFirstActiveMaterializationPlan({
+      existingProviderFileCount: 0,
+      providerSymbolCount: 2_049,
+    });
+    await materializeProviderFacts(
+      createFakeConnection(freshStatements),
+      rows,
+      {
+        replaceFileSymbols: true,
+        deleteExistingFileSymbols: freshPlan.deleteExistingFileSymbols,
+        useKnownFreshWriters: freshPlan.useKnownFreshWriters,
+        useKnownFreshEdgeWriter: freshPlan.useKnownFreshEdgeWriter,
+        writeEdges: freshPlan.writeEdges,
+      },
+    );
+
+    assert.equal(
+      countStatements(freshStatements, "COPY Symbol FROM"),
+      0,
+      "fresh large materialization should avoid the unsafe Symbol COPY path",
+    );
+    assert.equal(
+      countStatements(
+        freshStatements,
+        "MERGE (s:Symbol {symbolId: row.symbolId})",
+      ),
+      1,
+      "fresh large materialization should use merge-safe Symbol writes",
+    );
+    assert.equal(
+      countStatements(freshStatements, "CREATE (a)-[:DEPENDS_ON"),
+      1,
+      "fresh large materialization should retain the known-fresh edge fast path",
+    );
+    assert.equal(
+      countStatements(
+        freshStatements,
+        "OPTIONAL MATCH (a)-[existing:DEPENDS_ON",
+      ),
+      0,
+      "fresh edges should not pay for existing-relationship probes",
+    );
   });
 
-  it("reuses active provider rows when large repeat runs cannot safely retire stale symbols", () => {
+  it("selects safe writers at the LadybugDB Symbol mutation boundary", () => {
     assert.deepEqual(
       resolveProviderFirstActiveMaterializationPlan({
         existingProviderFileCount: 0,
-        providerSymbolCount: 200_000,
+        providerSymbolCount: 2_049,
       }),
       {
         deleteExistingFileSymbols: false,
-        useKnownFreshWriters: true,
+        useKnownFreshWriters: false,
+        useKnownFreshEdgeWriter: true,
         writeEdges: true,
         reuseExistingProviderRows: false,
       },
-      "fresh large provider loads can use COPY because no active rows exist yet",
+      "fresh provider loads above the safe COPY boundary use merge-safe symbol writes",
     );
 
     assert.deepEqual(
       resolveProviderFirstActiveMaterializationPlan({
         existingProviderFileCount: 1_000,
-        providerSymbolCount: 2_000,
+        providerSymbolCount: 2_048,
       }),
       {
         deleteExistingFileSymbols: true,
         useKnownFreshWriters: true,
+        useKnownFreshEdgeWriter: true,
         writeEdges: true,
         reuseExistingProviderRows: false,
       },
@@ -8025,6 +8075,7 @@ describe("provider-first indexing foundation", () => {
       {
         deleteExistingFileSymbols: false,
         useKnownFreshWriters: false,
+        useKnownFreshEdgeWriter: false,
         writeEdges: false,
         reuseExistingProviderRows: true,
       },
@@ -8039,6 +8090,7 @@ describe("provider-first indexing foundation", () => {
       {
         deleteExistingFileSymbols: false,
         useKnownFreshWriters: false,
+        useKnownFreshEdgeWriter: false,
         writeEdges: false,
         reuseExistingProviderRows: true,
       },
@@ -8055,6 +8107,7 @@ describe("provider-first indexing foundation", () => {
       {
         deleteExistingFileSymbols: false,
         useKnownFreshWriters: false,
+        useKnownFreshEdgeWriter: false,
         writeEdges: false,
         reuseExistingProviderRows: false,
       },
@@ -8071,10 +8124,79 @@ describe("provider-first indexing foundation", () => {
       {
         deleteExistingFileSymbols: false,
         useKnownFreshWriters: false,
+        useKnownFreshEdgeWriter: false,
         writeEdges: false,
         reuseExistingProviderRows: true,
       },
       "versionless recovery can reuse active provider symbols when the current provider shape is already present",
+    );
+  });
+
+  it(
+    "avoids destructive replacement when the existing provider graph exceeds the LadybugDB limit",
+    () => {
+      const plan = resolveProviderFirstActiveMaterializationPlan({
+        existingProviderFileCount: 1_420,
+        existingProviderSymbolCount: 29_000,
+        providerSymbolCount: 1_000,
+        activeProviderInputMatches: false,
+      });
+
+      assert.equal(plan.deleteExistingFileSymbols, false);
+      assert.equal(plan.useKnownFreshWriters, false);
+      assert.equal(plan.useKnownFreshEdgeWriter, false);
+      assert.equal(plan.writeEdges, false);
+    },
+  );
+
+  it("keeps large new-file incremental materialization on MERGE with fast edge writes", () => {
+    assert.deepEqual(
+      resolveProviderFirstIncrementalMaterializationPlan({
+        existingProviderSymbolCount: 0,
+        providerSymbolCount: 2_049,
+      }),
+      {
+        deleteExistingFileSymbols: false,
+        useKnownFreshWriters: false,
+        useKnownFreshEdgeWriter: true,
+        writeEdges: true,
+        reuseExistingProviderRows: false,
+      },
+    );
+  });
+
+  it("allows incremental replacement at the LadybugDB safety boundary", () => {
+    assert.deepEqual(
+      resolveProviderFirstIncrementalMaterializationPlan({
+        existingProviderSymbolCount: 2_048,
+        providerSymbolCount: 2_048,
+      }),
+      {
+        deleteExistingFileSymbols: true,
+        useKnownFreshWriters: true,
+        useKnownFreshEdgeWriter: true,
+        writeEdges: true,
+        reuseExistingProviderRows: false,
+      },
+    );
+  });
+
+  it("fails closed before unsafe incremental provider replacement", () => {
+    assert.throws(
+      () =>
+        resolveProviderFirstIncrementalMaterializationPlan({
+          existingProviderSymbolCount: 29_000,
+          providerSymbolCount: 1_000,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ProviderFirstIncrementalReplacementError);
+        assert.equal(error.name, "IndexError");
+        assert.match(error.message, /29000 existing scoped Symbol rows/);
+        assert.match(error.message, /1000 incoming Symbol rows/);
+        assert.match(error.message, /2048/);
+        assert.match(error.message, /fresh database rebuild is required/i);
+        return true;
+      },
     );
   });
 

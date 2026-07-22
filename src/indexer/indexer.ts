@@ -96,6 +96,8 @@ import {
   countExistingProviderPrimaryFiles,
   resolvePass1BatchSymbolWriteMode,
   resolveProviderFirstActiveMaterializationPlan,
+  ProviderFirstIncrementalReplacementError,
+  resolveProviderFirstIncrementalMaterializationPlan,
   shouldReuseProviderFirstFullGraph,
   shouldCreateParserWorkerPool,
   shouldDeleteExistingFilesBeforeFullPass1,
@@ -2760,10 +2762,15 @@ async function indexRepoImpl(
       stageTotal: providerCoverageScan.files.length,
       message: `scanned ${providerCoverageScan.files.length} file(s) for provider-first coverage`,
     });
-    if (
-      providerFirstIncrementalActive &&
-      providerCoverageScan.removedFileIds.length > 0
-    ) {
+    const deleteProviderFirstRemovedFiles = async (): Promise<void> => {
+      if (
+        !providerFirstIncrementalActive ||
+        providerCoverageScan.removedFileIds.length === 0 ||
+        providerFirstRemovedFilesDeleted
+      ) {
+        return;
+      }
+
       await graphIntegrity.begin(undefined, providerCoverageScan.removedFileIds);
       graphIntegrity.removeFiles(providerCoverageScan.removedFileIds);
       await measureProviderFirstPhase(
@@ -2780,7 +2787,7 @@ async function indexRepoImpl(
           }, postIndexSessionTimeoutMs),
       );
       providerFirstRemovedFilesDeleted = true;
-    }
+    };
     const providerChangedFiles = providerFirstIncrementalActive
       ? providerFirstIncrementalChangedFiles(providerCoverageScan)
       : providerCoverageScan.files;
@@ -2791,6 +2798,20 @@ async function indexRepoImpl(
         )
       : providerCoverageScan;
     if (providerFirstIncrementalActive && providerChangedFiles.length === 0) {
+      if (providerCoverageScan.removedFileIds.length > 0) {
+        const existingProviderSymbolCount =
+          await ladybugDb.countProviderReplacementSymbols(
+            conn,
+            repoId,
+            providerCoverageScan.removedFileIds,
+            [],
+          );
+        resolveProviderFirstIncrementalMaterializationPlan({
+          existingProviderSymbolCount,
+          providerSymbolCount: 0,
+        });
+        await deleteProviderFirstRemovedFiles();
+      }
       providerFirstScan = providerCoverageScan;
       emitProviderFirstProgress(onProgress, "coverageScan", {
         stageCurrent: 0,
@@ -2900,6 +2921,7 @@ async function indexRepoImpl(
             {
               repoId,
               reason: fallbackReason,
+              error: err,
             },
           );
           providerFirstExecutionFallback = providerFirstFallbackSummary([
@@ -3074,15 +3096,23 @@ async function indexRepoImpl(
               activeProviderInputHash &&
             activeProviderInputRecord.truncated !== true,
           );
-          const existingProviderSymbolCount = await countExistingScipProviderSymbols(conn, repoId);
+          const existingProviderSymbolCount = providerFirstIncrementalActive
+            ? await ladybugDb.countProviderReplacementSymbols(
+                conn,
+                repoId,
+                [
+                  ...materializedRows.files.map((file) => file.fileId),
+                  ...providerCoverageScan.removedFileIds,
+                ],
+                materializedRows.symbols.map((symbol) => symbol.symbolId),
+              )
+            : await countExistingScipProviderSymbols(conn, repoId);
           const activeMaterializationPlan: ProviderFirstActiveMaterializationPlan =
             providerFirstIncrementalActive
-              ? {
-                  deleteExistingFileSymbols: true,
-                  useKnownFreshWriters: true,
-                  writeEdges: true,
-                  reuseExistingProviderRows: false,
-                }
+              ? resolveProviderFirstIncrementalMaterializationPlan({
+                  existingProviderSymbolCount,
+                  providerSymbolCount: materializedRows.symbols.length,
+                })
               : resolveProviderFirstActiveMaterializationPlan({
                   existingProviderFileCount: countExistingProviderPrimaryFiles({
                     providerFiles: materializedRows.files,
@@ -3092,6 +3122,7 @@ async function indexRepoImpl(
                   activeProviderInputMatches,
                   existingProviderSymbolCount,
                 });
+          await deleteProviderFirstRemovedFiles();
           const reuseExistingFullGraph = shouldReuseProviderFirstFullGraph({ reuseExistingProviderRows: activeMaterializationPlan.reuseExistingProviderRows, activeProviderInputMatches, allFilesUnchanged: providerScan.allFilesUnchanged });
           await measureProviderFirstPhase(
             "persistProvenance",
@@ -3244,6 +3275,8 @@ async function indexRepoImpl(
                       activeMaterializationPlan.deleteExistingFileSymbols,
                     useKnownFreshWriters:
                       activeMaterializationPlan.useKnownFreshWriters,
+                    useKnownFreshEdgeWriter:
+                      activeMaterializationPlan.useKnownFreshEdgeWriter,
                     writeEdges: activeMaterializationPlan.writeEdges,
                     pruneExternalSymbols:
                       !scopedSourceFileListActive &&
@@ -3594,7 +3627,8 @@ async function indexRepoImpl(
     } catch (err) {
       if (
         providerFirstGraphCommitStarted || err instanceof ProviderFirstGraphValidationError ||
-        err instanceof GraphIntegrityVerificationError
+        err instanceof GraphIntegrityVerificationError ||
+        err instanceof ProviderFirstIncrementalReplacementError
       ) throw err;
       if (providerFirst.requestedMode !== "auto") throw err;
       const reason = err instanceof Error ? err.message : String(err);

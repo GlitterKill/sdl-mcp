@@ -233,6 +233,146 @@ describe("upsertSymbolBatch — integration", () => {
   );
 
   it(
+    "counts the exact union of scoped and incoming persisted symbols",
+    { skip: !ladybugAvailable },
+    async () => {
+      const conn_ = conn as unknown as import("kuzu").Connection;
+      const otherFileId = "batch-upsert-other-file";
+      await queries.upsertFile(conn_, {
+        fileId: otherFileId,
+        repoId,
+        relPath: "src/other.ts",
+        contentHash: "hash-other",
+        language: "ts",
+        byteSize: 50,
+        lastIndexedAt: null,
+      });
+
+      const scopedSymbols = [
+        makeSymbol("replacement-scoped-a", repoId, fileId, "scopedA"),
+        makeSymbol("replacement-scoped-b", repoId, fileId, "scopedB"),
+      ];
+      const incomingExisting = makeSymbol(
+        "replacement-incoming-existing",
+        repoId,
+        otherFileId,
+        "incomingExisting",
+      );
+      await queries.upsertSymbolBatch(conn_, [
+        ...scopedSymbols,
+        incomingExisting,
+      ]);
+
+      const count = await queries.countProviderReplacementSymbols(
+        conn_,
+        repoId,
+        [fileId],
+        [
+          scopedSymbols[0]!.symbolId,
+          incomingExisting.symbolId,
+          "replacement-missing",
+        ],
+      );
+
+      assert.strictEqual(count, 3);
+    },
+  );
+
+  it(
+    "rejects oversized provider replacement before deleting any Symbol rows",
+    { skip: !ladybugAvailable },
+    async () => {
+      const conn_ = conn as unknown as import("kuzu").Connection;
+      const symbols = Array.from({ length: 2_049 }, (_, index) =>
+        makeSymbol(
+          `replacement-guard-${index}`,
+          repoId,
+          fileId,
+          `guarded${index}`,
+        ),
+      );
+      await queries.upsertSymbolBatch(conn_, symbols);
+
+      await assert.rejects(
+        queries.deleteProviderReplacementSymbols(
+          conn_,
+          repoId,
+          [fileId],
+          symbols.map((symbol) => symbol.symbolId),
+        ),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(error.name, "IndexError");
+          assert.match(error.message, /2049/);
+          assert.match(error.message, /2048/);
+          assert.match(error.message, /fresh database rebuild is required/i);
+          return true;
+        },
+      );
+
+      const persisted = await queries.getSymbolsByFile(conn_, fileId);
+      assert.strictEqual(persisted.length, symbols.length);
+    },
+  );
+
+  it(
+    "provider metadata classification survives the bounded batch writer",
+    { skip: !ladybugAvailable },
+    async () => {
+      const conn_ = conn as unknown as import("kuzu").Connection;
+      const providerTarget =
+        "rust-analyzer cargo sdl-mcp-native 0.1.0 extract/summary/impl#[BodySignals][Default]default().";
+      const providerSymbol = makeSymbol(
+        "batch-provider-metadata",
+        repoId,
+        fileId,
+        "default",
+        {
+          source: "scip",
+          scipSymbol: providerTarget,
+          symbolStatus: "unresolved",
+          placeholderKind: "provider-metadata",
+          placeholderTarget: providerTarget,
+        },
+      );
+      const defaultSymbol = makeSymbol(
+        "batch-default-status",
+        repoId,
+        fileId,
+        "ordinaryFn",
+      );
+
+      await queries.upsertSymbolBatch(conn_, [providerSymbol, defaultSymbol]);
+
+      const rawResult = await conn.query(
+        "MATCH (s:Symbol) RETURN s.symbolId AS symbolId, s.symbolStatus AS symbolStatus, s.placeholderKind AS placeholderKind, s.placeholderTarget AS placeholderTarget",
+      );
+      const persistedById = new Map<string, Record<string, unknown>>();
+      while (rawResult.hasNext()) {
+        const row = await rawResult.getNext();
+        persistedById.set(String(row.symbolId), row);
+      }
+      rawResult.close();
+
+      const persistedProvider = persistedById.get(providerSymbol.symbolId);
+      assert.strictEqual(persistedProvider?.symbolStatus, "unresolved");
+      assert.strictEqual(
+        persistedProvider?.placeholderKind,
+        "provider-metadata",
+      );
+      assert.strictEqual(
+        persistedProvider?.placeholderTarget,
+        providerTarget,
+      );
+
+      const persistedDefault = persistedById.get(defaultSymbol.symbolId);
+      assert.strictEqual(persistedDefault?.symbolStatus, "real");
+      assert.strictEqual(persistedDefault?.placeholderKind, "");
+      assert.strictEqual(persistedDefault?.placeholderTarget, "");
+    },
+  );
+
+  it(
     "typical file — all symbols persisted, count matches",
     { skip: !ladybugAvailable },
     async () => {

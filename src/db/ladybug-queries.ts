@@ -119,6 +119,7 @@ export {
 } from "./ladybug-shadow-finalization.js";
 export {
   copyProviderFirstArtifact,
+  countProviderReplacementSymbols,
   deleteProviderReplacementSymbols,
   readLegacyFallbackEdges,
   readLegacyFallbackFiles,

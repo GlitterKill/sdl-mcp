@@ -193,9 +193,9 @@ function toSymbolBatchUpsertRow(symbol: SymbolRow) {
     packageName: symbol.packageName ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
     packageVersion: symbol.packageVersion ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
     scipSymbol: symbol.scipSymbol ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
-    symbolStatus: "real",
-    placeholderKind: "",
-    placeholderTarget: "",
+    symbolStatus: symbol.symbolStatus ?? "real",
+    placeholderKind: symbol.placeholderKind ?? "",
+    placeholderTarget: symbol.placeholderTarget ?? "",
     updatedAt: symbol.updatedAt,
   };
 }

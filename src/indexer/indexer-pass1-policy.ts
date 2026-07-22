@@ -1,12 +1,18 @@
 import { LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT } from "../db/ladybug-symbols.js";
+import { IndexError } from "../domain/errors.js";
+
 import { normalizePath } from "../util/paths.js";
 
 export interface ProviderFirstActiveMaterializationPlan {
   deleteExistingFileSymbols: boolean;
   useKnownFreshWriters: boolean;
+  useKnownFreshEdgeWriter: boolean;
   writeEdges: boolean;
   reuseExistingProviderRows: boolean;
 }
+
+/** Signals that incremental replacement must move to a fresh database. */
+export class ProviderFirstIncrementalReplacementError extends IndexError {}
 
 /** @internal exported for tests; do not import from product code. */
 export function countExistingProviderPrimaryFiles(params: {
@@ -29,12 +35,22 @@ export function resolveProviderFirstActiveMaterializationPlan(params: {
   existingProviderSymbolCount?: number;
 }): ProviderFirstActiveMaterializationPlan {
   const hasExistingProviderRows = params.existingProviderFileCount > 0;
-  const deleteExistingFileSymbols =
-    hasExistingProviderRows &&
-    params.providerSymbolCount <=
-      LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT;
+  // Replacement safety covers both rows removed from the active graph and incoming rows.
+  const existingProviderSymbolCount = hasExistingProviderRows
+    ? (params.existingProviderSymbolCount ?? params.providerSymbolCount)
+    : 0;
+  const providerReplacementRowCount = Math.max(
+    params.providerSymbolCount,
+    existingProviderSymbolCount,
+  );
   const useKnownFreshWriters =
+    providerReplacementRowCount <= LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT;
+  const deleteExistingFileSymbols =
+    hasExistingProviderRows && useKnownFreshWriters;
+  // A fresh large graph still needs fast edge writes even though Symbol rows use MERGE.
+  const useKnownFreshEdgeWriter =
     !hasExistingProviderRows || deleteExistingFileSymbols;
+  const writeEdges = useKnownFreshEdgeWriter;
   const existingProviderRowsMatchCurrentShape =
     hasExistingProviderRows &&
     params.existingProviderSymbolCount === params.providerSymbolCount;
@@ -45,12 +61,40 @@ export function resolveProviderFirstActiveMaterializationPlan(params: {
   return {
     deleteExistingFileSymbols,
     useKnownFreshWriters,
-    writeEdges: useKnownFreshWriters,
+    useKnownFreshEdgeWriter,
+    writeEdges,
     reuseExistingProviderRows:
       hasExistingProviderRows &&
       !deleteExistingFileSymbols &&
       canReuseExistingProviderRows,
   };
+}
+
+export function resolveProviderFirstIncrementalMaterializationPlan(params: {
+  existingProviderSymbolCount: number;
+  providerSymbolCount: number;
+}): ProviderFirstActiveMaterializationPlan {
+  const hasExistingProviderRows = params.existingProviderSymbolCount > 0;
+  const replacementRowCount = Math.max(
+    params.existingProviderSymbolCount,
+    params.providerSymbolCount,
+  );
+
+  if (
+    hasExistingProviderRows &&
+    replacementRowCount > LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT
+  ) {
+    throw new ProviderFirstIncrementalReplacementError(
+      `Provider-first incremental replacement is unsafe: ${params.existingProviderSymbolCount} existing scoped Symbol rows and ${params.providerSymbolCount} incoming Symbol rows exceed the LadybugDB safety limit of ${LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT}. A fresh database rebuild is required.`,
+    );
+  }
+
+  return resolveProviderFirstActiveMaterializationPlan({
+    existingProviderFileCount: hasExistingProviderRows ? 1 : 0,
+    existingProviderSymbolCount: params.existingProviderSymbolCount,
+    providerSymbolCount: params.providerSymbolCount,
+    activeProviderInputMatches: false,
+  });
 }
 
 export function shouldReuseProviderFirstFullGraph(params: {

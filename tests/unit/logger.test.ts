@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -103,6 +103,48 @@ describe("Logger", () => {
         join(blockingPath, "nested", "sdl-mcp.log"),
       );
       assert.strictEqual(diagnostics.fallbackUsed, true);
+    });
+  });
+
+  describe("error metadata", () => {
+    it("preserves ordered AggregateError children in file logs", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "sdl-logger-aggregate-"));
+      const testPath = join(tempDir, "aggregate.log");
+      const loggerModuleUrl = new URL(
+        "../../dist/util/logger.js",
+        import.meta.url,
+      ).href;
+      const script = `
+        import { disableFileLogging, enableFileLogging, logger } from ${JSON.stringify(loggerModuleUrl)};
+        enableFileLogging(${JSON.stringify(testPath)});
+        logger.error("provider replacement failed", {
+          error: new AggregateError(
+            [
+              new Error("primary materialization failure"),
+              new Error("FTS restoration failure"),
+            ],
+            "both provider replacement phases failed",
+          ),
+        });
+        disableFileLogging();
+      `;
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "--eval", script],
+        { encoding: "utf-8" },
+      );
+
+      assert.strictEqual(result.status, 0, result.stderr);
+
+      const output = readFileSync(testPath, "utf-8");
+      assert.match(output, /"error":"both provider replacement phases failed"/);
+      const primaryIndex = output.indexOf("primary materialization failure");
+      const restorationIndex = output.indexOf("FTS restoration failure");
+      assert.ok(primaryIndex >= 0, "primary failure should be logged");
+      assert.ok(
+        restorationIndex > primaryIndex,
+        "FTS restoration failure should follow the primary failure",
+      );
     });
   });
 
