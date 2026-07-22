@@ -1161,12 +1161,11 @@ export function isPublicIndexRefresh(name: string, args: unknown): boolean {
   const steps = (args as { steps?: unknown }).steps;
   return (
     Array.isArray(steps) &&
-    steps.some(
-      (step) =>
-        step !== null &&
-        typeof step === "object" &&
-        (step as { fn?: unknown }).fn === "indexRefresh",
-    )
+    steps.some((step) => {
+      if (step === null || typeof step !== "object") return false;
+      const fn = (step as { fn?: unknown }).fn;
+      return fn === "indexRefresh" || fn === "index.refresh";
+    })
   );
 }
 

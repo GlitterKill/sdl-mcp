@@ -299,6 +299,16 @@ export function isInToolDispatch(): boolean {
   return dispatchContext.getStore() === true;
 }
 
+/**
+ * Start detached work without inheriting the caller's dispatch ownership.
+ * Other async-local contexts, such as refresh admission, remain intact.
+ */
+export function runOutsideToolDispatchContext<T>(
+  fn: () => Promise<T>,
+): Promise<T> {
+  return dispatchContext.run(false, fn);
+}
+
 export function getToolDispatchStats(): ToolDispatchStats {
   const stats = limiter?.getStats();
   const maxConcurrency = limiter?.getMaxConcurrency() ?? configuredMax;

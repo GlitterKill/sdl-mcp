@@ -61,14 +61,19 @@ Public refresh envelopes are serialized by one process-wide FIFO admission
 gate before they acquire the normal tool-dispatch lease. The exact admitted
 surfaces are flat `sdl.index.refresh`, gateway `sdl.repo` with
 `action: "index.refresh"`, and non-dry-run workflows containing
-`fn: "indexRefresh"`. Global admission is required even for different
+either parser-supported spelling, `fn: "indexRefresh"` or
+`fn: "index.refresh"`. Global admission is required even for different
 repositories because LadybugDB has one writer and each refresh waits for every
 other graph-read dispatch lease to drain before destructive work.
 
 Synchronous calls retain admission through handler completion. For
 `async: true`, the operation response still returns immediately, while the
 handler transfers admission ownership to the detached background refresh
-promise until it settles. The transfer does not retain a normal dispatch slot.
+promise until it settles. The detached promise explicitly clears inherited
+tool-dispatch context, so `indexRepo` reserves its own synthetic dispatch lease
+and drains active graph reads before destructive work. Refresh-admission
+context remains inherited, and the transfer does not retain the request's
+normal dispatch slot.
 Direct watcher and CLI `indexRepo` calls keep their existing synthetic
 dispatch/indexing-gate path.
 
@@ -96,8 +101,9 @@ dispatch/indexing-gate path.
 - A blocked admission query proves the admission lookup and handler share one
   dispatch lease, so full-index quiescence cannot enter between them.
 - Real concurrent MCP refreshes cover flat calls on different repositories,
-  gateway calls on one repository, multi-step workflow refreshes, detached
-  async ownership transfer, and the graph-read/reset exclusion boundary.
+  gateway calls on one repository, both exact workflow function spellings,
+  multi-step workflow refreshes, detached async ownership transfer, synthetic
+  dispatch accounting, and the graph-read/reset exclusion boundary.
 - A real blocked verifier lease proves legacy/direct full indexing cancels and
   closes the lease before destructive reset. Additional cases cover explicit
   full, incremental-to-full upgrade, failure release, and unchanged ordinary

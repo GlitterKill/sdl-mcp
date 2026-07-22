@@ -123,6 +123,13 @@ describe("MCPServer", () => {
         }),
         true,
       );
+      assert.strictEqual(
+        isPublicIndexRefresh("sdl.workflow", {
+          repoId: "sdl-mcp",
+          steps: [{ fn: "index.refresh", args: { mode: "full" } }],
+        }),
+        true,
+      );
     });
 
     it("does not admit lookalike actions or workflow dry runs", () => {
@@ -136,7 +143,7 @@ describe("MCPServer", () => {
       assert.strictEqual(
         isPublicIndexRefresh("sdl.workflow", {
           repoId: "sdl-mcp",
-          steps: [{ fn: "index.refresh", args: { mode: "full" } }],
+          steps: [{ fn: "index.refresh.extra", args: { mode: "full" } }],
         }),
         false,
       );

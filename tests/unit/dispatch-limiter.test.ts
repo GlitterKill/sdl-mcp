@@ -10,6 +10,7 @@ import {
   resetToolDispatchLimiter,
   retainIndexRefreshAdmissionUntil,
   runIndexRefreshAdmission,
+  runOutsideToolDispatchContext,
   runToolDispatch,
   ToolDispatchQueueTimeoutError,
   waitForToolDispatchIdle,
@@ -288,6 +289,53 @@ describe("tool dispatch limiter", () => {
     });
 
     assert.strictEqual(isInToolDispatch(), false);
+  });
+
+  it("clears only dispatch context for retained detached work and restores it after failure", async () => {
+    let rejectBackground!: (reason?: unknown) => void;
+    let releaseRetained!: () => void;
+    const backgroundFailure = new Promise<void>((_resolve, reject) => {
+      rejectBackground = reject;
+    });
+    const retainedAfterFailure = new Promise<void>((resolve) => {
+      releaseRetained = resolve;
+    });
+
+    const response = await runIndexRefreshAdmission(() =>
+      runToolDispatch(async () => {
+        assert.strictEqual(isInToolDispatch(), true);
+        const background = runOutsideToolDispatchContext(async () => {
+          assert.strictEqual(isInToolDispatch(), false);
+          // Refresh-admission ALS must survive while only dispatch ALS clears.
+          retainIndexRefreshAdmissionUntil(retainedAfterFailure);
+          await backgroundFailure;
+        });
+        retainIndexRefreshAdmissionUntil(background);
+        assert.strictEqual(isInToolDispatch(), true);
+        return "accepted";
+      }),
+    );
+    assert.strictEqual(response, "accepted");
+    await delay(0);
+    assert.strictEqual(getToolDispatchStats().active, 0);
+
+    const queued = runIndexRefreshAdmission(async () => "released");
+    await delay(10);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().queued, 1);
+    rejectBackground(new Error("injected detached failure"));
+    await delay(10);
+    assert.strictEqual(
+      _getIndexRefreshAdmissionStatsForTesting().queued,
+      1,
+      "the second retained promise still owns refresh admission",
+    );
+    releaseRetained();
+
+    assert.strictEqual(await queued, "released");
+    await delay(0);
+    assert.strictEqual(isInToolDispatch(), false);
+    assert.strictEqual(getToolDispatchStats().active, 0);
+    assert.strictEqual(_getIndexRefreshAdmissionStatsForTesting().active, 0);
   });
 
   it("releases refresh admission when synchronous dispatch rejects", async () => {
