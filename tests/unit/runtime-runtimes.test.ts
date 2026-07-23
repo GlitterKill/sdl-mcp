@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
@@ -28,6 +29,23 @@ describe("runtime table structure", () => {
       assert.strictEqual(rt.name, name);
     }
   });
+});
+
+it("keeps failed executable lookups quiet", () => {
+  const moduleUrl = new URL(
+    "../../dist/runtime/runtimes.js",
+    import.meta.url,
+  ).href;
+  const missing = `sdl-mcp-missing-runtime-${process.pid}`;
+  const script = `import { resolveExecutable } from ${JSON.stringify(moduleUrl)}; resolveExecutable(${JSON.stringify(missing)});`;
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    { encoding: "utf8" },
+  );
+
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(result.stderr, "");
 });
 
 describe("alias compatibility", () => {

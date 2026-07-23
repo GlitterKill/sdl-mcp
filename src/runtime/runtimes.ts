@@ -287,6 +287,7 @@ export function resolveExecutable(name: string): string | undefined {
       timeout: 5000,
       encoding: "utf-8",
       env: childEnv,
+      stdio: ["ignore", "pipe", "pipe"],
     }).trim();
     const firstLine = result.split(/\r?\n/)[0]?.trim();
     return firstLine || undefined;
