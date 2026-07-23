@@ -21,7 +21,7 @@ import {
 import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
 import {
-  classifyDependencyTarget,
+  canonicalDependencyPlaceholderSymbol,
   isSafeUnresolvedCallSymbolId,
   type SymbolPlaceholderMeta,
 } from "./symbol-placeholders.js";
@@ -234,7 +234,10 @@ export async function insertEdge(
   conn: Connection,
   edge: EdgeRow,
 ): Promise<void> {
-  const targetMeta = edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
+  const target = canonicalDependencyPlaceholderSymbol(
+    edge.toSymbolId,
+    edge.targetMeta,
+  );
   // Note: MERGE on target symbol (b) may create "stub" nodes with only symbolId
   // and SYMBOL_IN_REPO edge when the target hasn't been indexed yet. This is
   // intentional — stubs are populated when the target file is indexed, and
@@ -266,29 +269,73 @@ export async function insertEdge(
          END,
          b.repoId = $repoId,
          b.external = CASE
+           WHEN targetFileCount > 0 THEN false
            WHEN $targetStatus = 'external' THEN true
            WHEN $targetStatus <> 'real' THEN false
-           WHEN targetFileCount > 0 THEN false
            ELSE coalesce(b.external, false)
          END,
          b.symbolStatus = CASE
-           WHEN $targetStatus <> 'real' THEN $targetStatus
            WHEN targetFileCount > 0 THEN 'real'
+           WHEN $targetStatus <> 'real' THEN $targetStatus
            WHEN coalesce(b.external, false) = true THEN 'external'
            ELSE 'real'
          END,
          b.placeholderKind = CASE
-           WHEN $targetStatus <> 'real' THEN $targetPlaceholderKind
            WHEN targetFileCount > 0 THEN ''
+           WHEN $targetStatus <> 'real' THEN $targetPlaceholderKind
            WHEN coalesce(b.external, false) = true THEN b.placeholderKind
            ELSE ''
          END,
-         b.placeholderTarget = CASE
-           WHEN $targetStatus <> 'real' THEN $targetPlaceholderTarget
-           WHEN targetFileCount > 0 THEN ''
-           WHEN coalesce(b.external, false) = true THEN b.placeholderTarget
-           ELSE ''
-         END
+          b.placeholderTarget = CASE
+            WHEN targetFileCount > 0 THEN ''
+            WHEN $targetStatus <> 'real' THEN $targetPlaceholderTarget
+            WHEN coalesce(b.external, false) = true THEN b.placeholderTarget
+            ELSE ''
+          END,
+          b.name = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN $toSymbolId
+            ELSE b.name
+          END,
+          b.kind = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN 'unknown'
+            ELSE b.kind
+          END,
+          b.language = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN 'unknown'
+            ELSE b.language
+          END,
+          b.rangeStartLine = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN 0
+            ELSE b.rangeStartLine
+          END,
+          b.rangeStartCol = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN 0
+            ELSE b.rangeStartCol
+          END,
+          b.rangeEndLine = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN 0
+            ELSE b.rangeEndLine
+          END,
+          b.rangeEndCol = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN 0
+            ELSE b.rangeEndCol
+          END,
+          b.signatureJson = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN NULL
+            ELSE b.signatureJson
+          END,
+          b.source = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN 'treesitter'
+            ELSE b.source
+          END,
+          b.scipSymbol = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN NULL
+            ELSE b.scipSymbol
+          END,
+          b.astFingerprint = CASE
+            WHEN $targetStatus <> 'real' AND targetFileCount = 0 THEN $toSymbolId
+            ELSE b.astFingerprint
+          END
      MERGE (a)-[:SYMBOL_IN_REPO]->(r)
      MERGE (b)-[:SYMBOL_IN_REPO]->(r)
      MERGE (a)-[d:DEPENDS_ON {edgeType: $edgeType}]->(b)
@@ -311,9 +358,9 @@ export async function insertEdge(
       resolutionPhase: edge.resolutionPhase ?? "pass1",
       provenance: edge.provenance,
       createdAt: edge.createdAt,
-      targetStatus: targetMeta.symbolStatus,
-      targetPlaceholderKind: targetMeta.placeholderKind ?? "",
-      targetPlaceholderTarget: targetMeta.placeholderTarget ?? "",
+      targetStatus: target.symbolStatus,
+      targetPlaceholderKind: target.placeholderKind,
+      targetPlaceholderTarget: target.placeholderTarget,
     },
   );
 }
@@ -483,9 +530,9 @@ export async function insertEdges(
             await ensureTargetEndpointSymbols(txConn, targetEndpointRows);
           });
         }
-        // Target metadata is node-only and one row per target. Placeholder
-        // rows never consult file-backed state, so keep them off the slower
-        // OPTIONAL MATCH path used to clean/preserve real target metadata.
+        // Target metadata is node-only and one row per target. Keep placeholder
+        // updates separate, but still prove the node is fileless before
+        // replacing its stable fields with the canonical placeholder tuple.
         const placeholderRows = targetRows.filter(
           (row) => row.targetStatus !== "real",
         );
@@ -498,6 +545,9 @@ export async function insertEdges(
               txConn,
               `UNWIND $rows AS row
                MATCH (b:Symbol {symbolId: row.toSymbolId})
+               OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)
+               WITH row, b, count(bf) AS targetFileCount
+               WHERE targetFileCount = 0
                SET b.repoId = row.repoId,
                    b.external = CASE
                      WHEN row.targetStatus = 'external' THEN true
@@ -505,7 +555,18 @@ export async function insertEdges(
                    END,
                    b.symbolStatus = row.targetStatus,
                    b.placeholderKind = row.targetPlaceholderKind,
-                   b.placeholderTarget = row.targetPlaceholderTarget`,
+                   b.placeholderTarget = row.targetPlaceholderTarget,
+                   b.name = row.targetName,
+                   b.kind = row.targetKind,
+                   b.language = row.targetLanguage,
+                   b.rangeStartLine = row.targetRangeStartLine,
+                   b.rangeStartCol = row.targetRangeStartCol,
+                   b.rangeEndLine = row.targetRangeEndLine,
+                   b.rangeEndCol = row.targetRangeEndCol,
+                   b.signatureJson = row.targetSignatureJson,
+                   b.source = row.targetSource,
+                   b.scipSymbol = row.targetScipSymbol,
+                   b.astFingerprint = row.targetAstFingerprint`,
               { rows: placeholderRows },
             ),
           );
@@ -808,10 +869,21 @@ export async function ensureDependencyTargetsForKnownSourceEdges(
                  b.external = CASE
                    WHEN row.targetStatus = 'external' THEN true
                    ELSE false
-                 END,
-                 b.symbolStatus = row.targetStatus,
-                 b.placeholderKind = row.targetPlaceholderKind,
-                 b.placeholderTarget = row.targetPlaceholderTarget`,
+                  END,
+                  b.symbolStatus = row.targetStatus,
+                  b.placeholderKind = row.targetPlaceholderKind,
+                  b.placeholderTarget = row.targetPlaceholderTarget,
+                  b.name = row.targetName,
+                  b.kind = row.targetKind,
+                  b.language = row.targetLanguage,
+                  b.rangeStartLine = row.targetRangeStartLine,
+                  b.rangeStartCol = row.targetRangeStartCol,
+                  b.rangeEndLine = row.targetRangeEndLine,
+                  b.rangeEndCol = row.targetRangeEndCol,
+                  b.signatureJson = row.targetSignatureJson,
+                  b.source = row.targetSource,
+                  b.scipSymbol = row.targetScipSymbol,
+                  b.astFingerprint = row.targetAstFingerprint`,
             { rows: missingRows },
           ),
         );
@@ -931,17 +1003,28 @@ async function updateExistingPlaceholderTargets(
     conn,
     `UNWIND $rows AS row
      MATCH (b:Symbol {symbolId: row.toSymbolId})
-     OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(:File)
-     WITH b, row, count(*) AS fileBackedCount
+     OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)
+     WITH b, row, count(bf) AS fileBackedCount
      WHERE fileBackedCount = 0
      SET b.repoId = row.repoId,
          b.external = CASE
            WHEN row.targetStatus = 'external' THEN true
            ELSE false
          END,
-         b.symbolStatus = row.targetStatus,
-         b.placeholderKind = row.targetPlaceholderKind,
-         b.placeholderTarget = row.targetPlaceholderTarget`,
+          b.symbolStatus = row.targetStatus,
+          b.placeholderKind = row.targetPlaceholderKind,
+          b.placeholderTarget = row.targetPlaceholderTarget,
+          b.name = row.targetName,
+          b.kind = row.targetKind,
+          b.language = row.targetLanguage,
+          b.rangeStartLine = row.targetRangeStartLine,
+          b.rangeStartCol = row.targetRangeStartCol,
+          b.rangeEndLine = row.targetRangeEndLine,
+          b.rangeEndCol = row.targetRangeEndCol,
+          b.signatureJson = row.targetSignatureJson,
+          b.source = row.targetSource,
+          b.scipSymbol = row.targetScipSymbol,
+          b.astFingerprint = row.targetAstFingerprint`,
     { rows },
   );
 }
@@ -1007,17 +1090,17 @@ function placeholderSymbolRowToCopyCells(
   return [
     row.toSymbolId,
     row.repoId,
-    "placeholder",
-    row.targetPlaceholderTarget || row.toSymbolId,
+    row.targetKind,
+    row.targetName,
     false,
     "",
-    "",
-    0,
-    0,
-    0,
-    0,
-    "",
-    "",
+    row.targetLanguage,
+    row.targetRangeStartLine,
+    row.targetRangeStartCol,
+    row.targetRangeEndLine,
+    row.targetRangeEndCol,
+    row.targetAstFingerprint,
+    row.targetSignatureJson,
     "",
     0.0,
     "unknown",
@@ -1221,6 +1304,17 @@ interface DependencyTargetMetadataRow {
   targetStatus: SymbolPlaceholderMeta["symbolStatus"];
   targetPlaceholderKind: string;
   targetPlaceholderTarget: string;
+  targetName: string;
+  targetKind: string;
+  targetLanguage: string;
+  targetRangeStartLine: number;
+  targetRangeStartCol: number;
+  targetRangeEndLine: number;
+  targetRangeEndCol: number;
+  targetSignatureJson: null;
+  targetSource: string;
+  targetScipSymbol: null;
+  targetAstFingerprint: string;
 }
 
 interface EndpointSymbolRow {
@@ -1326,14 +1420,27 @@ function buildTargetMetadataRows(edges: EdgeRow[]): DependencyTargetMetadataRow[
     if (rowsBySymbolId.has(edge.toSymbolId)) {
       continue;
     }
-    const targetMeta =
-      edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
+    const target = canonicalDependencyPlaceholderSymbol(
+      edge.toSymbolId,
+      edge.targetMeta,
+    );
     rowsBySymbolId.set(edge.toSymbolId, {
       repoId: edge.repoId,
       toSymbolId: edge.toSymbolId,
-      targetStatus: targetMeta.symbolStatus,
-      targetPlaceholderKind: targetMeta.placeholderKind ?? "",
-      targetPlaceholderTarget: targetMeta.placeholderTarget ?? "",
+      targetStatus: target.symbolStatus,
+      targetPlaceholderKind: target.placeholderKind,
+      targetPlaceholderTarget: target.placeholderTarget,
+      targetName: target.name,
+      targetKind: target.kind,
+      targetLanguage: target.language,
+      targetRangeStartLine: target.rangeStartLine,
+      targetRangeStartCol: target.rangeStartCol,
+      targetRangeEndLine: target.rangeEndLine,
+      targetRangeEndCol: target.rangeEndCol,
+      targetSignatureJson: target.signatureJson,
+      targetSource: target.source,
+      targetScipSymbol: target.scipSymbol,
+      targetAstFingerprint: target.astFingerprint,
     });
   }
 

@@ -278,7 +278,7 @@ You should leave `scip.generator.enabled = false` (the default) when:
 - You need a specific upstream indexer version that scip-io does not pin to.
 - You want minimum-overhead refreshes during heavy live-editing — scip-io adds wall-clock time even when sdl-mcp's own indexer would short-circuit.
 
-In all of those cases, keep `scip.enabled: true` and list the manually-managed indexes in `scip.indexes`; provider-first will consume those files on the next full refresh. Users who want quick/simple legacy indexing should leave `scip.enabled: false` and omit LSP provider inputs.
+In all of those cases, keep `scip.enabled: true` and list the manually-managed indexes in `scip.indexes`; provider-first consumes those files during a fresh first index or whole-database safe rebuild. Users who want quick/simple legacy indexing should leave `scip.enabled: false` and omit LSP provider inputs.
 
 ---
 
@@ -286,15 +286,16 @@ In all of those cases, keep `scip.enabled: true` and list the manually-managed i
 
 SCIP files are no longer ingested through a direct MCP tool or a legacy post-refresh overlay. When `scip.enabled: true` or semantic SCIP inputs are configured, provider-first owns SCIP facts.
 
-Run a full provider-first refresh after generating or updating SCIP inputs:
+Build a fresh validated candidate after generating or updating complete SCIP
+inputs for an already populated graph:
 
-```json
-{
-  "repoId": "my-repo",
-  "mode": "full",
-  "reason": "refresh SCIP provider facts"
-}
+```bash
+sdl-mcp index --force --safe-rebuild /absolute/path/to/new-graph.lbug
 ```
+
+The safe rebuild includes every configured repository because one LadybugDB
+path owns the whole graph. SDL-MCP refuses a destructive full provider refresh
+against a populated active database.
 
 Pipeline selection follows the provider-first rules:
 

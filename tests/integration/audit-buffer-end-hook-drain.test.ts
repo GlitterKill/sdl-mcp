@@ -23,6 +23,8 @@ import {
   drainAuditBuffer,
   flushAuditBufferOnShutdown,
   getBufferedAuditCount,
+  isExplicitAuditBufferingActive,
+  withExplicitAuditBufferingScope,
 } from "../../dist/mcp/audit-buffer.js";
 import { withPostIndexWriteSession } from "../../dist/db/write-session.js";
 
@@ -253,4 +255,76 @@ describe("audit-buffer end-hook drain (real DB)", () => {
       assert.equal(await countAuditRowsForRepo(), 2);
     },
   );
+
+  it("keeps an explicit full-refresh scope nest-safe and flushes once", async () => {
+    let flushes = 0;
+    assert.equal(isExplicitAuditBufferingActive(), false);
+
+    await withExplicitAuditBufferingScope(
+      async () => {
+        assert.equal(isExplicitAuditBufferingActive(), true);
+        await withExplicitAuditBufferingScope(
+          async () => {
+            assert.equal(isExplicitAuditBufferingActive(), true);
+          },
+          async () => {
+            flushes += 1;
+          },
+        );
+        assert.equal(flushes, 0);
+      },
+      async () => {
+        flushes += 1;
+      },
+    );
+
+    assert.equal(isExplicitAuditBufferingActive(), false);
+    assert.equal(flushes, 1);
+  });
+
+  it("preserves the indexing failure when the final audit flush also fails", async () => {
+    await assert.rejects(
+      withExplicitAuditBufferingScope(
+        async () => {
+          throw new Error("primary indexing failure");
+        },
+        async () => {
+          throw new Error("secondary audit flush failure");
+        },
+      ),
+      /primary indexing failure/,
+    );
+    assert.equal(isExplicitAuditBufferingActive(), false);
+  });
+
+  it("serializes concurrent drains and inserts every accepted row once", async () => {
+    await resetBufferAndDb();
+    const rows = [makeRow("serialized-0"), makeRow("serialized-1")];
+    for (const row of rows) assert.equal(bufferAuditEvent(row), true);
+
+    let active = 0;
+    let maxActive = 0;
+    const inserted: string[] = [];
+    const insertAuditEvent = async (
+      _conn: import("kuzu").Connection,
+      row: ReturnType<typeof makeRow>,
+    ): Promise<void> => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      inserted.push(row.eventId);
+      active -= 1;
+    };
+    const fakeConn = {} as import("kuzu").Connection;
+
+    const drained = await Promise.all([
+      drainAuditBuffer(fakeConn, { insertAuditEvent }),
+      drainAuditBuffer(fakeConn, { insertAuditEvent }),
+    ]);
+
+    assert.equal(drained.reduce((sum, count) => sum + count, 0), rows.length);
+    assert.equal(maxActive, 1);
+    assert.deepStrictEqual(inserted.sort(), rows.map((row) => row.eventId).sort());
+    assert.equal(getBufferedAuditCount(), 0);
+  });
 });

@@ -14,7 +14,7 @@ Use `repo.unregister` only for runtime registrations. It requires `confirmRepoId
 
 `sdl.repo.status` reports graph integrity under `derivedState`. The `graphIntegrityRevision` field identifies the current persisted graph revision, while `graphIntegrityVerifiedRevision` identifies the last revision that an independent verification snapshot published successfully. Equal values with `graphIntegrityState: "verified"` prove the current revision.
 
-The `verifying` and `failed` states can remain graph-readable when the current Version has a valid manifest and revision metadata. They do not claim that the latest revision is verified. Follow `nextBestAction` after a failure, and run a full refresh when the state is `unknown`, the manifest is missing, or the current revision is null.
+The `verifying` and `failed` states can remain graph-readable when the current Version has a valid manifest and revision metadata. They do not claim that the latest revision is verified. Continue normal graph reads during `verifying`; SDL-MCP recovers lost verifier wakeups without an agent-triggered refresh. After a permanent failure, `nextBestAction` stops refresh retry loops and directs the operator to a stopped `index --force --safe-rebuild` recovery.
 
 ## Symbol search misses
 

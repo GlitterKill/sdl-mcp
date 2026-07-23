@@ -20,6 +20,7 @@ import {
   indexRepo,
   type IndexProgress,
 } from "../../indexer/indexer.js";
+import { assertIndexStoragePreflight } from "../../indexer/index-storage-preflight.js";
 import { createVersionAndSnapshot } from "../../indexer/indexer-version.js";
 import { RepoConfig } from "../../config/types.js";
 import { LanguageSchema } from "../../config/types.js";
@@ -1129,6 +1130,17 @@ export async function handleIndexRefresh(
 
   // Async mode: return immediately, run indexing in background
   if (asyncMode) {
+    if (mode === "full") {
+      // Full refresh admission is deterministic and safety-critical. Surface
+      // the refusal to the caller instead of returning an operation ID for a
+      // background task that can only fail.
+      await withRepoMutation(repoId, async () => {
+        const conn = await getLadybugConn();
+        const repo = await ladybugDb.getRepo(conn, repoId);
+        if (!repo) throw new DatabaseError(`Repository ${repoId} not found`);
+        await assertIndexStoragePreflight(conn, repoId, mode);
+      });
+    }
     const operationId = `idx-${randomUUID().slice(0, 8)}`;
     logger.info("Async index refresh started", { repoId, mode, operationId });
     // Re-bind executeRefresh without request-scoped signal (it aborts when client disconnects)

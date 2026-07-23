@@ -80,6 +80,8 @@ import {
   resolveEffectiveIndexMode,
   resolvePostIndexSessionTimeoutMs,
 } from "./index-mode.js";
+import { assertIndexStoragePreflight } from "./index-storage-preflight.js";
+import { withFullIndexSafetyBoundaries } from "./index-refresh-safety.js";
 import {
   fileIdForPath,
   loadExistingSymbolMaps,
@@ -171,7 +173,10 @@ import {
   summarizeProviderFirstShadowActivationReadiness,
 } from "./provider-first/shadow-activation.js";
 import { finalizeProviderFirstShadowDb } from "./provider-first/shadow-finalization.js";
-import { withGraphIntegrityVerifierQuiesced } from "./provider-first/background-graph-integrity-verifier.js";
+import {
+  waitForGraphIntegrityVerifier,
+  withGraphIntegrityVerifierQuiesced,
+} from "./provider-first/background-graph-integrity-verifier.js";
 import {
   ensureGraphIntegrityVerificationComplete,
   failActiveGraphIntegrityVerification,
@@ -487,6 +492,8 @@ export interface IndexTimingDiagnostics {
 
 export interface IndexRepoOptions {
   includeTimings?: boolean;
+  /** @internal Allows destructive full writes only on a fresh rebuild path. */
+  isolatedRebuild?: boolean;
 }
 export interface IndexResult {
   versionId: string;
@@ -1950,17 +1957,6 @@ export async function indexRepo(
   signal?: AbortSignal,
   options?: IndexRepoOptions,
 ): Promise<IndexResult> {
-  // scip-io pre-refresh hook runs BEFORE acquiring indexLocks so a slow
-  // scip-io run does not hold the per-repo lock and starve queued
-  // refreshes. The runner coalesces concurrent calls per repo so two
-  // scip-io processes never race on writing index.scip. See
-  // src/scip/scip-io-runner.ts::runScipIoPreRefreshForIndex.
-  const { runScipIoPreRefreshForIndex } =
-    await import("../scip/scip-io-runner.js");
-  const scipPreRefreshResult = (await shouldDeferScipIoPreRefreshToIncrementalProvider(repoId, mode))
-    ? undefined
-    : await runScipIoPreRefreshForIndex(repoId, signal);
-
   // Serialize concurrent indexRepo calls for the same repo to prevent
   // LadybugDB write conflicts and race conditions during rapid watcher events.
   // Loop-and-recheck: after awaiting a lock, another caller may have set a new
@@ -2000,7 +1996,17 @@ export async function indexRepo(
     }
 
     const effectiveMode = await resolveEffectiveIndexMode(repoId, mode);
+    const preflightConn = await getLadybugConn();
+    await assertIndexStoragePreflight(preflightConn, repoId, mode, options);
     const runEffectiveIndex = async (): Promise<IndexResult> => {
+      // Provider generation happens after the storage gate so a corrupt or
+      // unsafe target fails quickly without spending time regenerating SCIP.
+      const { runScipIoPreRefreshForIndex } =
+        await import("../scip/scip-io-runner.js");
+      const scipPreRefreshResult =
+        await shouldDeferScipIoPreRefreshToIncrementalProvider(repoId, mode)
+          ? undefined
+          : await runScipIoPreRefreshForIndex(repoId, signal);
       // Flush WAL before large indexing runs open their own transactions.
       // Incremental refreshes are often tiny/no-op and can run frequently;
       // forcing CHECKPOINT on every incremental call can become a contention
@@ -2020,9 +2026,10 @@ export async function indexRepo(
       return result;
     };
 
-    return effectiveMode === "full"
-      ? withGraphIntegrityVerifierQuiesced(repoId, runEffectiveIndex)
-      : runEffectiveIndex();
+    if (effectiveMode !== "full") {
+      return runEffectiveIndex();
+    }
+    return withFullIndexSafetyBoundaries(repoId, runEffectiveIndex);
   };
 
   const resultPromise = withIndexingGate(() =>
@@ -3430,6 +3437,9 @@ async function indexRepoImpl(
             providerFirstLegacyFallbackStartedAt = Date.now();
           } else {
             if (activeMaterializationPlan.reuseExistingProviderRows) {
+              if (reuseExistingFullGraph) {
+                await waitForGraphIntegrityVerifier(repoId);
+              }
               const versionId = reuseExistingFullGraph ? await verifyNoOpIncrementalGraphIntegrity(repoId) : await resolveActiveGraphVersionId("Provider-first SCIP active rows reused");
               let semanticDeferred: boolean | undefined =
                 await markProviderFirstSemanticReadinessDeferred({
@@ -3634,6 +3644,7 @@ async function indexRepoImpl(
   }
   if (mode === "incremental" && scanAllFilesUnchanged) {
     return await measurePhase("shortCircuitNoOp", async () => {
+      await waitForGraphIntegrityVerifier(repoId);
       const versionId = await verifyNoOpIncrementalGraphIntegrity(repoId);
       const pass1Engine = emptyPass1EngineTelemetry();
       const recovery = await measurePhase("noOpRecoveryAssess", () =>

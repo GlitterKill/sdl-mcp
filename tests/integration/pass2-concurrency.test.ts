@@ -237,7 +237,9 @@ describe("pass2Concurrency — parity and progress", () => {
       "utf8",
     );
 
-    const result = await indexRepo(REPO_ID, "full");
+    const result = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     assert.ok(result.versionId.length > 0, "indexRepo should return a versionId");
 
     const callEdges = await getRunCallEdges();
@@ -281,7 +283,9 @@ describe("pass2Concurrency — parity and progress", () => {
       "utf8",
     );
 
-    const result = await indexRepo(REPO_ID, "full");
+    const result = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     assert.ok(result.versionId.length > 0, "indexRepo should return a versionId");
 
     const callEdges = await getRunCallEdges();
@@ -330,7 +334,13 @@ describe("pass2Concurrency — parity and progress", () => {
     );
 
     const progressEvents: IndexProgress[] = [];
-    await indexRepo(REPO_ID, "full", (p) => progressEvents.push(p));
+    await indexRepo(
+      REPO_ID,
+      "full",
+      (p) => progressEvents.push(p),
+      undefined,
+      { isolatedRebuild: true },
+    );
 
     const pass2Events = progressEvents.filter((p) => p.stage === "pass2");
     assert.ok(

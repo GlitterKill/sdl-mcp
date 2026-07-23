@@ -34,6 +34,6 @@ export async function assertGraphRetrievalAvailable(
   }
 
   throw new IndexError(
-    `Graph retrieval is unavailable for repository ${repoId} because integrity is not established for the latest version. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph.`,
+    `Graph retrieval is unavailable for repository ${repoId} because integrity is not established for the latest version. For a new unindexed repository, run one incremental refresh. For a populated graph, stop SDL-MCP and run \`sdl-mcp index --force --safe-rebuild <absolute-new-path>\`.`,
   );
 }

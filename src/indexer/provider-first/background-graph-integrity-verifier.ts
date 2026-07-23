@@ -185,6 +185,34 @@ export async function cancelAndWaitForGraphIntegrityVerifier(
 }
 
 /**
+ * Await useful verifier work without aborting it. Re-check after each task so
+ * a coalesced wake that installs a replacement worker is also observed.
+ */
+export async function waitForGraphIntegrityVerifier(
+  repoId: string,
+): Promise<void> {
+  while (true) {
+    const entry = workers.get(repoId);
+    if (entry) {
+      await entry.task;
+      continue;
+    }
+
+    // A committed revision can outlive its in-process notification (for
+    // example after a crash or a close/reopen boundary). Recover that durable
+    // work here so foreground no-op checks do not misread a lost wakeup as a
+    // permanently missing baseline.
+    const pending = (await listPendingGraphIntegrityRevisions(repoId))[0];
+    if (!pending) return;
+    if (!notifyGraphIntegrityVerifier(repoId)) {
+      // A quiesced/stopped verifier or synchronous foreground owner cannot be
+      // awaited through the worker map. Its caller owns the lifecycle.
+      return;
+    }
+  }
+}
+
+/**
  * Prevent verifier admission while a repository crosses a destructive lifecycle
  * boundary. The block is installed before cancellation so a captured recovery
  * sweep cannot recreate the worker after cancellation completes.

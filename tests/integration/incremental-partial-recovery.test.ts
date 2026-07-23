@@ -158,7 +158,9 @@ describe("incremental index partial-run recovery", () => {
   });
 
   it("rejects no-op recovery when the latest integrity baseline is missing", async () => {
-    const full = await indexRepo(REPO_ID, "full");
+    const full = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     assert.ok(full.versionId.length > 0);
     assert.equal(
       await getScipIngestionRecord(await getLadybugConn(), REPO_ID, "index.scip"),
@@ -174,7 +176,7 @@ describe("incremental index partial-run recovery", () => {
     assert.equal(await getDerivedState(REPO_ID), null);
     await assert.rejects(
       indexRepo(REPO_ID, "incremental"),
-      /Incremental indexing requires a verified graph integrity baseline.*full/i,
+      /Incremental indexing requires a verified graph integrity baseline.*--safe-rebuild/i,
     );
     assert.equal(
       (await ladybugDb.getLatestVersion(await getLadybugConn(), REPO_ID))?.versionId,
@@ -188,7 +190,9 @@ describe("incremental index partial-run recovery", () => {
   });
 
   it("repairs only missing file summaries during no-op incremental recovery", async () => {
-    await indexRepo(REPO_ID, "full");
+    await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     const conn = await getLadybugConn();
     const summaries = await ladybugDb.queryAll<{
       fileId: string;

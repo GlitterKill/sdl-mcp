@@ -129,4 +129,19 @@ describe("sync path regressions", () => {
     assert.equal(pullResult.artifactId, exportResult.artifactId);
     assert.equal(pullResult.versionId, "v-sync-path");
   });
+
+  it("does not retry a populated graph when full fallback requires a safe rebuild", async () => {
+    const pullResult = await pullLatestState({
+      repoId,
+      fallbackToFullIndex: true,
+      maxRetries: 1,
+    });
+
+    assert.equal(pullResult.success, false);
+    assert.equal(pullResult.retryCount, 0);
+    assert.match(
+      pullResult.error ?? "",
+      /--safe-rebuild <absolute-new-path>/,
+    );
+  });
 });

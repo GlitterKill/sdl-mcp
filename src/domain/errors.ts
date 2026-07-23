@@ -31,11 +31,43 @@ export class DatabaseError extends Error {
   }
 }
 
+/** Permanent evidence that the physical graph cannot safely accept writes. */
+export class StorageIntegrityError extends DatabaseError {
+  constructor(message: string) {
+    super(message);
+    this.name = "StorageIntegrityError";
+  }
+}
+
 export class IndexError extends Error {
   readonly code = ErrorCode.INDEX_ERROR;
   constructor(message: string) {
     super(message);
     this.name = "IndexError";
+  }
+}
+
+/** A destructive full refresh was refused on an active populated database. */
+export class SafeRebuildRequiredError extends IndexError {
+  constructor(message: string) {
+    super(message);
+    this.name = "SafeRebuildRequiredError";
+  }
+}
+
+/** A fresh rebuild candidate did not pass the stopped, post-reopen gates. */
+export class SafeRebuildValidationError extends IndexError {
+  constructor(message: string) {
+    super(message);
+    this.name = "SafeRebuildValidationError";
+  }
+}
+
+/** The current graph version does not have a verified incremental baseline. */
+export class GraphIntegrityBaselineError extends IndexError {
+  constructor(message: string) {
+    super(message);
+    this.name = "GraphIntegrityBaselineError";
   }
 }
 

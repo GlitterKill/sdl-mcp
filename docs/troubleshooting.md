@@ -133,11 +133,12 @@ sdl-mcp tool repo.status --repo-id <repo-id>
 Check `derivedState.stale`, the dirty flags, `derivedState.lastError`, and
 `derivedState.nextBestAction`. For stale graph-derived state from an interrupted
 run, the normal recovery is `sdl.index.refresh` with `mode: "incremental"`; use
-a full refresh if stale graph flags remain. Semantic-only dirty flags are not
-enqueued into startup recovery and remain deferred until semantic refresh work
-clears them. Increase `SDL_DERIVED_REFRESH_TIMEOUT_MS` only when startup
-recovery is legitimately long-running. If it repeatedly times out at the same
-phase, treat that as an indexing or LadybugDB contention issue first.
+a stopped `index --force --safe-rebuild` if stale graph flags remain.
+Semantic-only dirty flags are not enqueued into startup recovery and remain
+deferred until semantic refresh work clears them. Increase
+`SDL_DERIVED_REFRESH_TIMEOUT_MS` only when startup recovery is legitimately
+long-running. If it repeatedly times out at the same phase, treat that as an
+indexing or LadybugDB contention issue first.
 
 For tool dispatch stalls, inspect the warning fields in the log. When
 `indexingActive` is `true`, SDL-MCP intentionally narrows foreground tool
@@ -190,9 +191,60 @@ Recovery:
 - Or call `sdl.index.refresh` with `incremental`
 - Enable watcher mode if desired (`index --watch`)
 
+### Graph Integrity or Physical Symbol Failure
+
+Treat physical Symbol identity failures and current-revision graph-integrity
+failures as storage incidents. Repeated refresh attempts cannot repair a
+partially committed graph and can destroy useful forensic evidence.
+
+Common symptoms include:
+
+- a physical Symbol count that exceeds the distinct `symbolId` count
+- a primary-key or foreign-key failure during provider or legacy fallback work
+- equal expected and actual graph counts with a different fileless digest
+- a populated full refresh that reports `SafeRebuildRequiredError`
+- a watcher that becomes stale after a permanent integrity failure
+
+Use this recovery sequence:
+
+1. Stop every SDL-MCP process that can own the active graph.
+2. Resolve the effective config and graph paths with `sdl-mcp info`. Check
+   `SDL_GRAPH_DB_DIR`, `SDL_GRAPH_DB_PATH`, and `SDL_DB_PATH` as well as
+   `graphDatabase.path`.
+3. Copy the active `.lbug` file and every discovered WAL or checkpoint sidecar
+   into a separate quarantine directory. Record hashes before recovery.
+4. Choose an absolute candidate path that does not exist, then run:
+
+   ```bash
+   sdl-mcp index --force --safe-rebuild /absolute/path/to/recovered-graph.lbug
+   ```
+
+5. Accept the candidate only when the command reports successful validation
+   after checkpoint, close, and reopen for every configured repository.
+6. Keep SDL-MCP stopped while you update the config, launcher, and environment
+   overrides to the same candidate path. Retain the old database family for
+   rollback.
+7. Restart SDL-MCP and check `sdl.repo.status`, Symbol lookup, graph retrieval,
+   and enabled FTS for every configured repository.
+
+The pidfile check detects supported SDL-MCP owners. It cannot detect an
+unrelated program that opened LadybugDB directly, so you must stop that owner
+before the safe rebuild. The command retains a partial or invalid candidate for
+diagnosis and never changes the active database or configuration.
+
+Saved-file reconciliation does not require routine full refreshes. The patch
+transaction writes graph rows, canonical dependency placeholders, manifest
+changes, and the new integrity revision together. The background verifier
+coalesces rapid revisions, recovers a lost wakeup, and keeps graph reads
+available while the current revision is `verifying`. Permanent storage or
+baseline failures mark the watcher stale without starting a refresh retry loop.
+
 ### After Upgrading SDL-MCP
 
-If you see errors that say a database is "not compatible with the current graph engine," delete the existing `.lbug` database directory and re-run indexing. Migrating older graph databases in-place is not supported.
+If you see errors that say a database is "not compatible with the current graph
+engine," stop SDL-MCP and use the safe-rebuild sequence above. Do not delete the
+existing database until the replacement has passed post-reopen and live
+validation.
 
 ### Watcher Failure Modes
 
@@ -300,8 +352,8 @@ live outside those defaults.
 - Cause: a previous SDL-MCP process crashed without releasing the lock, or another process has the DB open
 - Resolution:
   - ensure no other `sdl-mcp serve` or `sdl-mcp index` process is running
-  - delete the lock file inside the `.lbug` database directory (the directory named in your `graphDatabase.path` config), then restart
-  - if the database is corrupted, delete the entire `.lbug` directory and re-run `sdl-mcp index`
+  - confirm the recorded owner process is no longer alive before removing a stale lock
+  - if storage integrity is uncertain, quarantine the database family and use `index --force --safe-rebuild` instead of deleting or reindexing it in place
 
 #### Concurrent access errors
 
@@ -340,7 +392,8 @@ live outside those defaults.
 - Cause: LadybugDB schema version changed between SDL-MCP releases in a way the current build cannot migrate automatically
 - Resolution:
   - restart SDL-MCP once to allow any pending forward migrations to run
-  - if the database is still reported as incompatible, delete the `.lbug` database directory and re-run `sdl-mcp index` to rebuild from source
+  - if the database is still reported as incompatible, keep it stopped and use `index --force --safe-rebuild` to create and validate a replacement
+  - retain the old database family until the replacement passes live validation
 
 ### Semantic / Embedding Setup Issues
 

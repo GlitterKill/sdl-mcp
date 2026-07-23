@@ -33,7 +33,7 @@ import {
   getSliceCacheStats,
   setCachedSlice,
 } from "../../dist/graph/sliceCache.js";
-import { indexRepo } from "../../dist/indexer/indexer.js";
+import { indexRepo as runIndexRepo } from "../../dist/indexer/indexer.js";
 import { processWatchedFileChange } from "../../dist/indexer/watcher.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
 import {
@@ -47,6 +47,22 @@ const RELEASE_SCALE_SYMBOL_COUNT = 2_112;
 const RELEASE_SCALE_PROVIDER_ID = "release-scale-scip";
 const RELEASE_SCALE_REL_PATH = "src/index.ts";
 const RELEASE_SCALE_NAME_COLUMN = 16;
+
+// Every full build in this file targets a per-test disposable database.
+const indexRepo: typeof runIndexRepo = (
+  repoId,
+  mode,
+  onProgress,
+  signal,
+  options,
+) =>
+  runIndexRepo(
+    repoId,
+    mode,
+    onProgress,
+    signal,
+    mode === "full" ? { ...options, isolatedRebuild: true } : options,
+  );
 
 describe("provider-first indexRepo fallback", () => {
   const previousConfig = process.env.SDL_CONFIG;
@@ -147,7 +163,10 @@ describe("provider-first indexRepo fallback", () => {
         return result;
       },
       async patchSavedFileFn() {
-        throw new Error("file was deleted");
+        throw Object.assign(new Error("file was deleted"), {
+          code: "ENOENT",
+          path: deletedPath,
+        });
       },
     });
     assert.ok(result);

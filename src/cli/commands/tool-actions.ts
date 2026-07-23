@@ -878,7 +878,7 @@ const indexRefresh: CliActionDefinition = {
   ],
   examples: [
     "sdl-mcp tool index.refresh --repo-id my-repo --mode incremental",
-    'sdl-mcp tool index.refresh --repo-id my-repo --mode full --reason "schema change"',
+    'sdl-mcp tool index.refresh --repo-id my-repo --mode incremental --reason "manual reconciliation"',
   ],
 };
 

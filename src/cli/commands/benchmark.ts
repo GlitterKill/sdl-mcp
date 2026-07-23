@@ -6,9 +6,13 @@ import type { BenchmarkOptions } from "../types.js";
 import { writeUtf8Output } from "../../benchmark/output-file.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
-import { initGraphDb } from "../../db/initGraphDb.js";
+import {
+  initGraphDb,
+  resolveGraphDbPath,
+} from "../../db/initGraphDb.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
+import { SafeRebuildRequiredError } from "../../domain/errors.js";
 import type { RepoConfig } from "../../config/types.js";
 import { indexRepo } from "../../indexer/indexer.js";
 import { buildSlice } from "../../graph/slice.js";
@@ -97,6 +101,23 @@ interface BenchmarkCIResult {
   };
 }
 
+export function validateFreshBenchmarkDatabasePath(
+  graphDbPath: string,
+  pathExists: (path: string) => boolean = existsSync,
+): void {
+  const existingEntry = [
+    graphDbPath,
+    `${graphDbPath}.wal`,
+    `${graphDbPath}.wal.checkpoint`,
+  ].find(pathExists);
+  if (existingEntry) {
+    throw new SafeRebuildRequiredError(
+      "benchmark:ci requires a fresh dedicated graph path; refusing to reuse " +
+        `the existing graph family entry ${existingEntry}`,
+    );
+  }
+}
+
 export const BENCHMARK_SCOPE_IGNORE_PATTERNS = [
   // Test files
   "**/tests/**",
@@ -182,7 +203,15 @@ async function collectBenchmarkMetrics(
 
   if (!skipIndexing) {
     const indexStart = performance.now();
-    const indexResult = await indexRepo(repoId, "full");
+    // benchmark:ci proves the database family is new before opening it, so
+    // repeated smoothing samples may safely rebuild the disposable graph.
+    const indexResult = await indexRepo(
+      repoId,
+      "full",
+      undefined,
+      undefined,
+      { isolatedRebuild: true },
+    );
     indexTimeMs = performance.now() - indexStart;
     filesIndexed = indexResult.filesProcessed;
   }
@@ -387,6 +416,9 @@ export async function benchmarkCICommand(
     console.error(`Repository not found: ${options.repoId || "default"}`);
     return 1;
   }
+  validateFreshBenchmarkDatabasePath(
+    resolveGraphDbPath(config, configPath),
+  );
 
   const repoId = repoConfig.repoId;
   const configuredRepoPath = resolve(repoConfig.rootPath);

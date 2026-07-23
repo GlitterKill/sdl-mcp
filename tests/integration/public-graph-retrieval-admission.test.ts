@@ -86,7 +86,7 @@ function assertUnavailable(response: ErrorEnvelope, label: string): void {
   assert.equal(response.structuredContent?.error?.code, "INDEX_ERROR", label);
   assert.match(
     response.structuredContent?.error?.message ?? "",
-    /Run sdl\.index\.refresh with mode:"full"/,
+    /--safe-rebuild <absolute-new-path>/,
     label,
   );
   assert.doesNotMatch(
@@ -110,7 +110,7 @@ function assertRepositoryNotFound(
   );
   assert.doesNotMatch(
     response.structuredContent?.error?.message ?? "",
-    /Graph retrieval|sdl\.index\.refresh|mode:"full"/,
+    /Graph retrieval|sdl\.index\.refresh|--safe-rebuild/,
     label,
   );
 }
@@ -670,7 +670,7 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     });
     assert.match(
       status.derivedState?.nextBestAction ?? "",
-      /mode:"full"/i,
+      /--safe-rebuild <absolute-new-path>/i,
     );
     assert.match(status.derivedState?.nextBestAction ?? "", /unverified/i);
     assert.doesNotMatch(
@@ -845,7 +845,12 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
         name: "sdl.context",
         arguments: { taskText: "graph" },
       })) as ErrorEnvelope;
-      assertUnavailable(response, "missing repoId");
+      assert.equal(response.isError, true, "missing repoId");
+      assert.equal(response.structuredContent?.error?.code, "INDEX_ERROR", "missing repoId");
+      assert.equal(
+        response.structuredContent?.error?.message,
+        "Graph retrieval requires an explicit repoId. Provide repoId.",
+      );
       assert.equal(dispatched, false);
     } finally {
       await isolatedClient.close();

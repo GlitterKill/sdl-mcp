@@ -126,6 +126,77 @@ describe("LadybugDB Symbol Queries", () => {
   });
 
   it(
+    "reports global physical Symbol identity health",
+    { skip: !ladybugAvailable },
+    async () => {
+      const empty = await queries.readPhysicalSymbolUniqueness(
+        conn as unknown as import("kuzu").Connection,
+      );
+      assert.deepStrictEqual(empty, {
+        physicalTotal: 0,
+        distinctTotal: 0,
+        duplicateSamples: [],
+      });
+
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "physical-identity-symbol",
+        repoId,
+        fileId,
+        kind: "function",
+        name: "healthy",
+        exported: false,
+        visibility: null,
+        language: "typescript",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 1,
+        rangeEndCol: 1,
+        astFingerprint: "healthy",
+        signatureJson: null,
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-07-23T00:00:00Z",
+      });
+
+      const healthy = await queries.assertPhysicalSymbolUniqueness(
+        conn as unknown as import("kuzu").Connection,
+      );
+      assert.deepStrictEqual(healthy, {
+        physicalTotal: 1,
+        distinctTotal: 1,
+        duplicateSamples: [],
+      });
+    },
+  );
+
+  it("raises a typed permanent error for mismatched physical Symbol counts", async () => {
+    const { StorageIntegrityError } =
+      await import("../../dist/domain/errors.js");
+    const symbolQueries =
+      await import("../../dist/db/ladybug-symbols.js");
+
+    assert.throws(
+      () =>
+        symbolQueries.assertPhysicalSymbolUniquenessSnapshot({
+          physicalTotal: 5,
+          distinctTotal: 3,
+          duplicateSamples: [
+            { symbolId: "a", copies: 2 },
+            { symbolId: "b", copies: 2 },
+          ],
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof StorageIntegrityError);
+        assert.match(error.message, /5 physical Symbol nodes/);
+        assert.match(error.message, /3 distinct symbolId values/);
+        assert.match(error.message, /a \(2\), b \(2\)/);
+        return true;
+      },
+    );
+  });
+
+  it(
     "upsertSymbol/getSymbol round-trip with JSON fields",
     { skip: !ladybugAvailable },
     async () => {

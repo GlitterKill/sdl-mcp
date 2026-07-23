@@ -8,6 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
+import { StorageIntegrityError } from "../domain/errors.js";
+import { logger } from "../util/logger.js";
+import { normalizePath } from "../util/paths.js";
 import {
   exec,
   execDdl,
@@ -18,10 +21,8 @@ import {
   assertSafeInt,
   withTransaction,
 } from "./ladybug-core.js";
-import { logger } from "../util/logger.js";
-import { normalizePath } from "../util/paths.js";
 import {
-  classifyDependencyTarget,
+  canonicalDependencyPlaceholderSymbol,
   type SymbolPlaceholderMeta,
   type SymbolStatus,
 } from "./symbol-placeholders.js";
@@ -37,6 +38,102 @@ const CSV_ARRAY_NULL = Symbol("symbolCsvArrayNull");
 const DEFAULT_SYMBOL_SNAPSHOT_PAGE_SIZE = 32_768;
 const MAX_SYMBOL_SNAPSHOT_PAGE_SIZE = 65_536;
 export const LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT = 2_048;
+const DEFAULT_PHYSICAL_SYMBOL_DUPLICATE_SAMPLE_LIMIT = 20;
+const MAX_PHYSICAL_SYMBOL_DUPLICATE_SAMPLE_LIMIT = 100;
+
+export interface PhysicalSymbolDuplicateSample {
+  symbolId: string;
+  copies: number;
+}
+
+export interface PhysicalSymbolUniquenessSnapshot {
+  physicalTotal: number;
+  distinctTotal: number;
+  duplicateSamples: PhysicalSymbolDuplicateSample[];
+}
+
+/**
+ * Convert a physical Symbol scan into a fail-closed storage health decision.
+ *
+ * This is intentionally global: Symbol primary keys are global, and repo/file
+ * relationship traversals can hide disconnected or cross-repo duplicate rows.
+ */
+export function assertPhysicalSymbolUniquenessSnapshot(
+  snapshot: PhysicalSymbolUniquenessSnapshot,
+): PhysicalSymbolUniquenessSnapshot {
+  if (snapshot.physicalTotal === snapshot.distinctTotal) {
+    return snapshot;
+  }
+
+  const renderedSamples = snapshot.duplicateSamples
+    .map(({ symbolId, copies }) => `${symbolId} (${copies})`)
+    .join(", ");
+  throw new StorageIntegrityError(
+    `LadybugDB contains ${snapshot.physicalTotal} physical Symbol nodes but ` +
+      `only ${snapshot.distinctTotal} distinct symbolId values. ` +
+      `Refusing graph mutation because primary-key identity is incoherent.` +
+      (renderedSamples ? ` Duplicate sample: ${renderedSamples}.` : ""),
+  );
+}
+
+export async function readPhysicalSymbolUniqueness(
+  conn: Connection,
+  duplicateSampleLimit = DEFAULT_PHYSICAL_SYMBOL_DUPLICATE_SAMPLE_LIMIT,
+): Promise<PhysicalSymbolUniquenessSnapshot> {
+  const counts = await querySingle<{
+    physicalTotal: unknown;
+    distinctTotal: unknown;
+  }>(
+    conn,
+    `MATCH (s:Symbol)
+     RETURN count(s) AS physicalTotal,
+            count(DISTINCT s.symbolId) AS distinctTotal`,
+  );
+  const physicalTotal = toNumber(counts?.physicalTotal ?? 0);
+  const distinctTotal = toNumber(counts?.distinctTotal ?? 0);
+  if (physicalTotal === distinctTotal) {
+    return { physicalTotal, distinctTotal, duplicateSamples: [] };
+  }
+
+  const limit = Math.max(
+    1,
+    Math.min(
+      MAX_PHYSICAL_SYMBOL_DUPLICATE_SAMPLE_LIMIT,
+      Math.trunc(duplicateSampleLimit),
+    ),
+  );
+  const duplicateRows = await queryAll<{
+    symbolId: string;
+    copies: unknown;
+  }>(
+    conn,
+    `MATCH (s:Symbol)
+     WITH s.symbolId AS symbolId, count(*) AS copies
+     WHERE copies > 1
+     RETURN symbolId, copies
+     ORDER BY symbolId
+     LIMIT $limit`,
+    { limit },
+  );
+
+  return {
+    physicalTotal,
+    distinctTotal,
+    duplicateSamples: duplicateRows.map((row) => ({
+      symbolId: row.symbolId,
+      copies: toNumber(row.copies),
+    })),
+  };
+}
+
+export async function assertPhysicalSymbolUniqueness(
+  conn: Connection,
+  duplicateSampleLimit = DEFAULT_PHYSICAL_SYMBOL_DUPLICATE_SAMPLE_LIMIT,
+): Promise<PhysicalSymbolUniquenessSnapshot> {
+  return assertPhysicalSymbolUniquenessSnapshot(
+    await readPhysicalSymbolUniqueness(conn, duplicateSampleLimit),
+  );
+}
 
 export async function countScipProviderSymbols(
   conn: Connection,
@@ -685,6 +782,8 @@ export interface DependencyPlaceholderNormalizeResult {
 
 export interface DependencyPlaceholderNormalizeOptions {
   fileIds?: ReadonlySet<string>;
+  /** Limit fileless repairs to placeholders touched by the current save. */
+  symbolIds?: ReadonlySet<string>;
   /**
    * Older migration fixtures predate some canonical Symbol columns. Runtime
    * finalization keeps this enabled; migrations can opt out until DDL catches
@@ -700,6 +799,7 @@ export async function normalizeDependencyPlaceholderSymbols(
 ): Promise<DependencyPlaceholderNormalizeResult> {
   const hasExternalColumn = await symbolExternalColumnExists(conn);
   const fileIds = options.fileIds ? [...options.fileIds] : undefined;
+  const symbolIds = options.symbolIds ? [...options.symbolIds] : undefined;
   const normalizeStableFields = options.normalizeStableFields ?? true;
   const fileBackedRepaired = await countFileBackedDependencyMetadataRepairs(
     conn,
@@ -721,7 +821,7 @@ export async function normalizeDependencyPlaceholderSymbols(
       );
     }
   }
-  const rows = await queryAll<{
+  const rows = symbolIds?.length === 0 ? [] : await queryAll<{
     symbolId: string;
     symbolStatus: string | null;
     placeholderKind: string | null;
@@ -742,7 +842,8 @@ export async function normalizeDependencyPlaceholderSymbols(
     conn,
     `MATCH (s:Symbol {repoId: $repoId})
      WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
-       AND s.symbolId STARTS WITH 'unresolved:'
+        AND s.symbolId STARTS WITH 'unresolved:'
+       ${symbolIds ? "AND s.symbolId IN $symbolIds" : ""}
      RETURN s.symbolId AS symbolId,
             s.symbolStatus AS symbolStatus,
             s.placeholderKind AS placeholderKind,
@@ -767,7 +868,7 @@ export async function normalizeDependencyPlaceholderSymbols(
             s.astFingerprint AS astFingerprint`
                 : ""
             }`,
-    { repoId },
+    { repoId, symbolIds },
   );
   const repairs: Array<{
     symbolId: string;
@@ -789,43 +890,27 @@ export async function normalizeDependencyPlaceholderSymbols(
   }> = [];
 
   for (const row of rows) {
-    const meta = classifyDependencyTarget(row.symbolId);
-    const external = meta.symbolStatus === "external";
+    const canonical = canonicalDependencyPlaceholderSymbol(row.symbolId);
     if (
-      row.symbolStatus !== meta.symbolStatus ||
-      (row.placeholderKind ?? "") !== (meta.placeholderKind ?? "") ||
-      (row.placeholderTarget ?? "") !== (meta.placeholderTarget ?? "") ||
-      (hasExternalColumn && toBoolean(row.external) !== external) ||
+      row.symbolStatus !== canonical.symbolStatus ||
+      (row.placeholderKind ?? "") !== canonical.placeholderKind ||
+      (row.placeholderTarget ?? "") !== canonical.placeholderTarget ||
+      (hasExternalColumn && toBoolean(row.external) !== canonical.external) ||
       (normalizeStableFields &&
-        (row.name !== row.symbolId ||
-          row.kind !== "unknown" ||
-          row.language !== "unknown" ||
+        (row.name !== canonical.name ||
+          row.kind !== canonical.kind ||
+          row.language !== canonical.language ||
           !isPersistedZero(row.rangeStartLine) ||
           !isPersistedZero(row.rangeStartCol) ||
           !isPersistedZero(row.rangeEndLine) ||
           !isPersistedZero(row.rangeEndCol) ||
           row.signatureJson !== null ||
-          row.source !== "treesitter" ||
+          row.source !== canonical.source ||
           row.scipSymbol !== null ||
-          row.astFingerprint !== row.symbolId))
+          row.astFingerprint !== canonical.astFingerprint))
     ) {
       repairs.push({
-        symbolId: row.symbolId,
-        symbolStatus: meta.symbolStatus,
-        placeholderKind: meta.placeholderKind ?? "",
-        placeholderTarget: meta.placeholderTarget ?? "",
-        external,
-        name: row.symbolId,
-        kind: "unknown",
-        language: "unknown",
-        rangeStartLine: 0,
-        rangeStartCol: 0,
-        rangeEndLine: 0,
-        rangeEndCol: 0,
-        signatureJson: null,
-        source: "treesitter",
-        scipSymbol: null,
-        astFingerprint: row.symbolId,
+        ...canonical,
       });
     }
   }

@@ -129,12 +129,29 @@ Index configured repository data into the ledger.
 ```bash
 sdl-mcp index --repo-id my-repo
 sdl-mcp index --watch
+sdl-mcp index --force --safe-rebuild /absolute/path/to/new-graph.lbug
 ```
 
 Key options:
 
 - `--repo-id <ID>`
 - `-w, --watch`
+- `-f, --force` (requests a full index)
+- `--safe-rebuild <PATH>` (requires `--force`; builds every configured repository in a new database)
+
+SDL-MCP refuses an in-place full refresh when a populated repository already
+exists in the active graph. Use `--safe-rebuild` with a new absolute path
+instead. The command requires a stopped SDL-MCP owner, rejects `--watch` and
+`--repo-id`, retains a failed candidate, and never opens or changes the active
+database.
+
+A successful safe rebuild waits for graph-integrity verification, checkpoints
+and closes the candidate, reopens it, and validates repository membership,
+physical Symbol identity, canonical string columns, dependency endpoints, and
+enabled Symbol FTS. It leaves the candidate closed and does not update your
+configuration. Keep SDL-MCP stopped while you switch `graphDatabase.path` or
+`SDL_GRAPH_DB_PATH`, retain the old database family for rollback, and restart
+only after both path sources agree.
 
 ### `sdl-mcp serve`
 
@@ -213,6 +230,9 @@ Key options:
 - `--fallback` (default: `true`)
 - `--retries <NUMBER>` (default: `3`)
 
+Permanent storage-integrity and populated-full-refresh refusals stop immediately
+without consuming the transient retry budget.
+
 ### `sdl-mcp benchmark:ci`
 
 Run benchmark checks in CI.
@@ -235,6 +255,9 @@ Notes:
 
 - Edge-accuracy regression checks run as part of `benchmark:ci` and compare against `scripts/benchmark/edge-accuracy-baseline.json`.
 - Benchmark repo scope can be pinned via `scripts/benchmark/phase-a-benchmark-lock.json`.
+- Indexing benchmarks require a fresh dedicated graph path. The command refuses
+  an existing database or WAL family; repeated smoothing samples then rebuild
+  only that process-owned disposable graph.
 
 ### `sdl-mcp summary`
 

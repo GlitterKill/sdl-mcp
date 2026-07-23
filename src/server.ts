@@ -688,7 +688,7 @@ export class MCPServer {
               if (graphAdmission.mode === "central") {
                 if (!graphAdmission.repoId) {
                   throw new IndexError(
-                    'Graph retrieval requires an explicit repoId. Provide repoId. Run sdl.index.refresh with mode:"full" if the graph must be rebuilt and verified.',
+                    "Graph retrieval requires an explicit repoId. Provide repoId.",
                   );
                 }
                 const conn = await getLadybugConn();

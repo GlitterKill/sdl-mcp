@@ -21,6 +21,7 @@ import type {
   IndexProgress,
   IndexProgressSubstage,
 } from "../../indexer/indexer.js";
+import { assertIndexStoragePreflight } from "../../indexer/index-storage-preflight.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import {
   getLadybugConn,
@@ -40,6 +41,10 @@ import {
   type RuntimeIdentity,
 } from "../../util/runtime-identity.js";
 import { normalizePath } from "../../util/paths.js";
+import {
+  runSafeRebuild,
+  validateSafeRebuildRequest,
+} from "./index-safe-rebuild.js";
 
 // ---------------------------------------------------------------------------
 // Progress renderer
@@ -2224,6 +2229,58 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
 
   // Check if an HTTP server is already running on this database.
   const graphDbPath = resolveGraphDbPath(config, configPath);
+  if (options.safeRebuildPath) {
+    const request = validateSafeRebuildRequest({
+      options,
+      activeGraphDbPath: graphDbPath,
+    });
+    console.log(request.externalOwnerWarning);
+    console.log(`Active graph DB (read-only): ${normalizePath(graphDbPath)}`);
+    console.log(
+      `Candidate graph DB: ${normalizePath(request.targetGraphDbPath)}`,
+    );
+
+    let progressState = createProgressState();
+    const result = await runSafeRebuild({
+      options,
+      config,
+      configPath,
+      activeGraphDbPath: graphDbPath,
+      onRepoStart: (repoId, rootPath) => {
+        progressState = createProgressState();
+        console.log(`\nBuilding ${repoId} (${rootPath}) [mode=isolated-full]...`);
+      },
+      onProgress: (_repoId, progress) => {
+        renderIndexProgress(progressState, progress);
+      },
+      onRepoComplete: (repoId, stats) => {
+        finishProgress(progressState);
+        console.log(
+          `  ${repoId}: ${stats.filesProcessed} files, ${stats.symbolsIndexed} symbols, ${stats.edgesCreated} edges`,
+        );
+      },
+    });
+
+    console.log(
+      `\n✓ Safe rebuild candidate validated after checkpoint, close, and reopen: ${normalizePath(result.targetGraphDbPath)}`,
+    );
+    console.log(
+      `  Repositories: ${result.validation.repoIds.join(", ")}`,
+    );
+    console.log(
+      `  Physical Symbol identity: ${result.validation.physicalSymbolTotal}/${result.validation.distinctSymbolTotal} unique`,
+    );
+    if (result.validation.ftsIndexName) {
+      console.log(
+        `  Symbol FTS: ${result.validation.ftsIndexName} present and queryable`,
+      );
+    }
+    console.log(
+      "  Activation is intentionally manual: keep SDL-MCP stopped, switch the configured graph path, then restart and verify.",
+    );
+    return;
+  }
+
   const existing = findExistingProcess(graphDbPath);
 
   const canDelegate = canDelegateIndexToServer(
@@ -2333,16 +2390,6 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     const conn = await getLadybugConn();
 
     const existingRepo = await ladybugDb.getRepo(conn, repo.repoId);
-
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.upsertRepo(wConn, {
-        repoId: repo.repoId,
-        rootPath: repo.rootPath,
-        configJson: JSON.stringify(repo),
-        createdAt: existingRepo?.createdAt ?? getCurrentTimestamp(),
-      });
-    });
-
     const directMode = options.force || !existingRepo ? "full" : "incremental";
 
     // Direct-path display reflects the actual mode that will run — fresh
@@ -2359,6 +2406,19 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     }
 
     try {
+      // Keep the CLI's registration write behind the same fail-closed gate as
+      // indexRepo. The indexer repeats this check after admission so a state
+      // change between registration and provider work still fails safely.
+      await assertIndexStoragePreflight(conn, repo.repoId, directMode);
+      await withWriteConn(async (wConn) => {
+        await ladybugDb.upsertRepo(wConn, {
+          repoId: repo.repoId,
+          rootPath: repo.rootPath,
+          configJson: JSON.stringify(repo),
+          createdAt: existingRepo?.createdAt ?? getCurrentTimestamp(),
+        });
+      });
+
       // Shared progress state across indexer + SCIP so stage transitions
       // between them (e.g. embeddings -> SCIP externals) produce a clean
       // newline boundary in TTY mode.

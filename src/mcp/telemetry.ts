@@ -4,7 +4,10 @@ import type { RepoId, SymbolId } from "../domain/types.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { getActivePostIndexSession } from "../db/write-session.js";
-import { bufferAuditEvent } from "./audit-buffer.js";
+import {
+  bufferAuditEvent,
+  isExplicitAuditBufferingActive,
+} from "./audit-buffer.js";
 import { logger } from "../util/logger.js";
 import { getObservabilityTap } from "../observability/event-tap.js";
 import { getCurrentTimestamp } from "../util/time.js";
@@ -410,7 +413,7 @@ async function recordAuditEvent(event: {
   // here would queue for the entire session duration and likely hit
   // queueTimeoutMs. The session-end hook drains the buffer using the
   // session's conn so audits land before the next writer can interleave.
-  if (getActivePostIndexSession()) {
+  if (getActivePostIndexSession() || isExplicitAuditBufferingActive()) {
     if (!bufferAuditEvent(row)) {
       // Buffer full; surface the drop synchronously so the first event is
       // never silent. audit-buffer's own per-N log won't fire until N drops

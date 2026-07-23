@@ -674,6 +674,75 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
+    "insertEdge does not downgrade a file-backed target from unresolved metadata",
+    { skip: !ladybugAvailable },
+    async () => {
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'edge-to'}),
+               (f:File {fileId: '${fileId}'})
+         SET s.repoId = '${repoId}',
+             s.external = false,
+             s.symbolStatus = 'real',
+             s.placeholderKind = '',
+             s.placeholderTarget = '',
+             s.name = 'realTarget',
+             s.kind = 'function',
+             s.language = 'ts',
+             s.rangeStartLine = 4,
+             s.rangeStartCol = 2,
+             s.rangeEndLine = 6,
+             s.rangeEndCol = 1,
+             s.signatureJson = '{"text":"function realTarget"}',
+             s.source = 'treesitter',
+             s.scipSymbol = NULL,
+             s.astFingerprint = 'real-target-fingerprint'
+         MERGE (s)-[:SYMBOL_IN_FILE]->(f)`,
+      );
+
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 0.5,
+        resolution: "unresolved",
+        provenance: "call:unresolved",
+        createdAt: "2026-07-23T00:00:00Z",
+        targetMeta: {
+          symbolStatus: "unresolved",
+          placeholderKind: "call",
+          placeholderTarget: "edge-to",
+        },
+      });
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'edge-to'})
+         RETURN coalesce(s.external, false) AS external,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget,
+                s.name AS name,
+                s.kind AS kind,
+                s.language AS language,
+                s.astFingerprint AS astFingerprint`,
+      );
+      const row = await result.getNext();
+      result.close();
+
+      assert.strictEqual(row.external, false);
+      assert.strictEqual(row.symbolStatus, "real");
+      assert.strictEqual(row.placeholderKind, "");
+      assert.strictEqual(row.placeholderTarget, "");
+      assert.strictEqual(row.name, "realTarget");
+      assert.strictEqual(row.kind, "function");
+      assert.strictEqual(row.language, "ts");
+      assert.strictEqual(row.astFingerprint, "real-target-fingerprint");
+    },
+  );
+
+  it(
     "insertEdges preserves existing external metadata on real target IDs",
     { skip: !ladybugAvailable },
     async () => {

@@ -2,7 +2,10 @@ import { createHash, type Hash } from "node:crypto";
 
 import type { Connection } from "kuzu";
 
-import { DatabaseError } from "../../domain/errors.js";
+import {
+  DatabaseError,
+  GraphIntegrityBaselineError,
+} from "../../domain/errors.js";
 import {
   advanceGraphIntegrityRevisionInTransaction,
   getDerivedState,
@@ -15,7 +18,9 @@ import {
   initializeGraphIntegrityVersionInTransaction,
   markUnrevisionedGraphIntegrityFailedIfVerifying,
 } from "../../db/ladybug-derived-state.js";
-import { classifyDependencyTarget } from "../../db/symbol-placeholders.js";
+import {
+  canonicalDependencyPlaceholderSymbol,
+} from "../../db/symbol-placeholders.js";
 import {
   getPersistedGraphIntegrityOtherRepoSymbolCount,
   getPersistedGraphIntegritySourceReferenceCounts,
@@ -53,7 +58,7 @@ const DIAGNOSTIC_STRING_LIMIT = 160;
 export const GRAPH_INTEGRITY_VERIFICATION_FAILURE =
   "Persisted graph integrity verification failed";
 const INCREMENTAL_BASELINE_ERROR =
-  'Incremental indexing requires a verified graph integrity baseline. Run sdl.index.refresh with mode:"full" first. If full verification also fails, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.';
+  "Incremental indexing requires a verified graph integrity baseline. Do not start a refresh loop; stop SDL-MCP and run `sdl-mcp index --force --safe-rebuild <absolute-new-path>` to build and validate a replacement.";
 const FILELESS_SENTINEL = "";
 interface ActiveGraphIntegrityVerification {
   versionId: string;
@@ -508,7 +513,7 @@ export class PersistedGraphIntegritySession {
         !state ||
         !graphIntegrityIsVerifiedForVersion(state, latestVersion.versionId)
       ) {
-        throw new Error(INCREMENTAL_BASELINE_ERROR);
+        throw new GraphIntegrityBaselineError(INCREMENTAL_BASELINE_ERROR);
       }
       baselineDigest = state.graphIntegrityDigest ?? undefined;
       baselinePruningSupported =
@@ -1087,7 +1092,7 @@ export async function verifyNoOpIncrementalGraphIntegrity(
     !graphIntegrityIsVerifiedForVersion(state, latestVersion.versionId) ||
     typeof state.graphIntegrityRevision !== "number"
   ) {
-    throw new Error(INCREMENTAL_BASELINE_ERROR);
+    throw new GraphIntegrityBaselineError(INCREMENTAL_BASELINE_ERROR);
   }
   const expectedRevision = state.graphIntegrityRevision;
 
@@ -1119,7 +1124,7 @@ export async function verifyNoOpIncrementalGraphIntegrity(
     ) ||
     stateAfterCapture.graphIntegrityDigest !== actual.digest
   ) {
-    throw new Error(INCREMENTAL_BASELINE_ERROR);
+    throw new GraphIntegrityBaselineError(INCREMENTAL_BASELINE_ERROR);
   }
   return latestVersion.versionId;
 }
@@ -1378,12 +1383,12 @@ export function createGraphIntegrityFilelessReferenceTuples(
       if (!existing && !symbol) {
         throw new Error("Graph integrity fileless canonical symbol is missing");
       }
-      const canonicalSymbolJson = existing
-        ? normalizeGraphIntegrityCanonicalSymbolJson(
+      const canonicalSymbolJson = symbol
+        ? serializeGraphIntegrityCanonicalSymbol(symbol)
+        : normalizeGraphIntegrityCanonicalSymbolJson(
             reference.filelessSymbolId,
-            existing.canonicalSymbolJson,
-          )
-        : serializeGraphIntegrityCanonicalSymbol(symbol!);
+            existing!.canonicalSymbolJson,
+          );
       return [
         reference.filelessSymbolId,
         canonicalSymbolJson,
@@ -1438,7 +1443,6 @@ export function createGraphIntegrityFilelessSymbols(rows: {
   symbols: readonly Pick<SymbolRow, "symbolId">[];
   externalSymbols: readonly ProviderFirstExternalSymbolRow[];
   edges: readonly EdgeRow[];
-  canonicalizeDependencyPlaceholders?: boolean;
 }): CanonicalSymbol[] {
   const fileBackedIds = new Set(rows.symbols.map((symbol) => symbol.symbolId));
   const fileless = new Map<string, CanonicalSymbol>();
@@ -1471,31 +1475,14 @@ export function createGraphIntegrityFilelessSymbols(rows: {
     ) {
       continue;
     }
-    // Finalization canonicalizes unresolved placeholders from their encoded ID,
-    // so stale resolver hints must not make the pre-write expectation diverge.
-    const metadata = edge.toSymbolId.startsWith("unresolved:")
-      ? classifyDependencyTarget(edge.toSymbolId)
-      : edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
-    if (metadata.symbolStatus === "real") continue;
-    const canonical = rows.canonicalizeDependencyPlaceholders ?? true;
+    const canonical = canonicalDependencyPlaceholderSymbol(
+      edge.toSymbolId,
+      edge.targetMeta,
+    );
+    if (canonical.symbolStatus === "real") continue;
     fileless.set(edge.toSymbolId, {
-      symbolId: edge.toSymbolId,
+      ...canonical,
       fileId: FILELESS_SENTINEL,
-      name: canonical ? edge.toSymbolId : "",
-      kind: canonical ? "unknown" : "",
-      language: canonical ? "unknown" : "",
-      rangeStartLine: 0,
-      rangeStartCol: 0,
-      rangeEndLine: 0,
-      rangeEndCol: 0,
-      signatureJson: null,
-      source: "treesitter",
-      scipSymbol: null,
-      astFingerprint: canonical ? edge.toSymbolId : "",
-      symbolStatus: metadata.symbolStatus,
-      external: metadata.symbolStatus === "external",
-      placeholderKind: metadata.placeholderKind ?? "",
-      placeholderTarget: metadata.placeholderTarget ?? "",
     });
   }
   return [...fileless.values()].sort((left, right) =>

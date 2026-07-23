@@ -131,7 +131,7 @@ The saved-file patch performs these steps:
 
 The foreground path must not call `capturePersistedGraphIntegrity()`. It must not wait for the background worker, and it must not fall back to synchronous verification.
 
-If the repository has no trusted manifest, the edit may still patch the graph, but SDL-MCP leaves integrity unverified and directs the user to run one full refresh. It must not self-certify by deriving both the expected and actual state from the same persisted rows.
+If the repository has no trusted manifest, the edit may still patch the graph, but SDL-MCP leaves integrity unverified. A new unindexed repository may run one incremental refresh; a populated graph requires stopped whole-database safe rebuild. It must not self-certify by deriving both the expected and actual state from the same persisted rows.
 
 ## Mutation ownership and Version coordination
 
@@ -143,11 +143,11 @@ Every production path that changes File, Symbol, or integrity-relevant placehold
 | Watcher save/checkpoint | Use the same saved-file patch path; do not maintain a parallel integrity implementation. |
 | File deletion or rename | Remove or move the file manifest, apply its fileless-reference delta, patch graph rows, and increment one revision atomically. |
 | Incremental `index.refresh` | Update all affected manifests inside the existing incremental integrity session and publish only after its current synchronous completion gate succeeds. |
-| Full provider/legacy index | Build a complete manifest from independent index output, verify it synchronously, and swap graph plus manifest during activation. |
+| Fresh full provider/legacy index | Build a complete manifest from independent index output and verify it synchronously in the fresh database. |
 | Provider reconciliation | Run through the owning incremental/full index transaction; direct provider graph writes must invalidate integrity if no expectation is available. |
 | Transaction rollback | Roll back graph rows, manifests, and revision together; do not notify the worker. |
 | Unregister | Cancel and await verification before deleting repository state. |
-| Unsupported/direct mutation | Invalidate integrity and require a full refresh. |
+| Unsupported/direct mutation | Invalidate integrity and require a stopped whole-database safe rebuild when the graph is populated. |
 
 Saved-file patches, incremental mutation, full-index activation, and unregister serialize their commit/activation phase through the same per-repository write-heavy lock. A shadow full index may build outside the lock, but activation must use the existing handoff protocol to replay committed live edits or abort when its recorded base Version/revision no longer matches. No edit parsed against one Version may commit after another Version becomes active.
 
@@ -230,7 +230,40 @@ Startup recovery finds repositories where `graphIntegrityState === "verifying"` 
 
 ### Full index, unregister, or shutdown
 
-These operations call a per-repository `cancelAndWait()` boundary. Cancellation rolls back an active read-only transaction, releases its connection lease in `finally`, and resolves only after no verifier is using repository state. Version and revision checks remain a second guard against late publication. A full index replaces the manifest atomically and establishes a verified initial revision for the new Version.
+These operations call a per-repository `cancelAndWait()` boundary. Cancellation rolls back an active read-only transaction, releases its connection lease in `finally`, and resolves only after no verifier is using repository state. Version and revision checks remain a second guard against late publication.
+
+A fresh first index establishes a verified initial revision for the new Version.
+SDL-MCP refuses a destructive full refresh against a populated active graph.
+Recovery builds every configured repository in a separate database, waits for
+verification, and validates the candidate again after checkpoint, close, and
+reopen.
+
+## Post-incident reconciliation hardening
+
+Saved-file reconciliation uses one canonical dependency-placeholder builder for
+both physical Symbol rows and fileless manifest tuples. The file write, Symbol
+and edge updates, touched-placeholder normalization, manifest delta, and
+revision advancement share one LadybugDB transaction. A touched canonical
+placeholder takes precedence over a stale manifest tuple, which prevents equal
+count and range bounds from hiding a fileless digest mismatch.
+
+Foreground save paths still return while the background verifier runs. A no-op
+incremental check waits for the useful per-repository worker to settle and
+recovers a durable pending revision if its in-process wakeup was lost. The
+waiter never cancels useful verification work.
+
+Watcher startup checks global physical Symbol uniqueness and the current
+verified baseline before it starts a provider. A saved-file patch falls back to
+one repository-wide incremental pass only when `ENOENT` or `ENOTDIR` identifies
+the watched path itself. Typed storage, baseline, verification, and provider
+replacement failures are permanent; they mark watcher health stale without a
+timer retry. Only known writer/read-pool and temporary filesystem failures use
+the bounded retry policy.
+
+Full refreshes also enter an explicit audit-buffering scope. The final drain
+runs through the serialized writer, and concurrent session, refresh, or
+shutdown drains share one promise tail. Audit writes therefore cannot open a
+competing write transaction during provider materialization or finalization.
 
 ## Migration
 
@@ -238,7 +271,10 @@ Add migration `m023` to the existing LadybugDB migration registry. The migration
 
 For existing repositories, `m023` writes the persisted representation of `unknown` to `graphIntegrityState` and leaves both revision fields and `graphIntegrityFilelessPruningSupported` unset because no independent manifest exists. It preserves the old Version and digest only as diagnostic history. The verified predicate requires both revision fields to be non-null, so equality between two unset values cannot certify the graph. The migration does not rebuild or reindex automatically.
 
-An existing repository without a complete manifest remains unverified until one full refresh builds and verifies the manifest. Startup and saved-file patches must not reconstruct a manifest from existing Symbol rows and immediately mark those same rows verified.
+An existing repository without a complete manifest remains unverified until a
+fresh first index or validated safe rebuild creates the manifest. Startup and
+saved-file patches must not reconstruct a manifest from existing Symbol rows
+and immediately mark those same rows verified.
 
 No public configuration flag or dual verification mode is added. Full indexing continues to use synchronous final verification because activation must publish only a complete verified graph.
 
@@ -253,9 +289,10 @@ No public configuration flag or dual verification mode is added. Full indexing c
 - Stale success and stale failure results do not change state.
 - A genuine current-revision mismatch publishes `failed`.
 - Restart recovery requeues an unfinished revision.
-- Full refresh atomically replaces the manifest and revision state.
+- A populated active full refresh fails before provider work or graph writes.
+- A whole-database candidate establishes and validates every configured repository after reopen.
 - Full index, unregister, and shutdown cancel pending work safely.
-- A missing manifest requires a full refresh and never self-certifies.
+- A missing manifest requires a fresh first index or stopped safe rebuild and never self-certifies.
 - Fileless placeholder/provider identity remains covered.
 - A changed file cannot reuse provider metadata when its pre-edit canonical digest disagrees with the trusted manifest.
 - Every mutation path in the ownership table either advances the manifest/revision atomically or invalidates integrity.

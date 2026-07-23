@@ -165,6 +165,11 @@ export function parseIndexOptions(
         throw new Error("--repo-id requires a value");
       }
       options.repoId = args[++i];
+    } else if (arg === "--safe-rebuild") {
+      if (i + 1 >= args.length) {
+        throw new Error("--safe-rebuild requires a value");
+      }
+      options.safeRebuildPath = args[++i];
     }
   }
 
@@ -179,6 +184,9 @@ export function parseIndexOptions(
   }
   if (typeof values["repo-id"] === "string") {
     options.repoId = values["repo-id"];
+  }
+  if (typeof values["safe-rebuild"] === "string") {
+    options.safeRebuildPath = values["safe-rebuild"];
   }
 
   return options;

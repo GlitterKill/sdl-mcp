@@ -22,6 +22,7 @@ import {
 import { withTransaction } from "../../dist/db/ladybug-core.js";
 import * as derivedState from "../../dist/db/ladybug-derived-state.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { SafeRebuildRequiredError } from "../../dist/domain/errors.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 import {
   _resetGraphIntegrityVerifierForTesting,
@@ -261,6 +262,52 @@ describe("full index verifier quiescence", () => {
     );
   }
 
+  it("refuses a populated active full refresh before checkpoint or reset", async (t) => {
+    await initializeRepo();
+    const originalQuery = Connection.prototype.query;
+    const originalExecute = Connection.prototype.execute;
+    const statements = new WeakMap<object, string>();
+    const originalPrepare = Connection.prototype.prepare;
+    let checkpointCalls = 0;
+    let resetReads = 0;
+
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      const prepared = await originalPrepare.call(this, statement);
+      statements.set(prepared, statement);
+      return prepared;
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        const statement = statements.get(prepared);
+        if (
+          statement?.includes("MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)") &&
+          statement.includes("f.fileId IN $fileIds")
+        ) {
+          resetReads += 1;
+        }
+        return originalExecute.call(
+          this,
+          prepared,
+          params,
+          progressCallback,
+        );
+      },
+    );
+    t.mock.method(Connection.prototype, "query", async function (statement) {
+      if (statement.trim() === "CHECKPOINT") checkpointCalls += 1;
+      return originalQuery.call(this, statement);
+    });
+
+    await assert.rejects(
+      indexRepo(repoId, "full"),
+      (error: unknown) => error instanceof SafeRebuildRequiredError,
+    );
+    assert.equal(checkpointCalls, 0);
+    assert.equal(resetReads, 0);
+  });
+
   it("closes a verifier lease before an explicit legacy full reset begins", async (t) => {
     await initializeRepo();
     await advancePendingRevision();
@@ -268,7 +315,9 @@ describe("full index verifier quiescence", () => {
     assert.equal(notifyGraphIntegrityVerifier(repoId), true);
     await block.pageStarted;
 
-    const refresh = indexRepo(repoId, "full");
+    const refresh = indexRepo(repoId, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     try {
       await new Promise<void>((resolve) => setImmediate(resolve));
       assert.equal(block.resetReads(), 0);
@@ -336,7 +385,9 @@ describe("full index verifier quiescence", () => {
     assert.equal(notifyGraphIntegrityVerifier(repoId), true);
     await block.pageStarted;
 
-    const refresh = indexRepo(repoId, "full");
+    const refresh = indexRepo(repoId, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     try {
       block.releasePage();
       await assert.rejects(refresh, /injected full reset failure/);

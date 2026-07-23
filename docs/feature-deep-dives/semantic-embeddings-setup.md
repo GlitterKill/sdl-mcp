@@ -188,13 +188,17 @@ node scripts/download-models.mjs nomic-embed-text-v1.5
 }
 ```
 
-**Step 3 - Re-index to populate the extra lane/model vectors:**
+**Step 3 - Build a validated candidate to populate the extra lane/model vectors:**
 
 ```bash
-npx sdl-mcp index --repo-id my-repo --mode full
+npx sdl-mcp index --force --safe-rebuild /absolute/path/to/new-graph.lbug
 ```
 
-A full re-index is recommended when switching profiles so every requested lane/model vector is populated. Both supported models are 768-dimensional; the re-index is about filling missing vector columns, not changing vector dimensionality.
+The safe rebuild indexes every configured repository because the candidate is a
+whole LadybugDB database. It populates every requested lane/model vector without
+destructively refreshing the active graph. Both supported models are
+768-dimensional; the rebuild fills missing vector columns rather than changing
+vector dimensionality.
 
 **Step 4 - Verify:**
 

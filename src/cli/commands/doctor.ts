@@ -415,7 +415,7 @@ async function checkStaleIndex(
 
     return {
       status: "warn",
-      message: `Stale indexes:\n${staleRepos.map((r) => `  - ${r}`).join("\n")}\n  Run: sdl-mcp index --mode full`,
+      message: `Stale indexes:\n${staleRepos.map((r) => `  - ${r}`).join("\n")}\n  Run: sdl-mcp index`,
     };
   } catch (error) {
     return {

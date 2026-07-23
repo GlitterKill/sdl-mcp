@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { createServer } from "http";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import {
   formatIndexStartupLines,
 } from "../../dist/cli/commands/index.js";
@@ -11,6 +11,9 @@ import {
   parseIndexOptions,
 } from "../../dist/cli/argParsing.js";
 import type { CLIOptions } from "../../dist/cli/types.js";
+import {
+  validateSafeRebuildRequest,
+} from "../../dist/cli/commands/index-safe-rebuild.js";
 
 describe("CLI index command", () => {
   const global: CLIOptions = {};
@@ -78,6 +81,30 @@ describe("CLI index command", () => {
       assert.strictEqual(options.repoId, "combined-repo");
     });
 
+    it("parses --safe-rebuild from args and parsed values", () => {
+      assert.strictEqual(
+        parseIndexOptions(
+          ["--safe-rebuild", "F:\\graphs\\candidate.lbug"],
+          global,
+          {},
+        ).safeRebuildPath,
+        "F:\\graphs\\candidate.lbug",
+      );
+      assert.strictEqual(
+        parseIndexOptions([], global, {
+          "safe-rebuild": "F:\\graphs\\from-values.lbug",
+        }).safeRebuildPath,
+        "F:\\graphs\\from-values.lbug",
+      );
+    });
+
+    it("throws when --safe-rebuild has no value", () => {
+      assert.throws(
+        () => parseIndexOptions(["--safe-rebuild"], global, {}),
+        /--safe-rebuild requires a value/,
+      );
+    });
+
     it("inherits global config option", () => {
       const g: CLIOptions = { config: "/path/to/config.json" };
       const options = parseIndexOptions([], g, {});
@@ -102,6 +129,100 @@ describe("CLI index command", () => {
           "Runtime: sdl-mcp 0.11.4; node=v24.14.0; module=C:/pkg/sdl-mcp/dist/cli/commands/index.js",
           "Graph DB: F:/Claude/sdl-mcp/sdl-mcp-graph.lbug",
         ],
+      );
+    });
+  });
+
+  describe("safe rebuild preflight", () => {
+    const activePath = resolve("test-output", "active-graph.lbug");
+    const candidatePath = resolve("test-output", "candidate-graph.lbug");
+
+    function validate(
+      overrides: Partial<Parameters<typeof validateSafeRebuildRequest>[0]> = {},
+    ): ReturnType<typeof validateSafeRebuildRequest> {
+      return validateSafeRebuildRequest({
+        options: {
+          force: true,
+          safeRebuildPath: candidatePath,
+        },
+        activeGraphDbPath: activePath,
+        findOwner: () => null,
+        pathExists: () => false,
+        ...overrides,
+      });
+    }
+
+    it("accepts a stopped-owner absolute non-existent candidate", () => {
+      const result = validate();
+      assert.strictEqual(result.targetGraphDbPath, candidatePath);
+      assert.match(result.externalOwnerWarning, /external LadybugDB owner/i);
+    });
+
+    it("requires force and rejects watch or repository scope", () => {
+      assert.throws(
+        () => validate({ options: { safeRebuildPath: candidatePath } }),
+        /requires --force/,
+      );
+      assert.throws(
+        () =>
+          validate({
+            options: {
+              force: true,
+              watch: true,
+              safeRebuildPath: candidatePath,
+            },
+          }),
+        /cannot be combined with --watch/,
+      );
+      assert.throws(
+        () =>
+          validate({
+            options: {
+              force: true,
+              repoId: "one-repo",
+              safeRebuildPath: candidatePath,
+            },
+          }),
+        /cannot be combined with --repo-id/,
+      );
+    });
+
+    it("rejects relative, active, existing, and live-owner targets", () => {
+      assert.throws(
+        () =>
+          validate({
+            options: {
+              force: true,
+              safeRebuildPath: "relative-candidate.lbug",
+            },
+          }),
+        /absolute path/,
+      );
+      assert.throws(
+        () =>
+          validate({
+            options: {
+              force: true,
+              safeRebuildPath: activePath,
+            },
+          }),
+        /different from the active graph database/,
+      );
+      assert.throws(
+        () => validate({ pathExists: () => true }),
+        /already exists/,
+      );
+      assert.throws(
+        () =>
+          validate({
+            findOwner: () => ({
+              pid: 4242,
+              transport: "http",
+              port: 3000,
+              startedAt: new Date(0).toISOString(),
+            }),
+          }),
+        /PID 4242/,
       );
     });
   });
@@ -175,6 +296,35 @@ describe("CLI index command", () => {
   });
 
   describe("one-shot lifecycle", () => {
+    it("preflights direct indexing before repository registration writes", () => {
+      const source = readFileSync("src/cli/commands/index.ts", "utf-8");
+      const directPathStart = source.indexOf(
+        "// Direct indexing path (original behavior).",
+      );
+      const preflight = source.indexOf(
+        "await assertIndexStoragePreflight(",
+        directPathStart,
+      );
+      const repoWrite = source.indexOf(
+        "await ladybugDb.upsertRepo(",
+        directPathStart,
+      );
+      const indexCall = source.indexOf(
+        "const stats: IndexResult = await indexRepo(",
+        directPathStart,
+      );
+
+      assert.ok(directPathStart >= 0, "direct CLI index path must exist");
+      assert.ok(
+        preflight > directPathStart && preflight < repoWrite,
+        "storage preflight must run before the direct CLI writes Repo metadata",
+      );
+      assert.ok(
+        repoWrite < indexCall,
+        "repository registration must still precede the authoritative index call",
+      );
+    });
+
     it("cleans up direct indexing resources before reporting completion", () => {
       const source = readFileSync("src/cli/commands/index.ts", "utf-8");
 

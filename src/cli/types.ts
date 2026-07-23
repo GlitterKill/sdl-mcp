@@ -40,6 +40,7 @@ export interface IndexOptions extends CLIOptions {
   repoId?: string;
   force?: boolean;
   diagnostics?: boolean;
+  safeRebuildPath?: string;
 }
 
 export interface VersionOptions extends CLIOptions {}

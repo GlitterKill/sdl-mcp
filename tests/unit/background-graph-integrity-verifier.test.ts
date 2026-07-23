@@ -14,6 +14,7 @@ import {
   runGraphIntegrityVerifierRecoverySweep,
   startGraphIntegrityVerifierRecovery,
   stopGraphIntegrityVerifierRecovery,
+  waitForGraphIntegrityVerifier,
   withGraphIntegrityVerifierQuiesced,
 } from "../../dist/indexer/provider-first/background-graph-integrity-verifier.js";
 import {
@@ -226,6 +227,71 @@ describe("background graph integrity verifier", () => {
       "repo",
       (state) => state?.graphIntegrityVerifiedRevision === 1,
     );
+  });
+
+  it("waits for useful in-flight verification without cancelling it", async (t) => {
+    root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-wait-"));
+    await initLadybugDb(join(root, "graph.lbug"));
+    await seedPendingRevision(root, "repo");
+
+    const statements = new WeakMap<object, string>();
+    const pageStarted = deferred();
+    const releasePage = deferred();
+    const originalPrepare = Connection.prototype.prepare;
+    const originalExecute = Connection.prototype.execute;
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      const prepared = await originalPrepare.call(this, statement);
+      statements.set(prepared, statement);
+      return prepared;
+    });
+    t.mock.method(
+      Connection.prototype,
+      "execute",
+      async function (prepared, params, progressCallback) {
+        if (
+          statements
+            .get(prepared)
+            ?.includes("OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]")
+        ) {
+          pageStarted.resolve();
+          await releasePage.promise;
+        }
+        return originalExecute.call(
+          this,
+          prepared,
+          params,
+          progressCallback,
+        );
+      },
+    );
+
+    assert.equal(notifyGraphIntegrityVerifier("repo"), true);
+    await pageStarted.promise;
+    let settled = false;
+    const waiter = waitForGraphIntegrityVerifier("repo").then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+
+    releasePage.resolve();
+    await waiter;
+    assert.equal(
+      (await derivedState.getDerivedState("repo"))?.graphIntegrityState,
+      "verified",
+    );
+  });
+
+  it("recovers a durable pending revision whose wakeup was lost", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-bg-integrity-lost-wakeup-"));
+    await initLadybugDb(join(root, "graph.lbug"));
+    await seedPendingRevision(root, "repo");
+
+    await waitForGraphIntegrityVerifier("repo");
+
+    const state = await derivedState.getDerivedState("repo");
+    assert.equal(state?.graphIntegrityState, "verified");
+    assert.equal(state?.graphIntegrityVerifiedRevision, 1);
   });
 
   it("awaits an in-flight recovery sweep and blocks late notifications during global stop", async (t) => {

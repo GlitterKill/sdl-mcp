@@ -241,7 +241,7 @@ describe("LadybugDB write batching", () => {
     );
   });
 
-  it("keeps non-real target metadata off the file-backed cleanup path", async () => {
+  it("checks file ownership before canonicalizing non-real target metadata", async () => {
     const statements: string[] = [];
     const conn = createFakeConnection(statements);
     const edges: EdgeRow[] = [
@@ -279,8 +279,8 @@ describe("LadybugDB write batching", () => {
         statements,
         "OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]",
       ),
-      1,
-      "only real targets should need file-backed metadata cleanup",
+      2,
+      "real and placeholder targets must both preserve file-backed symbols",
     );
     assert.strictEqual(
       countStatementsContaining(statements, "b.symbolStatus = row.targetStatus"),
@@ -749,7 +749,9 @@ describe("LadybugDB write batching", () => {
       call.statement.includes("MERGE (b:Symbol {symbolId: row.toSymbolId})"),
     );
     const updateCalls = calls.filter((call) =>
-      call.statement.includes("OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(:File)"),
+      call.statement.includes(
+        "OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)",
+      ),
     );
     assert.strictEqual(mergeCalls.length, 1);
     assert.deepStrictEqual(

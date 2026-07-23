@@ -437,12 +437,12 @@ For indexing:
 - When `rootAvailability` is missing or unreadable, restore the root or unregister the repository; refresh advice is intentionally suppressed until the root is usable.
 - Prefer incremental refresh.
 - Read `derivedState.graphIntegrityRevision` and `graphIntegrityVerifiedRevision` together. Equal revisions with `graphIntegrityState: "verified"` prove the current persisted graph revision.
-- A `verifying` state permits graph reads but does not prove the latest revision. Continue when pending verification is acceptable, or poll `repo.status` when the task requires latest-revision proof.
-- A `failed` state can remain graph-readable when a current manifest exists, but it does not prove the latest revision. Follow `nextBestAction` and run `index.refresh` with `mode: "full"` before relying on latest-revision verification.
-- An `unknown` state, null current revision, or missing-manifest guidance requires `index.refresh` with `mode: "full"`. Incremental mutations require an available manifest-backed baseline for the latest graph version.
+- A `verifying` state permits graph reads but does not prove the latest revision. Continue work when pending verification is acceptable, or poll `repo.status` when the task requires latest-revision proof. Do not refresh solely because verification is running.
+- A `failed` state can remain graph-readable when a current manifest exists, but it does not prove the latest revision. Do not retry refresh automatically. Follow `nextBestAction` for stopped `index --force --safe-rebuild` recovery.
+- An `unknown` state, null current revision, or missing-manifest guidance blocks graph retrieval. Run one incremental refresh only for a new unindexed repository; a populated graph requires a stopped safe rebuild.
 - Successful saved indexed edits commit graph and manifest changes together, advance the current revision, and return before background verification completes.
 - If refresh runs asynchronously, poll `repo.status` and wait for completion before relying on its resulting graph state.
-- Avoid full refresh unless the repo is newly registered, unindexed, or explicitly required.
+- Do not request a full refresh for a populated active graph. SDL-MCP rejects it before provider work or graph writes.
 
 ---
 

@@ -27,6 +27,8 @@ const MAX_BUFFER = 5000;
 
 const buffer: AuditRow[] = [];
 let droppedDueToBackpressure = 0;
+let explicitBufferingDepth = 0;
+let drainTail: Promise<void> = Promise.resolve();
 
 /**
  * Push an audit row into the buffer. Returns true if accepted, false if
@@ -60,20 +62,67 @@ export function getDroppedAuditCount(): number {
   return droppedDueToBackpressure;
 }
 
+export function isExplicitAuditBufferingActive(): boolean {
+  return explicitBufferingDepth > 0;
+}
+
+/**
+ * Buffer audits across a full-refresh ownership boundary. Nested or concurrent
+ * scopes share one process-wide depth and only the final exit flushes.
+ */
+export async function withExplicitAuditBufferingScope<T>(
+  operation: () => Promise<T>,
+  flush: () => Promise<void>,
+): Promise<T> {
+  explicitBufferingDepth += 1;
+  let operationFailure: unknown;
+  try {
+    return await operation();
+  } catch (error) {
+    operationFailure = error;
+    throw error;
+  } finally {
+    explicitBufferingDepth -= 1;
+    if (explicitBufferingDepth === 0) {
+      try {
+        await flush();
+      } catch (error) {
+        if (!operationFailure) throw error;
+        logger.warn(
+          "[audit-buffer] Flush failed after the scoped operation already failed",
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
+  }
+}
+
+export interface DrainAuditBufferOptions {
+  /** @internal Test seam for deterministic drain-concurrency coverage. */
+  insertAuditEvent?: typeof ladybugDb.insertAuditEvent;
+}
+
 /**
  * Drain all buffered events into the DB on the supplied connection. Returns
  * the count drained. Failures on individual rows are logged and skipped so
  * one bad row can't strand the whole queue.
  */
-export async function drainAuditBuffer(conn: Connection): Promise<number> {
+async function drainAuditBufferNow(
+  conn: Connection,
+  options: DrainAuditBufferOptions,
+): Promise<number> {
   if (buffer.length === 0) return 0;
   // Take a snapshot — new events arriving during the drain stay in the
   // buffer for the next drain (or the on-shutdown flush).
   const drained = buffer.splice(0, buffer.length);
   let okCount = 0;
+  const insertAuditEvent =
+    options.insertAuditEvent ?? ladybugDb.insertAuditEvent;
   for (const row of drained) {
     try {
-      await ladybugDb.insertAuditEvent(conn, row);
+      await insertAuditEvent(conn, row);
       okCount += 1;
     } catch (err) {
       logger.warn(
@@ -87,6 +136,18 @@ export async function drainAuditBuffer(conn: Connection): Promise<number> {
     logger.debug(`[audit-buffer] Drained ${okCount}/${drained.length} buffered audit events`);
   }
   return okCount;
+}
+
+export async function drainAuditBuffer(
+  conn: Connection,
+  options: DrainAuditBufferOptions = {},
+): Promise<number> {
+  const drain = drainTail.then(() => drainAuditBufferNow(conn, options));
+  drainTail = drain.then(
+    () => undefined,
+    () => undefined,
+  );
+  return drain;
 }
 
 /**

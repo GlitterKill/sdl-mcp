@@ -57,7 +57,7 @@ flowchart LR
 - **SyncArtifact**: Stores compressed indexed state with metadata
 - **Export**: Creates artifacts from current indexed state
 - **Import**: Restores indexed state from artifacts
-- **Pull**: Fetches latest artifact or falls back to full index
+- **Pull**: Fetches the latest artifact and can bootstrap a new unindexed repository when no artifact exists
 
 ### Data Model
 
@@ -164,7 +164,13 @@ console.log(
 );
 ```
 
-Import invalidates any previously verified graph digest before its first canonical graph write. This also applies when the artifact reuses the current version ID and when `pullWithFallback` imports an artifact. Run a full index refresh after import to establish a new verified health baseline.
+Import invalidates any previously verified graph digest before its first
+canonical graph write. This also applies when the artifact reuses the current
+version ID and when `pullWithFallback` imports an artifact. For a populated
+graph, use the stopped whole-database safe-rebuild flow to establish a verified
+replacement; SDL-MCP refuses an in-place destructive full refresh. Pull stops
+immediately on that permanent refusal instead of consuming the transient retry
+budget or attempting the same full fallback again.
 
 #### Pull with Fallback
 
@@ -265,7 +271,7 @@ const result = await pullWithFallback({
 
 When no artifact is found:
 
-1. **With fallback** (default): Performs full index operation
+1. **With fallback** (default): Performs a full bootstrap only when the repository is still unindexed. A populated graph returns safe-rebuild guidance.
 2. **Without fallback**: Returns error with explicit message
 
 ### Integrity Failures

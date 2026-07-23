@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Offline whole-database safe rebuild**: `sdl-mcp index --force --safe-rebuild <absolute-new-path>` builds every configured repository in a fresh LadybugDB candidate while the active graph remains untouched. The command rejects live SDL owners and scoped/watch combinations, retains failed candidates, waits for graph-integrity workers, checkpoints and closes, reopens, and validates repository membership, physical Symbol identity, canonical string scans, dependency endpoints, and enabled Symbol FTS before reporting success.
 - **Safe runtime repository removal**: Added `repo.unregister` across flat MCP, gateway, Code Mode, and CLI surfaces. Exact repository confirmation, configured-repository protection, dirty-draft opt-in, serialized transactional deletion, exhaustive current-schema cleanup, and repository-scoped cache, live-index, prefetch, and response-handle invalidation preserve unrelated repositories and global content-addressed nodes.
 - **Persisted graph integrity gate**: Added revision-safe verification that keeps saved-file graph commits fast while an application-owned worker verifies the persisted LadybugDB graph independently.
   - **Deterministic manifests and digests**: Full and incremental indexing persist independently constructed file and fileless expectations beside the graph. The manifests include file-backed symbols, provider externals, unresolved dependency placeholders, and deterministic fileless-reference liveness; verification streams the active `Symbol` universe in stable UTF-8 keyset order and compares it with those expectations.
@@ -33,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Graph integrity recovery and reconciliation**: Index admission now fails closed on global physical `Symbol` duplication and refuses destructive full refreshes of populated active graphs. Saved-file patches persist canonical dependency placeholders and fileless manifest tuples in the same transaction, no-op checks recover and await pending verification, permanent watcher failures stop fallback/retry amplification, and full-refresh audit events drain through one serialized writer.
 - **Session workflow instruction duplication**: MCP initialization no longer supplies workflow text that clients can repeat across every imported tool. The deterministic tool catalog carries one fallback copy in its first advertised description.
 - **Background integrity performance**: Increased the bounded read-only symbol page and stopped after a short final page, avoiding repeated ordered LadybugDB traversals while preserving deterministic paging and cooperative cancellation between queries. Saved-file patches now batch matched-symbol updates while retaining stable SCIP identity and membership relationships.
 - **Dependency security gate**: Updated transitive Hono server, Hono, Express body parser, brace expansion, URI parsing, and tar overrides to patched releases so the CI moderate-severity audit remains fail-closed without downgrading the MCP SDK.

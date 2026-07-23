@@ -104,6 +104,14 @@ export {
   markGraphIntegrityVerifiedIfVerifying,
   type GraphIntegrityPendingRevision,
 } from "./ladybug-derived-state.js";
+export {
+  countInvalidSafeRebuildDependencyEndpoints,
+  readSafeRebuildRepoMembershipCounts,
+  readSafeRebuildSymbolPointLookupSample,
+  validateSafeRebuildCanonicalStrings,
+  type SafeRebuildRepoMembershipCounts,
+  type SafeRebuildSymbolPointLookupSample,
+} from "./ladybug-safe-rebuild.js";
 // Shadow cluster (Louvain) operations
 export * from "./ladybug-shadow-clusters.js";
 

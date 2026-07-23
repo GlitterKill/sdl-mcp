@@ -182,7 +182,9 @@ describe("Java pass2 indexing", () => {
   });
 
   it("creates import-matched call edges in pass2", async () => {
-    const result = await indexRepo(REPO_ID, "full");
+    const result = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     assert.ok(result.versionId.length > 0);
 
     const conn = await getLadybugConn();
@@ -247,7 +249,9 @@ describe("Java pass2 indexing", () => {
   });
 
   it("creates same-package call edges across source roots", async () => {
-    const result = await indexRepo(REPO_ID, "full");
+    const result = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     assert.ok(result.versionId.length > 0);
 
     const conn = await getLadybugConn();

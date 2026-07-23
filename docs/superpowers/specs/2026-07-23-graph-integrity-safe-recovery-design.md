@@ -142,10 +142,9 @@ LIMIT $limit
 The check raises `StorageIntegrityError`, a typed non-retryable error with
 bounded, path-free recovery guidance.
 
-`indexRepo()` runs the check before:
+`indexRepo()` runs the check inside serialized repository admission and before:
 
 - SCIP generation;
-- the per-repository index lock;
 - WAL checkpoint;
 - FTS drop/rebuild;
 - graph-integrity ownership changes; and
@@ -161,8 +160,11 @@ unsafe unless the caller declares that the database path is an isolated,
 non-active rebuild candidate.
 
 Add `isolatedRebuild` to the internal `IndexRepoOptions`. Normal MCP, watcher,
-and CLI calls leave it false. Before SCIP or writes, `indexRepo()` raises a
-typed `SafeRebuildRequiredError` when:
+and CLI calls leave it false. The offline safe-rebuild path sets it only after
+validating a non-existent candidate family. `benchmark:ci` may also set it
+after proving its dedicated graph and WAL family did not exist before the
+command opened the database. Before SCIP or writes, `indexRepo()` raises a typed
+`SafeRebuildRequiredError` when:
 
 - mode is `full`;
 - the repository already has persisted files; and
@@ -378,6 +380,10 @@ Unknown errors are not assumed retryable.
   full-refresh instruction while verification is in flight.
 - Permanent watcher failures produce zero incremental fallbacks and zero
   retries.
+- Permanent sync fallback failures consume zero retry budget and do not launch
+  a second full-index attempt.
+- Repeated benchmark full-index samples require a process-owned graph family
+  that was absent before the command started.
 - Missing-file patch failures produce one incremental fallback.
 - Known writer contention retains bounded retry.
 - Audit events emitted during full indexing remain buffered and drain without

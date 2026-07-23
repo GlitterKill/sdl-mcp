@@ -16,6 +16,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { indexRepo } from "../../dist/indexer/indexer.js";
 import { handleIndexRefresh } from "../../dist/mcp/tools/repo.js";
 
 const REPO_ID = "test-index-refresh-diagnostics";
@@ -316,21 +317,19 @@ describe("index.refresh diagnostics", () => {
     );
   });
 
-  it("pre-deletes existing symbols once for full diagnostic refreshes", async () => {
-    const result = await handleIndexRefresh({
-      repoId: REPO_ID,
-      mode: "full",
-      includeDiagnostics: true,
+  it("pre-deletes existing symbols once for isolated rebuild diagnostics", async () => {
+    const result = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      includeTimings: true,
+      isolatedRebuild: true,
     });
 
-    assert.equal(result.ok, true);
-    assert.ok(result.diagnostics?.timings, "expected timing diagnostics");
+    assert.ok(result.timings, "expected timing diagnostics");
     assert.equal(
-      typeof result.diagnostics.timings.phases.preDeleteExistingSymbols,
+      typeof result.timings.phases.preDeleteExistingSymbols,
       "number",
-      "expected full refresh to report upfront stale-symbol deletion",
+      "expected isolated rebuild to report upfront stale-symbol deletion",
     );
-    const pass1Drain = result.diagnostics.timings.pass1Drain;
+    const pass1Drain = result.timings.pass1Drain;
     assert.ok(pass1Drain, "expected pass1 drain diagnostics");
     assert.equal(
       pass1Drain.rows.existingFiles,

@@ -164,6 +164,15 @@ function assertSucceeded(response: ToolEnvelope, label: string): void {
   );
 }
 
+function assertSafeRebuildRequired(response: ToolEnvelope, label: string): void {
+  assert.equal(response.isError, true, label);
+  assert.match(
+    JSON.stringify(response.structuredContent),
+    /--safe-rebuild <absolute-new-path>/,
+    label,
+  );
+}
+
 describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
   let server: MCPServer;
   let client: Client;
@@ -288,12 +297,12 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
     const blocker = blockFirstRepoLookup(t);
     const first = client.callTool({
       name: "sdl.index.refresh",
-      arguments: { repoId: REPO_A, mode: "full" },
+      arguments: { repoId: REPO_A, mode: "incremental" },
     });
     await blocker.started;
     const second = client.callTool({
       name: "sdl.index.refresh",
-      arguments: { repoId: REPO_B, mode: "full" },
+      arguments: { repoId: REPO_B, mode: "incremental" },
     });
     try {
       await waitFor(
@@ -317,12 +326,12 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
     const blocker = blockFirstRepoLookup(t);
     const first = client.callTool({
       name: "sdl.repo",
-      arguments: { repoId: REPO_A, action: "index.refresh", mode: "full" },
+      arguments: { repoId: REPO_A, action: "index.refresh", mode: "incremental" },
     });
     await blocker.started;
     const second = client.callTool({
       name: "sdl.repo",
-      arguments: { repoId: REPO_A, action: "index.refresh", mode: "full" },
+      arguments: { repoId: REPO_A, action: "index.refresh", mode: "incremental" },
     });
     try {
       await waitFor(
@@ -348,8 +357,8 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
         arguments: {
           repoId: REPO_A,
           steps: [
-            { fn: "indexRefresh", args: { mode: "full" } },
-            { fn: "indexRefresh", args: { mode: "full" } },
+            { fn: "indexRefresh", args: { mode: "incremental" } },
+            { fn: "indexRefresh", args: { mode: "incremental" } },
           ],
         },
       }),
@@ -371,7 +380,7 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
       name: "sdl.workflow",
       arguments: {
         repoId: REPO_A,
-        steps: [{ fn: "index.refresh", args: { mode: "full" } }],
+        steps: [{ fn: "index.refresh", args: { mode: "incremental" } }],
       },
     });
     await blocker.started;
@@ -379,7 +388,7 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
       name: "sdl.workflow",
       arguments: {
         repoId: REPO_B,
-        steps: [{ fn: "index.refresh", args: { mode: "full" } }],
+        steps: [{ fn: "index.refresh", args: { mode: "incremental" } }],
       },
     });
 
@@ -416,7 +425,7 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
     const backgroundResponse = await withTimeout(
       client.callTool({
         name: "sdl.index.refresh",
-        arguments: { repoId: REPO_A, mode: "full", async: true },
+        arguments: { repoId: REPO_A, mode: "incremental", async: true },
       }),
       "async refresh did not return its operation response",
     );
@@ -425,7 +434,7 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
 
     const second = client.callTool({
       name: "sdl.index.refresh",
-      arguments: { repoId: REPO_B, mode: "full" },
+      arguments: { repoId: REPO_B, mode: "incremental" },
     });
     try {
       await waitFor(
@@ -443,140 +452,21 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
     assertSucceeded(response as ToolEnvelope, "post-async refresh");
   });
 
-  it("gives async full refresh a synthetic lease that drains an active graph read before reset", async (t) => {
-    await clearReadPoolStatementCaches();
-    const statements = new WeakMap<object, string>();
-    const readStarted = deferred();
-    const releaseRead = deferred();
-    const backgroundLookupStarted = deferred();
-    const releaseBackgroundLookup = deferred();
-    const resetStarted = deferred();
-    const releaseReset = deferred();
-    const originalPrepare = Connection.prototype.prepare;
-    const originalExecute = Connection.prototype.execute;
-    let blockedRead = false;
-    let blockedBackgroundLookup = false;
-    let blockedReset = false;
-
-    t.mock.method(Connection.prototype, "prepare", async function (statement) {
-      const prepared = await originalPrepare.call(this, statement);
-      statements.set(prepared, statement);
-      return prepared;
+  it("rejects async full refresh before acknowledging a background operation", async () => {
+    const response = await client.callTool({
+      name: "sdl.index.refresh",
+      arguments: { repoId: REPO_A, mode: "full", async: true },
     });
-    t.mock.method(
-      Connection.prototype,
-      "execute",
-      async function (prepared, params, progressCallback) {
-        const statement = statements.get(prepared);
-        if (
-          !blockedRead &&
-          statement?.includes("MATCH (v:Version)") &&
-          statement.includes("VERSION_OF_REPO")
-        ) {
-          blockedRead = true;
-          readStarted.resolve();
-          await releaseRead.promise;
-        }
-        if (
-          blockedRead &&
-          !blockedBackgroundLookup &&
-          statement?.includes("MATCH (r:Repo {repoId: $repoId})") &&
-          statement.includes("RETURN r.repoId AS repoId")
-        ) {
-          blockedBackgroundLookup = true;
-          backgroundLookupStarted.resolve();
-          await releaseBackgroundLookup.promise;
-        }
-        if (
-          !blockedReset &&
-          statement?.includes("MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)") &&
-          statement.includes("f.fileId IN $fileIds")
-        ) {
-          blockedReset = true;
-          resetStarted.resolve();
-          await releaseReset.promise;
-        }
-        return originalExecute.call(this, prepared, params, progressCallback);
-      },
-    );
 
-    const read = client.callTool({
-      name: "sdl.symbol.search",
-      arguments: { repoId: REPO_A, query: "value", semantic: false },
-    });
-    await readStarted.promise;
-    const asyncResponse = await withTimeout(
-      client.callTool({
-        name: "sdl.index.refresh",
-        arguments: { repoId: REPO_A, mode: "full", async: true },
-      }),
-      "async refresh response waited for background indexing",
-    );
-    assertSucceeded(asyncResponse as ToolEnvelope, "async refresh response");
-    await backgroundLookupStarted.promise;
-    releaseBackgroundLookup.resolve();
-
-    try {
-      await waitFor(
-        () => getToolDispatchStats().queued === 1,
-        "background refresh did not reserve a synthetic dispatch lease",
-      );
-    } catch (error) {
-      releaseRead.resolve();
-      releaseReset.resolve();
-      await read.catch(() => undefined);
-      await withTimeout(
-        client.callTool({
-          name: "sdl.index.refresh",
-          arguments: { repoId: REPO_B, mode: "full" },
-        }),
-        "timed-out background refresh did not settle during regression cleanup",
-      ).catch(() => undefined);
-      throw error;
-    }
-    assert.equal(
-      blockedReset,
-      false,
-      "async destructive reset crossed an active graph-read dispatch lease",
-    );
-    assert.equal(getToolDispatchStats().active, 1);
-    assert.deepEqual(getToolDispatchStats().activeLabels, ["sdl.symbol.search"]);
-    assert.equal(getToolDispatchStats().queued, 1);
-
-    releaseRead.resolve();
-    assertSucceeded((await read) as ToolEnvelope, "drained graph read");
-    await resetStarted.promise;
-    assert.deepEqual(
-      getToolDispatchStats().activeLabels,
-      ["tool-dispatch"],
-      "background indexRepo owns the synthetic dispatch lease during reset",
-    );
-    releaseReset.resolve();
-
-    // Public refresh admission remains retained until the detached index settles.
-    const afterBackground = await withTimeout(
-      client.callTool({
-        name: "sdl.index.refresh",
-        arguments: { repoId: REPO_B, mode: "full" },
-      }),
-      "refresh admission did not release after async indexing",
-    );
-    assertSucceeded(afterBackground as ToolEnvelope, "post-background refresh");
+    assertSafeRebuildRequired(response as ToolEnvelope, "async full refresh");
   });
 
-  it("drains an existing graph read before reset and queues a new read until full refresh completes", async (t) => {
+  it("rejects sync full refresh before destructive reset and preserves graph reads", async (t) => {
     await clearReadPoolStatementCaches();
     const statements = new WeakMap<object, string>();
-    const firstReadStarted = deferred();
-    const releaseFirstRead = deferred();
-    const resetStarted = deferred();
-    const releaseReset = deferred();
     const originalPrepare = Connection.prototype.prepare;
     const originalExecute = Connection.prototype.execute;
-    let blockedRead = false;
-    let blockedReset = false;
-    let resetReleased = false;
-    let secondReadSettled = false;
+    let resetReads = 0;
 
     t.mock.method(Connection.prototype, "prepare", async function (statement) {
       const prepared = await originalPrepare.call(this, statement);
@@ -589,72 +479,26 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
       async function (prepared, params, progressCallback) {
         const statement = statements.get(prepared);
         if (
-          !blockedRead &&
-          statement?.includes("MATCH (v:Version)") &&
-          statement.includes("VERSION_OF_REPO")
-        ) {
-          blockedRead = true;
-          firstReadStarted.resolve();
-          await releaseFirstRead.promise;
-        }
-        if (
-          !blockedReset &&
           statement?.includes("MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)") &&
           statement.includes("f.fileId IN $fileIds")
         ) {
-          blockedReset = true;
-          resetStarted.resolve();
-          await releaseReset.promise;
-          resetReleased = true;
+          resetReads += 1;
         }
         return originalExecute.call(this, prepared, params, progressCallback);
       },
     );
 
-    const firstRead = client.callTool({
-      name: "sdl.symbol.search",
-      arguments: { repoId: REPO_A, query: "value", semantic: false },
-    });
-    await firstReadStarted.promise;
-    const refresh = client.callTool({
+    const response = await client.callTool({
       name: "sdl.index.refresh",
       arguments: { repoId: REPO_A, mode: "full" },
     });
-    await waitFor(
-      () => getToolDispatchStats().active === 2,
-      "refresh never reached the dispatch-drain boundary",
-    );
-    assert.equal(blockedReset, false, "destructive reset crossed an active graph read");
-    releaseFirstRead.resolve();
-    assertSucceeded((await firstRead) as ToolEnvelope, "pre-reset graph read");
-    await resetStarted.promise;
+    assertSafeRebuildRequired(response as ToolEnvelope, "sync full refresh");
+    assert.equal(resetReads, 0);
 
-    const secondRead = client
-      .callTool({
-        name: "sdl.symbol.search",
-        arguments: { repoId: REPO_A, query: "value", semantic: false },
-      })
-      .then((response) => {
-        secondReadSettled = true;
-        return response;
-      });
-    try {
-      await waitFor(
-        () => getToolDispatchStats().queued === 1,
-        "graph read did not queue behind destructive full reset",
-      );
-      assert.equal(secondReadSettled, false);
-      assert.equal(resetReleased, false);
-    } finally {
-      releaseReset.resolve();
-    }
-
-    const [refreshResponse, secondReadResponse] = await withTimeout(
-      Promise.all([refresh, secondRead]),
-      "full refresh or queued graph read deadlocked",
-    );
-    assert.equal(resetReleased, true);
-    assertSucceeded(refreshResponse as ToolEnvelope, "full refresh");
-    assertSucceeded(secondReadResponse as ToolEnvelope, "post-reset graph read");
+    const read = await client.callTool({
+      name: "sdl.symbol.search",
+      arguments: { repoId: REPO_A, query: "value", semantic: false },
+    });
+    assertSucceeded(read as ToolEnvelope, "graph read after rejected full refresh");
   });
 });

@@ -66,6 +66,7 @@ async function main(): Promise<void> {
       "from-postinstall": { type: "boolean" },
       watch: { type: "boolean", short: "w" },
       "repo-id": { type: "string" },
+      "safe-rebuild": { type: "string" },
       stdio: { type: "boolean" },
       http: { type: "boolean" },
       port: { type: "string" },
@@ -277,7 +278,7 @@ Commands:
   doctor            Validate SDL-MCP environment
   info              Show unified runtime, config, log, Ladybug, and native-addon info
   version           Show version information
-  index             Index repositories (optional: --watch, --repo-id, --force)
+  index             Index repositories (optional: --watch, --repo-id, --force, --safe-rebuild)
   serve             Start MCP server (default: stdio, optional: --http, --port, --host, --dashboard-port)
   tool              Access all MCP tool actions directly (run 'sdl-mcp tool --list' for more info)
   export            Export indexed state as sync artifact
@@ -312,6 +313,7 @@ Global Options:
    -w, --watch          Watch for file changes
    --repo-id ID         Index specific repository by ID
    -f, --force          Force full re-index (default mode is incremental)
+   --safe-rebuild PATH  Build and validate all repos in a new absolute DB path
 
  Serve Options:
    --stdio               Use stdio transport (default)

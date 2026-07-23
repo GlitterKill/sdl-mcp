@@ -19,7 +19,8 @@ import { getLadybugConn, getReadPoolHealth } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath } from "../util/paths.js";
 import { patchSavedFile } from "../live-index/file-patcher.js";
-import { withIndexingGate } from "../mcp/indexing-gate.js";
+import { logWatcherHealthTelemetry } from "../mcp/telemetry.js";
+import { logger } from "../util/logger.js";
 import { globToSafeRegex } from "../util/safeRegex.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
@@ -36,8 +37,23 @@ import {
   type RuntimeWatcher,
   type WatcherProviderName,
 } from "./watchman-provider.js";
-import { logger } from "../util/logger.js";
-import { logWatcherHealthTelemetry } from "../mcp/telemetry.js";
+import {
+  classifyWatcherReindexFailure,
+  processWatchedFileChange,
+  WatcherReadPoolUnhealthyError,
+  type IndexRepoFn,
+} from "./watcher-change-processor.js";
+import { waitForGraphIntegrityVerifier } from "./provider-first/background-graph-integrity-verifier.js";
+import { verifyNoOpIncrementalGraphIntegrity } from "./provider-first/persisted-graph-integrity.js";
+
+export {
+  classifyWatcherReindexFailure,
+  processWatchedFileChange,
+} from "./watcher-change-processor.js";
+export type {
+  IndexRepoFn,
+  WatcherReindexFailureDisposition,
+} from "./watcher-change-processor.js";
 
 // Local interface for chokidar FSWatcher to avoid 'as any' casts
 
@@ -46,39 +62,6 @@ interface ChokidarWatcher {
   on(event: string, fn: (...args: any[]) => void): this;
   close(): Promise<void>;
   getWatched?(): Record<string, string[]>;
-}
-
-export type IndexRepoFn = (
-  repoId: string,
-  mode: "full" | "incremental",
-) => Promise<unknown>;
-
-export async function processWatchedFileChange(params: {
-  repoId: string;
-  filePath: string;
-  indexRepo: IndexRepoFn;
-  patchSavedFileFn?: (input: {
-    repoId: string;
-    filePath: string;
-  }) => Promise<unknown>;
-}): Promise<void> {
-  const { repoId, filePath, indexRepo, patchSavedFileFn } = params;
-  if (patchSavedFileFn) {
-    try {
-      await withIndexingGate(() => patchSavedFileFn({ repoId, filePath }));
-      return;
-    } catch (patchError: unknown) {
-      // Fall back to repo-wide incremental indexing below.
-      logger.debug("patchSavedFile failed, falling back to incremental index", {
-        repoId,
-        filePath,
-        error:
-          patchError instanceof Error ? patchError.message : String(patchError),
-      });
-    }
-  }
-
-  await indexRepo(repoId, "incremental");
 }
 
 type ChokidarModule = {
@@ -356,6 +339,9 @@ export async function watchRepositoryWithIndexer(
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
+  await ladybugDb.assertPhysicalSymbolUniqueness(conn);
+  await waitForGraphIntegrityVerifier(repoId);
+  await verifyNoOpIncrementalGraphIntegrity(repoId);
 
   let repoConfig: RepoConfig;
   try {
@@ -447,7 +433,10 @@ export async function watchRepositoryWithIndexer(
       health.stale = true;
       logger.error("Watcher error budget exceeded", {
         repoId,
-        hint: "Run: sdl-mcp index --force",
+        hint:
+          "Inspect the bounded watcher errors and graph-integrity status. " +
+          "Retry one incremental refresh only after a transient cause clears; " +
+          "use a stopped safe rebuild for permanent storage failures.",
       });
     }
   };
@@ -482,7 +471,7 @@ export async function watchRepositoryWithIndexer(
       // hung writer settles or the watchdog flips the conn.
       const poolHealth = getReadPoolHealth();
       if (!poolHealth.healthy) {
-        throw new Error(
+        throw new WatcherReadPoolUnhealthyError(
           `read pool unhealthy (stuck=${poolHealth.stuck}/${poolHealth.total}); deferring reindex`,
         );
       }
@@ -543,11 +532,16 @@ export async function watchRepositoryWithIndexer(
         return;
       }
       const msg = error instanceof Error ? error.message : String(error);
+      const disposition = classifyWatcherReindexFailure(error);
       recordWatcherError(
         `[sdl-mcp] Failed incremental index for ${filePath}: ${msg}`,
       );
+      if (disposition !== "transient") {
+        health.stale = true;
+      }
       if (
         !attemptTimedOut &&
+        disposition === "transient" &&
         attempt + 1 < WATCHER_REINDEX_MAX_ATTEMPTS &&
         !closed &&
         !abortSignal.aborted &&

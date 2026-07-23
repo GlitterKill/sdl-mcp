@@ -158,7 +158,9 @@ describe("Python pass2 indexing", () => {
   });
 
   it("creates import-matched call edges in pass2", async () => {
-    const result = await indexRepo(REPO_ID, "full");
+    const result = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     assert.ok(result.versionId.length > 0);
 
     const conn = await getLadybugConn();
@@ -221,7 +223,9 @@ describe("Python pass2 indexing", () => {
   });
 
   it("creates imported-instance method call edges in pass2", async () => {
-    const result = await indexRepo(REPO_ID, "full");
+    const result = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     assert.ok(result.versionId.length > 0);
 
     const conn = await getLadybugConn();
@@ -249,7 +253,9 @@ describe("Python pass2 indexing", () => {
   });
 
   it("does not create same-directory call edges without an import", async () => {
-    const result = await indexRepo(REPO_ID, "full");
+    const result = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
     assert.ok(result.versionId.length > 0);
 
     const conn = await getLadybugConn();

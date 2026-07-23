@@ -27,6 +27,7 @@ import {
   createGraphIntegrityFileDigest,
   createGraphIntegrityFilelessDelta,
   createGraphIntegrityFilelessEdgeReferences,
+  createGraphIntegrityFilelessReferenceTuples,
   createGraphIntegrityFilelessSymbols,
   createGraphIntegrityFileState,
   failActiveGraphIntegrityVerification,
@@ -1295,6 +1296,64 @@ describe("persisted graph integrity", () => {
     ]);
   });
 
+  it("promotes a touched placeholder over a legacy blank manifest tuple", () => {
+    const unresolvedId = "unresolved:./helpers.sh:*";
+    const [canonicalSymbol] = createGraphIntegrityFilelessSymbols({
+      symbols: [],
+      externalSymbols: [],
+      edges: [
+        {
+          repoId: "repo",
+          fromSymbolId: "sym:alpha",
+          toSymbolId: unresolvedId,
+          edgeType: "import",
+          weight: 1,
+          confidence: 1,
+          resolution: "unresolved",
+          provenance: null,
+          createdAt: "2026-07-23T00:00:00.000Z",
+        },
+      ],
+    });
+    assert.ok(canonicalSymbol);
+    const legacyBlank = canonicalFilelessJson(unresolvedId, {
+      3: "",
+      5: "",
+      6: "",
+      13: "",
+    });
+    const tuples = createGraphIntegrityFilelessReferenceTuples(
+      [
+        {
+          filelessSymbolId: unresolvedId,
+          sourceSymbolId: "sym:alpha",
+          edgeType: "import",
+          direction: "incoming",
+          referenceCount: 1,
+        },
+      ],
+      [canonicalSymbol],
+      new Map([
+        [
+          unresolvedId,
+          {
+            stateId: JSON.stringify(["repo", unresolvedId]),
+            repoId: "repo",
+            symbolId: unresolvedId,
+            canonicalSymbolJson: legacyBlank,
+            referenceCount: 1,
+          },
+        ],
+      ]),
+    );
+
+    const promoted = parseGraphIntegrityCanonicalSymbol(tuples[0]![1]);
+    assert.equal(promoted.name, unresolvedId);
+    assert.equal(promoted.kind, "unknown");
+    assert.equal(promoted.language, "unknown");
+    assert.equal(promoted.astFingerprint, unresolvedId);
+  });
+
   it("tracks baseline liveness as counts and current incremental source deltas", () => {
     const Ledger = GraphIntegrityFilelessLivenessLedger as unknown as new (trackSources: boolean) => {
       seedReferenceCount: (row: Record<string, unknown>) => void;
@@ -2074,7 +2133,19 @@ describe("persisted graph integrity", () => {
     );
     assert.match(
       graphIntegrityNextBestAction("failed") as string,
-      /delete the configured \.lbug database directory/,
+      /do not retry refresh automatically/i,
+    );
+    assert.match(
+      graphIntegrityNextBestAction("failed") as string,
+      /--safe-rebuild <absolute-new-path>/,
+    );
+    assert.match(
+      graphIntegrityNextBestAction("verifying") as string,
+      /Continue using graph reads/,
+    );
+    assert.doesNotMatch(
+      graphIntegrityNextBestAction("verifying") as string,
+      /sdl\.index\.refresh|mode:"full"/i,
     );
   });
 
@@ -2283,7 +2354,7 @@ describe("persisted graph integrity", () => {
 
     await assert.rejects(
       verifyNoOp("repo"),
-      /Incremental indexing requires a verified graph integrity baseline.*full/i,
+      /Incremental indexing requires a verified graph integrity baseline.*--safe-rebuild/i,
     );
     assert.equal((await ladybugDb.getLatestVersion(await getLadybugConn(), "repo"))?.versionId, "v1");
   });
@@ -2304,7 +2375,7 @@ describe("persisted graph integrity", () => {
 
     await assert.rejects(
       verifyNoOp("repo"),
-      /Incremental indexing requires a verified graph integrity baseline.*full/i,
+      /Incremental indexing requires a verified graph integrity baseline.*--safe-rebuild/i,
     );
   });
 

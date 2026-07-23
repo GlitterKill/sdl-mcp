@@ -11,6 +11,28 @@ import {
 } from "../../dist/benchmark/threshold.js";
 import { RegressionReportGenerator } from "../../dist/benchmark/regression.js";
 import { MetricSmoothing, runBenchmarkWithSmoothing } from "../../dist/benchmark/smoothing.js";
+import { validateFreshBenchmarkDatabasePath } from "../../dist/cli/commands/benchmark.js";
+
+describe("Benchmark database isolation", () => {
+  it("accepts a graph family that does not exist", () => {
+    assert.doesNotThrow(() =>
+      validateFreshBenchmarkDatabasePath("C:/tmp/benchmark.lbug", () => false),
+    );
+  });
+
+  for (const suffix of ["", ".wal", ".wal.checkpoint"]) {
+    it(`rejects an existing benchmark graph${suffix || " target"}`, () => {
+      assert.throws(
+        () =>
+          validateFreshBenchmarkDatabasePath(
+            "C:/tmp/benchmark.lbug",
+            (path) => path.endsWith(suffix),
+          ),
+        /fresh dedicated graph path/,
+      );
+    });
+  }
+});
 
 describe("Benchmark Threshold Evaluator", () => {
   let thresholds: BenchmarkThresholds;

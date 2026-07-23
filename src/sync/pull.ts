@@ -2,7 +2,12 @@ import { join } from "path";
 
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import { IndexError } from "../domain/errors.js";
+import {
+  GraphIntegrityBaselineError,
+  IndexError,
+  SafeRebuildRequiredError,
+  StorageIntegrityError,
+} from "../domain/errors.js";
 import { indexRepo, type IndexResult } from "../indexer/indexer.js";
 import { sleep } from "../util/time.js";
 import type {
@@ -15,9 +20,22 @@ import { listArtifacts, getArtifactMetadata, importArtifact } from "./sync.js";
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 
-export async function pullLatestState(
+interface PullLatestStateOutcome {
+  result: SyncPullResult;
+  terminalError?: Error;
+}
+
+function isPermanentSyncFailure(error: unknown): boolean {
+  return (
+    error instanceof StorageIntegrityError ||
+    error instanceof SafeRebuildRequiredError ||
+    error instanceof GraphIntegrityBaselineError
+  );
+}
+
+async function pullLatestStateWithOutcome(
   options: SyncPullOptions,
-): Promise<SyncPullResult> {
+): Promise<PullLatestStateOutcome> {
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   let retryCount = 0;
   let lastError: Error | undefined;
@@ -69,12 +87,14 @@ export async function pullLatestState(
         const durationMs = Date.now() - startTime;
 
         return {
-          success: true,
-          versionId: importResult.versionId,
-          artifactId: metadata.artifact_id,
-          method: "artifact",
-          durationMs,
-          retryCount,
+          result: {
+            success: true,
+            versionId: importResult.versionId,
+            artifactId: metadata.artifact_id,
+            method: "artifact",
+            durationMs,
+            retryCount,
+          },
         };
       }
 
@@ -87,12 +107,14 @@ export async function pullLatestState(
         const durationMs = Date.now() - startTime;
 
         return {
-          success: true,
-          versionId: indexResult.versionId,
-          artifactId: null,
-          method: "full-index",
-          durationMs,
-          retryCount,
+          result: {
+            success: true,
+            versionId: indexResult.versionId,
+            artifactId: null,
+            method: "full-index",
+            durationMs,
+            retryCount,
+          },
         };
       }
 
@@ -104,6 +126,7 @@ export async function pullLatestState(
         error instanceof Error ? error : new IndexError(String(error));
       retryCount = attempt;
 
+      if (isPermanentSyncFailure(lastError)) break;
       if (attempt < maxRetries) {
         await sleep(RETRY_DELAY_MS * (attempt + 1));
       }
@@ -111,22 +134,35 @@ export async function pullLatestState(
   }
 
   return {
-    success: false,
-    versionId: null,
-    artifactId: null,
-    method: "fallback",
-    durationMs: 0,
-    retryCount,
-    error: lastError?.message ?? "Unknown error",
+    result: {
+      success: false,
+      versionId: null,
+      artifactId: null,
+      method: "fallback",
+      durationMs: 0,
+      retryCount,
+      error: lastError?.message ?? "Unknown error",
+    },
+    terminalError: lastError,
   };
+}
+
+export async function pullLatestState(
+  options: SyncPullOptions,
+): Promise<SyncPullResult> {
+  return (await pullLatestStateWithOutcome(options)).result;
 }
 
 export async function pullWithFallback(
   options: SyncPullOptions,
 ): Promise<SyncPullResult> {
-  const result = await pullLatestState(options);
+  const { result, terminalError } = await pullLatestStateWithOutcome(options);
 
-  if (!result.success && (options.fallbackToFullIndex ?? true)) {
+  if (
+    !result.success &&
+    (options.fallbackToFullIndex ?? true) &&
+    !isPermanentSyncFailure(terminalError)
+  ) {
     try {
       const startTime = Date.now();
       const indexResult: IndexResult = await indexRepo(options.repoId, "full");

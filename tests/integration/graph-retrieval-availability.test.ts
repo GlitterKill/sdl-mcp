@@ -237,7 +237,7 @@ describe("graph retrieval availability", { concurrency: 1 }, () => {
       const typed = error as { code?: string; message?: string };
       return (
         typed.code === "INDEX_ERROR" &&
-        /mode:"full"/.test(typed.message ?? "") &&
+        /--safe-rebuild <absolute-new-path>/.test(typed.message ?? "") &&
         !/[A-Z]:\\|\.lbug|revision \d/i.test(typed.message ?? "")
       );
     };

@@ -272,6 +272,7 @@ async function patchSavedFileUnlocked(
   }));
   let nextFileState: ReturnType<typeof createGraphIntegrityFileState> | undefined;
   let filelessDelta: ReturnType<typeof createGraphIntegrityFilelessDelta> | undefined;
+  let touchedFilelessSymbolIds = new Set<string>();
   if (integrityBaseline && hasTrustedFileBaseline) {
     let previousReferences: ReturnType<
       typeof parseGraphIntegrityFilelessReferences
@@ -307,8 +308,12 @@ async function patchSavedFileUnlocked(
       symbols: expectedSymbols,
       externalSymbols: [],
       edges: postWriteEdges,
-      canonicalizeDependencyPlaceholders: false,
     });
+    touchedFilelessSymbolIds = new Set(
+      nextFilelessSymbols
+        .filter((symbol) => symbol.symbolId.startsWith("unresolved:"))
+        .map((symbol) => symbol.symbolId),
+    );
     const filelessSymbolIds = new Set([
       ...previousReferences.map((reference) => reference[0]),
       ...nextFilelessSymbols.map((symbol) => symbol.symbolId),
@@ -475,6 +480,18 @@ async function patchSavedFileUnlocked(
             symbolIds: diff.preserved.map((s) => s.symbolId),
           });
         }
+
+        // Keep physical placeholder rows and their manifest tuples in the same
+        // transaction. ID scoping avoids a repo-wide placeholder scan on each
+        // foreground save.
+        await ladybugDb.normalizeDependencyPlaceholderSymbols(
+          txConn,
+          request.repoId,
+          {
+            fileIds: new Set([durableFile.fileId]),
+            symbolIds: touchedFilelessSymbolIds,
+          },
+        );
 
         if (
           integrityBaseline &&

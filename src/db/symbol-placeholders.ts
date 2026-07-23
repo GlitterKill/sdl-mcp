@@ -8,6 +8,25 @@ export interface SymbolPlaceholderMeta {
   placeholderTarget: string | null;
 }
 
+export interface CanonicalDependencyPlaceholderSymbol {
+  symbolId: string;
+  name: string;
+  kind: "unknown";
+  language: "unknown";
+  rangeStartLine: 0;
+  rangeStartCol: 0;
+  rangeEndLine: 0;
+  rangeEndCol: 0;
+  signatureJson: null;
+  source: "treesitter";
+  scipSymbol: null;
+  astFingerprint: string;
+  external: boolean;
+  symbolStatus: SymbolStatus;
+  placeholderKind: string;
+  placeholderTarget: string;
+}
+
 const LOCAL_IMPORT_PREFIXES = [
   "src/",
   "test/",
@@ -126,6 +145,38 @@ export function classifyDependencyTarget(symbolId: string): SymbolPlaceholderMet
     symbolStatus: "real",
     placeholderKind: null,
     placeholderTarget: null,
+  };
+}
+
+/**
+ * Produce the one durable shape used for a fileless dependency endpoint.
+ * Encoded unresolved IDs are authoritative over potentially stale resolver
+ * hints; non-encoded external targets retain their explicit classification.
+ */
+export function canonicalDependencyPlaceholderSymbol(
+  symbolId: string,
+  hintedMeta?: SymbolPlaceholderMeta,
+): CanonicalDependencyPlaceholderSymbol {
+  const meta = symbolId.startsWith("unresolved:")
+    ? classifyDependencyTarget(symbolId)
+    : hintedMeta ?? classifyDependencyTarget(symbolId);
+  return {
+    symbolId,
+    name: symbolId,
+    kind: "unknown",
+    language: "unknown",
+    rangeStartLine: 0,
+    rangeStartCol: 0,
+    rangeEndLine: 0,
+    rangeEndCol: 0,
+    signatureJson: null,
+    source: "treesitter",
+    scipSymbol: null,
+    astFingerprint: symbolId,
+    external: meta.symbolStatus === "external",
+    symbolStatus: meta.symbolStatus,
+    placeholderKind: meta.placeholderKind ?? "",
+    placeholderTarget: meta.placeholderTarget ?? "",
   };
 }
 

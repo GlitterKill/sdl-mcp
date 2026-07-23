@@ -657,7 +657,7 @@ export async function getDerivedStateSummary(
     );
   } else if (summary.stale) {
     summary.nextBestAction = row.lastError
-      ? "Derived state recomputation failed. Inspect derivedState.lastError, then run sdl.index.refresh with mode:\"incremental\"; use mode:\"full\" if stale flags remain."
+      ? "Derived state recomputation failed. Inspect derivedState.lastError, then run sdl.index.refresh with mode:\"incremental\" once. If stale flags remain, inspect the logged failure instead of starting a full-refresh loop."
       : "Derived state is stale, likely from an interrupted older refresh. Run sdl.index.refresh with mode:\"incremental\" to recompute derived state inline.";
   }
   return summary;
@@ -667,13 +667,13 @@ export function graphIntegrityNextBestAction(
   state: GraphIntegrityState | "version-mismatch",
 ): string {
   if (state === "verifying") {
-    return "Graph integrity verification is in progress. Wait for the active index refresh to finish; if no refresh is active, run sdl.index.refresh with mode:\"full\".";
+    return "Graph integrity verification is running in the background. Continue using graph reads and check sdl.repo.status later; do not start a refresh solely for this state.";
   }
   if (state === "failed") {
-    return 'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph. If full verification fails again, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.';
+    return "Graph integrity verification failed. A manifest-backed graph remains readable, but the current revision is not verified. Do not retry refresh automatically; stop SDL-MCP and run `sdl-mcp index --force --safe-rebuild <absolute-new-path>` to build and validate a replacement.";
   }
   if (state === "version-mismatch") {
-    return 'Graph integrity belongs to another graph version. Run sdl.index.refresh with mode:"full" to establish a current verified baseline.';
+    return "Graph integrity belongs to another graph version. Do not retry refresh automatically; stop SDL-MCP and run `sdl-mcp index --force --safe-rebuild <absolute-new-path>` to build and validate a replacement.";
   }
-  return 'Graph integrity is unverified. Run sdl.index.refresh with mode:"full" to establish a verified baseline.';
+  return "Graph integrity is unverified. For a new unindexed repository, run one incremental refresh; for a populated graph, stop SDL-MCP and run `sdl-mcp index --force --safe-rebuild <absolute-new-path>`.";
 }

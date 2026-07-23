@@ -715,6 +715,17 @@ Generated SCIP files are decoded up to 512 MiB each. When the generated merged `
 | `SDL_DERIVED_REFRESH_TIMEOUT_MS` | Timeout for background startup recovery of stale graph-derived rows. Default: `120000` |
 | `ANTHROPIC_API_KEY`              | Hosted semantic-summary provider credential                                            |
 
+`SDL_GRAPH_DB_DIR` takes precedence over `SDL_GRAPH_DB_PATH`. The
+`index --force --safe-rebuild <absolute-new-path>` command temporarily removes
+the directory override, points only its own process at the candidate, and
+restores the exact environment after closing the candidate. The command does
+not change `graphDatabase.path`, either graph database, or your launcher.
+
+Before activating a validated candidate, stop every SDL-MCP process and any
+unsupported program that opened LadybugDB directly. Update all effective path
+sources together; an environment override can otherwise keep the process on
+the old database even after you edit the configuration file.
+
 `SDL_MCP_NATIVE_PASS1_SERIAL=1` is a diagnostic isolation switch for native
 indexer crashes. It keeps native Rust parsing enabled, but parses one pass-1
 chunk at a time instead of prefetching the next native chunk while JavaScript

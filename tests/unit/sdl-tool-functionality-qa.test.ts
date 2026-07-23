@@ -96,7 +96,7 @@ describe("SDL tool functionality QA", () => {
           graphIntegrityDigest: null,
           graphIntegrityError: "internal mismatch detail",
           nextBestAction:
-            'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph. If full verification fails again, stop SDL-MCP, delete the configured .lbug database directory, and rebuild from source.',
+            "Graph integrity verification failed. A manifest-backed graph remains readable, but the current revision is not verified. Do not retry refresh automatically; stop SDL-MCP and run `sdl-mcp index --force --safe-rebuild <absolute-new-path>` to build and validate a replacement.",
         },
       },
       { detail: "full" },
