@@ -313,7 +313,14 @@ export function isWatcherStale(
     "pendingChanges" | "eventsReceived" | "lastSuccessfulReindexAt"
   >,
   nowMs = Date.now(),
+  activeReindex = false,
 ): boolean {
+  // An active attempt owns this pending change and is bounded by the operation
+  // timeout. Restarting here races legitimate work before it can publish its
+  // successful completion.
+  if (activeReindex) {
+    return false;
+  }
   if (health.pendingChanges <= 0) {
     return false;
   }
@@ -954,7 +961,9 @@ export async function watchRepositoryWithIndexer(
     if (closed) {
       return;
     }
-    const stale = providerFailureActive || isWatcherStale(health);
+    const stale =
+      providerFailureActive ||
+      isWatcherStale(health, Date.now(), reindexCoalescer.active);
     health.stale = stale;
     try {
       logWatcherHealthTelemetry({

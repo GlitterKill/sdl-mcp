@@ -281,6 +281,21 @@ describe("watcher health", () => {
     );
   });
 
+  it("does not consider actively processing pending work stale", () => {
+    assert.strictEqual(
+      isWatcherStale(
+        {
+          eventsReceived: 1,
+          lastSuccessfulReindexAt: null,
+          pendingChanges: 1,
+        },
+        Date.now(),
+        true,
+      ),
+      false,
+    );
+  });
+
   it("applies SDL ignore globs to absolute chokidar paths", () => {
     const repoRoot = resolve("repo");
     const ignored = _createChokidarIgnoredPredicateForTesting(repoRoot, [
