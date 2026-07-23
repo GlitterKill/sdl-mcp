@@ -2,6 +2,10 @@
   "$comment": "Determinism fixtures for determinism.test.ts. Adding an SDL-MCP tool requires adding at least one stable call here or an uncoveredAllowlist entry with a reason.",
   "repoId": "determinism-fixtures",
   "fixtureRepo": "../stress/fixtures",
+  "toolCatalogExpectations": {
+    "workflowInstructionCopies": 1,
+    "workflowInstructionToolIndex": 0
+  },
   "toolCalls": [
     {
       "tool": "sdl.action.search",

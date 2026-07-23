@@ -15,6 +15,7 @@ import { getContinuation } from "../../dist/code-mode/workflow-truncation.js";
 import { SHUTDOWN_FORCE_EXIT_TIMEOUT_MS } from "../../dist/config/constants.js";
 import type { CodeModeConfig } from "../../dist/config/types.js";
 import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
+import { SDL_MCP_SERVER_INSTRUCTIONS } from "../../dist/mcp/server-instructions.js";
 import type { MCPServer } from "../../dist/server.js";
 import {
   DeltaGetResponseSchema,
@@ -279,6 +280,17 @@ async function runLeg(repeats: number, options: { setup: boolean }): Promise<Leg
       : undefined;
 
     const tools = await server.client.listTools();
+    const workflowInstructionIndexes = tools.tools.flatMap((tool, index) =>
+      tool.description?.includes(SDL_MCP_SERVER_INSTRUCTIONS) ? [index] : [],
+    );
+    assert.equal(
+      workflowInstructionIndexes.length,
+      fixtures.toolCatalogExpectations.workflowInstructionCopies,
+    );
+    assert.equal(
+      workflowInstructionIndexes[0],
+      fixtures.toolCatalogExpectations.workflowInstructionToolIndex,
+    );
     const results = new Map<string, string[]>();
 
     for (const [ordinal, call] of fixtures.toolCalls.entries()) {
