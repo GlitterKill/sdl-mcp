@@ -8936,6 +8936,7 @@ describe("provider-first indexing foundation", () => {
       await dbExec(
         activeConn,
         `MATCH (r:Repo {repoId: $repoId})
+         MATCH (f:File {fileId: $fileId})
          MATCH (source:Symbol {symbolId: $sourceSymbolId})
          MERGE (target:Symbol {symbolId: $unresolvedSymbolId})
          SET target.repoId = $repoId,
@@ -8964,9 +8965,10 @@ describe("provider-first indexing foundation", () => {
              target.packageVersion = '',
              target.scipSymbol = '',
              target.symbolStatus = 'unresolved',
-             target.placeholderKind = 'call',
-             target.placeholderTarget = $unresolvedSymbolId
+              target.placeholderKind = 'call',
+              target.placeholderTarget = $unresolvedSymbolId
          MERGE (target)-[:SYMBOL_IN_REPO]->(r)
+         MERGE (target)-[:SYMBOL_IN_FILE]->(f)
          MERGE (source)-[d:DEPENDS_ON {edgeType: 'call'}]->(target)
          SET d.weight = 1.0,
              d.confidence = 0.7,
@@ -8983,6 +8985,7 @@ describe("provider-first indexing foundation", () => {
          MERGE (v)-[:VERSION_OF_REPO]->(r)`,
         {
           repoId,
+          fileId,
           sourceSymbolId,
           unresolvedSymbolId,
           versionId,
@@ -9003,6 +9006,7 @@ describe("provider-first indexing foundation", () => {
       assert.equal(summary.copyMode, "bulkCsv");
       assert.equal(summary.actualCounts?.edges, 1);
       assert.equal(summary.actualCounts?.auxiliarySymbols, 1);
+      assert.equal(summary.actualCounts?.auxiliarySymbolFileLinks, 1);
       assert.ok(
         summary.bulkLoad?.artifacts.some(
           (artifact) =>
@@ -9010,6 +9014,27 @@ describe("provider-first indexing foundation", () => {
         ),
         "newline-bearing edge endpoints should be excluded from relationship COPY",
       );
+      assert.ok(
+        summary.bulkLoad?.artifacts.some(
+          (artifact) =>
+            artifact.targetTable === "SYMBOL_IN_FILE" && artifact.rows === 0,
+        ),
+        "newline-bearing file membership should use the parameterized fallback",
+      );
+      const verificationDb = new kuzu.Database(shadowDbPath);
+      const verificationConn = new kuzu.Connection(verificationDb);
+      try {
+        const membershipRows = await queryAll<{ count: unknown }>(
+          verificationConn,
+          `MATCH (s:Symbol {symbolId: $unresolvedSymbolId})-[:SYMBOL_IN_FILE]->(:File {fileId: $fileId})
+           RETURN count(s) AS count`,
+          { unresolvedSymbolId, fileId },
+        );
+        assert.equal(toNumber(membershipRows[0]?.count ?? 0), 1);
+      } finally {
+        await verificationConn.close().catch(() => {});
+        await verificationDb.close().catch(() => {});
+      }
     } finally {
       await activeConn.close().catch(() => {});
       await activeDb.close().catch(() => {});
@@ -9121,6 +9146,33 @@ describe("provider-first indexing foundation", () => {
 
       assert.equal(summary.status, "finalized", summary.reasons.join("\n"));
       assert.equal(summary.actualCounts?.auxiliarySymbols, 1);
+      assert.equal(summary.actualCounts?.auxiliarySymbolFileLinks, 1);
+      assert.ok(
+        summary.bulkLoad?.artifacts.some(
+          (artifact) =>
+            artifact.targetTable === "SYMBOL_IN_FILE" && artifact.rows === 1,
+        ),
+        "file-backed provider metadata membership should be copied explicitly",
+      );
+      const verificationDb = new kuzu.Database(shadowDbPath);
+      const verificationConn = new kuzu.Connection(verificationDb);
+      try {
+        const membershipRows = await queryAll<{ count: unknown }>(
+          verificationConn,
+          `MATCH (:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File {fileId: $fileId})
+           MATCH (s:Symbol {symbolId: $metadataSymbolId})-[:SYMBOL_IN_FILE]->(f)
+           RETURN count(s) AS count`,
+          { repoId, fileId, metadataSymbolId },
+        );
+        assert.equal(
+          toNumber(membershipRows[0]?.count ?? 0),
+          1,
+          "shadow finalization must preserve file membership for provider metadata symbols",
+        );
+      } finally {
+        await verificationConn.close().catch(() => {});
+        await verificationDb.close().catch(() => {});
+      }
     } finally {
       await activeConn.close().catch(() => {});
       await activeDb.close().catch(() => {});

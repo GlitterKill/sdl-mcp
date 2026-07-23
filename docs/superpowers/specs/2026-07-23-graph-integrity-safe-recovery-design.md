@@ -55,6 +55,12 @@ The recovery decision is based on the following observed facts:
 - LadybugDB 0.18.1's existing shadow finalizer deliberately refuses Symbol
   mutation above 2,048 rows. The affected repository has roughly 29,000
   provider symbols.
+- The first isolated recovery candidate exposed a smaller shadow-finalization
+  defect before cutover: 21 Rust derive-generated provider-metadata symbols
+  retained their nodes but lost `SYMBOL_IN_FILE`. The staging artifact and
+  pre-activation backup both retained those relationships; the auxiliary-node
+  reset restored only `Symbol` and `SYMBOL_IN_REPO`. Restoring the 21 file links
+  made the persisted digest exactly equal the manifest digest.
 
 ## Safety invariants
 

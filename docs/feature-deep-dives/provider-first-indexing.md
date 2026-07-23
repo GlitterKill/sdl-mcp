@@ -267,7 +267,7 @@ If staging artifact writes or shadow DB loading fail, the run reports the failed
 
 After active graph finalization finishes, loaded shadows are finalized by writing these rows to finalization CSV artifacts and loading those artifacts into the shadow `.lbug` with LadybugDB `COPY`:
 
-- Auxiliary dependency symbols.
+- Auxiliary dependency symbols and their repository/file membership.
 - Final active edges.
 - Version rows.
 - Symbol versions.
@@ -278,7 +278,13 @@ After active graph finalization finishes, loaded shadows are finalized by writin
 - Shadow clusters.
 - `DerivedState` rows.
 
-Finalization then validates active-versus-shadow counts and checkpoints the shadow database. The finalization manifest sits under the shadow build's `finalization/` directory so failed parity checks can be inspected without re-running provider collection.
+Finalization then validates active-versus-shadow counts, including file links for
+auxiliary symbols, and checkpoints the shadow database. Provider metadata can
+remain `unresolved` while still belonging to a concrete source file; finalization
+preserves that relationship instead of treating status as fileless ownership.
+The finalization manifest sits under the shadow build's `finalization/`
+directory so failed parity checks can be inspected without re-running provider
+collection.
 
 Shadow finalization seeds edge-target symbol nodes that are needed as relationship endpoints but are not repo-linked in the active graph. It does not add missing `SYMBOL_IN_REPO` relationships that would skew parity counts.
 

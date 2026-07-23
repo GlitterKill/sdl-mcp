@@ -55,6 +55,7 @@ export interface ProviderFirstShadowFinalizationCounts {
   files: number;
   symbols: number;
   auxiliarySymbols: number;
+  auxiliarySymbolFileLinks: number;
   edges: number;
   versions: number;
   symbolVersions: number;
@@ -156,6 +157,7 @@ const SYMBOL_COLUMNS = [
 ] as const;
 
 const SYMBOL_IN_REPO_COLUMNS = ["from", "to"] as const;
+const SYMBOL_IN_FILE_COLUMNS = ["from", "to"] as const;
 
 const EDGE_COLUMNS = [
   "from",
@@ -353,6 +355,11 @@ interface AuxiliarySymbolQueryRow {
   placeholderTarget: string | null;
 }
 
+interface AuxiliarySymbolFileLinkRow {
+  symbolId: string;
+  fileId: string;
+}
+
 interface SemanticProviderRunCopyRow {
   runId: string;
   repoId: string;
@@ -522,6 +529,10 @@ async function copyFinalizedRows(params: {
     params.activeConn,
     params.repoId,
   );
+  const auxiliarySymbolFileLinks = await readAuxiliarySymbolFileLinksForRepo(
+    params.activeConn,
+    params.repoId,
+  );
   const auxiliarySymbolIds = new Set(
     auxiliarySymbols.map((symbol) => symbol.symbolId),
   );
@@ -642,6 +653,20 @@ async function copyFinalizedRows(params: {
   const fallbackAuxiliarySymbols = auxiliarySymbols.filter(
     (row) => !isSymbolRelCopySafe(row),
   );
+  const bulkAuxiliarySymbolIds = new Set(
+    bulkAuxiliarySymbols.map((row) => row.symbolId),
+  );
+  const auxiliarySymbolFileLinkCanUseBulk = (
+    row: AuxiliarySymbolFileLinkRow,
+  ): boolean =>
+    bulkAuxiliarySymbolIds.has(row.symbolId) &&
+    copyRelEndpointIsSafe(row.fileId);
+  const bulkAuxiliarySymbolFileLinks = auxiliarySymbolFileLinks.filter(
+    auxiliarySymbolFileLinkCanUseBulk,
+  );
+  const fallbackAuxiliarySymbolFileLinks = auxiliarySymbolFileLinks.filter(
+    (row) => !auxiliarySymbolFileLinkCanUseBulk(row),
+  );
   const bulkEdges = edges.filter(isEdgeRelCopySafe);
   const fallbackEdges = edges.filter((row) => !isEdgeRelCopySafe(row));
   const bulkClusterMembers = clusterMembers.filter(isClusterMemberRelCopySafe);
@@ -682,6 +707,15 @@ async function copyFinalizedRows(params: {
       kind: "relationship",
       rows: bulkAuxiliarySymbols,
       mapRow: (row) => [row.symbolId, row.repoId],
+    }),
+    await writeCsvArtifact({
+      stagingDir,
+      fileName: "auxiliary-symbol-in-file.csv",
+      columns: [...SYMBOL_IN_FILE_COLUMNS],
+      targetTable: "SYMBOL_IN_FILE",
+      kind: "relationship",
+      rows: bulkAuxiliarySymbolFileLinks,
+      mapRow: (row) => [row.symbolId, row.fileId],
     }),
     await writeCsvArtifact({
       stagingDir,
@@ -966,6 +1000,10 @@ async function copyFinalizedRows(params: {
     params.shadowConn,
     fallbackAuxiliarySymbols,
   );
+  await upsertAuxiliarySymbolFileLinksFallback(
+    params.shadowConn,
+    fallbackAuxiliarySymbolFileLinks,
+  );
   await upsertFinalizedEdgesFallback(params.shadowConn, fallbackEdges);
   const callProvenanceRepairs =
     await normalizeProviderFirstCallEdgeProvenance(
@@ -1005,6 +1043,8 @@ async function copyFinalizedRows(params: {
         artifacts,
         fallbackRows: {
           auxiliarySymbols: fallbackAuxiliarySymbols.length,
+          auxiliarySymbolFileLinks:
+            fallbackAuxiliarySymbolFileLinks.length,
           edges: fallbackEdges.length,
           clusterMembers: fallbackClusterMembers.length,
           processSteps: fallbackProcessSteps.length,
@@ -1626,6 +1666,28 @@ async function upsertAuxiliarySymbolsFallback(
   }
 }
 
+async function upsertAuxiliarySymbolFileLinksFallback(
+  conn: Connection,
+  rows: AuxiliarySymbolFileLinkRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const chunkSize = 256;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (s:Symbol {symbolId: row.symbolId})
+       MATCH (f:File {fileId: row.fileId})
+       OPTIONAL MATCH (s)-[existing:SYMBOL_IN_FILE]->(f)
+       WITH s, f, existing
+       WHERE existing IS NULL
+       CREATE (s)-[:SYMBOL_IN_FILE]->(f)`,
+      { rows: chunk },
+    );
+  }
+}
+
 async function upsertFinalizedEdgesFallback(
   conn: Connection,
   edges: EdgeRow[],
@@ -1967,6 +2029,24 @@ async function readAuxiliarySymbolsForRepo(
     { repoId },
   );
   return rows.map((row) => symbolRowFromQuery(row, repoId, "unresolved"));
+}
+
+async function readAuxiliarySymbolFileLinksForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<AuxiliarySymbolFileLinkRow[]> {
+  // Provider metadata can be unresolved while still belonging to a concrete
+  // source file. Preserve that structural membership when finalization
+  // replaces auxiliary nodes; status alone does not make a symbol fileless.
+  return await queryAll<AuxiliarySymbolFileLinkRow>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)-[:FILE_IN_REPO]->(r)
+     WHERE coalesce(s.symbolStatus, 'real') <> 'real'
+        OR coalesce(s.external, false) = true
+     RETURN s.symbolId AS symbolId, f.fileId AS fileId
+     ORDER BY symbolId, fileId`,
+    { repoId },
+  );
 }
 
 function auxiliarySymbolToCopyCells(row: AuxiliarySymbolRow): unknown[] {
@@ -2382,6 +2462,14 @@ async function readFinalizationCounts(
        WHERE coalesce(s.symbolStatus, 'real') <> 'real'
           OR coalesce(s.external, false) = true
        RETURN count(s) AS count`,
+      { repoId },
+    ),
+    auxiliarySymbolFileLinks: await count(
+      conn,
+      `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[rel:SYMBOL_IN_FILE]->(:File)-[:FILE_IN_REPO]->(r)
+       WHERE coalesce(s.symbolStatus, 'real') <> 'real'
+          OR coalesce(s.external, false) = true
+       RETURN count(rel) AS count`,
       { repoId },
     ),
     edges: await count(
