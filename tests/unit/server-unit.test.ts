@@ -1,5 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import {
   isPublicIndexRefresh,
@@ -8,6 +10,7 @@ import {
   shouldBypassToolDispatch,
 } from "../../dist/server.js";
 import { SDL_MCP_SERVER_INSTRUCTIONS } from "../../dist/mcp/server-instructions.js";
+import { getPackageVersion } from "../../dist/util/package-info.js";
 
 /**
  * Tests for src/server.ts — MCPServer class.
@@ -167,6 +170,62 @@ describe("MCPServer", () => {
   });
 
   describe("constructor", () => {
+    it("advertises workflow instructions once in the deterministic tool catalog", async () => {
+      const schema = z.object({});
+      const handler = async () => ({});
+      server.registerTool("tool-a", "desc-a", schema, handler);
+      server.registerTool("tool-b", "desc-b", schema, handler);
+
+      const client = new Client({ name: "test-client", version: "1.0.0" });
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      await Promise.all([
+        client.connect(clientTransport),
+        server.getServer().connect(serverTransport),
+      ]);
+
+      try {
+        assert.strictEqual(client.getInstructions(), undefined);
+
+        const first = await client.listTools();
+        const second = await client.listTools();
+        const descriptions = first.tools.map((tool) => tool.description);
+
+        assert.strictEqual(JSON.stringify(second), JSON.stringify(first));
+        assert.deepStrictEqual(Object.keys(first), ["tools"]);
+        for (const tool of first.tools) {
+          assert.deepStrictEqual(Object.keys(tool), [
+            "name",
+            "title",
+            "description",
+            "inputSchema",
+            "annotations",
+          ]);
+        }
+        assert.deepStrictEqual(
+          first.tools.map((tool) => tool.name),
+          ["tool-a", "tool-b"],
+        );
+        assert.strictEqual(
+          descriptions[0],
+          `${SDL_MCP_SERVER_INSTRUCTIONS}\n\ndesc-a [SDL-MCP v${getPackageVersion()}]`,
+        );
+        assert.strictEqual(
+          descriptions[1],
+          `desc-b [SDL-MCP v${getPackageVersion()}]`,
+        );
+        assert.strictEqual(
+          descriptions.filter(
+            (description) =>
+              description?.includes(SDL_MCP_SERVER_INSTRUCTIONS) === true,
+          ).length,
+          1,
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
     it("creates an MCPServer instance", () => {
       assert.ok(server);
       assert.ok(server instanceof MCPServer);

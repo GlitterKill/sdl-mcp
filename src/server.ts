@@ -503,7 +503,6 @@ export class MCPServer {
           tools: { listChanged: true },
           logging: {},
         },
-        instructions: SDL_MCP_SERVER_INSTRUCTIONS,
       },
     );
 
@@ -534,23 +533,32 @@ export class MCPServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       try {
         return {
-          tools: Array.from(this.tools.values()).map((tool) => ({
-            name: this.formatToolNameForClient(tool.name),
-            title: tool.presentation.title,
-            description:
+          tools: Array.from(this.tools.values()).map((tool, index) => {
+            const description =
               tool.presentation.includeVersionInDescription === false
                 ? tool.description
-                : buildVersionedToolDescription(tool.description),
-            annotations: {
+                : buildVersionedToolDescription(tool.description);
+
+            return {
+              name: this.formatToolNameForClient(tool.name),
               title: tool.presentation.title,
-            } satisfies ToolAnnotations,
-            inputSchema:
-              tool.wireSchema ??
-              convertSchema(tool.inputSchema, this._gatewayMode),
-            ...(tool.outputSchema
-              ? { outputSchema: convertSchema(tool.outputSchema, this._gatewayMode) }
-              : {}),
-          })),
+              // Some clients repeat server instructions for every tool. Keep one
+              // deterministic fallback copy in the first advertised catalog entry.
+              description:
+                index === 0
+                  ? `${SDL_MCP_SERVER_INSTRUCTIONS}\n\n${description}`
+                  : description,
+              annotations: {
+                title: tool.presentation.title,
+              } satisfies ToolAnnotations,
+              inputSchema:
+                tool.wireSchema ??
+                convertSchema(tool.inputSchema, this._gatewayMode),
+              ...(tool.outputSchema
+                ? { outputSchema: convertSchema(tool.outputSchema, this._gatewayMode) }
+                : {}),
+            };
+          }),
         };
       } catch (error) {
         process.stderr.write(`[sdl-mcp] ListTools error: ${error}\n`);
