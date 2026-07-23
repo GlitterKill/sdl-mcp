@@ -280,8 +280,12 @@ async function runLeg(repeats: number, options: { setup: boolean }): Promise<Leg
       : undefined;
 
     const tools = await server.client.listTools();
-    const workflowInstructionIndexes = tools.tools.flatMap((tool, index) =>
-      tool.description?.includes(SDL_MCP_SERVER_INSTRUCTIONS) ? [index] : [],
+    const workflowInstructionIndexes = tools.tools.flatMap(
+      (tool, index) =>
+        tool.description
+          ?.split(SDL_MCP_SERVER_INSTRUCTIONS)
+          .slice(1)
+          .map(() => index) ?? [],
     );
     assert.equal(
       workflowInstructionIndexes.length,
