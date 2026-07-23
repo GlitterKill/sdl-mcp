@@ -15,8 +15,8 @@ import { getPackageVersion } from "../../dist/util/package-info.js";
 /**
  * Tests for src/server.ts — MCPServer class.
  * Verifies tool registration, gatewayMode property, clearTools, and
- * post-dispatch hook registration. Does not test full MCP transport
- * connectivity (that would be an integration test).
+ * post-dispatch hook registration. Covers in-memory protocol connectivity,
+ * but not external stdio or HTTP integration.
  */
 
 describe("MCPServer", () => {
@@ -184,12 +184,45 @@ describe("MCPServer", () => {
         server.getServer().connect(serverTransport),
       ]);
 
+      const rawToolResults: unknown[] = [];
+      const handleClientMessage = clientTransport.onmessage;
+      clientTransport.onmessage = (message, extra) => {
+        if (
+          "result" in message &&
+          message.result !== null &&
+          typeof message.result === "object" &&
+          "tools" in message.result
+        ) {
+          rawToolResults.push(message.result);
+        }
+        handleClientMessage?.(message, extra);
+      };
+
       try {
         assert.strictEqual(client.getInstructions(), undefined);
 
         const first = await client.listTools();
         const second = await client.listTools();
         const descriptions = first.tools.map((tool) => tool.description);
+
+        assert.strictEqual(rawToolResults.length, 2);
+        assert.strictEqual(
+          JSON.stringify(rawToolResults[1]),
+          JSON.stringify(rawToolResults[0]),
+        );
+        const rawFirst = rawToolResults[0] as {
+          tools: Array<Record<string, unknown>>;
+        };
+        assert.deepStrictEqual(Object.keys(rawFirst), ["tools"]);
+        for (const tool of rawFirst.tools) {
+          assert.deepStrictEqual(Object.keys(tool), [
+            "name",
+            "title",
+            "description",
+            "annotations",
+            "inputSchema",
+          ]);
+        }
 
         assert.strictEqual(JSON.stringify(second), JSON.stringify(first));
         assert.deepStrictEqual(Object.keys(first), ["tools"]);
