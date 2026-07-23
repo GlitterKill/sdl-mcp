@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import { StorageIntegrityError } from "../../dist/domain/errors.js";
 import {
   classifyWatcherReindexFailure,
@@ -50,6 +51,54 @@ describe("processWatchedFileChange", () => {
       "patch:src/deleted.ts",
       "index:demo-repo:incremental",
     ]);
+  });
+
+  it("routes root-level deletes through one incremental reindex", async () => {
+    const calls: string[] = [];
+    const repoRoot = resolve("watcher-root");
+
+    await processWatchedFileChange({
+      repoId: "demo-repo",
+      repoRoot,
+      filePath: "deleted.ts",
+      async indexRepo(repoId, mode) {
+        calls.push(`index:${repoId}:${mode}`);
+      },
+      async patchSavedFileFn({ filePath }) {
+        calls.push(`patch:${filePath}`);
+        throw missingPathError(resolve(repoRoot, "deleted.ts"));
+      },
+    });
+
+    assert.deepStrictEqual(calls, [
+      "patch:deleted.ts",
+      "index:demo-repo:incremental",
+    ]);
+  });
+
+  it("does not mistake a nested missing file with the same basename for a root-level delete", async () => {
+    const calls: string[] = [];
+    const repoRoot = resolve("watcher-root");
+    const nested = missingPathError(
+      resolve(repoRoot, "nested", "deleted.ts"),
+    );
+
+    await assert.rejects(
+      processWatchedFileChange({
+        repoId: "demo-repo",
+        repoRoot,
+        filePath: "deleted.ts",
+        async indexRepo() {
+          calls.push("index");
+        },
+        async patchSavedFileFn() {
+          calls.push("patch");
+          throw nested;
+        },
+      }),
+      (error: unknown) => error === nested,
+    );
+    assert.deepStrictEqual(calls, ["patch"]);
   });
 
   it("does not fallback for a permanent graph storage failure", async () => {

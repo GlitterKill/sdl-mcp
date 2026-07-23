@@ -194,6 +194,22 @@ describe("LadybugDB Symbol Queries", () => {
         return true;
       },
     );
+
+    assert.throws(
+      () =>
+        symbolQueries.assertPhysicalSymbolUniquenessSnapshot({
+          physicalTotal: 2_189,
+          distinctTotal: 227,
+          duplicateSamples: [{ symbolId: "", copies: 1_963 }],
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof StorageIntegrityError);
+        assert.match(error.message, /STRING projection divergence/);
+        assert.match(error.message, /empty symbolId for 1963 nodes/);
+        assert.match(error.message, /primary-key point lookups may still resolve/);
+        return true;
+      },
+    );
   });
 
   it(

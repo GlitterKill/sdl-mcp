@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import {
   GraphIntegrityBaselineError,
   SafeRebuildRequiredError,
@@ -88,15 +90,34 @@ export function classifyWatcherReindexFailure(
 function pathsIdentifySameWatchedFile(
   errorPath: string,
   watchedPath: string,
+  repoRoot?: string,
 ): boolean {
   const normalizedError = normalizePath(errorPath);
   const normalizedWatched = normalizePath(watchedPath);
-  const [comparableError, comparableWatched] =
+  const normalizedResolvedWatched = repoRoot
+    ? normalizePath(resolve(repoRoot, watchedPath))
+    : undefined;
+  const comparableError =
     process.platform === "win32"
-      ? [normalizedError.toLowerCase(), normalizedWatched.toLowerCase()]
-      : [normalizedError, normalizedWatched];
+      ? normalizedError.toLowerCase()
+      : normalizedError;
+  const comparableWatched =
+    process.platform === "win32"
+      ? normalizedWatched.toLowerCase()
+      : normalizedWatched;
+  const comparableResolvedWatched =
+    process.platform === "win32"
+      ? normalizedResolvedWatched?.toLowerCase()
+      : normalizedResolvedWatched;
   if (comparableError === comparableWatched) return true;
+  if (
+    comparableResolvedWatched &&
+    comparableError === comparableResolvedWatched
+  ) {
+    return true;
+  }
   return (
+    !repoRoot &&
     comparableWatched.includes("/") &&
     comparableError.endsWith(`/${comparableWatched}`)
   );
@@ -105,6 +126,7 @@ function pathsIdentifySameWatchedFile(
 function isMissingWatchedPathError(
   error: unknown,
   watchedPath: string,
+  repoRoot?: string,
 ): boolean {
   return boundedCauseChain(error).some((cause) => {
     if (typeof cause !== "object" || cause === null) return false;
@@ -112,13 +134,14 @@ function isMissingWatchedPathError(
     return (
       (candidate.code === "ENOENT" || candidate.code === "ENOTDIR") &&
       typeof candidate.path === "string" &&
-      pathsIdentifySameWatchedFile(candidate.path, watchedPath)
+      pathsIdentifySameWatchedFile(candidate.path, watchedPath, repoRoot)
     );
   });
 }
 
 export async function processWatchedFileChange(params: {
   repoId: string;
+  repoRoot?: string;
   filePath: string;
   indexRepo: IndexRepoFn;
   patchSavedFileFn?: (input: {
@@ -126,13 +149,13 @@ export async function processWatchedFileChange(params: {
     filePath: string;
   }) => Promise<unknown>;
 }): Promise<void> {
-  const { repoId, filePath, indexRepo, patchSavedFileFn } = params;
+  const { repoId, repoRoot, filePath, indexRepo, patchSavedFileFn } = params;
   if (patchSavedFileFn) {
     try {
       await withIndexingGate(() => patchSavedFileFn({ repoId, filePath }));
       return;
     } catch (patchError: unknown) {
-      if (!isMissingWatchedPathError(patchError, filePath)) {
+      if (!isMissingWatchedPathError(patchError, filePath, repoRoot)) {
         throw patchError;
       }
       // A delete/rename can invalidate more than one file identity, so let the

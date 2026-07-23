@@ -1,6 +1,6 @@
 # Graph Integrity Safe Recovery and Background Reconciliation
 
-Status: Approved for implementation
+Status: Implemented
 
 Date: 2026-07-23
 
@@ -61,6 +61,29 @@ The recovery decision is based on the following observed facts:
   pre-activation backup both retained those relationships; the auxiliary-node
   reset restored only `Symbol` and `SYMBOL_IN_REPO`. Restoring the 21 file links
   made the persisted digest exactly equal the manifest digest.
+- A second isolated candidate proved the deeper storage failure. SCIP-IO
+  finalized healthy at 2,189 physical and 2,189 distinct Symbols. LSP-IO's
+  later active-table `COPY Symbol` immediately changed the shared graph to
+  31,529 physical and 29,567 distinct projected IDs.
+- The 1,963 affected SCIP-IO rows occupied the live slots from internal offsets
+  64 through 2,047 after 21 tombstones. Sequential scans projected empty
+  `symbolId`, `name`, `astFingerprint`, and `scipSymbol`; primary-key point
+  lookups still returned the original rows.
+- Replaying the retained artifacts first reproduced the duplicate/blank-key
+  failure when a later repository appended Symbols with a second node `COPY`.
+  Provider input, fallback rows, and the finalized SCIP shadow were valid.
+- A stronger durability reproduction then removed all later node `COPY` and
+  FTS work. A COPY-built Symbol baseline remained scan/point-lookup coherent
+  immediately after a later parameterized `MERGE`, but `CHECKPOINT` changed
+  scan-visible `scipSymbol` values while primary-key lookups retained the
+  originals. Reopen persisted the divergence.
+- A control database built with Symbol `MERGE` from its first row survived the
+  same later-repository append, checkpoint, and reopen. Relationship-only
+  `COPY` did not reproduce the node-column failure.
+- The confirmed product boundary is therefore stricter than “no active
+  `COPY`”: a COPY-built Symbol database must never become the mutable active
+  graph. Active Symbol tables are MERGE-built from the start, production
+  shadow staging/activation is blocked, and relationship COPY remains enabled.
 
 ## Safety invariants
 
@@ -87,6 +110,9 @@ The recovery decision is based on the following observed facts:
    graph-baseline failures are permanent until an explicit recovery action.
 10. Audit writes do not open independent transactions during an explicitly
     scoped full refresh or database handoff.
+11. Mutable active Symbol tables are built with parameterized batch `MERGE`
+    from the first row. Production orchestration does not stage or activate a
+    node-COPY shadow under LadybugDB 0.18.1.
 
 ## Considered approaches
 
@@ -109,7 +135,11 @@ Rejected for this recovery. The shadow is repository-scoped but path activation
 replaces the entire configured database, which would erase the other three
 repositories. Its finalizer also rejects Symbol mutation above the 2,048-row
 LadybugDB safety ceiling. Raising that ceiling would discard an evidence-based
-safety guard rather than solve the ownership problem.
+safety guard rather than solve the ownership problem. More importantly, later
+testing proved that even a finalized COPY-built shadow is not a safe mutable
+baseline: a later parameterized Symbol append plus checkpoint can corrupt
+scan-visible STRING values. Production orchestration therefore skips staging
+as well as activation, avoiding unbounded timestamped shadow artifacts.
 
 ### Isolated whole-database rebuild
 
@@ -204,6 +234,11 @@ The option:
 - indexes every configured repository into the target with
   `isolatedRebuild: true`;
 - treats any repository failure as candidate failure;
+- checkpoints after each repository, validates global physical/distinct Symbol
+  identity, canonical STRING scans, scalar primary-key projection parity for
+  every Symbol, and dependency endpoints, then recomputes every previously
+  indexed repository's persisted integrity manifest before reporting that
+  repository complete;
 - waits for every repository's background graph-integrity verifier to quiesce
   and requires its current state to be `verified`;
 - checkpoints and closes the candidate;
@@ -229,10 +264,13 @@ rejects a `failed` or still-`verifying` state. After reopen, validation requires
 - no duplicate sample groups;
 - each non-empty configured repository has persisted files, a latest Version,
   and a verified current graph-integrity revision;
+- every repository's freshly recomputed persisted digest matches its stored
+  integrity manifest instead of trusting the previous `verified` flag alone;
 - a valid empty configured repository is present and has no contradictory
   persisted graph state;
 - repository Symbol membership counts contain no duplicate `symbolId`;
-- deterministic scan samples agree with primary-key point lookup;
+- every scan-visible Symbol string projection agrees exactly with its scalar
+  primary-key point lookup;
 - `LOWER()` succeeds across canonical string fields;
 - all `DEPENDS_ON` relationship endpoints expose non-empty Symbol IDs;
 - when FTS is enabled, the configured Symbol FTS index exists and a bounded
@@ -299,6 +337,9 @@ Change the rules:
 
 - fall back from a saved-file patch to incremental indexing only for a proven
   missing path (`ENOENT` or `ENOTDIR`), which represents delete/rename;
+- resolve a relative watched path against the repository root before matching
+  the missing-path error, including root-level files, so an unrelated nested
+  dependency with the same basename cannot trigger fallback;
 - rethrow all other patch errors;
 - retry boundedly only for recognized transient writer/read-pool contention;
 - never retry `StorageIntegrityError`, `SafeRebuildRequiredError`,
@@ -376,8 +417,20 @@ Unknown errors are not assumed retryable.
   candidate and a fresh first index remain allowed.
 - `--safe-rebuild` parsing and validation reject watch, repo filtering,
   relative/equal/existing targets, and missing `--force`.
-- Candidate validation runs only after close/reopen and rejects duplicate
-  Symbol identity or unverified repository integrity.
+- Candidate validation checkpoints after every repository, revalidates all
+  earlier manifests, and rejects duplicate Symbol identity, stale verified
+  state, or post-reopen digest drift.
+- Known-file and missing-placeholder writers emit no active-table
+  `COPY Symbol`; known ownership and dependency relationships retain COPY.
+- A MERGE-built first repository remains scan/PK coherent after a later
+  repository writes through the active parameterized materializer, followed by
+  explicit checkpoint and reopen. The fixture covers null, empty, and non-empty
+  optional strings plus the 2,047/2,048/2,049 boundary.
+- A configured `shadowDb` request reports the stable safety reason and creates
+  no staging artifact or active-database handoff.
+- Safe rebuild checkpoints and performs global storage, full scan/scalar-PK
+  string parity, plus manifest validation after each repository before
+  reporting that repository complete.
 - A cross-repository saved-file patch touches an already canonical shared
   placeholder and leaves physical and manifest digests equal.
 - A legacy blank placeholder expectation is promoted to the canonical tuple in

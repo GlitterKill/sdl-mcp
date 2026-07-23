@@ -24,27 +24,36 @@ describe("per-repository lifecycle barrier", () => {
     resetRepoLifecycleForTests();
   });
 
-  it("quiesces verification across full-index shadow activation and active DB close", () => {
+  it("blocks production shadow staging before any active DB handoff", () => {
     const source = readFileSync(
       new URL("../../src/indexer/indexer.ts", import.meta.url),
       "utf8",
     );
-    const quiesce = source.indexOf(
-      "withGraphIntegrityVerifierQuiesced(repoId",
+    const skipAssignment = source.indexOf(
+      "providerFirstShadowStagingSkipReason =",
     );
-    const activation = source.indexOf(
-      "activateProviderFirstShadowDbWithHandoff({",
-      quiesce,
+    const blockReason = source.indexOf(
+      "PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON",
+      skipAssignment,
     );
-    const close = source.indexOf(
-      "closeLadybugDb({ preserveCloseHooks: true })",
-      activation,
+    const stagingGuard = source.indexOf(
+      "if (providerFirstShadowStagingSkipReason)",
+      blockReason,
     );
 
-    assert.ok(quiesce >= 0 && activation > quiesce);
     assert.ok(
-      activation < close,
-      "verification admission must remain closed through active DB close",
+      skipAssignment >= 0 &&
+        blockReason > skipAssignment &&
+        stagingGuard > blockReason,
+      "the storage safety block must be established before shadow staging",
+    );
+    assert.ok(
+      !source.includes("activateProviderFirstShadowDbWithHandoff"),
+      "production indexing must not invoke the mutating shadow handoff",
+    );
+    assert.ok(
+      !source.includes("closeLadybugDb({ preserveCloseHooks: true })"),
+      "a blocked shadow must not close the active database",
     );
   });
 

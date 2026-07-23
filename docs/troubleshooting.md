@@ -200,6 +200,9 @@ partially committed graph and can destroy useful forensic evidence.
 Common symptoms include:
 
 - a physical Symbol count that exceeds the distinct `symbolId` count
+- a label scan that projects empty `symbolId`, `name`, `astFingerprint`, or
+  `scipSymbol` values while primary-key point lookups still resolve the
+  original Symbol IDs
 - a primary-key or foreign-key failure during provider or legacy fallback work
 - equal expected and actual graph counts with a different fileless digest
 - a populated full refresh that reports `SafeRebuildRequiredError`
@@ -219,8 +222,12 @@ Use this recovery sequence:
    sdl-mcp index --force --safe-rebuild /absolute/path/to/recovered-graph.lbug
    ```
 
-5. Accept the candidate only when the command reports successful validation
-   after checkpoint, close, and reopen for every configured repository.
+5. Accept the candidate only when the command reports successful checkpointed
+   storage validation after each configured repository. That gate recomputes
+   every previously indexed repository's persisted integrity manifest and
+   compares every scan-visible Symbol string projection with a scalar
+   primary-key lookup. The command repeats final validation after checkpoint,
+   close, and reopen.
 6. Keep SDL-MCP stopped while you update the config, launcher, and environment
    overrides to the same candidate path. Retain the old database family for
    rollback.
@@ -231,6 +238,24 @@ The pidfile check detects supported SDL-MCP owners. It cannot detect an
 unrelated program that opened LadybugDB directly, so you must stop that owner
 before the safe rebuild. The command retains a partial or invalid candidate for
 diagnosis and never changes the active database or configuration.
+
+All configured repositories are rebuilt because `Symbol.symbolId` is a global
+primary key inside one shared database. For example, SCIP-IO can be the first
+repository and LSP-IO can be the later repository whose write exposes a global
+storage defect. This does not mean that both providers are indexing the same
+repository. Use separate config and graph database instances when repositories
+require operational isolation.
+
+With LadybugDB 0.18.1, a `Symbol` table initially populated by node `COPY` can
+later diverge between label scans and primary-key point lookups after another
+Symbol append—including parameterized `MERGE`—and checkpoint. A later switch to
+`MERGE` does not repair that baseline. SDL-MCP therefore creates active Symbol
+tables with parameterized `MERGE` from the start and blocks production shadow
+staging and activation. An existing database that may contain an activated
+COPY-built baseline needs the clean safe rebuild above.
+
+Relationship `COPY` did not reproduce this node-column failure and remains
+enabled for ownership and known-endpoint dependency relationships.
 
 Saved-file reconciliation does not require routine full refreshes. The patch
 transaction writes graph rows, canonical dependency placeholders, manifest

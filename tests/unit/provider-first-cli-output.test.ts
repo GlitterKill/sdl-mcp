@@ -9,6 +9,7 @@ import {
   formatScipGeneratorCacheLine,
   formatSemanticReadinessLines,
 } from "../../dist/cli/commands/index.js";
+import { PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON } from "../../dist/indexer/provider-first/shadow-activation.js";
 
 describe("provider-first CLI output", () => {
   it("prints summary cost only for API summary providers", () => {
@@ -400,6 +401,42 @@ describe("provider-first CLI output", () => {
       "  Provider-first: scipFull (provider-first:test)",
       `  Provider-first shadow staging skipped: ${fallbackCapReason}`,
       "  Provider-first coverage: 2257/41309 files provider-primary (1000 full, 1257 partial); 92 provider unusable, 38960 uncovered; legacy fallback skipped 39052 file(s) over cap 5000",
+    ]);
+  });
+
+  it("surfaces the mutable COPY-shadow safety block without staging artifacts", () => {
+    const lines = formatProviderFirstExecutionSummaryLines({
+      status: "executed",
+      executor: "scipFull",
+      generationId: "provider-first:test",
+      reasons: [],
+      filesProcessed: 1,
+      symbolsIndexed: 2,
+      edgesCreated: 0,
+      externalSymbolsIndexed: 0,
+      shadowBuild: {
+        status: "skipped",
+        activation: "shadowDb",
+        requestedFormat: "csv",
+        generationId: "provider-first:test",
+        counts: {
+          files: 1,
+          symbols: 2,
+          externalSymbols: 0,
+          edges: 0,
+        },
+        activationResult: {
+          status: "skipped",
+          rollback: "notNeeded",
+          reasons: [PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON],
+        },
+        reasons: [PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON],
+      },
+    });
+
+    assert.deepEqual(lines, [
+      "  Provider-first: scipFull (provider-first:test)",
+      `  Provider-first shadow staging skipped: ${PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON}`,
     ]);
   });
 

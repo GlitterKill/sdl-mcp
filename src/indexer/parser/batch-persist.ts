@@ -141,7 +141,7 @@ export interface BatchPersistDrainDiagnostics {
 export interface BatchPersistAccumulatorOptions {
   collectDiagnostics?: boolean;
   knownSymbolIdsForEdgeCopy?: ReadonlySet<string>;
-  symbolWriteMode?: "merge" | "fresh-copy";
+  symbolWriteMode?: "merge" | "fresh-replace";
   autoDrain?: boolean;
 }
 
@@ -503,7 +503,7 @@ export class BatchPersistAccumulator {
   private readonly collectDiagnostics: boolean;
   private readonly diagnostics: BatchPersistDrainDiagnostics;
   private readonly knownSymbolIdsForEdgeCopy: ReadonlySet<string>;
-  private readonly symbolWriteMode: "merge" | "fresh-copy";
+  private readonly symbolWriteMode: "merge" | "fresh-replace";
   private readonly autoDrain: boolean;
 
   constructor(
@@ -682,8 +682,8 @@ export class BatchPersistAccumulator {
     const timePhase: BatchPersistTimePhase = (phase, rows, body) =>
       this.timeWritePhase(phase, rows, body, phaseMs);
 
-    if (this.symbolWriteMode === "fresh-copy") {
-      await this.writeFreshCopyBatch(batch, existingFileIds, timePhase);
+    if (this.symbolWriteMode === "fresh-replace") {
+      await this.writeFreshReplaceBatch(batch, existingFileIds, timePhase);
     } else {
       await this.writeMergeBatch(batch, existingFileIds, timePhase);
     }
@@ -762,14 +762,14 @@ export class BatchPersistAccumulator {
     });
   }
 
-  private async writeFreshCopyBatch(
+  private async writeFreshReplaceBatch(
     batch: FlushBatch,
     existingFileIds: string[],
     timePhase: BatchPersistTimePhase,
   ): Promise<void> {
-    // Provider-first fallback needs the duplicate-key-safe COPY writers from
-    // the direct path, but batching keeps LadybugDB's single writer from
-    // thrashing through several transactions per parsed file.
+    // Provider-first fallback replaces colliding provider identities before
+    // the safe MERGE writer runs. Batching keeps LadybugDB's single writer
+    // from thrashing through several transactions per parsed file.
     const incomingSymbolIds = [
       ...new Set(batch.symbols.map((symbol) => symbol.symbolId)),
     ];
@@ -785,7 +785,7 @@ export class BatchPersistAccumulator {
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
         // Delete every incoming ID on the serialized writer. A separate
-        // existence probe can become stale between fresh-copy flushes.
+        // existence probe can become stale between fresh-replace flushes.
         await timePhase(
           "deleteIncomingSymbols",
           incomingSymbolIds.length,

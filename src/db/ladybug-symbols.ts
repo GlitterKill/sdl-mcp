@@ -34,7 +34,6 @@ import {
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
 const PRESERVE_OPTIONAL_SYMBOL_FIELD = "__sdl_preserve_optional_symbol_field__";
 const CSV_NULL_SENTINEL = "\\N";
-const CSV_ARRAY_NULL = Symbol("symbolCsvArrayNull");
 const DEFAULT_SYMBOL_SNAPSHOT_PAGE_SIZE = 32_768;
 const MAX_SYMBOL_SNAPSHOT_PAGE_SIZE = 65_536;
 export const LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT = 2_048;
@@ -66,13 +65,20 @@ export function assertPhysicalSymbolUniquenessSnapshot(
   }
 
   const renderedSamples = snapshot.duplicateSamples
-    .map(({ symbolId, copies }) => `${symbolId} (${copies})`)
+    .map(({ symbolId, copies }) => `${symbolId || "<empty>"} (${copies})`)
     .join(", ");
+  const blankProjection = snapshot.duplicateSamples.find(
+    ({ symbolId }) => symbolId.length === 0,
+  );
   throw new StorageIntegrityError(
     `LadybugDB contains ${snapshot.physicalTotal} physical Symbol nodes but ` +
       `only ${snapshot.distinctTotal} distinct symbolId values. ` +
-      `Refusing graph mutation because primary-key identity is incoherent.` +
-      (renderedSamples ? ` Duplicate sample: ${renderedSamples}.` : ""),
+      `Refusing graph mutation because the label scan and primary-key identity are incoherent. ` +
+      `This can indicate duplicate physical keys or STRING projection divergence.` +
+      (blankProjection
+        ? ` The scan projected an empty symbolId for ${blankProjection.copies} nodes even though primary-key point lookups may still resolve their original IDs.`
+        : "") +
+      (renderedSamples ? ` Scan sample: ${renderedSamples}.` : ""),
   );
 }
 
@@ -164,50 +170,6 @@ export async function hasProviderFirstBootstrap(
   return toNumber(row?.count ?? 0) > 0;
 }
 
-const SYMBOL_COPY_COLUMNS = [
-  "symbolId",
-  "repoId",
-  "kind",
-  "name",
-  "exported",
-  "visibility",
-  "language",
-  "rangeStartLine",
-  "rangeStartCol",
-  "rangeEndLine",
-  "rangeEndCol",
-  "astFingerprint",
-  "signatureJson",
-  "summary",
-  "summaryQuality",
-  "summarySource",
-  "invariantsJson",
-  "sideEffectsJson",
-  "roleTagsJson",
-  "searchText",
-  "updatedAt",
-  "embeddingMiniLM",
-  "embeddingMiniLMCardHash",
-  "embeddingMiniLMUpdatedAt",
-  "embeddingMiniLMVec",
-  "embeddingNomic",
-  "embeddingNomicCardHash",
-  "embeddingNomicUpdatedAt",
-  "embeddingJinaCode",
-  "embeddingJinaCodeCardHash",
-  "embeddingJinaCodeUpdatedAt",
-  "embeddingNomicVec",
-  "embeddingJinaCodeVec",
-  "external",
-  "scipSymbol",
-  "source",
-  "packageName",
-  "packageVersion",
-  "symbolStatus",
-  "placeholderKind",
-  "placeholderTarget",
-] as const;
-
 const SIMPLE_REL_COPY_COLUMNS = ["from", "to"] as const;
 
 export interface SymbolRow {
@@ -297,6 +259,18 @@ function toSymbolBatchUpsertRow(symbol: SymbolRow) {
   };
 }
 
+function toKnownFileSymbolBatchUpsertRow(
+  symbol: SymbolRow,
+): SymbolBatchUpsertRow {
+  return {
+    ...toSymbolBatchUpsertRow(symbol),
+    source: symbol.source ?? "treesitter",
+    packageName: symbol.packageName ?? "",
+    packageVersion: symbol.packageVersion ?? "",
+    scipSymbol: symbol.scipSymbol ?? "",
+  };
+}
+
 function splitSymbolBatchRowsBySummaryQualityType(
   rows: SymbolBatchUpsertRow[],
 ): SymbolBatchUpsertRow[][] {
@@ -315,6 +289,77 @@ function splitSymbolBatchRowsBySummaryQualityType(
   }
 
   return [integralRows, fractionalRows].filter((group) => group.length > 0);
+}
+
+function* symbolBatchRowGroups(
+  symbols: readonly SymbolRow[],
+  chunkSize: number,
+  toRow: (symbol: SymbolRow) => SymbolBatchUpsertRow =
+    toSymbolBatchUpsertRow,
+): Generator<SymbolBatchUpsertRow[]> {
+  for (let i = 0; i < symbols.length; i += chunkSize) {
+    yield* splitSymbolBatchRowsBySummaryQualityType(
+      symbols.slice(i, i + chunkSize).map(toRow),
+    );
+  }
+}
+
+async function mergeSymbolNodeRows(
+  conn: Connection,
+  rows: SymbolBatchUpsertRow[],
+): Promise<void> {
+  await exec(
+    conn,
+    `UNWIND $rows AS row
+     MATCH (r:Repo {repoId: row.repoId})
+     MATCH (f:File {fileId: row.fileId})
+     MERGE (s:Symbol {symbolId: row.symbolId})
+     SET s.repoId = row.repoId,
+         s.kind = row.kind,
+         s.name = row.name,
+         s.exported = row.exported,
+         s.visibility = row.visibility,
+         s.language = row.language,
+         s.rangeStartLine = row.rangeStartLine,
+         s.rangeStartCol = row.rangeStartCol,
+         s.rangeEndLine = row.rangeEndLine,
+         s.rangeEndCol = row.rangeEndCol,
+         s.astFingerprint = row.astFingerprint,
+         s.signatureJson = row.signatureJson,
+         s.summary = row.summary,
+         s.invariantsJson = row.invariantsJson,
+         s.sideEffectsJson = row.sideEffectsJson,
+         s.roleTagsJson = row.roleTagsJson,
+         s.searchText = row.searchText,
+         s.summaryQuality = row.summaryQuality,
+         s.summarySource = row.summarySource,
+         s.external = row.external,
+         s.source = CASE
+           WHEN row.source = $preserveOptionalSymbolField
+           THEN coalesce(s.source, 'treesitter')
+           ELSE row.source
+         END,
+         s.packageName = CASE
+           WHEN row.packageName = $preserveOptionalSymbolField
+           THEN s.packageName
+           ELSE row.packageName
+         END,
+         s.packageVersion = CASE
+           WHEN row.packageVersion = $preserveOptionalSymbolField
+           THEN s.packageVersion
+           ELSE row.packageVersion
+         END,
+         s.scipSymbol = CASE
+           WHEN row.scipSymbol = $preserveOptionalSymbolField
+           THEN s.scipSymbol
+           ELSE row.scipSymbol
+         END,
+         s.symbolStatus = row.symbolStatus,
+         s.placeholderKind = row.placeholderKind,
+         s.placeholderTarget = row.placeholderTarget,
+         s.updatedAt = row.updatedAt`,
+    { rows, preserveOptionalSymbolField: PRESERVE_OPTIONAL_SYMBOL_FIELD },
+  );
 }
 
 export interface SymbolSnapshotRow {
@@ -437,103 +482,46 @@ export async function upsertSymbolBatch(
     options?.chunkSize,
   );
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < symbols.length; i += chunkSize) {
-      const chunk = symbols.slice(i, i + chunkSize);
-      // Coerce nullable STRING fields to '' — kuzu binder picks ANY type
-      // when a struct field is uniformly null. Empty string keeps the payload
-      // shape stable for the parameter binder.
-      const rowGroups = splitSymbolBatchRowsBySummaryQualityType(
-        chunk.map(toSymbolBatchUpsertRow),
-      );
+    // Coerce nullable STRING fields to '' — kuzu binder picks ANY type when a
+    // struct field is uniformly null. Empty string keeps the shape stable.
+    for (const rows of symbolBatchRowGroups(symbols, chunkSize)) {
       // Three-pass W3 workaround for LadybugDB UNWIND+MERGE-rel runtime bug:
       // (1) MERGE node + SET props, (2) idempotent SYMBOL_IN_FILE,
       // (3) idempotent SYMBOL_IN_REPO. Plain MERGE-rel inside UNWIND throws
       // "invalid unordered_map<K, T> key" in 0.15.x–0.16.0.
-      for (const rows of rowGroups) {
-        await exec(
-          txConn,
-          `UNWIND $rows AS row
-         MATCH (r:Repo {repoId: row.repoId})
-         MATCH (f:File {fileId: row.fileId})
-         MERGE (s:Symbol {symbolId: row.symbolId})
-         SET s.repoId = row.repoId,
-             s.kind = row.kind,
-             s.name = row.name,
-             s.exported = row.exported,
-             s.visibility = row.visibility,
-             s.language = row.language,
-             s.rangeStartLine = row.rangeStartLine,
-             s.rangeStartCol = row.rangeStartCol,
-             s.rangeEndLine = row.rangeEndLine,
-             s.rangeEndCol = row.rangeEndCol,
-             s.astFingerprint = row.astFingerprint,
-             s.signatureJson = row.signatureJson,
-             s.summary = row.summary,
-             s.invariantsJson = row.invariantsJson,
-             s.sideEffectsJson = row.sideEffectsJson,
-             s.roleTagsJson = row.roleTagsJson,
-             s.searchText = row.searchText,
-             s.summaryQuality = row.summaryQuality,
-             s.summarySource = row.summarySource,
-             s.external = row.external,
-             s.source = CASE
-               WHEN row.source = $preserveOptionalSymbolField
-               THEN coalesce(s.source, 'treesitter')
-               ELSE row.source
-             END,
-             s.packageName = CASE
-               WHEN row.packageName = $preserveOptionalSymbolField
-               THEN s.packageName
-               ELSE row.packageName
-             END,
-             s.packageVersion = CASE
-               WHEN row.packageVersion = $preserveOptionalSymbolField
-               THEN s.packageVersion
-               ELSE row.packageVersion
-             END,
-             s.scipSymbol = CASE
-               WHEN row.scipSymbol = $preserveOptionalSymbolField
-               THEN s.scipSymbol
-               ELSE row.scipSymbol
-             END,
-              s.symbolStatus = row.symbolStatus,
-              s.placeholderKind = row.placeholderKind,
-              s.placeholderTarget = row.placeholderTarget,
-              s.updatedAt = row.updatedAt`,
-          { rows, preserveOptionalSymbolField: PRESERVE_OPTIONAL_SYMBOL_FIELD },
-        );
-        await exec(
-          txConn,
-          `UNWIND $rows AS row
+      await mergeSymbolNodeRows(txConn, rows);
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
          MATCH (s:Symbol {symbolId: row.symbolId})
          MATCH (f:File {fileId: row.fileId})
          OPTIONAL MATCH (s)-[existing:SYMBOL_IN_FILE]->(f)
          WITH s, f, existing
          WHERE existing IS NULL
          CREATE (s)-[:SYMBOL_IN_FILE]->(f)`,
-          { rows },
-        );
-        await exec(
-          txConn,
-          `UNWIND $rows AS row
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
          MATCH (s:Symbol {symbolId: row.symbolId})
          MATCH (r:Repo {repoId: row.repoId})
          OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
          WITH s, r, existing
          WHERE existing IS NULL
          CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
-          { rows },
-        );
-      }
+        { rows },
+      );
     }
   });
 }
 
 /**
  * Write a validated fresh set of file-backed symbols when the caller has
- * already removed old symbols for the same files. This avoids the generic
- * relationship existence checks and optional-field preservation needed by the
- * legacy upsert path.
+ * already removed old symbols for the same files. Symbol nodes must use
+ * parameterized MERGE: LadybugDB 0.18.1 can corrupt earlier STRING vectors
+ * when COPY appends Symbol nodes to an active/shared table. Relationship COPY
+ * remains safe and preserves the provider-first fast path.
  */
 export async function upsertKnownFileSymbols(
   conn: Connection,
@@ -549,10 +537,10 @@ export async function upsertKnownFileSymbols(
     return true;
   });
 
-  // COPY streams from temporary artifacts, so chunking the old UNWIND payload
-  // no longer applies. The option is kept for API compatibility with callers
-  // that still pass the standard Ladybug write options.
-  void options?.chunkSize;
+  const chunkSize = resolveLadybugWriteChunkSize(
+    "symbols",
+    options?.chunkSize,
+  );
   const measurePhase =
     options?.measurePhase ??
     (async <T>(
@@ -561,21 +549,24 @@ export async function upsertKnownFileSymbols(
     ): Promise<T> => await fn());
   await withTransaction(conn, async (txConn) => {
     await measurePhase("nodeAndRelCreate", async () => {
-      await copyKnownFileSymbols(txConn, symbols);
+      await mergeKnownFileSymbolsAndCopyRelationships(
+        txConn,
+        symbols,
+        chunkSize,
+      );
     });
   });
 }
 
-async function copyKnownFileSymbols(
+async function mergeKnownFileSymbolsAndCopyRelationships(
   conn: Connection,
   symbols: readonly SymbolRow[],
+  chunkSize: number,
 ): Promise<void> {
   const tempDir = await mkdtemp(join(tmpdir(), "sdl-known-symbols-"));
-  const symbolPath = join(tempDir, "symbols.csv");
   const symbolInFilePath = join(tempDir, "symbol-in-file.csv");
   const symbolInRepoPath = join(tempDir, "symbol-in-repo.csv");
   try {
-    await writeKnownSymbolsCsv(symbolPath, symbols);
     await writeSimpleRelCsv(
       symbolInFilePath,
       symbols.map((symbol) => [symbol.symbolId, symbol.fileId] as const),
@@ -585,17 +576,31 @@ async function copyKnownFileSymbols(
       symbols.map((symbol) => [symbol.symbolId, symbol.repoId] as const),
     );
 
-    await copyCsvArtifact(conn, "Symbol", symbolPath);
-    await copyCsvArtifact(conn, "SYMBOL_IN_FILE", symbolInFilePath);
-    await copyCsvArtifact(conn, "SYMBOL_IN_REPO", symbolInRepoPath);
+    for (const rows of symbolBatchRowGroups(
+      symbols,
+      chunkSize,
+      toKnownFileSymbolBatchUpsertRow,
+    )) {
+      await mergeSymbolNodeRows(conn, rows);
+    }
+    await copyKnownSymbolRelationships(
+      conn,
+      "SYMBOL_IN_FILE",
+      symbolInFilePath,
+    );
+    await copyKnownSymbolRelationships(
+      conn,
+      "SYMBOL_IN_REPO",
+      symbolInRepoPath,
+    );
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function copyCsvArtifact(
+async function copyKnownSymbolRelationships(
   conn: Connection,
-  tableName: string,
+  tableName: "SYMBOL_IN_FILE" | "SYMBOL_IN_REPO",
   filePath: string,
 ): Promise<void> {
   await execDdl(
@@ -603,24 +608,6 @@ async function copyCsvArtifact(
     `COPY ${tableName} FROM '${escapeCopyPath(filePath)}' ` +
       `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
   );
-}
-
-async function writeKnownSymbolsCsv(
-  filePath: string,
-  symbols: readonly SymbolRow[],
-): Promise<void> {
-  const stream = createWriteStream(filePath, { encoding: "utf8" });
-  try {
-    await writeCsvLine(stream, SYMBOL_COPY_COLUMNS);
-    for (const symbol of symbols) {
-      await writeCsvLine(stream, symbolRowToCopyCells(symbol));
-    }
-    stream.end();
-    await finished(stream);
-  } catch (err) {
-    stream.destroy();
-    throw err;
-  }
 }
 
 async function writeSimpleRelCsv(
@@ -639,52 +626,6 @@ async function writeSimpleRelCsv(
     stream.destroy();
     throw err;
   }
-}
-
-function symbolRowToCopyCells(symbol: SymbolRow): unknown[] {
-  return [
-    symbol.symbolId,
-    symbol.repoId,
-    symbol.kind,
-    symbol.name,
-    symbol.exported,
-    symbol.visibility ?? "",
-    symbol.language,
-    symbol.rangeStartLine,
-    symbol.rangeStartCol,
-    symbol.rangeEndLine,
-    symbol.rangeEndCol,
-    symbol.astFingerprint,
-    symbol.signatureJson ?? "",
-    symbol.summary ?? "",
-    symbol.summaryQuality ?? 0.0,
-    symbol.summarySource ?? "unknown",
-    symbol.invariantsJson ?? "",
-    symbol.sideEffectsJson ?? "",
-    symbol.roleTagsJson ?? "",
-    symbol.searchText ?? "",
-    symbol.updatedAt,
-    null,
-    null,
-    null,
-    CSV_ARRAY_NULL,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    CSV_ARRAY_NULL,
-    CSV_ARRAY_NULL,
-    symbol.external ?? false,
-    symbol.scipSymbol ?? "",
-    symbol.source ?? "treesitter",
-    symbol.packageName ?? "",
-    symbol.packageVersion ?? "",
-    symbol.symbolStatus ?? "real",
-    symbol.placeholderKind ?? "",
-    symbol.placeholderTarget ?? "",
-  ];
 }
 
 async function writeCsvLine(
@@ -717,7 +658,6 @@ function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
 }
 
 function csvCell(value: unknown): string {
-  if (value === CSV_ARRAY_NULL) return "";
   if (value === null || value === undefined) return CSV_NULL_SENTINEL;
   const text = String(value);
   if (text === "") return '""';

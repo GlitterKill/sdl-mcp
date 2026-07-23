@@ -166,8 +166,8 @@ export function shouldUseBatchPersistAccumulator(params: {
 /** @internal exported for tests; do not import from product code. */
 export function resolvePass1BatchSymbolWriteMode(params: {
   providerFirstLegacyFallbackActive: boolean;
-}): "merge" | "fresh-copy" {
-  return params.providerFirstLegacyFallbackActive ? "fresh-copy" : "merge";
+}): "merge" | "fresh-replace" {
+  return params.providerFirstLegacyFallbackActive ? "fresh-replace" : "merge";
 }
 
 /** @internal exported for tests; do not import from product code. */

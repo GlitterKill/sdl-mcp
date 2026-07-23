@@ -16,6 +16,9 @@ import {
   createSecondaryIndexes,
 } from "../../dist/db/ladybug-schema.js";
 import {
+  unresolvedCallSymbolId,
+} from "../../dist/db/symbol-placeholders.js";
+import {
   getExportedSymbolsByRepo,
   getFileSummarySymbolFactsByRepo,
   getSymbolsByRepoForSnapshotPage,
@@ -771,10 +774,51 @@ describe("LadybugDB write batching", () => {
     );
   });
 
-  it("loads known fresh file symbols with node and relationship COPY artifacts", async () => {
+  it("never COPY-loads placeholder Symbol nodes into the active graph", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+
+    await ensureDependencyTargetsForKnownSourceEdges(conn, [
+      {
+        repoId: "repo",
+        fromSymbolId: "from",
+        toSymbolId: unresolvedCallSymbolId("src/index.ts:missingCall"),
+        edgeType: "call",
+        weight: 1,
+        confidence: 0.5,
+        resolution: "unresolved",
+        resolverId: "test",
+        resolutionPhase: "pass1",
+        provenance: "test",
+        createdAt: "2026-07-23T00:00:00.000Z",
+        targetMeta: {
+          symbolStatus: "unresolved",
+          placeholderKind: "call",
+          placeholderTarget: "src/index.ts:missingCall",
+        },
+      },
+    ]);
+
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY Symbol FROM"),
+      0,
+      "active placeholder creation must not use LadybugDB Symbol COPY",
+    );
+    assert.strictEqual(
+      countStatementsContaining(
+        statements,
+        "MERGE (b:Symbol {symbolId: row.toSymbolId})",
+      ),
+      1,
+      "missing placeholder nodes should use the parameterized MERGE writer",
+    );
+  });
+
+  it("MERGEs known fresh Symbol nodes while retaining relationship COPY artifacts", async () => {
     const statements: string[] = [];
     const phases: string[] = [];
-    const conn = createFakeConnection(statements);
+    const paramsLog: Record<string, unknown>[] = [];
+    const conn = createFakeConnection(statements, paramsLog);
     const symbols: SymbolRow[] = Array.from({ length: 4097 }, (_, index) => ({
       symbolId: `symbol-${index}`,
       repoId: "repo",
@@ -823,16 +867,15 @@ describe("LadybugDB write batching", () => {
         statements,
         "COPY Symbol FROM",
       ),
-      1,
-      "known symbols should use one bulk Symbol COPY load",
+      0,
+      "active known-symbol writes must not use LadybugDB Symbol COPY",
     );
-    assert.strictEqual(
+    assert.ok(
       countStatementsContaining(
         statements,
         "MERGE (s:Symbol {symbolId: row.symbolId})",
-      ),
-      0,
-      "known fresh symbols should not probe or merge replaced symbol nodes",
+      ) > 0,
+      "known symbols should use the parameterized batch MERGE writer",
     );
     assert.strictEqual(
       countStatementsContaining(statements, "COPY SYMBOL_IN_FILE FROM"),
@@ -854,11 +897,28 @@ describe("LadybugDB write batching", () => {
       0,
       "known fresh symbols should not probe for pre-existing relationships",
     );
-    assert.strictEqual(
-      countStatementsContaining(statements, "preserveOptionalSymbolField"),
-      0,
-      "known fresh symbols should not preserve stale optional metadata",
+    const writtenSymbolRows = paramsLog.flatMap((params) =>
+      Array.isArray(params.rows)
+        ? (params.rows as Array<Record<string, unknown>>).filter(
+            (row) => typeof row.symbolId === "string",
+          )
+        : [],
     );
+    assert.ok(writtenSymbolRows.length > 0);
+    for (const row of writtenSymbolRows) {
+      for (const field of [
+        "source",
+        "packageName",
+        "packageVersion",
+        "scipSymbol",
+      ]) {
+        assert.notStrictEqual(
+          row[field],
+          "__sdl_preserve_optional_symbol_field__",
+          `known fresh Symbol.${field} should replace optional metadata`,
+        );
+      }
+    }
   });
 
   it("loads new file summaries with node and relationship COPY artifacts", async () => {

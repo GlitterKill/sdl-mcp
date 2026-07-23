@@ -36,6 +36,11 @@ import {
   waitForGraphIntegrityVerifier,
 } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
 import {
+  capturePersistedGraphIntegrity,
+  compareGraphIntegrityExpectations,
+  createGraphIntegrityExpectationFromManifest,
+} from "../../indexer/provider-first/persisted-graph-integrity.js";
+import {
   indexExistsForTable,
   showIndexesStrict,
 } from "../../retrieval/index-lifecycle.js";
@@ -104,6 +109,14 @@ export interface RunSafeRebuildParams {
   _initGraphDbForTesting?: typeof initGraphDb;
   /** @internal deterministic post-reopen failure seam. */
   _validateCandidateForTesting?: typeof validateSafeRebuildCandidate;
+  /** @internal deterministic per-repository storage failure seam. */
+  _validateStorageAfterRepoForTesting?: (
+    repoId: string,
+  ) => Promise<void>;
+  /** @internal observes successful per-repository storage validation. */
+  _afterRepoStorageValidationForTesting?: (
+    repoId: string,
+  ) => void | Promise<void>;
 }
 
 function comparablePath(path: string): string {
@@ -186,6 +199,23 @@ function configuredFtsIndexName(config: AppConfig): string | undefined {
   return config.semantic.retrieval.fts?.indexName ?? "symbol_search_text_v1";
 }
 
+async function validatePersistedGraphIntegrityManifest(
+  conn: Connection,
+  repoId: string,
+): Promise<void> {
+  const expected = createGraphIntegrityExpectationFromManifest(
+    await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
+    await ladybugDb.listGraphIntegrityFilelessStates(conn, repoId),
+  );
+  const actual = await capturePersistedGraphIntegrity(conn, repoId);
+  const mismatch = compareGraphIntegrityExpectations(expected, actual);
+  if (mismatch) {
+    failCandidateValidation(
+      `repository ${repoId} persisted graph does not match its integrity manifest: ${JSON.stringify(mismatch)}`,
+    );
+  }
+}
+
 async function validateConfiguredRepo(
   conn: Connection,
   repoId: string,
@@ -214,6 +244,7 @@ async function validateConfiguredRepo(
         `non-empty repository ${repoId} does not have verified graph integrity for its current Version`,
       );
     }
+    await validatePersistedGraphIntegrityManifest(conn, repoId);
     return;
   }
 
@@ -235,15 +266,27 @@ async function validateConfiguredRepo(
       `empty repository ${repoId} has integrity state without a Version`,
     );
   }
+  if (
+    latestVersion &&
+    graphIntegrityIsVerifiedForVersion(state, latestVersion.versionId)
+  ) {
+    await validatePersistedGraphIntegrityManifest(conn, repoId);
+  }
 }
 
 async function validatePointLookups(
   conn: Connection,
 ): Promise<string[]> {
   const sample = await readSafeRebuildSymbolPointLookupSample(conn);
-  if (sample.invalidSymbolIds.length > 0) {
+  if (sample.mismatchTotal > 0) {
+    const details = sample.mismatches
+      .map(
+        (mismatch) =>
+          `${mismatch.symbolId} [${mismatch.fields.join(", ")}]`,
+      )
+      .join("; ");
     failCandidateValidation(
-      `Symbol primary-key point lookup disagrees with the label scan for ${sample.invalidSymbolIds.join(", ")}`,
+      `Symbol scalar primary-key projection disagrees with the label scan for ${sample.mismatchTotal} row(s): ${details}`,
     );
   }
   return sample.symbolIds;
@@ -254,6 +297,29 @@ async function validateDependencyEndpoints(
 ): Promise<void> {
   if ((await countInvalidSafeRebuildDependencyEndpoints(conn)) !== 0) {
     failCandidateValidation("DEPENDS_ON contains an empty Symbol endpoint");
+  }
+}
+
+async function validateSafeRebuildStorageAfterRepo(
+  repoId: string,
+): Promise<void> {
+  // Force the just-written node columns through LadybugDB's durable checkpoint
+  // path before accepting this repository. Revalidate every earlier manifest
+  // because a later repository write can expose damage in an older table page.
+  await withWriteConn((conn) => execDdl(conn, "CHECKPOINT"));
+  const conn = await getLadybugConn();
+  try {
+    await ladybugDb.assertPhysicalSymbolUniqueness(conn);
+    await validateSafeRebuildCanonicalStrings(conn);
+    await validatePointLookups(conn);
+    await validateDependencyEndpoints(conn);
+    const storedRepos = await ladybugDb.listRepos(conn, 10_000);
+    for (const storedRepo of storedRepos) {
+      await validateConfiguredRepo(conn, storedRepo.repoId);
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    failCandidateValidation(`after repository ${repoId}: ${detail}`);
   }
 }
 
@@ -385,6 +451,9 @@ export async function runSafeRebuild(
   const initCandidate = params._initGraphDbForTesting ?? initGraphDb;
   const validateCandidate =
     params._validateCandidateForTesting ?? validateSafeRebuildCandidate;
+  const validateStorageAfterRepo =
+    params._validateStorageAfterRepoForTesting ??
+    validateSafeRebuildStorageAfterRepo;
   const repoResults: SafeRebuildResult["repoResults"] = [];
   let candidateOpen = false;
   let completed = false;
@@ -422,6 +491,12 @@ export async function runSafeRebuild(
           isolatedRebuild: true,
         },
       );
+      // A COPY-built LadybugDB 0.18.1 Symbol table can lose earlier STRING
+      // values when a later repository appends nodes and a checkpoint runs.
+      // The gate checkpoints and revalidates all prior manifests so recovery
+      // stops at the repository that exposes the damage.
+      await validateStorageAfterRepo(repo.repoId);
+      await params._afterRepoStorageValidationForTesting?.(repo.repoId);
       repoResults.push({ repoId: repo.repoId, stats });
       params.onRepoComplete?.(repo.repoId, stats);
     }

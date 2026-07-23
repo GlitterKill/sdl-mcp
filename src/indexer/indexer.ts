@@ -42,12 +42,10 @@ import {
 import { loadConfig } from "../config/loadConfig.js";
 import {
   buildDeferredIndexes,
-  closeLadybugDb,
   ensureCriticalSymbolFtsIndex,
   flushStaleFinalizers,
   getLadybugConn,
   getLadybugDbPath,
-  initLadybugDb,
   preIndexCheckpoint,
   withWriteConn,
 } from "../db/ladybug.js";
@@ -75,7 +73,6 @@ import { recoverMissingMetricsForRepo } from "../graph/metrics-recovery.js";
 import { clearSliceCache } from "../graph/sliceCache.js";
 import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
-import { withRepoWriteHeavyLock } from "./derived-refresh-queue.js";
 import {
   resolveEffectiveIndexMode,
   resolvePostIndexSessionTimeoutMs,
@@ -169,14 +166,11 @@ import {
   type ProviderFirstShadowBuildSummary,
 } from "./provider-first/shadow-build.js";
 import {
-  activateProviderFirstShadowDbWithHandoff,
+  PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON,
   summarizeProviderFirstShadowActivationReadiness,
 } from "./provider-first/shadow-activation.js";
 import { finalizeProviderFirstShadowDb } from "./provider-first/shadow-finalization.js";
-import {
-  waitForGraphIntegrityVerifier,
-  withGraphIntegrityVerifierQuiesced,
-} from "./provider-first/background-graph-integrity-verifier.js";
+import { waitForGraphIntegrityVerifier } from "./provider-first/background-graph-integrity-verifier.js";
 import {
   ensureGraphIntegrityVerificationComplete,
   failActiveGraphIntegrityVerification,
@@ -2493,7 +2487,6 @@ async function indexRepoImpl(
   const finalizeProviderFirstShadowBuild = async (
     shadowBuild: ProviderFirstShadowBuildSummary | undefined,
     versionId: string,
-    semanticDeferred?: boolean,
   ): Promise<ProviderFirstShadowBuildSummary | undefined> => {
     if (!shadowBuild) return undefined;
     await graphIntegrity.stageManifest(versionId);
@@ -2503,7 +2496,6 @@ async function indexRepoImpl(
       shadowBuild.shadowDb?.status === "loaded"
         ? shadowBuild.shadowDb.path
         : undefined;
-    const activeDbPath = getLadybugDbPath();
     const graphDerivedStateReady =
       providerFirstSkipDerivedStateReason === undefined;
     if (shadowDbPath && graphDerivedStateReady) {
@@ -2545,108 +2537,22 @@ async function indexRepoImpl(
     }
     const finalizedGraphReady =
       finalizedShadowBuild.finalization?.status === "finalized";
-    if (
-      finalizedGraphReady &&
-      graphDerivedStateReady &&
-      activeDbPath &&
-      shadowDbPath &&
-      providerFirstConfig.activation === "shadowDb"
-    ) {
-      emitProviderFirstProgress(onProgress, "shadowActivate", {
-        message: "activating finalized shadow DB",
+    finalizedShadowBuild.activationResult =
+      summarizeProviderFirstShadowActivationReadiness({
+        shadowBuild: finalizedShadowBuild,
+        fallbackFiles: 0,
+        graphDerivedStateReady,
+        shadowContainsFinalizedGraph: finalizedGraphReady,
+        finalizedGraphReasons:
+          finalizedShadowBuild.finalization?.status === "finalized"
+            ? undefined
+            : finalizedShadowBuild.finalization?.reasons,
+        activationBlockedReason:
+          PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON,
       });
-      finalizedShadowBuild.activationResult = await measureProviderFirstPhase(
-        "shadowActivate",
-        "providerFirstShadowActivate",
-        () =>
-          withRepoWriteHeavyLock(repoId, () =>
-            withGraphIntegrityVerifierQuiesced(repoId, () =>
-              activateProviderFirstShadowDbWithHandoff({
-              activeDbPath,
-              shadowDbPath,
-              generationId: finalizedShadowBuild.generationId,
-              prepareHandoff: async () => {
-                if (
-                  !graphIntegrity.ownsStagedRevision(
-                    versionId,
-                    await getDerivedState(repoId),
-                  )
-                ) {
-                  throw new Error(
-                    "shadow activation lost its graph integrity revision",
-                  );
-                }
-              },
-              closeActiveDb: () =>
-                closeLadybugDb({ preserveCloseHooks: true }),
-              reopenActiveDb: async (path) => {
-                await initLadybugDb(path, {
-                  bufferPoolBytes:
-                    appConfig.graphDatabase?.bufferPoolBytes ?? undefined,
-                });
-              },
-              validateActivatedDb: async () => {
-                // Shadow staging cannot load the FTS extension safely beside the
-                // live pool. Validate the required index immediately after the
-                // handoff so a failure triggers the activation rollback path.
-                await ensureCriticalSymbolFtsIndex({
-                  recordTiming: recordIndexSubphaseTiming,
-                });
-                const retrievalConfig = appConfig.semantic?.enabled
-                  ? appConfig.semantic.retrieval
-                  : undefined;
-                const symbolFtsIndexName =
-                  retrievalConfig && retrievalConfig.fts?.enabled !== false
-                    ? (retrievalConfig.fts?.indexName ?? "symbol_search_text_v1")
-                    : undefined;
-                if (symbolFtsIndexName) {
-                  const { indexExistsForTable, showIndexes } = await import(
-                    "../retrieval/index-lifecycle.js"
-                  );
-                  const indexes = await showIndexes(await getLadybugConn());
-                  if (
-                    !indexExistsForTable(
-                      indexes,
-                      "Symbol",
-                      symbolFtsIndexName,
-                      "fts",
-                    )
-                  ) {
-                    throw new Error(
-                      `required Symbol FTS index ${symbolFtsIndexName} is absent after shadow handoff`,
-                    );
-                  }
-                }
-              },
-              }),
-            ),
-          ),
-      );
-      if (finalizedShadowBuild.activationResult.status === "activated") {
-        if (semanticDeferred) {
-          await markProviderFirstSemanticReadinessDeferred({
-            repoId,
-            versionId,
-            appConfig,
-          });
-        }
-      }
-      emitProviderFirstProgress(onProgress, "shadowActivate", {
-        message: `shadow DB activation ${finalizedShadowBuild.activationResult.status}`,
-      });
-    } else {
-      finalizedShadowBuild.activationResult =
-        summarizeProviderFirstShadowActivationReadiness({
-          shadowBuild: finalizedShadowBuild,
-          fallbackFiles: 0,
-          graphDerivedStateReady,
-          shadowContainsFinalizedGraph: finalizedGraphReady,
-          finalizedGraphReasons:
-            finalizedShadowBuild.finalization?.status === "finalized"
-              ? undefined
-              : finalizedShadowBuild.finalization?.reasons,
-        });
-    }
+    emitProviderFirstProgress(onProgress, "shadowActivate", {
+      message: PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON,
+    });
     return finalizedShadowBuild;
   };
 
@@ -3001,7 +2907,10 @@ async function indexRepoImpl(
           providerFirstSkipDerivedStateReason =
             readinessGates.skipDerivedStateReason;
           providerFirstShadowStagingSkipReason =
-            readinessGates.shadowStagingSkipReason;
+            joinProviderFirstSkipDerivedStateReasons([
+              readinessGates.shadowStagingSkipReason,
+              PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON,
+            ]);
           if (scopedSourceFileListActive) {
             providerFirstShadowStagingSkipReason =
               providerFirstShadowStagingSkipReason
@@ -3171,6 +3080,8 @@ async function indexRepoImpl(
                   finalizedGraphReasons: providerFirstSkipDerivedStateReason
                     ? [providerFirstSkipDerivedStateReason]
                     : undefined,
+                  activationBlockedReason:
+                    PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON,
                 });
               if (shadowBuild.status === "staged") {
                 const stagedTotal = providerFirstShadowStageTotal(
@@ -3546,7 +3457,6 @@ async function indexRepoImpl(
               shadowBuild: await finalizeProviderFirstShadowBuild(
                 providerFirstExecutedSummary.shadowBuild,
                 versionId,
-                post.semanticDeferred,
               ),
             };
             const semanticRefresh =
@@ -4597,7 +4507,6 @@ async function indexRepoImpl(
       const finalizedShadowBuild = await finalizeProviderFirstShadowBuild(
         shadowBuild,
         versionId,
-        semanticDeferred,
       );
       providerFirstExecutedSummary = {
         ...providerFirstExecutedSummary,

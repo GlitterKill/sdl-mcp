@@ -17,9 +17,12 @@ import {
 } from "../../dist/config/loadConfig.js";
 import {
   getLadybugDbPath,
+  getLadybugConn,
   closeLadybugDb,
   initLadybugDb,
+  withWriteConn,
 } from "../../dist/db/ladybug.js";
+import { exec, querySingle } from "../../dist/db/ladybug-core.js";
 import { initGraphDb } from "../../dist/db/initGraphDb.js";
 import {
   runSafeRebuild,
@@ -118,6 +121,7 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
   it("builds every configured repo and validates only after close/reopen", async () => {
     const fixture = createFixture();
     const events: string[] = [];
+    const repoValidationOrder: string[] = [];
     const config = loadConfig(fixture.configPath);
     const result = await runSafeRebuild({
       options: {
@@ -129,6 +133,12 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
       configPath: fixture.configPath,
       activeGraphDbPath: fixture.activePath,
       onLifecycleEvent: (event) => events.push(event),
+      _afterRepoStorageValidationForTesting: (repoId) => {
+        repoValidationOrder.push(`validated:${repoId}`);
+      },
+      onRepoComplete: (repoId) => {
+        repoValidationOrder.push(`complete:${repoId}`);
+      },
     });
 
     assert.equal(readFileSync(fixture.activePath, "utf8"), fixture.sentinel);
@@ -149,6 +159,12 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
         events.indexOf("candidate:validated"),
     );
     assert.equal(events.at(-1), "candidate:closed-after-validation");
+    assert.deepEqual(repoValidationOrder, [
+      "validated:safe-rebuild-source",
+      "complete:safe-rebuild-source",
+      "validated:safe-rebuild-empty",
+      "complete:safe-rebuild-empty",
+    ]);
 
     await initLadybugDb(fixture.candidatePath);
     await assert.rejects(
@@ -182,6 +198,37 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
       /required Symbol FTS index required_but_missing_fts is absent/,
     );
 
+    const conn = await getLadybugConn();
+    const symbol = await querySingle<{ symbolId: string; name: string }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       RETURN s.symbolId AS symbolId, s.name AS name
+       ORDER BY s.symbolId
+       LIMIT 1`,
+      { repoId: "safe-rebuild-source" },
+    );
+    assert.ok(symbol);
+    await withWriteConn((writeConn) =>
+      exec(
+        writeConn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         SET s.name = $name`,
+        { symbolId: symbol.symbolId, name: "injected-reopen-corruption" },
+      ),
+    );
+    await assert.rejects(
+      validateSafeRebuildCandidate(config),
+      /persisted graph does not match its integrity manifest/,
+    );
+    await withWriteConn((writeConn) =>
+      exec(
+        writeConn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         SET s.name = $name`,
+        { symbolId: symbol.symbolId, name: symbol.name },
+      ),
+    );
+
     const state = await getDerivedState("safe-rebuild-source");
     assert.ok(state?.graphIntegrityVersionId);
     assert.equal(typeof state.graphIntegrityRevision, "number");
@@ -202,6 +249,52 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
     assert.equal(getLadybugDbPath(), null);
   });
 
+  it("revalidates earlier repository manifests after each later repository checkpoint", async () => {
+    const fixture = createFixture();
+
+    await assert.rejects(
+      runSafeRebuild({
+        options: {
+          config: fixture.configPath,
+          force: true,
+          safeRebuildPath: fixture.candidatePath,
+        },
+        config: loadConfig(fixture.configPath),
+        configPath: fixture.configPath,
+        activeGraphDbPath: fixture.activePath,
+        _afterRepoStorageValidationForTesting: async (repoId) => {
+          if (repoId !== "safe-rebuild-source") return;
+          const conn = await getLadybugConn();
+          const symbol = await querySingle<{ symbolId: string }>(
+            conn,
+            `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+             RETURN s.symbolId AS symbolId
+             ORDER BY s.symbolId
+             LIMIT 1`,
+            { repoId },
+          );
+          assert.ok(symbol);
+          await withWriteConn((writeConn) =>
+            exec(
+              writeConn,
+              `MATCH (s:Symbol {symbolId: $symbolId})
+               SET s.name = $name`,
+              {
+                symbolId: symbol.symbolId,
+                name: "injected-between-repositories-corruption",
+              },
+            ),
+          );
+        },
+      }),
+      /after repository safe-rebuild-empty:.*repository safe-rebuild-source persisted graph does not match its integrity manifest/,
+    );
+
+    assert.equal(readFileSync(fixture.activePath, "utf8"), fixture.sentinel);
+    assert.equal(existsSync(fixture.candidatePath), true);
+    assert.equal(getLadybugDbPath(), null);
+  });
+
   it("scans the incident-sensitive Symbol strings during reopen validation", () => {
     const source = readFileSync("src/db/ladybug-safe-rebuild.ts", "utf8");
     for (const field of [
@@ -209,6 +302,15 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
       "summary",
       "searchText",
       "signatureJson",
+      "embeddingMiniLM",
+      "embeddingMiniLMCardHash",
+      "embeddingMiniLMUpdatedAt",
+      "embeddingNomic",
+      "embeddingNomicCardHash",
+      "embeddingNomicUpdatedAt",
+      "embeddingJinaCode",
+      "embeddingJinaCodeCardHash",
+      "embeddingJinaCodeUpdatedAt",
       "scipSymbol",
     ]) {
       assert.match(
@@ -217,6 +319,39 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
         `safe rebuild validation must force a full LOWER scan of Symbol.${field}`,
       );
     }
+  });
+
+  it("stops before repository completion when the per-repo storage gate fails", async () => {
+    const fixture = createFixture();
+    const startedRepoIds: string[] = [];
+    const completedRepoIds: string[] = [];
+
+    await assert.rejects(
+      runSafeRebuild({
+        options: {
+          config: fixture.configPath,
+          force: true,
+          safeRebuildPath: fixture.candidatePath,
+        },
+        config: loadConfig(fixture.configPath),
+        configPath: fixture.configPath,
+        activeGraphDbPath: fixture.activePath,
+        onRepoStart: (repoId) => startedRepoIds.push(repoId),
+        onRepoComplete: (repoId) => completedRepoIds.push(repoId),
+        _validateStorageAfterRepoForTesting: async (repoId) => {
+          throw new Error(
+            `injected physical Symbol incoherence after ${repoId}`,
+          );
+        },
+      }),
+      /injected physical Symbol incoherence after safe-rebuild-source/,
+    );
+
+    assert.deepEqual(startedRepoIds, ["safe-rebuild-source"]);
+    assert.deepEqual(completedRepoIds, []);
+    assert.equal(readFileSync(fixture.activePath, "utf8"), fixture.sentinel);
+    assert.equal(existsSync(fixture.candidatePath), true);
+    assert.equal(getLadybugDbPath(), null);
   });
 
   it("closes and retains a failed candidate without touching the active sentinel", async () => {

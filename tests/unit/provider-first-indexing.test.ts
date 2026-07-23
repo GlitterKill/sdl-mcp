@@ -73,6 +73,7 @@ import { finalizeProviderFirstShadowDb } from "../../dist/indexer/provider-first
 import {
   activateProviderFirstShadowDb,
   activateProviderFirstShadowDbWithHandoff,
+  PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON,
   summarizeProviderFirstShadowActivationReadiness,
 } from "../../dist/indexer/provider-first/shadow-activation.js";
 import {
@@ -575,7 +576,7 @@ describe("provider-first indexing foundation", () => {
       resolvePass1BatchSymbolWriteMode({
         providerFirstLegacyFallbackActive: true,
       }),
-      "fresh-copy",
+      "fresh-replace",
     );
     assert.equal(
       resolveProviderFirstPass1Concurrency({
@@ -7798,10 +7799,12 @@ describe("provider-first indexing foundation", () => {
       replaceFileSymbols: true,
     });
 
-    assert.equal(
-      countStatements(statements, "MERGE (s:Symbol {symbolId: row.symbolId})"),
-      0,
-      "provider-first replacement materialization should not merge known-fresh symbol nodes",
+    assert.ok(
+      countStatements(
+        statements,
+        "MERGE (s:Symbol {symbolId: row.symbolId})",
+      ) > 0,
+      "provider-first replacement materialization should batch-MERGE known-fresh symbol nodes",
     );
     assert.equal(
       countStatements(statements, "CREATE (s:Symbol {symbolId: row.symbolId})"),
@@ -7810,8 +7813,8 @@ describe("provider-first indexing foundation", () => {
     );
     assert.equal(
       countStatements(statements, "COPY Symbol FROM"),
-      1,
-      "provider-first materialization should bulk-load known-fresh symbol nodes",
+      0,
+      "provider-first active materialization must not COPY Symbol nodes",
     );
     assert.equal(
       countStatements(statements, "COPY SYMBOL_IN_FILE FROM"),
@@ -7861,7 +7864,7 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
-  it("deletes existing provider symbol nodes by incoming ids before known-fresh copy", async () => {
+  it("deletes existing provider symbol nodes by incoming ids before known-fresh MERGE", async () => {
     const statements: string[] = [];
     const emittedAt = "2026-05-25T12:00:00.000Z";
     const rows = providerFactsToGraphRows({
@@ -7906,8 +7909,8 @@ describe("provider-first indexing foundation", () => {
         statement.includes("MATCH (s:Symbol {repoId: $repoId})") &&
         statement.includes("DELETE s"),
     );
-    const symbolCopyIndex = statements.findIndex((statement) =>
-      statement.includes("COPY Symbol FROM"),
+    const symbolMergeIndex = statements.findIndex((statement) =>
+      statement.includes("MERGE (s:Symbol {symbolId: row.symbolId})"),
     );
 
     assert.ok(
@@ -7915,8 +7918,8 @@ describe("provider-first indexing foundation", () => {
       "provider replacement should delete stale/orphan symbol nodes by incoming ids",
     );
     assert.ok(
-      symbolDeleteIndex < symbolCopyIndex,
-      "stale/orphan symbol nodes must be deleted before COPY inserts primary keys",
+      symbolDeleteIndex < symbolMergeIndex,
+      "stale/orphan symbol nodes must be deleted before MERGE replaces primary keys",
     );
   });
 
@@ -8036,7 +8039,7 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
-  it("selects safe writers at the LadybugDB Symbol mutation boundary", () => {
+  it("selects safe writers at the LadybugDB Symbol deletion boundary", () => {
     assert.deepEqual(
       resolveProviderFirstActiveMaterializationPlan({
         existingProviderFileCount: 0,
@@ -8049,7 +8052,7 @@ describe("provider-first indexing foundation", () => {
         writeEdges: true,
         reuseExistingProviderRows: false,
       },
-      "fresh provider loads above the safe COPY boundary use merge-safe symbol writes",
+      "fresh provider loads above the safe deletion boundary use merge-safe symbol writes",
     );
 
     assert.deepEqual(
@@ -10627,13 +10630,13 @@ describe("provider-first indexing foundation", () => {
       fallbackFiles: 2,
       graphDerivedStateReady: false,
       shadowContainsFinalizedGraph: false,
+      activationBlockedReason:
+        PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON,
     });
 
     assert.equal(activation.status, "skipped");
     assert.deepEqual(activation.reasons, [
-      "legacy fallback rows are not staged into the shadow DB yet",
-      "graph-derived state is not ready in the shadow DB yet",
-      "shadow DB does not contain version, metrics, summaries, and derived-state rows yet",
+      PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON,
     ]);
   });
 

@@ -86,7 +86,7 @@ export interface MaterializeProviderFactsOptions {
    */
   deleteExistingFileSymbols?: boolean;
   /**
-   * Use the COPY-based Symbol writer only when later Symbol mutations are safe.
+   * Use the replacement-aware Symbol MERGE plus ownership-COPY fast path.
    */
   useKnownFreshWriters?: boolean;
   /**
@@ -340,8 +340,8 @@ export async function materializeProviderFacts(
     context: "Provider-first materialize",
   });
   // Active materialization still owns the live graph before shadow activation,
-  // but provider-owned replacement rows use known-fresh COPY paths for symbols
-  // and edges while legacy fallback keeps the broader merge-safe writers.
+  // but provider-owned replacement rows use known-fresh Symbol MERGE and
+  // relationship COPY paths while legacy fallback keeps broader writers.
   const repoId = resolveRowsRepoId(rows);
   const measurePhase =
     options.measurePhase ??

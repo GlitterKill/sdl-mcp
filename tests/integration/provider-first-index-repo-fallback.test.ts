@@ -17,7 +17,6 @@ import {
   closeLadybugDb,
   getExtensionCapabilities,
   getLadybugConn,
-  getLadybugDbPath,
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
@@ -265,38 +264,30 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.equal(result.semanticDeferred, true);
-    assert.equal(result.providerFirstExecution?.shadowBuild?.status, "staged");
-    assert.equal(result.providerFirstExecution.shadowBuild?.format, "csv");
+    assert.equal(result.providerFirstExecution?.shadowBuild?.status, "skipped");
     assert.equal(result.providerFirstExecution.shadowBuild?.counts.files, 1);
+    assert.match(
+      result.providerFirstExecution.shadowBuild?.reasons.join(" ") ?? "",
+      /COPY-built Symbol storage cannot safely become the mutable active graph/,
+    );
+    assert.equal(result.providerFirstExecution.shadowBuild?.shadowDb, undefined);
     assert.equal(
-      result.providerFirstExecution.shadowBuild?.shadowDb?.status,
-      "loaded",
-    );
-    assert.equal(
-      result.providerFirstExecution.shadowBuild?.finalization?.status,
-      "finalized",
-    );
-    assert.deepEqual(
-      result.providerFirstExecution.shadowBuild?.finalization?.actualCounts,
-      result.providerFirstExecution.shadowBuild?.finalization?.expectedCounts,
-    );
-    assert.ok(
-      (result.providerFirstExecution.shadowBuild?.finalization?.actualCounts
-        ?.graphIntegrityFileStates ?? 0) > 0,
-    );
-    assert.equal(
-      result.providerFirstExecution.shadowBuild?.finalization?.actualCounts
-        ?.graphIntegrityFileStateRepoLinks,
-      result.providerFirstExecution.shadowBuild?.finalization?.actualCounts
-        ?.graphIntegrityFileStates,
+      result.providerFirstExecution.shadowBuild?.finalization,
+      undefined,
     );
     assert.equal(
       result.providerFirstExecution.shadowBuild?.activationResult?.status,
-      "activated",
+      "skipped",
     );
     assert.equal(
-      result.providerFirstExecution.shadowBuild?.activationResult?.activeDbPath,
-      getLadybugDbPath(),
+      result.providerFirstExecution.shadowBuild?.activationResult?.rollback,
+      "notNeeded",
+    );
+    assert.match(
+      result.providerFirstExecution.shadowBuild?.activationResult?.reasons.join(
+        " ",
+      ) ?? "",
+      /COPY-built Symbol storage cannot safely become the mutable active graph/,
     );
     assert.equal(
       existsSync(result.providerFirstExecution.shadowBuild?.shadowDb?.path ?? ""),
@@ -308,16 +299,18 @@ describe("provider-first indexRepo fallback", () => {
         (result.providerFirstExecution.phaseTimings?.phases.providerCollection ??
           0),
     );
-    assert.ok(
-      result.providerFirstExecution.phaseTimings?.phases.shadowActivate !==
+    assert.equal(
+      result.providerFirstExecution.phaseTimings?.phases.shadowActivate ===
         undefined,
+      true,
     );
     assert.ok(
       result.providerFirstExecution.phaseTimings?.phases.postProviderGc !==
         undefined,
     );
-    assert.ok(
-      existsSync(result.providerFirstExecution.shadowBuild?.manifestPath ?? ""),
+    assert.equal(
+      result.providerFirstExecution.shadowBuild?.manifestPath,
+      undefined,
     );
     assert.equal(result.filesProcessed, 1);
     assert.ok(result.symbolsIndexed >= 3);
@@ -343,7 +336,7 @@ describe("provider-first indexRepo fallback", () => {
         "fts",
       ),
       true,
-      `executed provider-first lifecycle should activate a DB with critical Symbol FTS: ${JSON.stringify({ extensionCapabilities, indexes })}`,
+      `executed provider-first lifecycle should retain an active DB with critical Symbol FTS: ${JSON.stringify({ extensionCapabilities, indexes })}`,
     );
     const symbols = await ladybugDb.queryAll<{
       name: string;
@@ -390,6 +383,7 @@ describe("provider-first indexRepo fallback", () => {
     const providerEdges = await ladybugDb.queryAll<{
       fromName: string;
       toName: string;
+      edgeType: string;
       resolverId: string;
       provenance: string;
     }>(
@@ -398,15 +392,23 @@ describe("provider-first indexRepo fallback", () => {
        WHERE from.repoId = $repoId
        RETURN from.name AS fromName,
               to.name AS toName,
+              edge.edgeType AS edgeType,
               edge.resolverId AS resolverId,
               edge.provenance AS provenance
-       ORDER BY fromName, toName`,
+       ORDER BY fromName, toName, edgeType`,
       { repoId },
     );
-    assert.equal(providerEdges.length, 1);
     assert.deepEqual(
-      providerEdges.map((edge) => [edge.fromName, edge.toName]),
-      [["main", "helper"]],
+      providerEdges.map((edge) => [
+        edge.fromName,
+        edge.toName,
+        edge.edgeType,
+      ]),
+      [
+        ["main", "api", "call"],
+        ["main", "api", "import"],
+        ["main", "helper", "call"],
+      ],
     );
     for (const edge of providerEdges) {
       assert.match(edge.resolverId, /^provider-first:/);
@@ -530,7 +532,7 @@ describe("provider-first indexRepo fallback", () => {
   });
 
   it(
-    "rolls back shadow activation when required Windows FTS is unavailable",
+    "retains the active graph when required Windows FTS is unavailable to the shadow",
     { skip: process.platform !== "win32" },
     async (t) => {
       const previousNativeDisabled = process.env.SDL_MCP_DISABLE_NATIVE_ADDON;
@@ -551,18 +553,21 @@ describe("provider-first indexRepo fallback", () => {
 
       assert.equal(result.providerFirstExecution?.status, "executed");
       assert.equal(
-        result.providerFirstExecution?.shadowBuild?.finalization?.status,
-        "finalized",
+        result.providerFirstExecution?.shadowBuild?.status,
+        "skipped",
+      );
+      assert.equal(
+        result.providerFirstExecution?.shadowBuild?.finalization,
+        undefined,
       );
       const activation =
         result.providerFirstExecution?.shadowBuild?.activationResult;
-      assert.equal(activation?.status, "failed");
-      assert.equal(activation?.rollback, "restored");
+      assert.equal(activation?.status, "skipped");
+      assert.equal(activation?.rollback, "notNeeded");
       assert.match(
         activation?.reasons.join(" ") ?? "",
-        /required Symbol FTS index symbol_search_text_v1 is absent after shadow handoff.*previous active DB was restored/,
+        /COPY-built Symbol storage cannot safely become the mutable active graph/,
       );
-      assert.equal(getLadybugDbPath(), activation?.activeDbPath);
 
       const conn = await getLadybugConn();
       const indexes = await showIndexes(conn);
@@ -580,7 +585,7 @@ describe("provider-first indexRepo fallback", () => {
     },
   );
 
-  it("guards release-scale shadow finalization in the production indexRepo lifecycle", async () => {
+  it("skips release-scale shadow staging in the production indexRepo lifecycle", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       releaseScaleSymbolCount: RELEASE_SCALE_SYMBOL_COUNT,
@@ -599,56 +604,31 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.edgesCreated, 0);
 
     const shadowBuild = result.providerFirstExecution?.shadowBuild;
-    assert.equal(shadowBuild?.status, "staged");
+    assert.equal(shadowBuild?.status, "skipped");
     assert.equal(shadowBuild?.counts.files, 1);
     assert.equal(shadowBuild?.counts.symbols, RELEASE_SCALE_SYMBOL_COUNT);
     assert.equal(shadowBuild?.counts.externalSymbols, 0);
     assert.equal(shadowBuild?.counts.edges, 0);
-    assert.equal(shadowBuild?.shadowDb?.status, "loaded");
-    assert.equal(
-      shadowBuild?.shadowDb?.actualCounts.symbols,
-      RELEASE_SCALE_SYMBOL_COUNT,
-    );
-    const secondaryIndexes = shadowBuild?.shadowDb?.secondaryIndexes;
-    assert.ok(secondaryIndexes);
-    assert.ok(Number.isSafeInteger(secondaryIndexes.attempted));
-    assert.ok(secondaryIndexes.attempted >= secondaryIndexes.failures.length);
-    assert.ok(
-      secondaryIndexes.failures.every(
-        (failure) => failure.statement.length > 0 && failure.error.length > 0,
-      ),
-    );
-
-    assert.equal(shadowBuild?.finalization?.status, "skipped");
+    assert.equal(shadowBuild?.shadowDb, undefined);
+    assert.equal(shadowBuild?.finalization, undefined);
     assert.match(
-      shadowBuild?.finalization?.reasons.join(" ") ?? "",
-      /above 2048/,
+      shadowBuild?.reasons.join(" ") ?? "",
+      /COPY-built Symbol storage cannot safely become the mutable active graph/,
     );
     assert.equal(shadowBuild?.activationResult?.status, "skipped");
     assert.match(
       shadowBuild?.activationResult?.reasons.join(" ") ?? "",
-      /above 2048/,
+      /COPY-built Symbol storage cannot safely become the mutable active graph/,
     );
-    assert.notEqual(
+    assert.equal(
       result.providerFirstExecution?.phaseTimings?.phases.shadowFinalize,
       undefined,
     );
 
-    const shadowDbPath = shadowBuild?.shadowDb?.path ?? "";
-    assert.ok(shadowDbPath);
-    assert.equal(existsSync(shadowDbPath), true);
-    assert.notEqual(getLadybugDbPath(), shadowDbPath);
-
     const activeConn = await getLadybugConn();
     await assertReleaseScaleIndexState(
       activeConn,
-      "release-scale active DB after guarded handoff",
-      repoId,
-      expectedSymbols,
-    );
-    await assertReleaseScaleIndexStateAtPath(
-      shadowDbPath,
-      "release-scale staged shadow after finalization guard",
+      "release-scale MERGE-built active DB",
       repoId,
       expectedSymbols,
     );
@@ -911,29 +891,27 @@ describe("provider-first indexRepo fallback", () => {
       /legacy fallback indexed 1 uncovered or provider-unusable file/i,
     );
     assert.equal(result.filesProcessed, 2);
-    assert.equal(result.providerFirstExecution?.shadowBuild?.status, "staged");
-    assert.equal(result.providerFirstExecution?.shadowBuild?.counts.files, 2);
+    assert.equal(result.providerFirstExecution?.shadowBuild?.status, "skipped");
+    assert.equal(result.providerFirstExecution?.shadowBuild?.counts.files, 1);
+    assert.match(
+      result.providerFirstExecution?.shadowBuild?.reasons.join(" ") ?? "",
+      /COPY-built Symbol storage cannot safely become the mutable active graph/,
+    );
     assert.equal(
-      result.providerFirstExecution?.shadowBuild?.shadowDb?.status,
-      "loaded",
+      result.providerFirstExecution?.shadowBuild?.shadowDb,
+      undefined,
     );
     const finalization = result.providerFirstExecution?.shadowBuild?.finalization;
-    assert.equal(
-      finalization?.status,
-      "finalized",
-      JSON.stringify(finalization, null, 2),
-    );
-    assert.equal(
-      finalization?.copyMode,
-      "bulkCsv",
-    );
-    assert.ok(
-      finalization?.bulkLoad?.manifestPath,
-      "shadow finalization should expose the bulk-load manifest for diagnostics",
-    );
+    assert.equal(finalization, undefined);
     assert.equal(
       result.providerFirstExecution?.shadowBuild?.activationResult?.status,
-      "activated",
+      "skipped",
+    );
+    assert.match(
+      result.providerFirstExecution?.shadowBuild?.activationResult?.reasons.join(
+        " ",
+      ) ?? "",
+      /COPY-built Symbol storage cannot safely become the mutable active graph/,
     );
     assert.ok(
       (result.providerFirstExecution?.legacyFallbackDiagnostics?.phases[
@@ -946,22 +924,8 @@ describe("provider-first indexRepo fallback", () => {
     const conn = await getLadybugConn();
     const edgeCount = await ladybugDb.getEdgeCount(conn, repoId);
     const symbolCount = await ladybugDb.getSymbolCount(conn, repoId);
-    assert.equal(
-      result.providerFirstExecution?.shadowBuild?.finalization?.actualCounts
-        .edges,
-      edgeCount,
-    );
-    assert.equal(
-      result.providerFirstExecution?.shadowBuild?.finalization?.actualCounts
-        .symbols,
-      symbolCount,
-      "shadow finalization symbols should match the public real-symbol count",
-    );
-    assert.ok(
-      (result.providerFirstExecution?.shadowBuild?.finalization?.actualCounts
-        .auxiliarySymbols ?? 0) > 0,
-      "shadow finalization should report unresolved dependency placeholders separately",
-    );
+    assert.ok(edgeCount > 0);
+    assert.ok(symbolCount > 0);
     const symbols = await ladybugDb.queryAll<{
       name: string;
       source: string;
@@ -2193,28 +2157,6 @@ async function assertReleaseScaleIndexState(
     [],
     relationships,
   );
-}
-
-async function assertReleaseScaleIndexStateAtPath(
-  dbPath: string,
-  checkpoint: string,
-  repoId: string,
-  expectedSymbols: ReleaseScaleIndexProjection[],
-): Promise<void> {
-  const kuzu = await import("kuzu");
-  const db = new kuzu.Database(dbPath);
-  const conn = new kuzu.Connection(db);
-  try {
-    await assertReleaseScaleIndexState(
-      conn,
-      checkpoint,
-      repoId,
-      expectedSymbols,
-    );
-  } finally {
-    await conn.close().catch(() => {});
-    await db.close().catch(() => {});
-  }
 }
 
 function assertBoundedProjection<T>(

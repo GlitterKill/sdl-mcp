@@ -10,9 +10,17 @@ import {
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
+import {
+  execDdl,
+  queryAll,
+  querySingle,
+} from "../../dist/db/ladybug-core.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { readSafeRebuildSymbolPointLookupSample } from "../../dist/db/ladybug-safe-rebuild.js";
 import { unresolvedCallSymbolId } from "../../dist/db/symbol-placeholders.js";
+import { resolveProviderFirstActiveMaterializationPlan } from "../../dist/indexer/indexer-pass1-policy.js";
 import { BatchPersistAccumulator } from "../../dist/indexer/parser/batch-persist.js";
+import { materializeProviderFacts } from "../../dist/indexer/provider-first/materializer.js";
 import type {
   EdgeRow,
   SymbolRow,
@@ -277,16 +285,325 @@ describe("BatchPersistAccumulator", () => {
     );
   });
 
-  it("preserves fresh-copy identities across flushes and placeholder pruning", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "sdl-fresh-copy-batch-"));
+  it("preserves MERGE-built Symbol fields when a later repository writes after checkpoint and reopen", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "sdl-symbol-reopen-"));
+    const activeDbPath = join(tempRoot, "active.lbug");
+    const now = "2026-07-23T00:00:00.000Z";
+    const firstRepoId = "first-repo";
+    const secondRepoId = "second-repo";
+    const firstFileId = "first-file";
+    const secondFileId = "second-file";
+    const firstRepoScanBaseline = new Map<
+      string,
+      {
+        symbolId: string;
+        name: string;
+        astFingerprint: string;
+        scipSymbol: string | null;
+      }
+    >();
+    const symbols = (
+      repoId: string,
+      fileId: string,
+      prefix: string,
+      count: number,
+    ): SymbolRow[] => {
+      const offset =
+        prefix === "first" ? 0 : prefix === "auxiliary" ? 50_000 : 100_000;
+      return Array.from({ length: count }, (_, index) => ({
+        // Provider-first identities are SHA-256 strings. Short fixture IDs do
+        // not exercise LadybugDB's overflow-backed string vectors.
+        symbolId: (offset + index).toString(16).padStart(64, "0"),
+        repoId,
+        fileId,
+        kind: "function",
+        name: `${prefix}Symbol${index}`,
+        exported: true,
+        visibility: "public",
+        language: "rust",
+        rangeStartLine: index + 1,
+        rangeStartCol: 0,
+        rangeEndLine: index + 1,
+        rangeEndCol: 1,
+        astFingerprint: (200_000 + offset + index)
+          .toString(16)
+          .padStart(64, "0"),
+        signatureJson: JSON.stringify({
+          text: `pub async fn ${prefix}Symbol${index}<T>(value: T) -> Result<T>`,
+        }),
+        summary:
+          `${prefix}Symbol${index} validates provider facts, persists graph relationships, ` +
+          "and returns the canonical indexed result without losing repository ownership.",
+        invariantsJson: null,
+        sideEffectsJson: null,
+        roleTagsJson: '["provider-primary","entrypoint"]',
+        searchText:
+          `${prefix}Symbol${index} function provider graph index persistence ` +
+          "repository ownership symbol identity canonical rust",
+        summaryQuality: 0.8,
+        summarySource: "provider:scip",
+        source: "scip",
+        packageName: "fixture-provider-package",
+        packageVersion: "1.0.0",
+        scipSymbol:
+          `rust-analyzer cargo fixture-provider-package 1.0.0 ` +
+          `src/lib.rs/${prefix}Symbol${index}().`,
+        updatedAt: now,
+      }));
+    };
+
+    try {
+      await closeLadybugDb();
+      const realSymbols = symbols(
+        firstRepoId,
+        firstFileId,
+        "first",
+        1_957,
+      ).map((symbol, index) => ({
+        ...symbol,
+        scipSymbol:
+          index % 3 === 0
+            ? null
+            : index % 3 === 1
+              ? ""
+              : symbol.scipSymbol,
+      }));
+      const auxiliarySymbols = symbols(
+        firstRepoId,
+        firstFileId,
+        "auxiliary",
+        232,
+      ).map((symbol, index) => ({
+        ...symbol,
+        symbolStatus: "unresolved" as const,
+        placeholderKind: index < 21 ? "provider-metadata" : "call",
+        placeholderTarget: symbol.scipSymbol ?? symbol.name,
+      }));
+      // Build the mutable active graph entirely through parameterized node
+      // MERGE plus relationship COPY.
+      await initLadybugDb(activeDbPath);
+      await withWriteConn(async (conn) => {
+        await ladybugDb.upsertRepo(conn, {
+          repoId: firstRepoId,
+          rootPath: join(tempRoot, firstRepoId),
+          configJson: "{}",
+          createdAt: now,
+        });
+        await ladybugDb.upsertFile(conn, {
+          fileId: firstFileId,
+          repoId: firstRepoId,
+          relPath: "src/first.ts",
+          contentHash: "1".repeat(64),
+          language: "typescript",
+          byteSize: 1,
+          lastIndexedAt: now,
+        });
+        await ladybugDb.upsertKnownFileSymbols(conn, [
+          ...realSymbols,
+          ...auxiliarySymbols,
+        ]);
+      });
+
+      // Automatic COPY-shadow staging is blocked in production. Keep the
+      // MERGE-built active storage authoritative across close/reopen.
+      await closeLadybugDb();
+      await initLadybugDb(activeDbPath);
+      await withWriteConn(async (conn) => {
+        const identity = await ladybugDb.readPhysicalSymbolUniqueness(conn);
+        assert.equal(identity.physicalTotal, 2_189);
+        assert.equal(identity.distinctTotal, 2_189);
+        const baselineRows = await queryAll<{
+          symbolId: string;
+          name: string;
+          astFingerprint: string;
+          scipSymbol: string | null;
+        }>(
+          conn,
+          `MATCH (s:Symbol)
+           RETURN s.symbolId AS symbolId,
+                  s.name AS name,
+                  s.astFingerprint AS astFingerprint,
+                  s.scipSymbol AS scipSymbol`,
+        );
+        for (const row of baselineRows) {
+          firstRepoScanBaseline.set(row.symbolId, row);
+        }
+      });
+
+      // A later configured repository must be able to update the reopened
+      // active graph without changing any earlier provider metadata.
+      await closeLadybugDb();
+      await initLadybugDb(activeDbPath);
+      const secondRepoSymbols = symbols(
+        secondRepoId,
+        secondFileId,
+        "second",
+        1_034,
+      );
+      const secondRepoPlan = resolveProviderFirstActiveMaterializationPlan({
+        existingProviderFileCount: 0,
+        providerSymbolCount: secondRepoSymbols.length,
+      });
+      await withWriteConn(async (conn) => {
+        await ladybugDb.upsertRepo(conn, {
+          repoId: secondRepoId,
+          rootPath: join(tempRoot, secondRepoId),
+          configJson: "{}",
+          createdAt: now,
+        });
+        await materializeProviderFacts(
+          conn,
+          {
+            files: [
+              {
+                fileId: secondFileId,
+                repoId: secondRepoId,
+                relPath: "src/second.ts",
+                contentHash: "2".repeat(64),
+                language: "rust",
+                byteSize: 1,
+                lastIndexedAt: now,
+              },
+            ],
+            symbols: secondRepoSymbols,
+            externalSymbols: [],
+            edges: [],
+            changedFileIds: new Set([secondFileId]),
+          },
+          {
+            graphIntegrityExpectationsTracked: true,
+            replaceFileSymbols: true,
+            deleteExistingFileSymbols:
+              secondRepoPlan.deleteExistingFileSymbols,
+            useKnownFreshWriters: secondRepoPlan.useKnownFreshWriters,
+            useKnownFreshEdgeWriter:
+              secondRepoPlan.useKnownFreshEdgeWriter,
+            writeEdges: secondRepoPlan.writeEdges,
+            pruneExternalSymbols: false,
+          },
+        );
+        const immediateRows = await queryAll<{
+          symbolId: string;
+          scipSymbol: string | null;
+        }>(
+          conn,
+          `MATCH (s:Symbol)
+           RETURN s.symbolId AS symbolId, s.scipSymbol AS scipSymbol`,
+        );
+        const immediateSample = immediateRows.find(
+          (row) => row.symbolId === realSymbols[65]!.symbolId,
+        );
+        assert.equal(
+          immediateSample?.scipSymbol,
+          firstRepoScanBaseline.get(realSymbols[65]!.symbolId)?.scipSymbol,
+          "the later materializer must not alter earlier SCIP metadata",
+        );
+      });
+
+      await withWriteConn((conn) => execDdl(conn, "CHECKPOINT"));
+      await closeLadybugDb();
+      await initLadybugDb(activeDbPath);
+      await withWriteConn(async (conn) => {
+        const identity = await ladybugDb.readPhysicalSymbolUniqueness(conn);
+        assert.deepEqual(identity, {
+          physicalTotal: 3_223,
+          distinctTotal: 3_223,
+          duplicateSamples: [],
+        });
+
+        const scanRows = await queryAll<{
+          symbolId: string;
+          name: string;
+          astFingerprint: string;
+          scipSymbol: string | null;
+        }>(
+          conn,
+          `MATCH (s:Symbol)
+           RETURN s.symbolId AS symbolId,
+                  s.name AS name,
+                  s.astFingerprint AS astFingerprint,
+                  s.scipSymbol AS scipSymbol`,
+        );
+        const scanById = new Map(
+          scanRows.map((row) => [row.symbolId, row] as const),
+        );
+        for (const expected of [
+          realSymbols[64]!,
+          realSymbols[65]!,
+          realSymbols.at(-1)!,
+          auxiliarySymbols[90]!,
+        ]) {
+          const baseline = firstRepoScanBaseline.get(expected.symbolId);
+          assert.ok(baseline);
+          const scanned = scanById.get(expected.symbolId);
+          assert.deepEqual(scanned, baseline);
+          const point = await querySingle<{
+            symbolId: string;
+            name: string;
+            astFingerprint: string;
+            scipSymbol: string | null;
+          }>(
+            conn,
+            `MATCH (s:Symbol {symbolId: $symbolId})
+             RETURN s.symbolId AS symbolId,
+                    s.name AS name,
+                    s.astFingerprint AS astFingerprint,
+                    s.scipSymbol AS scipSymbol`,
+            { symbolId: expected.symbolId },
+          );
+          assert.deepEqual(point, baseline);
+        }
+
+        const secondRepoFileSymbols = await ladybugDb.getSymbolsByFile(
+          conn,
+          secondFileId,
+        );
+        assert.equal(secondRepoFileSymbols.length, secondRepoSymbols.length);
+        const laterSymbol = secondRepoSymbols[64]!;
+        assert.deepEqual(scanById.get(laterSymbol.symbolId), {
+          symbolId: laterSymbol.symbolId,
+          name: laterSymbol.name,
+          astFingerprint: laterSymbol.astFingerprint,
+          scipSymbol: laterSymbol.scipSymbol,
+        });
+        const laterPoint = await querySingle<{
+          symbolId: string;
+          name: string;
+          astFingerprint: string;
+          scipSymbol: string | null;
+        }>(
+          conn,
+          `MATCH (s:Symbol {symbolId: $symbolId})
+           RETURN s.symbolId AS symbolId,
+                  s.name AS name,
+                  s.astFingerprint AS astFingerprint,
+                  s.scipSymbol AS scipSymbol`,
+          { symbolId: laterSymbol.symbolId },
+        );
+        assert.deepEqual(laterPoint, scanById.get(laterSymbol.symbolId));
+
+        const parity = await readSafeRebuildSymbolPointLookupSample(conn);
+        assert.equal(parity.scannedTotal, 3_223);
+        assert.equal(parity.mismatchTotal, 0);
+        assert.equal(parity.mismatches.length, 0);
+        assert.equal(parity.symbolIds.length, 20);
+      });
+    } finally {
+      await closeLadybugDb();
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves fresh-replace identities across flushes and placeholder pruning", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "sdl-fresh-replace-batch-"));
     const graphDbPath = join(tempRoot, "graph.lbug");
-    const repoId = "fresh-copy-batch-repo";
+    const repoId = "fresh-replace-batch-repo";
     const providerFileId = "provider-file";
     const firstFallbackFileId = "fallback-first-file";
     const secondFallbackFileId = "fallback-second-file";
     const now = "2026-07-15T00:00:00.000Z";
     const symbolId = (index: number): string =>
-      `fresh-copy-symbol-${String(index).padStart(4, "0")}`;
+      `fresh-replace-symbol-${String(index).padStart(4, "0")}`;
     const symbol = (
       index: number,
       name: string,
@@ -353,10 +670,16 @@ describe("BatchPersistAccumulator", () => {
         );
       });
 
+      // Reopen the MERGE-built active database before fresh-replace fallback
+      // appends more symbols. This is the durable production boundary that
+      // must remain safe at and beyond the historical 2,048-row threshold.
+      await closeLadybugDb();
+      await initLadybugDb(graphDbPath);
+
       const accumulator = new BatchPersistAccumulator(189, {
         autoDrain: false,
         collectDiagnostics: true,
-        symbolWriteMode: "fresh-copy",
+        symbolWriteMode: "fresh-replace",
       });
       accumulator.addSymbols(
         Array.from({ length: 189 }, (_, offset) => {
@@ -416,17 +739,17 @@ describe("BatchPersistAccumulator", () => {
             weight: 1,
             confidence: 0.95,
             resolution: "exact",
-            resolverId: "fresh-copy-regression",
+            resolverId: "fresh-replace-regression",
             resolutionPhase: "pass1",
-            provenance: "fresh-copy-regression",
+            provenance: "fresh-replace-regression",
             createdAt: now,
           })),
         );
         await assertSymbolCounts(4_311, 4_311);
 
         // Finalization prunes placeholder nodes created while preparing fresh
-        // relationship COPY. LadybugDB 0.18.1 must not alias the preceding
-        // Symbol COPY vectors when those placeholders are deleted.
+        // relationship COPY. Node MERGE storage must remain coherent while
+        // those relationship-only placeholders are deleted.
         await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
           conn,
           Array.from({ length: 58 }, (_, index) => ({
@@ -437,9 +760,9 @@ describe("BatchPersistAccumulator", () => {
             weight: 1,
             confidence: 0.5,
             resolution: "unresolved",
-            resolverId: "fresh-copy-regression",
+            resolverId: "fresh-replace-regression",
             resolutionPhase: "pass1",
-            provenance: "fresh-copy-regression",
+            provenance: "fresh-replace-regression",
             createdAt: now,
             targetMeta: {
               symbolStatus: "unresolved",
@@ -552,6 +875,34 @@ describe("BatchPersistAccumulator", () => {
             fileId: secondFallbackFileId,
           },
         ]);
+      });
+
+      await withWriteConn((conn) => execDdl(conn, "CHECKPOINT"));
+      await closeLadybugDb();
+      await initLadybugDb(graphDbPath);
+      await withWriteConn(async (conn) => {
+        const durableBoundaryRows = await ladybugDb.queryAll<{
+          symbolId: string;
+          name: string;
+          astFingerprint: string;
+        }>(
+          conn,
+          `MATCH (s:Symbol)
+           WHERE s.symbolId IN $symbolIds
+           RETURN s.symbolId AS symbolId,
+                  s.name AS name,
+                  s.astFingerprint AS astFingerprint
+           ORDER BY s.symbolId`,
+          { symbolIds: [2_047, 2_048, 2_049].map(symbolId) },
+        );
+        assert.deepEqual(
+          durableBoundaryRows,
+          [2_047, 2_048, 2_049].map((index) => ({
+            symbolId: symbolId(index),
+            name: `provider-${index}`,
+            astFingerprint: `fingerprint-${index}`,
+          })),
+        );
       });
     } finally {
       try {

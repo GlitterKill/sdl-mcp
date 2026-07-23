@@ -504,6 +504,7 @@ export async function watchRepositoryWithIndexer(
           ? indexRepo(repoId, "incremental")
           : processWatchedFileChange({
               repoId,
+              repoRoot: repoRow.rootPath,
               filePath,
               indexRepo,
               patchSavedFileFn: ({

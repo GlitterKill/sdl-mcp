@@ -28,7 +28,7 @@ flowchart LR
 | Validate a completed provider-first graph | [Accuracy Gates](#accuracy-gates) |
 | Follow the full-refresh execution path | [Full Builds](#full-builds) |
 | Interpret fallback and skipped-tail behavior | [Same-Run Legacy Fallback](#same-run-legacy-fallback) |
-| Inspect shadow DB staging, finalization, and activation | [Shadow DB Lifecycle](#shadow-db-lifecycle) |
+| Understand why shadow staging and activation are blocked | [Shadow DB Safety Policy](#shadow-db-safety-policy) |
 | Read provider-first progress, coverage, and timing output | [Progress And CLI Diagnostics](#progress-and-cli-diagnostics) |
 | Understand when provider references become exact edges | [Call Proof And Edge Materialization](#call-proof-and-edge-materialization) |
 | Check what is implemented versus pending | [Current Implementation Status](#current-implementation-status) |
@@ -108,7 +108,7 @@ JVM SCIP indexes from `scip-java` receive these normalization guards:
 
 - Java/Kotlin constructor descriptors named `` `<init>` `` are treated as constructors even when the descriptor uses SCIP-Java's arity form, such as `` `<init>`(+1).``.
 - JVM type-parameter descriptors written with bracketed suffixes, such as `RecordJsonAdapter#[T]`, are skipped as type parameters instead of being reported as unknown descriptor suffixes.
-- Broad Java/Kotlin declaration spans that exceed the physical source line stay neutral when they describe delegated properties or type/class declarations. These ranges are not source-proven invocations and should not block provider-first shadow activation.
+- Broad Java/Kotlin declaration spans that exceed the physical source line stay neutral when they describe delegated properties or type/class declarations. These ranges are not source-proven invocations and should not block provider-first graph readiness.
 
 ## Accuracy Gates
 
@@ -126,28 +126,28 @@ The internal graph checker writes JSON and Markdown reports under `.tmp/provider
 
 ## Full Builds
 
-The target full-build path is:
+The current full-build path is:
 
 1. Collect SCIP indexes and capped LSP facts.
-2. Emit staging artifacts.
-3. Bulk-load a fresh shadow `.lbug`.
-4. Validate row counts, relationship endpoints, and active generation coverage.
-5. Build FTS and derived graph algorithm state.
-6. Checkpoint only after writes and index builds are idle.
-7. Activate the shadow DB with lock-aware close/reopen behavior.
+2. Validate provider rows, coverage, and relationship endpoints.
+3. Materialize Symbol nodes with parameterized `MERGE` and known ownership or dependency relationships with relationship `COPY`.
+4. Run same-run legacy fallback for uncovered or provider-unusable files.
+5. Build versions, metrics, summaries, FTS, and derived graph algorithm state in the active graph.
+6. Verify the persisted graph digest before publishing graph readiness.
+7. Report shadow staging as skipped by the LadybugDB mutable-activation safety policy.
 
 ### Graph Readiness Versus Semantic Readiness
 
-Embeddings, LLM summaries, retrieval-index bootstrap, and semantic enrichment are not part of the first ready gate. They advance a separate semantic readiness state. Provider-first graph finalization skips inline semantic work so shadow activation can happen against graph-ready rows first.
+Embeddings, LLM summaries, retrieval-index bootstrap, and semantic enrichment are not part of the first ready gate. They advance a separate semantic readiness state. Provider-first graph finalization skips inline semantic work so the active graph can become graph-ready first.
 
-After the finalized graph is active, SDL-MCP runs the configured semantic readiness refresh against the activated DB:
+After graph finalization, SDL-MCP runs the configured semantic readiness refresh against the active DB:
 
 - Summaries run when `semantic.generateSummaries` is enabled.
 - Symbol and FileSummary embeddings run from the configured semantic model plan.
 - Deferred retrieval indexes are rebuilt.
 - Semantic dirty flags are cleared only after that pass completes.
 
-If semantic refresh cannot complete, the CLI reports `Semantic readiness: deferred`, `DerivedState.embeddingsDirty` remains set, and `DerivedState.summariesDirty` is set only when summaries are configured. A degraded mock fallback or any deferred embedding rows count as incomplete; mock rows are not reported as embedded. Shadow activation re-applies the semantic dirty marker after the activated DB is reopened. Repeated provider-first runs that reuse already-current active provider rows run the same post-graph semantic refresh rather than reporting a clean graph prematurely.
+If semantic refresh cannot complete, the CLI reports `Semantic readiness: deferred`, `DerivedState.embeddingsDirty` remains set, and `DerivedState.summariesDirty` is set only when summaries are configured. A degraded mock fallback or any deferred embedding rows count as incomplete; mock rows are not reported as embedded. Repeated provider-first runs that reuse already-current active provider rows run the same post-graph semantic refresh rather than reporting a clean graph prematurely.
 
 ### Persisted Graph Integrity
 
@@ -159,7 +159,7 @@ Expected fileless membership comes from authoritative symbol and edge rows. Incr
 
 Placeholder pruning finalizes the expectation from those counts before the persisted cleanup runs; the cleanup query's returned rows are never used as the expected baseline. Liveness for a repository-owned fileless target includes incoming file-backed references whose repo-unique source has the same canonical `repoId`; only the fileless target can be shared across repositories. The baseline aggregate uses that stable source property because LadybugDB 0.18.1 exits natively on the equivalent cyclic repository-relationship plan after placeholder deletion. Exact affected-file and pass-2 replacement queries remain relationship-scoped. Changed-file subtraction remains scoped to the exact affected files. When those references disappear, cleanup removes only the stale target-repository `SYMBOL_IN_REPO` relationship. A shared physical node and another repository's membership remain intact; the node is deleted only after it has no repository memberships and is globally isolated. Because LadybugDB's safe-delete threshold applies to the global `Symbol` table, the pruning decision combines the target repository's authoritative expected count with a conservative pre-prune count of physical symbols outside or shared with it. A shared node can therefore be counted on both sides and disable pruning near the boundary, but it cannot make an unsafe physical table look smaller. When that global boundary is too large, or the baseline contains an unsupported fileless-source edge shape, SDL-MCP skips physical placeholder pruning and conservatively retains the verified incremental membership. Full refreshes never inherit that membership. If LadybugDB's safety boundary retains a stale placeholder tail during a full refresh, final verification fails closed instead of accepting the extra rows. The final independent scan therefore detects missed, extra, or incorrect cleanup without producing false mismatches in multi-repository databases.
 
-After shadow activation and deferred semantic refresh finish, SDL-MCP streams the final active LadybugDB symbols in stable file-and-symbol keyset order and compares that digest with the expected value. A mismatch records bounded details in operational logs, marks `DerivedState.graphIntegrityState` as `failed`, and returns a generic deterministic error without exposing symbol or path details in MCP output.
+After graph finalization and deferred semantic refresh finish, SDL-MCP streams the active LadybugDB symbols in stable file-and-symbol keyset order and compares that digest with the expected value. A mismatch records bounded details in operational logs, marks `DerivedState.graphIntegrityState` as `failed`, and returns a generic deterministic error without exposing symbol or path details in MCP output.
 
 Publishing either the verified digest or a verifier-owned failure is a conditional state transition: it succeeds only while `DerivedState` is still `verifying` for the same version. A concurrent durable mutation can reset that state, or a newer verification can replace its version, without a stale verifier overwriting the resulting `unknown` or newer `verified` state. The stale caller still receives the generic integrity error. This keeps the O(symbols) final scan on a read connection; only the constant-time compare-and-set uses the single writer.
 
@@ -176,8 +176,8 @@ Full SCIP provider-first runs currently:
 1. Collect SCIP documents and external symbols.
 2. Normalize them into provider facts.
 3. Validate coverage against the scanned repository file set.
-4. Optionally stage provider-materialized graph rows as Ladybug-loadable CSV artifacts for a fresh shadow `.lbug` when the shadow can still be finalized.
-5. Materialize provider-owned files, symbols, and edges through the existing active LadybugDB single-writer APIs.
+4. Report shadow staging as skipped while mutable activation is blocked for the pinned LadybugDB runtime.
+5. Materialize provider-owned files, symbols, and edges into the active LadybugDB through the existing single-writer APIs.
 
 Large SCIP collections above the occurrence-retention limit keep lightweight per-file coverage and edge inputs, but they do not retain full occurrence fact rows. Those rows are currently diagnostic payload and would otherwise be created only to be dropped before coverage analysis. Provider-first also drops decoded provider fact payloads and discarded graph-row copies after coverage analysis, before same-run legacy fallback and versioning continue.
 
@@ -218,7 +218,7 @@ For C/C++ provider-first coverage, SDL-MCP separates three denominators:
 | SCIP semantic eligibility | The union of scan-scope files named by discovered `compile_commands.json` entries plus provider-emitted C/C++ header/include documents inside scan scope. |
 | SCIP provider coverage | The provider document count that remains inside scan scope after unsafe or out-of-scope paths are filtered. |
 
-When semantic eligibility is known, fallback-cap summaries include a semantic eligibility diagnostics block. It splits the fallback tail into semantic-eligible uncovered files, semantic-eligible provider-unusable files, and scanned files outside semantic eligibility, with bounded sample paths for each group. This keeps large C/C++ runs from treating every skipped scanned file as an equally useful fallback candidate and makes it clear whether raising `providerFirst.maxSemanticEligibleFallbackFiles` would buy more active-graph semantic coverage while leaving shadow activation deferred.
+When semantic eligibility is known, fallback-cap summaries include a semantic eligibility diagnostics block. It splits the fallback tail into semantic-eligible uncovered files, semantic-eligible provider-unusable files, and scanned files outside semantic eligibility, with bounded sample paths for each group. This keeps large C/C++ runs from treating every skipped scanned file as an equally useful fallback candidate and makes it clear whether raising `providerFirst.maxSemanticEligibleFallbackFiles` would buy more active-graph semantic coverage.
 
 ## Same-Run Legacy Fallback
 
@@ -229,9 +229,9 @@ If the uncovered set is larger than the cap, or an operator lowers the cap for i
 1. Keeps the provider-primary active rows.
 2. Skips the expensive fallback parse.
 3. Reports `legacy fallback skipped ... over cap ...`.
-4. Skips shadow staging because graph-derived readiness plus shadow finalization/activation remain blocked by the intentionally partial graph.
+4. Keeps the active graph authoritative; shadow staging is already disabled by the mutable-activation safety policy.
 
-When semantic eligibility is known, SDL-MCP still reports the useful semantic-eligible subset separately. Parsing that subset while skipping the outside-semantic tail is opt-in through `providerFirst.maxSemanticEligibleFallbackFiles` (default `0`) because shadow finalization and activation remain blocked by the skipped tail.
+When semantic eligibility is known, SDL-MCP still reports the useful semantic-eligible subset separately. Parsing that subset while skipping the outside-semantic tail is opt-in through `providerFirst.maxSemanticEligibleFallbackFiles` (default `0`).
 
 Complete same-run provider-first legacy fallback uses the tuned legacy path:
 
@@ -240,71 +240,51 @@ Complete same-run provider-first legacy fallback uses the tuned legacy path:
 - Normal configured concurrency.
 - The batch persistence accumulator.
 
-Intentionally partial provider-first fallback stays conservative with inline TypeScript/tree-sitter pass-1 parsing and direct per-file LadybugDB writes. The skipped tail already blocks activation, and that mixed partial path has hit hard native and worker exits on large C++ repos.
+Intentionally partial provider-first fallback stays conservative with inline TypeScript/tree-sitter pass-1 parsing and direct per-file LadybugDB writes. That mixed partial path has hit hard native and worker exits on large C++ repos.
 
-When same-run legacy fallback is needed, fallback files are parsed through the legacy path first. SDL-MCP then collects those just-written active graph rows by repo-relative path and restages a merged provider-plus-fallback shadow build. Full fallback reruns rebuild stale fallback `File` rows from scratch when a previous versionless attempt already wrote them, which avoids duplicate relationship creation during recovery.
+When same-run legacy fallback is needed, fallback files are parsed through the legacy path and remain in the active graph. Full fallback reruns rebuild stale fallback `File` rows from scratch when a previous versionless attempt already wrote them, which avoids duplicate relationship creation during recovery.
 
 Large active provider rows are reused when the active SCIP input fingerprint has a matching non-truncated `ScipIngestion` marker, or when a versionless recovery run finds that the current provider symbol shape is already present in the active graph. Otherwise, dirty partial graphs take the merge-safe materialization path instead of assuming the existing graph is complete.
 
-## Shadow DB Lifecycle
+## Shadow DB Safety Policy
 
-### Staging
+`providerFirst.activation` remains `shadowDb` in configuration for compatibility,
+but production orchestration does not stage or activate a provider-first shadow
+with LadybugDB 0.18.1. The CLI reports one stable reason:
 
-The staging directory is created beside the active graph DB at `provider-first-shadow/<repoId>/<generationId>/`. It contains:
+> shadow DB activation is blocked because LadybugDB 0.18.1 COPY-built Symbol
+> storage cannot safely become the mutable active graph after later MERGE
+> writes and checkpoints
 
-- Table-shaped node CSVs: `repos.csv`, `files.csv`, `symbols.csv`, and `external-symbols.csv`.
-- Relationship CSVs: `file-in-repo.csv`, `symbol-in-file.csv`, `symbol-in-repo.csv`, and `depends-on.csv`.
-- A loaded `shadow.lbug`.
-- A manifest with staged counts, expected versus actual shadow-load counts, copy order, requested format, actual format, secondary-index warnings, shadow-load status, and validation metadata.
+The block applies before staging, so normal full indexes do not accumulate
+timestamped CSV directories or complete shadow database copies that can never
+be activated.
 
-CSV staging uses an explicit LadybugDB `NULL_STRINGS` sentinel so nullable values do not collapse with intentional empty-string sentinels. Shadow `COPY` runs with `PARALLEL=FALSE` and `QUOTE='"'` because provider symbol names, signatures, and source paths can contain quoted newlines or late comma-bearing values that LadybugDB's inferred CSV settings may otherwise reject. `providerFirst.stagingFormat: "parquet"` currently falls back to CSV and records that reason in the manifest because Parquet writing is not bundled yet.
+The evidence is stricter than “do not append with `COPY`.” A `Symbol` table
+initially populated by node `COPY` can remain healthy until a later Symbol
+append—including a parameterized `MERGE`—and checkpoint. After that boundary,
+a label scan and primary-key point lookup can return different STRING values.
+A table built with parameterized Symbol `MERGE` from the start survived the
+same later-repository write, checkpoint, and reopen control. Changing future
+writes to `MERGE` therefore does not repair an already activated COPY-built
+baseline; that database requires a clean rebuild.
 
-When same-run legacy fallback is skipped by the configured cap, SDL-MCP skips shadow staging because finalization and activation remain ineligible while uncovered files are intentionally absent. If provider call-proof gaps already make graph-derived state dirty, shadow staging and finalization are skipped because the provider call edges are not trusted enough for a shadow graph. Shadow DBs are also single-repo scoped today: when the active DB already contains another repo, SDL-MCP skips shadow staging and uses the active materialization path so unrelated repos remain indexed. Revisit this once shadow builds can copy a complete DB, including non-target repos, before activation. The active graph still receives normal finalization rows, and the CLI reports the skipped shadow reason.
+Relationship `COPY` did not reproduce the node-column failure and remains
+enabled. `SYMBOL_IN_FILE`, `SYMBOL_IN_REPO`, and known-endpoint `DEPENDS_ON`
+bulk loaders keep their fast paths after Symbol nodes have been created with
+parameterized `MERGE`.
 
-If staging artifact writes or shadow DB loading fail, the run reports the failed shadow phase as skipped and continues through the active LadybugDB materialization path. Unsafe provider graph validation still fails before any provider writes.
-
-### Finalization
-
-After active graph finalization finishes, loaded shadows are finalized by writing these rows to finalization CSV artifacts and loading those artifacts into the shadow `.lbug` with LadybugDB `COPY`:
-
-- Auxiliary dependency symbols and their repository/file membership.
-- Final active edges.
-- Version rows.
-- Symbol versions.
-- Metrics.
-- File summaries.
-- Clusters.
-- Processes.
-- Shadow clusters.
-- `DerivedState` rows.
-
-Finalization then validates active-versus-shadow counts, including file links for
-auxiliary symbols, and checkpoints the shadow database. Provider metadata can
-remain `unresolved` while still belonging to a concrete source file; finalization
-preserves that relationship instead of treating status as fileless ownership.
-The finalization manifest sits under the shadow build's `finalization/`
-directory so failed parity checks can be inspected without re-running provider
-collection.
-
-Shadow finalization seeds edge-target symbol nodes that are needed as relationship endpoints but are not repo-linked in the active graph. It does not add missing `SYMBOL_IN_REPO` relationships that would skew parity counts.
-
-Relationship rows whose endpoint contains quotes, whose endpoint/property text contains record separators, or whose `pass2-cpp` provenance requires CSV quoting are excluded from relationship `COPY` and written through parameterized LadybugDB writes after the bulk load. This preserves unresolved quoted or multi-line dependency, cluster, process, shadow-cluster, and C++ pass-2 edge rows without letting one rare row break the whole activation.
-
-### Activation
-
-When activation prerequisites are met, live indexing:
-
-1. Closes the active LadybugDB pool.
-2. Swaps the finalized shadow `.lbug` into the active path.
-3. Reopens the active database.
-4. Keeps the previous active DB as a backup.
-5. Restores that backup if the activated shadow cannot be reopened.
+The low-level shadow staging, finalization, swap, and rollback helpers remain
+covered for diagnostics and future engine qualification. They are not called
+by production index orchestration while this safety block is active. Re-enable
+them only after a pinned LadybugDB runtime passes the cross-repository
+scan-versus-point-lookup regression through checkpoint and reopen.
 
 ## Active Materialization
 
-Active provider materialization still writes to the live LadybugDB path before shadow activation so same-run fallback and graph finalization can use the normal active graph APIs. Provider-first uses a narrower write shape than the general legacy writer:
+Active provider materialization is the authoritative graph used by same-run fallback and graph finalization. Provider-first uses a narrower write shape than the general legacy writer:
 
-- After old file-backed symbols have been deleted, provider symbols are written as temporary `Symbol`, `SYMBOL_IN_FILE`, and `SYMBOL_IN_REPO` CSV artifacts and imported with LadybugDB `COPY`.
+- After old file-backed symbols have been deleted, provider `Symbol` nodes are written with the parameterized batch `MERGE` path. Only `SYMBOL_IN_FILE` and `SYMBOL_IN_REPO` ownership relationships use temporary CSV artifacts and LadybugDB `COPY`.
 - Provider edges use a known-endpoint bulk loader after files, symbols, and external symbols are already present.
 - The edge loader writes a temporary `DEPENDS_ON` CSV and imports it with LadybugDB `COPY` inside the active transaction.
 - Source-symbol replacement means fresh provider sources have no old outgoing `DEPENDS_ON` rows to probe before relationship loading.
@@ -323,9 +303,7 @@ Provider-first substages cover:
 - provider collection: `metadata`, `documents`, `externalSymbols`, `sourceLines`, `normalize`, `rows`, and `validate`
 - `coverageAnalyze`
 - active `materialize.*` work
-- `shadowStage`
-- `shadowFinalize`
-- `shadowActivate`
+- `shadowStage` with the current safety-policy skip reason
 
 Known-count loops include `stageCurrent` and `stageTotal`. Loops without a reliable total emit bounded heartbeat messages so long provider runs keep showing movement.
 
@@ -350,11 +328,11 @@ The final summary includes a provider-first timing block with:
 
 - Total provider-first wall time.
 - The slowest provider-first phase.
-- Phase buckets for collection, coverage scan, active materialization, same-run legacy fallback, final shadow staging, shadow finalization, and activation when those phases run.
+- Phase buckets for collection, coverage scan, active materialization, and same-run legacy fallback. Shadow timing buckets appear only when their low-level phases actually run.
 
 Collection prints broad buckets and a `collect.normalize` subphase line for coalescing, symbol relpath indexes, symbol facts, retained or lightweight occurrence facts, diagnostics, coverage, relationship edges, and occurrence edges. This makes normalizer bottlenecks visible without rerunning with a profiler.
 
-The active materialization bucket prints a subphase line for provider-owned symbol deletion, file upserts, symbol upserts, stale external pruning, external-symbol merges, and edge inserts. Provider symbol writes also report `nodeAndRelCreate` for the combined symbol-node plus file/repo ownership `COPY` load.
+The active materialization bucket prints a subphase line for provider-owned symbol deletion, file upserts, symbol upserts, stale external pruning, external-symbol merges, and edge inserts. Provider symbol writes also report `nodeAndRelCreate` for the combined symbol-node `MERGE` plus file/repo ownership relationship load.
 
 That timing block is always emitted for executed provider-first runs, even when broad `--diagnostics` timing output is not requested, so normal indexing tests can identify the next bottleneck without changing CLI flags.
 
@@ -380,15 +358,14 @@ Nested finalization, pass-2, version snapshot, deferred-index, and retrieval-ind
 
 ### Shadow DB Diagnostics
 
-The summary includes a `Provider-first shadow staging` line with the actual staging format and staged file/symbol/external/edge counts when staging runs. It then prints `Provider-first shadow DB loaded` when the fresh shadow `.lbug` passes actual row-count validation.
+Production summaries print `Provider-first shadow staging skipped` with the
+mutable COPY-shadow safety reason. No staging directory or shadow `.lbug` is
+created, and no shadow finalization or activation timing is reported.
 
-When call-proof, fallback-cap, source-scope, incremental, or multi-repo blockers make the shadow non-activatable before artifact creation, the CLI prints `Provider-first shadow staging skipped` with the health reason instead. Once active finalization has produced version, metrics, summaries, derived state, and algorithm rows, the CLI prints `Provider-first shadow DB finalized` with final active/shadow parity counts. `symbols` matches the public real-symbol total, while unresolved or external dependency support nodes copied for edge parity are reported separately as `auxiliarySymbols`.
-
-Finalized runs also report `copy=bulkCsv` and the number of finalization artifacts loaded into the shadow DB. Failed or skipped finalization is reported separately for staged shadows whose finalization cannot complete. Secondary-index build failures remain non-fatal but are surfaced as shadow DB warnings. Runtimes that reject `CREATE INDEX` syntax are reported as skipped secondary indexes rather than data-load failures.
-
-If artifact writes or shadow loading fail, the CLI prints a skipped-staging or skipped-load line with the reason. When activation is not attempted or cannot complete safely, the CLI prints a separate `Provider-first shadow DB activation skipped` or failed line with the missing prerequisites or rollback status.
-
-After a finalized shadow is swapped into the active path, SDL-MCP reopens it and rebuilds or verifies the configured critical Symbol FTS index before accepting the handoff. If that required index is absent or the FTS runtime is unavailable, activation fails and restores the previous active database. The post-handoff validation runs only against the newly activated shadow, so reopening the restored backup does not repeat the failed validation.
+The formatter still understands staged, loaded, finalized, skipped, failed,
+activated, and rolled-back summaries emitted by low-level diagnostics or older
+runtimes. Those states remain useful when qualifying a future LadybugDB
+version, but they are not produced by current index orchestration.
 
 ### Coverage Diagnostics
 
@@ -516,9 +493,9 @@ The version snapshot stage reads current symbols by `symbolId` cursor pages, not
 
 Snapshot reads require repo-owned, non-external symbols even when stale dependency-support metadata still reports `symbolStatus: "real"`. Shadow finalization uses the same boundary for `SymbolVersion` and `Metrics` rows so external SCIP dependency nodes stay auxiliary instead of inflating public version counts.
 
-When the freshly staged shadow classifies a symbol as unresolved or external, finalization treats that staged classification as authoritative for copied active edges, symbol versions, metrics, and expected parity counts. This lets a current provider run downgrade stale active real rows back to auxiliary metadata without blocking shadow activation.
+The low-level shadow finalizer treats a staged unresolved or external classification as authoritative for copied edges, symbol versions, metrics, and parity counts. Production indexing applies the equivalent provider classification directly to the active graph and does not activate that shadow.
 
-Dropping decoded provider fact payloads and discarded graph-row copies after coverage analysis keeps provider-first full refreshes from spending most of the remaining fallback time or heap on active graph snapshot bookkeeping before the finalized shadow database is activated.
+Dropping decoded provider fact payloads and discarded graph-row copies after coverage analysis keeps provider-first full refreshes from spending most of the remaining fallback time or heap on active graph snapshot bookkeeping.
 
 Full-mode stale symbol retirement deletes all Symbol-incident relationships with a single `DETACH DELETE` after explicit ID-keyed cleanup for metrics, symbol references, embeddings, summaries, and file memory links.
 
@@ -528,7 +505,7 @@ Legacy internal repeat-full paths retain bounded stale-symbol retirement for con
 
 For very large provider sets, SDL-MCP keeps the existing LadybugDB deletion and merge safety ceilings. Safe rebuild does not raise those limits or repair an incoherent table in place; it indexes into a new database where no stale provider nodes need retirement.
 
-These runs report `provider active rows reused for existing large symbol set`, return without opening an active graph writer, and keep graph-derived readiness deferred until a clean active rebuild, restore, or eligible shadow activation physically replaces stale provider-primary rows. Fresh graph DBs still use the known-fresh provider `COPY` path because no active provider rows need to be retired.
+These runs report `provider active rows reused for existing large symbol set`, return without opening an active graph writer, and keep graph-derived readiness deferred until a clean active rebuild or restore physically replaces stale provider-primary rows. Fresh active graph DBs use the same known-fresh parameterized Symbol writer; production orchestration does not build or activate node-COPY shadows.
 
 ## Incremental Builds
 
@@ -563,12 +540,12 @@ Full-refresh execution:
 - Same-run legacy fallback for scanned files with missing or provider-unusable coverage, excluding those files from provider materialization to avoid duplicate provider/legacy symbols and surfacing grouped provider-unusable reason counts in CLI output.
 - Conservative SCIP occurrence edge materialization: imports and implementations can become edges, and source-proved invocation references become exact calls, while broad non-call references and stale/unavailable call-proof cases are retained as occurrences.
 - Large SCIP occurrence retention guardrails: large provider-first runs keep coverage counts and edge inputs without retaining full occurrence fact rows that would be discarded before coverage analysis.
-- Large repeat full-index guardrails: existing active provider rows are reused whenever stale provider-symbol retirement exceeds the safety cap, avoiding duplicate primary-key `COPY` failures and native delete/merge crashes while making the stale-row tradeoff explicit in execution reasons.
+- Large repeat full-index guardrails: existing active provider rows are reused whenever stale provider-symbol retirement exceeds the safety cap, avoiding unsafe active Symbol rewrites and native delete/merge crashes while making the stale-row tradeoff explicit in execution reasons.
 
 Readiness, validation, and provenance:
 
 - Call-proof diagnostic grouping for provider-primary files, including reason codes, reference counts, affected file counts, sample paths, and bounded mismatch samples in CLI output. Readable non-call references are excluded from call-proof readiness.
-- Semantic-readiness split for provider-first runs: graph finalization skips inline semantic refresh, activates graph-ready rows first, then refreshes semantic summaries, embeddings, and retrieval indexes against the active DB. Failed semantic refresh leaves semantic dirty flags for recovery.
+- Semantic-readiness split for provider-first runs: graph finalization publishes graph-ready active rows first, then refreshes semantic summaries, embeddings, and retrieval indexes against the active DB. Failed semantic refresh leaves semantic dirty flags for recovery.
 - Provider materialization metadata: edge provenance records provider/index/source-path context, and provider documentation summary quality is graded by documentation depth.
 - Source-fidelity validation: provider-first local file rows use raw source SHA-256 plus byte size, and provider graph validation rejects missing/invalid hashes, invalid local ranges, missing endpoints, duplicate relationships, and unproved provider call edges before writes.
 - Provider provenance persistence: `SemanticProviderRun` stores provider run metadata plus bounded coverage summaries, while `SemanticDiagnostic` stores provider diagnostics and grouped coverage/call-proof failures.
@@ -577,9 +554,9 @@ Readiness, validation, and provenance:
 
 Shadow DB and diagnostics:
 
-- Shadow staging artifacts and bulk load: provider-materialized rows, plus same-run legacy fallback rows when fallback parsing runs, are written as streaming table-shaped CSV files plus a manifest beside the active graph DB, then loaded into a fresh shadow `.lbug` with node `COPY` before relationship `COPY`, explicit CSV quote/null handling, secondary indexes built after the load, checkpointing, and expected-versus-actual row-count validation.
-- Shadow finalization and activation handoff: loaded shadow DBs receive finalized active graph rows through finalization CSV artifacts and LadybugDB `COPY`, active-versus-shadow parity validation, explicit activation eligibility reasons, and a live close/swap/reopen handoff that keeps a previous active DB backup and rolls back if activation or reopen fails.
-- Provider-first phase timing in normal CLI summaries, including provider collection subphase buckets, SCIP normalizer subphase buckets, active materialization subphase buckets, and the combined provider-symbol `nodeAndRelCreate` `COPY` bucket, independent of broad `--diagnostics` output, so optimization work can target the slowest provider-first bucket from ordinary indexing runs.
+- Production safety policy: requested `shadowDb` staging and activation are skipped before artifact creation because COPY-built Symbol storage is not safely mutable under LadybugDB 0.18.1.
+- Low-level qualification helpers: staging, finalization, swap, validation, and rollback remain directly tested for future engine qualification, but production orchestration does not call them while the safety block is active.
+- Provider-first phase timing in normal CLI summaries, including provider collection subphase buckets, SCIP normalizer subphase buckets, active materialization subphase buckets, and the combined provider-symbol `nodeAndRelCreate` node-and-ownership bucket, independent of broad `--diagnostics` output, so optimization work can target the slowest provider-first bucket from ordinary indexing runs.
 
 ### Still Pending
 

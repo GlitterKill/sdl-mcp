@@ -169,7 +169,7 @@ function providerFirstSubstageLabel(substage?: IndexProgressSubstage): string {
     case "materialize.upsertSymbols":
       return "Provider-first materialize: upsert symbols";
     case "materialize.upsertSymbols.nodeAndRelCreate":
-      return "Provider-first materialize: symbol COPY";
+      return "Provider-first materialize: symbol nodes and ownership links";
     case "materialize.upsertSymbols.nodeUpsert":
       return "Provider-first materialize: symbol nodes";
     case "materialize.upsertSymbols.fileRelCreate":

@@ -989,7 +989,7 @@ describe("insertPass2Edges", () => {
     );
   });
 
-  it("COPY-loads missing versioned unresolved call targets before relationship COPY", async () => {
+  it("MERGEs missing versioned unresolved call targets before relationship COPY", async () => {
     const { insertPass2Edges, createPass2WriteStats } = await import(
       "../../dist/indexer/indexer-pass2.js"
     );
@@ -1016,18 +1016,18 @@ describe("insertPass2Edges", () => {
 
     assert.strictEqual(
       countStatementsContaining(statements, "COPY Symbol FROM"),
-      1,
-      "missing versioned unresolved-call targets should use Symbol COPY",
+      0,
+      "active placeholder targets must not use Symbol COPY",
     );
     assert.strictEqual(
       countStatementsContaining(statements, "COPY SYMBOL_IN_REPO FROM"),
-      1,
-      "new placeholder targets should copy their repo links with the new node rows",
+      0,
+      "new placeholder targets should use parameterized repo links",
     );
     assert.strictEqual(
       countStatementsContaining(statements, "MERGE (b:Symbol"),
-      0,
-      "versioned unresolved-call targets should skip generic placeholder MERGE",
+      1,
+      "versioned unresolved-call targets should use generic placeholder MERGE",
     );
     assert.strictEqual(
       countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
@@ -1035,9 +1035,9 @@ describe("insertPass2Edges", () => {
       "relationship COPY should still load known-endpoint edges",
     );
     assert.ok(stats.copyEnsureSymbolProbeMs >= 0);
-    assert.ok(stats.copyEnsureSymbolCopyMissingCsvMs >= 0);
-    assert.ok(stats.copyEnsureSymbolCopyMissingFromMs >= 0);
-    assert.strictEqual(stats.copyEnsureSymbolMergeFallbackMs, 0);
+    assert.strictEqual(stats.copyEnsureSymbolCopyMissingCsvMs, 0);
+    assert.strictEqual(stats.copyEnsureSymbolCopyMissingFromMs, 0);
+    assert.ok(stats.copyEnsureSymbolMergeFallbackMs >= 0);
   });
 
   it("records pass-2 write attribution counters for mixed full-mode batches", async () => {

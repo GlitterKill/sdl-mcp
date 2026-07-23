@@ -22,7 +22,6 @@ import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
 import {
   canonicalDependencyPlaceholderSymbol,
-  isSafeUnresolvedCallSymbolId,
   type SymbolPlaceholderMeta,
 } from "./symbol-placeholders.js";
 import {
@@ -42,56 +41,7 @@ const EDGE_COPY_COLUMNS = [
   "provenance",
   "createdAt",
 ] as const;
-// Keep this aligned with ladybug-symbols.ts SYMBOL_COPY_COLUMNS. The
-// placeholder target path cannot import that private helper without coupling
-// edge writes to file-backed symbol materialization.
-const PLACEHOLDER_SYMBOL_COPY_COLUMNS = [
-  "symbolId",
-  "repoId",
-  "kind",
-  "name",
-  "exported",
-  "visibility",
-  "language",
-  "rangeStartLine",
-  "rangeStartCol",
-  "rangeEndLine",
-  "rangeEndCol",
-  "astFingerprint",
-  "signatureJson",
-  "summary",
-  "summaryQuality",
-  "summarySource",
-  "invariantsJson",
-  "sideEffectsJson",
-  "roleTagsJson",
-  "searchText",
-  "updatedAt",
-  "embeddingMiniLM",
-  "embeddingMiniLMCardHash",
-  "embeddingMiniLMUpdatedAt",
-  "embeddingMiniLMVec",
-  "embeddingNomic",
-  "embeddingNomicCardHash",
-  "embeddingNomicUpdatedAt",
-  "embeddingJinaCode",
-  "embeddingJinaCodeCardHash",
-  "embeddingJinaCodeUpdatedAt",
-  "embeddingNomicVec",
-  "embeddingJinaCodeVec",
-  "external",
-  "scipSymbol",
-  "source",
-  "packageName",
-  "packageVersion",
-  "symbolStatus",
-  "placeholderKind",
-  "placeholderTarget",
-] as const;
-const SIMPLE_REL_COPY_COLUMNS = ["from", "to"] as const;
 const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
-const SYMBOL_CSV_NULL_SENTINEL = "\\N";
-const CSV_ARRAY_NULL = Symbol("edgeCsvArrayNull");
 
 export type DependencyTargetEnsurePhaseName =
   | "symbolMetadata"
@@ -828,23 +778,8 @@ export async function ensureDependencyTargetsForKnownSourceEdges(
       fn: () => Promise<T>,
     ): Promise<T> => await fn());
   await withTransaction(conn, async (txConn) => {
-    const copyMissingRows: DependencyTargetMetadataRow[] = [];
-    const mergeRows: DependencyTargetMetadataRow[] = [];
-    for (const row of targetRows) {
-      if (isCopyMissingPlaceholderTarget(row)) {
-        copyMissingRows.push(row);
-      } else {
-        mergeRows.push(row);
-      }
-    }
-
-    for (let i = 0; i < copyMissingRows.length; i += chunkSize) {
-      const rows = copyMissingRows.slice(i, i + chunkSize);
-      await ensureCopyMissingPlaceholderTargets(txConn, rows, measurePhase);
-    }
-
-    for (let i = 0; i < mergeRows.length; i += chunkSize) {
-      const rows = mergeRows.slice(i, i + chunkSize);
+    for (let i = 0; i < targetRows.length; i += chunkSize) {
+      const rows = targetRows.slice(i, i + chunkSize);
       const existingSymbolIds = await measurePhase(
         "symbolMetadata.probeExisting",
         async () => await queryExistingSymbolIds(txConn, rows),
@@ -900,50 +835,6 @@ export async function ensureDependencyTargetsForKnownSourceEdges(
   });
 }
 
-function isCopyMissingPlaceholderTarget(
-  row: DependencyTargetMetadataRow,
-): boolean {
-  return (
-    row.targetStatus === "unresolved" &&
-    row.targetPlaceholderKind === "call" &&
-    isSafeUnresolvedCallSymbolId(row.toSymbolId)
-  );
-}
-
-async function ensureCopyMissingPlaceholderTargets(
-  conn: Connection,
-  rows: readonly DependencyTargetMetadataRow[],
-  measurePhase: EnsureDependencyTargetsOptions["measurePhase"],
-): Promise<void> {
-  if (!measurePhase || rows.length === 0) return;
-
-  const existingSymbolIds = await measurePhase(
-    "symbolMetadata.probeExisting",
-    async () => await queryExistingSymbolIds(conn, rows),
-  );
-  const existingRows: DependencyTargetMetadataRow[] = [];
-  const missingRows: DependencyTargetMetadataRow[] = [];
-  for (const row of rows) {
-    if (existingSymbolIds.has(row.toSymbolId)) {
-      existingRows.push(row);
-    } else {
-      missingRows.push(row);
-    }
-  }
-
-  if (missingRows.length > 0) {
-    await copyMissingPlaceholderTargets(conn, missingRows, measurePhase);
-  }
-  if (existingRows.length > 0) {
-    await measurePhase("symbolMetadata.matchExisting", async () =>
-      updateExistingPlaceholderTargets(conn, existingRows),
-    );
-    await measurePhase("repoLink", async () =>
-      ensureDependencyTargetRepoLinks(conn, existingRows),
-    );
-  }
-}
-
 async function queryExistingSymbolIds(
   conn: Connection,
   rows: readonly DependencyTargetMetadataRow[],
@@ -952,9 +843,9 @@ async function queryExistingSymbolIds(
   const existing = new Set<string>();
   for (const symbolId of symbolIds) {
     // LadybugDB 0.18.1 does not reliably match node properties against
-    // UNWIND/list-derived variables for this path. Scalar parameter probes do
-    // use the primary-key lookup and prevent MERGE from re-creating a symbol
-    // that was just inserted by the fresh-copy Symbol writer.
+    // UNWIND/list-derived variables for this path. Scalar parameter probes use
+    // the primary-key lookup and prevent MERGE from re-creating an existing
+    // file-backed Symbol.
     const result = await queryAll<{ symbolId: unknown }>(
       conn,
       `MATCH (s:Symbol {symbolId: $symbolId})
@@ -966,33 +857,6 @@ async function queryExistingSymbolIds(
     }
   }
   return existing;
-}
-
-async function copyMissingPlaceholderTargets(
-  conn: Connection,
-  rows: readonly DependencyTargetMetadataRow[],
-  measurePhase: NonNullable<EnsureDependencyTargetsOptions["measurePhase"]>,
-): Promise<void> {
-  const tempDir = await mkdtemp(join(tmpdir(), "sdl-placeholder-targets-"));
-  const symbolPath = join(tempDir, "symbols.csv");
-  const symbolInRepoPath = join(tempDir, "symbol-in-repo.csv");
-  try {
-    await measurePhase("symbolMetadata.copyMissing.csvMaterialize", async () => {
-      await writePlaceholderSymbolsCsv(symbolPath, rows);
-      await writeSimpleRelCsv(
-        symbolInRepoPath,
-        rows.map((row) => [row.toSymbolId, row.repoId] as const),
-      );
-    });
-    await measurePhase("symbolMetadata.copyMissing.copyFrom", async () =>
-      copyPlaceholderSymbolCsvArtifact(conn, symbolPath),
-    );
-    await measurePhase("repoLink", async () =>
-      copyCsvArtifact(conn, "SYMBOL_IN_REPO", symbolInRepoPath),
-    );
-  } finally {
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
-  }
 }
 
 async function updateExistingPlaceholderTargets(
@@ -1061,116 +925,6 @@ function groupTargetSymbolIdsByRepo(
     }
   }
   return byRepo;
-}
-
-async function writePlaceholderSymbolsCsv(
-  filePath: string,
-  rows: readonly DependencyTargetMetadataRow[],
-): Promise<void> {
-  const stream = createWriteStream(filePath, { encoding: "utf8" });
-  try {
-    await writeCsvLine(stream, PLACEHOLDER_SYMBOL_COPY_COLUMNS);
-    for (const row of rows) {
-      await writePlaceholderSymbolCsvLine(
-        stream,
-        placeholderSymbolRowToCopyCells(row),
-      );
-    }
-    stream.end();
-    await finished(stream);
-  } catch (err) {
-    stream.destroy();
-    throw err;
-  }
-}
-
-function placeholderSymbolRowToCopyCells(
-  row: DependencyTargetMetadataRow,
-): unknown[] {
-  return [
-    row.toSymbolId,
-    row.repoId,
-    row.targetKind,
-    row.targetName,
-    false,
-    "",
-    row.targetLanguage,
-    row.targetRangeStartLine,
-    row.targetRangeStartCol,
-    row.targetRangeEndLine,
-    row.targetRangeEndCol,
-    row.targetAstFingerprint,
-    row.targetSignatureJson,
-    "",
-    0.0,
-    "unknown",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    CSV_ARRAY_NULL,
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    CSV_ARRAY_NULL,
-    CSV_ARRAY_NULL,
-    row.targetStatus === "external",
-    "",
-    "treesitter",
-    "",
-    "",
-    row.targetStatus,
-    row.targetPlaceholderKind,
-    row.targetPlaceholderTarget,
-  ];
-}
-
-async function writeSimpleRelCsv(
-  filePath: string,
-  rows: readonly (readonly [string, string])[],
-): Promise<void> {
-  const stream = createWriteStream(filePath, { encoding: "utf8" });
-  try {
-    await writeCsvLine(stream, SIMPLE_REL_COPY_COLUMNS);
-    for (const row of rows) {
-      await writeCsvLine(stream, row);
-    }
-    stream.end();
-    await finished(stream);
-  } catch (err) {
-    stream.destroy();
-    throw err;
-  }
-}
-
-async function copyCsvArtifact(
-  conn: Connection,
-  tableName: string,
-  filePath: string,
-): Promise<void> {
-  await execDdl(
-    conn,
-    `COPY ${tableName} FROM '${escapeCopyPath(filePath)}' ` +
-      `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
-  );
-}
-
-async function copyPlaceholderSymbolCsvArtifact(
-  conn: Connection,
-  filePath: string,
-): Promise<void> {
-  await execDdl(
-    conn,
-    `COPY Symbol FROM '${escapeCopyPath(filePath)}' ` +
-      `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(SYMBOL_CSV_NULL_SENTINEL)}'])`,
-  );
 }
 
 async function copyKnownSymbolEdges(
@@ -1243,16 +997,6 @@ async function writeCsvLine(
   }
 }
 
-async function writePlaceholderSymbolCsvLine(
-  stream: NodeJS.WritableStream,
-  cells: readonly unknown[],
-): Promise<void> {
-  const line = `${cells.map(placeholderSymbolCsvCell).join(",")}\n`;
-  if (!stream.write(line)) {
-    await waitForDrain(stream);
-  }
-}
-
 function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
@@ -1273,17 +1017,7 @@ function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
 }
 
 function csvCell(value: unknown): string {
-  if (value === CSV_ARRAY_NULL) return "";
   if (value === null || value === undefined) return CSV_NULL_SENTINEL;
-  const text = String(value);
-  if (text === "") return '""';
-  const escaped = text.replaceAll('"', '""');
-  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
-}
-
-function placeholderSymbolCsvCell(value: unknown): string {
-  if (value === CSV_ARRAY_NULL) return "";
-  if (value === null || value === undefined) return SYMBOL_CSV_NULL_SENTINEL;
   const text = String(value);
   if (text === "") return '""';
   const escaped = text.replaceAll('"', '""');

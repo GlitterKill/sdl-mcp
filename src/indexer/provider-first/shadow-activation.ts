@@ -30,7 +30,17 @@ export interface ProviderFirstShadowActivationReadinessParams {
   graphDerivedStateReady: boolean;
   shadowContainsFinalizedGraph: boolean;
   finalizedGraphReasons?: string[];
+  activationBlockedReason?: string;
 }
+
+/**
+ * LadybugDB 0.18.1 does not durably preserve earlier optional STRING values
+ * when later MERGE writes mutate a Symbol table initially populated by COPY.
+ * Keep finalized shadows as diagnostics until a future engine is explicitly
+ * regression-tested for mutable activation.
+ */
+export const PROVIDER_FIRST_COPY_SHADOW_ACTIVATION_BLOCK_REASON =
+  "shadow DB activation is blocked because LadybugDB 0.18.1 COPY-built Symbol storage cannot safely become the mutable active graph after later MERGE writes and checkpoints";
 
 export interface ProviderFirstShadowActivationFs {
   access?: typeof access;
@@ -62,6 +72,15 @@ export function summarizeProviderFirstShadowActivationReadiness(
     params.shadowBuild?.status === "staged"
       ? params.shadowBuild.shadowDb
       : undefined;
+  if (params.activationBlockedReason) {
+    return {
+      status: "skipped",
+      shadowDbPath:
+        shadowDb?.status === "loaded" ? shadowDb.path : undefined,
+      rollback: "notNeeded",
+      reasons: [params.activationBlockedReason],
+    };
+  }
   if (!shadowDb || shadowDb.status !== "loaded") {
     reasons.push("shadow DB was not loaded");
   }
@@ -80,7 +99,6 @@ export function summarizeProviderFirstShadowActivationReadiness(
       );
     }
   }
-
   if (reasons.length > 0) {
     return {
       status: "skipped",

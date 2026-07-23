@@ -183,7 +183,7 @@ export interface Pass1Params {
   concurrency: number;
   workerPool?: ParserWorkerPool | null;
   useBatchPersist?: boolean;
-  batchSymbolWriteMode?: "merge" | "fresh-copy";
+  batchSymbolWriteMode?: "merge" | "fresh-replace";
   serializeNativePass1Chunks?: boolean;
   drainBatchPersistBetweenNativeChunks?: boolean;
   drainBatchPersistDuringTsPass?: boolean;
