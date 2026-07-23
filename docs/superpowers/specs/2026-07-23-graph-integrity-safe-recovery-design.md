@@ -189,34 +189,46 @@ The option:
 - rejects `--watch` and `--repo-id`;
 - requires an absolute, non-existent target path;
 - rejects a target equal to the configured active database;
-- verifies that no SDL process owns the configured active database;
+- calls the existing cross-platform `findExistingProcess()` pidfile probe for
+  the configured active database and rejects a live SDL owner; stale pidfiles
+  are removed by that helper;
 - overrides graph-path environment variables only for the command lifetime;
 - indexes every configured repository into the target with
   `isolatedRebuild: true`;
 - treats any repository failure as candidate failure;
+- waits for every repository's background graph-integrity verifier to quiesce
+  and requires its current state to be `verified`;
 - checkpoints and closes the candidate;
 - reopens the same candidate;
 - validates it; and
 - closes it again before reporting success.
 
-The command does not update configuration or delete either database. Its
-success output identifies the validated candidate and tells the operator that
-activation still requires a stopped-server path switch.
+The pidfile probe detects supported SDL-MCP owners on every platform; it cannot
+prove that an unrelated process opened LadybugDB directly. The command therefore
+also reports the explicit operator precondition that no unsupported external
+LadybugDB owner may be running. It does not open the active database to test
+ownership, update configuration, or delete either database. Its success output
+identifies the validated candidate and tells the operator that activation still
+requires a stopped-server path switch.
 
 ### Candidate validation
 
-After reopen, validation requires:
+Before checkpoint/close, the command awaits
+`waitForGraphIntegrityVerifier(repoId)` for each configured repository and
+rejects a `failed` or still-`verifying` state. After reopen, validation requires:
 
 - global physical Symbol count equals distinct `symbolId` count;
 - no duplicate sample groups;
-- each configured repository has persisted files, a latest Version, and a
-  verified current graph-integrity revision;
+- each non-empty configured repository has persisted files, a latest Version,
+  and a verified current graph-integrity revision;
+- a valid empty configured repository is present and has no contradictory
+  persisted graph state;
 - repository Symbol membership counts contain no duplicate `symbolId`;
 - deterministic scan samples agree with primary-key point lookup;
 - `LOWER()` succeeds across canonical string fields;
 - all `DEPENDS_ON` relationship endpoints expose non-empty Symbol IDs;
-- the configured Symbol FTS index exists; and
-- a bounded `QUERY_FTS_INDEX` probe executes successfully.
+- when FTS is enabled, the configured Symbol FTS index exists and a bounded
+  `QUERY_FTS_INDEX` probe executes successfully.
 
 Validation errors are typed and retain the candidate for diagnosis. They never
 fall through to activation.
@@ -224,14 +236,18 @@ fall through to activation.
 ### Saved-file placeholder canonicalization
 
 The saved-file path currently constructs new fileless manifest symbols with
-`canonicalizeDependencyPlaceholders: false`. Change it to the canonical form.
+`canonicalizeDependencyPlaceholders: false`. Replace the alternate shape with
+one pure `canonicalDependencyPlaceholderSymbol()` builder shared by edge
+writes, physical normalization, and manifest construction.
 
 Before applying the manifest delta in the same saved-file transaction:
 
 1. write the file, symbols, references, and parser-owned edges;
 2. call the existing `normalizeDependencyPlaceholderSymbols()` helper scoped
-   to the durable file for file-backed repairs;
-3. let that helper canonicalize unresolved fileless dependency placeholders;
+   to the durable file for file-backed repairs and to the touched placeholder
+   `symbolIds` for fileless repairs;
+3. let that helper canonicalize only those touched unresolved fileless
+   dependency placeholders;
 4. apply the canonical manifest delta; and
 5. advance the integrity revision.
 
