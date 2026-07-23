@@ -187,6 +187,16 @@ describe("release regression guards", () => {
       /SDL_MCP_PASS1_STABLE_DB_WRITES:\s*"1"/,
       "benchmark CI should serialize pass-1 DB writes against parser work to avoid hosted-runner exit 139 flakes",
     );
+    assert.match(
+      benchmarksJob,
+      /SDL_CONFIG:\s*config\/sdlmcp\.config\.json/,
+      "benchmark CI should load the checked-in config that declares the locked OSS repository",
+    );
+    assert.match(
+      benchmarksJob,
+      /set \+e[\s\S]*benchmark:ci[\s\S]*BENCHMARK_EXIT_CODE=\$\?[\s\S]*set -e[\s\S]*name:\s*Upload Benchmark CI result[\s\S]*if:\s*always\(\)[\s\S]*path:\s*\.benchmark\/latest-result\.json/s,
+      "benchmark CI should preserve the real exit code and upload its result on failure",
+    );
 
     assert.match(
       benchmarkMatrixNightlyJob,

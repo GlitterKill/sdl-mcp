@@ -82,6 +82,7 @@ async function main(): Promise<void> {
       retries: { type: "string" },
       "baseline-path": { type: "string" },
       "threshold-path": { type: "string" },
+      out: { type: "string" },
       "update-baseline": { type: "boolean" },
       "skip-indexing": { type: "boolean" },
       "out-exclusive": { type: "boolean" },

@@ -306,6 +306,13 @@ describe("CLI command routing", () => {
       "utf8",
     );
 
+    it("declares --out as a string-valued top-level option", () => {
+      assert.match(
+        cliEntrypointSource,
+        /\bout:\s*\{\s*type:\s*"string"\s*\}/u,
+      );
+    });
+
     it("routes to parseBenchmarkOptions and returns BenchmarkOptions", () => {
       const options = parseBenchmarkOptions([], global, {
         "repo-id": "my-repo",

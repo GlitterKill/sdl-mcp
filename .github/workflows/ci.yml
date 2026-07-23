@@ -285,6 +285,7 @@ jobs:
       - name: Run Benchmark CI Guardrails (locked OSS repo)
         shell: bash
         env:
+          SDL_CONFIG: config/sdlmcp.config.json
           # Keep benchmark:ci as a stable JS/LadybugDB regression guardrail.
           # Native parser crash coverage lives in native-build and sync-memory;
           # enabling it here has repeatedly produced Linux exit 139 flakes.
@@ -298,8 +299,10 @@ jobs:
           THRESHOLD_PATH="config/benchmark.ci.config.json"
           echo "Using threshold config: ${THRESHOLD_PATH}"
           npm run build
+          set +e
           node dist/cli/index.js benchmark:ci --repo-id zod-oss --threshold-path "${THRESHOLD_PATH}" --json --out .benchmark/latest-result.json
           BENCHMARK_EXIT_CODE=$?
+          set -e
 
           echo "Benchmark exit code: ${BENCHMARK_EXIT_CODE}"
 
@@ -310,6 +313,15 @@ jobs:
           fi
 
           echo "[PASS] Benchmark guardrails passed"
+
+      - name: Upload Benchmark CI result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-ci-result
+          path: .benchmark/latest-result.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Auto-update benchmark baseline on main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

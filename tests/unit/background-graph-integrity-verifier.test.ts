@@ -350,11 +350,11 @@ describe("background graph integrity verifier", () => {
       "repo",
       (state) =>
         state?.graphIntegrityState === "verified" &&
-        state.graphIntegrityVerifiedRevision === 1,
+        state.graphIntegrityVerifiedRevision === 1 &&
+        pendingReads >= 2,
     );
 
     assert.equal(row.graphIntegrityRevision, 1);
-    assert.ok(pendingReads >= 2, "worker must reload after completion");
     assert.deepEqual(
       [...new Set(pendingRepoIds)],
       ["repo"],
