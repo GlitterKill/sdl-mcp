@@ -38,11 +38,12 @@ SDL-MCP will not track whether a client has previously fetched the catalog. Sess
 
 A focused regression will request the advertised tool list and assert:
 
-- MCP initialization does not provide the workflow block.
-- The workflow marker appears exactly once across all tool descriptions.
-- The first tool description contains the workflow.
-- Later tool descriptions do not contain it.
-- Tool ordering and version suffix behavior remain unchanged.
+- The MCP initialization response omits the `instructions` key.
+- The first description equals `SDL_MCP_SERVER_INSTRUCTIONS + "\n\n" + versionedDescription`.
+- The complete workflow block appears exactly once across all tool descriptions.
+- Every later tool description remains byte-identical to its existing value.
+- Tool ordering and response/tool object key ordering remain unchanged.
+- Two repeated `tools/list` JSON serializations are byte-identical and preserve current version suffix behavior.
 
 The implementation will update `tests/integration/determinism.fixtures.json` because tool descriptions are contract surface.
 
