@@ -181,6 +181,41 @@ export async function markDerivedStateComputed(
   });
 }
 
+/** Clear derived flags only if no newer target version has been published. */
+export async function markDerivedStateComputedIfCurrent(
+  repoId: string,
+  computedVersionId: string,
+  clearedFlags?: DerivedStateDirtyFlags,
+  options?: { clearError?: boolean },
+): Promise<boolean> {
+  const updatedAt = getCurrentTimestamp();
+  const clearAll = !clearedFlags;
+  const clearClusters = clearAll || Boolean(clearedFlags?.clusters);
+  const clearProcesses = clearAll || Boolean(clearedFlags?.processes);
+  const clearAlgorithms = clearAll || Boolean(clearedFlags?.algorithms);
+  const clearSummaries = clearAll || Boolean(clearedFlags?.summaries);
+  const clearEmbeddings = clearAll || Boolean(clearedFlags?.embeddings);
+  const clearError = options?.clearError ?? true;
+  return withWriteConn(async (wConn) => {
+    const updated = await querySingle<{ repoId: string }>(
+      wConn,
+      "MATCH (d:DerivedState {repoId: $repoId}) WHERE d.targetVersionId = $computedVersionId SET d.clustersDirty = CASE WHEN $clearClusters THEN false ELSE d.clustersDirty END, d.processesDirty = CASE WHEN $clearProcesses THEN false ELSE d.processesDirty END, d.algorithmsDirty = CASE WHEN $clearAlgorithms THEN false ELSE d.algorithmsDirty END, d.summariesDirty = CASE WHEN $clearSummaries THEN false ELSE d.summariesDirty END, d.embeddingsDirty = CASE WHEN $clearEmbeddings THEN false ELSE d.embeddingsDirty END, d.computedVersionId = $computedVersionId, d.targetVersionId = $computedVersionId, d.updatedAt = $updatedAt, d.lastError = CASE WHEN $clearError THEN null ELSE d.lastError END RETURN d.repoId AS repoId",
+      {
+        repoId,
+        clearClusters,
+        clearProcesses,
+        clearAlgorithms,
+        clearSummaries,
+        clearEmbeddings,
+        clearError,
+        computedVersionId,
+        updatedAt,
+      },
+    );
+    return updated !== null;
+  });
+}
+
 export async function recordDerivedStateError(
   repoId: string,
   lastError: string,

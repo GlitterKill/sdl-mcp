@@ -11,6 +11,7 @@ declare module "kuzu" {
       throwOnWalReplayFailure?: boolean,
       enableChecksums?: boolean,
     );
+    init(): Promise<void>;
     close(): Promise<void>;
   }
 

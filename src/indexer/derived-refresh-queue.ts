@@ -11,11 +11,10 @@
 
 import { getLadybugConn } from "../db/ladybug.js";
 import {
-  markDerivedStateComputed,
+  markDerivedStateComputedIfCurrent,
   recordDerivedStateError,
 } from "../db/ladybug-derived-state.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { runToolDispatch } from "../mcp/dispatch-limiter.js";
 import { logger } from "../util/logger.js";
 import {
@@ -48,6 +47,8 @@ interface RunningEntry {
 // settles. That is intentional — marking dirty is enough on the CLI path.
 const pending = new Map<string, PendingEntry>();
 const running = new Map<string, RunningEntry>();
+// Includes timed-out work whose queue wrapper has already settled.
+const activeRefreshWork = new Set<Promise<void>>();
 let enabled = true;
 let shuttingDown = false;
 
@@ -204,25 +205,24 @@ async function markDerivedRefreshComputed(
   targetVersionId: string,
   algorithmRefresh?: AlgorithmRefreshDiagnostics | void,
 ): Promise<void> {
-  if (!algorithmRefresh) {
-    await markDerivedStateComputed(repoId, targetVersionId, {
-      clusters: true,
-      processes: true,
-      algorithms: true,
-    });
-    return;
-  }
-  await markDerivedStateComputed(
+  const published = await markDerivedStateComputedIfCurrent(
     repoId,
     targetVersionId,
     {
       clusters: true,
       processes: true,
-      algorithms: !algorithmRefresh.dirty,
+      algorithms: !algorithmRefresh?.dirty,
     },
-    { clearError: !algorithmRefresh.dirty },
+    { clearError: !algorithmRefresh?.dirty },
   );
-  if (algorithmRefresh.dirty) {
+  if (!published) {
+    logger.debug("Skipped stale derived-refresh publication", {
+      repoId,
+      targetVersionId,
+    });
+    return;
+  }
+  if (algorithmRefresh?.dirty) {
     await recordDerivedStateError(
       repoId,
       algorithmRefresh.failures.join("; ") || "algorithm refresh failed",
@@ -346,75 +346,73 @@ async function runOne(
     message: "starting",
   });
   try {
-    await withIndexingGate(async () => {
-      await runToolDispatch(
-        async () => {
-          let writeLockHeld = false;
-          await runWithDerivedRefreshTimeout(
-            repoId,
-            targetVersionId,
-            signal,
-            async (refreshSignal) => {
-              if (refreshSignal.aborted) return;
-              let algorithmRefresh: AlgorithmRefreshDiagnostics | void =
-                undefined;
-              // The dispatch slot is intentional: while indexing narrows dispatch
-              // concurrency to one, the background refresh must occupy that one slot
-              // so foreground read tools cannot overlap its LadybugDB writes.
-              await withRepoWriteHeavyLock(repoId, async () => {
-                writeLockHeld = true;
-                try {
-                  if (refreshSignal.aborted) return;
-                  algorithmRefresh = await hooks.refresh({
-                    repoId,
-                    versionId: targetVersionId,
-                    signal: refreshSignal,
-                    onProgress: (progress) => {
-                      setDerivedRefreshProgress(
-                        repoId,
-                        targetVersionId,
-                        progressForIndexEvent(progress),
-                      );
-                    },
-                  });
-                } finally {
-                  writeLockHeld = false;
-                }
-              });
-              if (refreshSignal.aborted) return;
-              setDerivedRefreshProgress(repoId, targetVersionId, {
-                phase: "complete",
-                current: DERIVED_REFRESH_PROGRESS_TOTAL,
-                total: DERIVED_REFRESH_PROGRESS_TOTAL,
-                message: "marking derived state complete",
-              });
-              await markDerivedRefreshComputed(
-                repoId,
-                targetVersionId,
-                algorithmRefresh,
-              );
-            },
-            (timeoutMs) => {
-              if (!writeLockHeld) return;
-              const marked = markActiveRepoWriteHeavyLockTimedOut(
+    await runToolDispatch(
+      async () => {
+        let writeLockHeld = false;
+        await runWithDerivedRefreshTimeout(
+          repoId,
+          targetVersionId,
+          signal,
+          async (refreshSignal) => {
+            if (refreshSignal.aborted) return;
+            let algorithmRefresh: AlgorithmRefreshDiagnostics | void =
+              undefined;
+            // Keep derived work inside the normal dispatch budget without borrowing
+            // the destructive-index gate. The repo lock protects same-repo write-heavy
+            // work, while LadybugDB's global write limiter serializes mutations.
+            await withRepoWriteHeavyLock(repoId, async () => {
+              writeLockHeld = true;
+              try {
+                if (refreshSignal.aborted) return;
+                algorithmRefresh = await hooks.refresh({
+                  repoId,
+                  versionId: targetVersionId,
+                  signal: refreshSignal,
+                  onProgress: (progress) => {
+                    setDerivedRefreshProgress(
+                      repoId,
+                      targetVersionId,
+                      progressForIndexEvent(progress),
+                    );
+                  },
+                });
+              } finally {
+                writeLockHeld = false;
+              }
+            });
+            if (refreshSignal.aborted) return;
+            setDerivedRefreshProgress(repoId, targetVersionId, {
+              phase: "complete",
+              current: DERIVED_REFRESH_PROGRESS_TOTAL,
+              total: DERIVED_REFRESH_PROGRESS_TOTAL,
+              message: "marking derived state complete",
+            });
+            await markDerivedRefreshComputed(
+              repoId,
+              targetVersionId,
+              algorithmRefresh,
+            );
+          },
+          (timeoutMs) => {
+            if (!writeLockHeld) return;
+            const marked = markActiveRepoWriteHeavyLockTimedOut(
+              repoId,
+              targetVersionId,
+              timeoutMs,
+            );
+            if (marked) {
+              logger.warn("derived-refresh write-heavy lock timed out", {
                 repoId,
                 targetVersionId,
                 timeoutMs,
-              );
-              if (marked) {
-                logger.warn("derived-refresh write-heavy lock timed out", {
-                  repoId,
-                  targetVersionId,
-                  timeoutMs,
-                });
-              }
-            },
-          );
-        },
-        undefined,
-        `derived-refresh:${repoId}`,
-      );
-    });
+              });
+            }
+          },
+        );
+      },
+      undefined,
+      `derived-refresh:${repoId}`,
+    );
   } catch (err) {
     if (signal.aborted) {
       logger.debug("derived-refresh aborted", { repoId, targetVersionId });
@@ -460,7 +458,13 @@ async function runWithDerivedRefreshTimeout(
       parentAbort();
       await parentAbortPromise;
     }
-    workPromise = Promise.resolve().then(() => work(timeoutAbort.signal));
+    const refreshWork = Promise.resolve().then(() => work(timeoutAbort.signal));
+    workPromise = refreshWork;
+    activeRefreshWork.add(refreshWork);
+    void refreshWork.then(
+      () => activeRefreshWork.delete(refreshWork),
+      () => activeRefreshWork.delete(refreshWork),
+    );
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => {
         timedOut = true;
@@ -474,7 +478,20 @@ async function runWithDerivedRefreshTimeout(
     });
     await Promise.race([workPromise, timeoutPromise, parentAbortPromise]);
   } catch (err) {
-    if (timedOut && workPromise) {
+    if (parentSignal.aborted && workPromise) {
+      try {
+        await workPromise;
+      } catch (settledErr) {
+        logger.debug("derived-refresh aborted work rejected while settling", {
+          repoId,
+          targetVersionId,
+          error:
+            settledErr instanceof Error
+              ? settledErr.message
+              : String(settledErr),
+        });
+      }
+    } else if (timedOut && workPromise) {
       void workPromise.then(
         () => {
           logger.info("derived-refresh timed-out work settled", {
@@ -568,14 +585,43 @@ async function defaultRefreshImpl(params: {
  * Cooperative shutdown. Signals all in-flight refreshes to abort and waits
  * for them to settle. New enqueues are rejected.
  */
-export async function shutdownDerivedRefreshQueue(): Promise<void> {
+export async function shutdownDerivedRefreshQueue(
+  timeoutMs?: number,
+): Promise<void> {
   shuttingDown = true;
   pending.clear();
   const outstanding = [...running.values()];
   for (const entry of outstanding) {
     entry.abort.abort();
   }
-  await Promise.allSettled(outstanding.map((e) => e.promise));
+  const settlement = Promise.allSettled([
+    ...outstanding.map((entry) => entry.promise),
+    ...activeRefreshWork,
+  ]);
+  if (timeoutMs === undefined) {
+    await settlement;
+    return;
+  }
+
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      settlement,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(
+            new Error(
+              "Timed out after " +
+                timeoutMs +
+                "ms waiting for derived refresh work to stop",
+            ),
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
 }
 
 /**

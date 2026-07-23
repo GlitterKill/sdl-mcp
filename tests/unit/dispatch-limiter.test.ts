@@ -578,4 +578,47 @@ describe("tool dispatch limiter", () => {
     releaseSecond?.();
     await Promise.all([first, second]);
   });
+
+  it("does not report idle while dispatch work remains queued", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 1, queueTimeoutMs: 1_000 });
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstBarrier = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondBarrier = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let secondEntered = false;
+    let idleSettled = false;
+    const first = runToolDispatch(async () => firstBarrier);
+    const second = runToolDispatch(async () => {
+      secondEntered = true;
+      await secondBarrier;
+    });
+    await delay(20);
+    const wait = waitForToolDispatchIdle({
+      activeAllowance: 1,
+      timeoutMs: 1_000,
+      pollMs: 2,
+      label: "queued-drain-test",
+    }).then((result) => {
+      idleSettled = result;
+    });
+
+    try {
+      await delay(20);
+      assert.strictEqual(
+        idleSettled,
+        false,
+        "queued work must drain before idle is reported",
+      );
+    } finally {
+      releaseFirst();
+    }
+    await wait;
+    assert.strictEqual(secondEntered, true);
+    releaseSecond();
+    await Promise.all([first, second]);
+  });
 });

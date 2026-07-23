@@ -46,6 +46,23 @@ export function getActiveIndexerCount(): number {
   return activeIndexers;
 }
 
+/** Wait for all indexing-gate work to release before closing shared storage. */
+export async function waitForIndexingIdle(params: {
+  timeoutMs: number;
+  pollMs?: number;
+}): Promise<boolean> {
+  const deadline = Date.now() + params.timeoutMs;
+  const pollMs = params.pollMs ?? 25;
+  while (activeIndexers > 0) {
+    if (Date.now() >= deadline) return false;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, pollMs);
+      timer.unref();
+    });
+  }
+  return true;
+}
+
 /**
  * Bracket an indexing operation. Increments the counter on entry, decrements
  * on exit. The listener is fired only on 0→1 and n→0 transitions so the

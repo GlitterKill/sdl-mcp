@@ -315,9 +315,7 @@ export function isWatcherStale(
   nowMs = Date.now(),
   activeReindex = false,
 ): boolean {
-  // An active attempt owns this pending change and is bounded by the operation
-  // timeout. Restarting here races legitimate work before it can publish its
-  // successful completion.
+  // An active attempt is bounded; restarting here races valid work before completion.
   if (activeReindex) {
     return false;
   }

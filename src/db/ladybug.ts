@@ -198,20 +198,24 @@ function formatReindexGuidanceError(dbPath: string, msg: string): string {
   if (isWalCorruption) {
     guidance +=
       "\n\nThis appears to be a WAL (write-ahead log) corruption issue. " +
-      "To recover:\n" +
+      "Preserve the complete database family; do not delete or reopen it in place. " +
+      "To recover safely:\n" +
       "  1. Stop any running SDL-MCP processes\n" +
-      `  2. Delete the database file: ${dbPath}\n` +
-      "  3. Re-index all repositories: sdl-mcp index\n" +
-      "  4. Semantic embeddings will be recomputed during the next index refresh.";
+      `  2. Copy ${dbPath} and every sidecar with the same base name to quarantine\n` +
+      "  3. Build a fresh candidate: sdl-mcp index --force --safe-rebuild <absolute-new-path>\n" +
+      "  4. Switch the configured graph path only after the command validates the candidate.";
   } else if (isLockError) {
     guidance +=
       "\n\nThe database file appears to be locked by another process. " +
       "Check for other SDL-MCP instances and stop them before retrying.";
   } else {
     guidance +=
-      "\nIf the database is corrupted, delete it and re-run indexing with: sdl-mcp index. " +
-      "Semantic embeddings are derived artifacts and will be recomputed.";
+      "\nPreserve the existing database. If storage integrity is uncertain, stop SDL-MCP " +
+      "and build a fresh candidate with: sdl-mcp index --force --safe-rebuild <absolute-new-path>.";
   }
+
+  guidance +=
+    "\nSemantic embeddings and other derived artifacts can be recomputed from source after recovery.";
 
   return guidance;
 }
@@ -469,6 +473,7 @@ export async function getLadybugDb(
       }
     }
 
+    let openingDb: LadybugDatabase | null = null;
     try {
       const bufferManagerSize = resolveLadybugBufferManagerSizeBytes(
         undefined,
@@ -479,7 +484,7 @@ export async function getLadybugDb(
         process.env,
         options?.checkpointThresholdBytes,
       );
-      dbInstance = new modules.Database(
+      openingDb = new modules.Database(
         normalizedPath,
         bufferManagerSize,
         true,
@@ -488,14 +493,33 @@ export async function getLadybugDb(
         true,
         checkpointThresholdBytes,
       );
+      // LadybugDB constructs lazily: WAL replay and storage validation happen
+      // during init/first use, so do not publish an open database before this
+      // boundary completes.
+      await openingDb.init();
+      dbInstance = openingDb;
       currentDbPath = normalizedPath;
       logger.info("LadybugDB database opened", {
         path: normalizedPath,
         bufferManagerSizeBytes: bufferManagerSize,
         checkpointThresholdBytes,
       });
-      return dbInstance;
+      return openingDb;
     } catch (err) {
+      if (openingDb) {
+        try {
+          await openingDb.close();
+        } catch (closeErr) {
+          logger.warn("Error closing LadybugDB after initialization failure", {
+            error:
+              closeErr instanceof Error ? closeErr.message : String(closeErr),
+          });
+        }
+      }
+      if (dbInstance === openingDb) {
+        dbInstance = null;
+        currentDbPath = null;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       throw new DatabaseError(formatReindexGuidanceError(normalizedPath, msg));
     }

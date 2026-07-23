@@ -25,6 +25,11 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import {
+  configureToolDispatchLimiter,
+  resetToolDispatchLimiter,
+  runToolDispatch,
+} from "../../dist/mcp/dispatch-limiter.js";
+import {
   getDerivedState,
   markDerivedStateDirty,
 } from "../../dist/db/ladybug-derived-state.js";
@@ -38,6 +43,7 @@ afterEach(async () => {
   await shutdownDerivedRefreshQueue();
   _setDerivedRefreshHooksForTesting(null);
   enableDerivedRefreshQueue();
+  resetToolDispatchLimiter();
   await closeLadybugDb();
   if (graphDbPath && existsSync(graphDbPath)) {
     rmSync(graphDbPath, { recursive: true, force: true });
@@ -184,6 +190,7 @@ describe("derived refresh timeout", () => {
 
   it("aborts and rejects work that exceeds the bounded refresh timeout", async () => {
     process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS = "30";
+    const release = deferred();
     let aborted = false;
 
     await assert.rejects(
@@ -195,12 +202,14 @@ describe("derived refresh timeout", () => {
           signal.addEventListener("abort", () => {
             aborted = true;
           });
-          await new Promise<void>(() => undefined);
+          await release.promise;
         },
       ),
       /derived-refresh timed out after 30ms/,
     );
     assert.strictEqual(aborted, true);
+    release.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
   });
 
   it("rejects new write-heavy lock attempts while timed-out work is still settling", async () => {
@@ -256,6 +265,102 @@ describe("derived refresh timeout", () => {
     }
     assert.fail("timed-out write-heavy lock marker did not clear");
   });
+  it("waits for abort-insensitive work to settle after parent abort", async () => {
+    const parent = new AbortController();
+    const entered = deferred();
+    const release = deferred();
+    let settled = false;
+    const run = _runWithDerivedRefreshTimeoutForTesting(
+      "repo-parent-abort",
+      "v1",
+      parent.signal,
+      async () => {
+        entered.resolve();
+        await release.promise;
+      },
+    );
+    const observed = run.then(
+      () => {
+        settled = true;
+        return null;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+
+    await entered.promise;
+    parent.abort();
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.strictEqual(
+        settled,
+        false,
+        "parent abort must not hide DB-capable work that is still running",
+      );
+    } finally {
+      release.resolve();
+    }
+    const error = await observed;
+    assert.match(String(error), /derived-refresh aborted/);
+  });
+});
+
+describe("derived refresh dispatch isolation", () => {
+  it("does not block foreground dispatch while background work is running", async () => {
+    graphDbPath = mkdtempSync(join(tmpdir(), "sdl-derived-refresh-dispatch-"));
+    await initLadybugDb(graphDbPath);
+    const repoId = "repo-background-refresh";
+    const versionId = "v-background-refresh";
+    const entered = deferred();
+    const release = deferred();
+    let foregroundCompleted = false;
+
+    await markDerivedStateDirty(repoId, versionId, {
+      clusters: true,
+      processes: true,
+      algorithms: true,
+      summaries: false,
+      embeddings: false,
+    });
+    configureToolDispatchLimiter({
+      maxConcurrency: 2,
+      queueTimeoutMs: 1_000,
+    });
+    _setDerivedRefreshHooksForTesting({
+      refresh: async () => {
+        entered.resolve();
+        await release.promise;
+      },
+    });
+
+    enqueueDerivedRefresh(repoId, versionId);
+    await entered.promise;
+    const foreground = runToolDispatch(
+      async () => {
+        foregroundCompleted = true;
+      },
+      undefined,
+      "sdl.file",
+    );
+
+    try {
+      await Promise.race([
+        foreground,
+        new Promise<void>((resolve) => setTimeout(resolve, 100)),
+      ]);
+      assert.strictEqual(
+        foregroundCompleted,
+        true,
+        "foreground dispatch should complete before background refresh releases",
+      );
+    } finally {
+      release.resolve();
+      await foreground;
+      await waitForDerivedRefreshIdle(repoId, 5_000, 10);
+    }
+  });
 });
 
 describe("derived refresh computed flags", () => {
@@ -292,6 +397,43 @@ describe("derived refresh computed flags", () => {
     assert.strictEqual(state.algorithmsDirty, false);
     assert.strictEqual(state.summariesDirty, true);
     assert.strictEqual(state.embeddingsDirty, true);
+  });
+
+  it("does not let an older refresh clear a newer target version", async () => {
+    graphDbPath = mkdtempSync(join(tmpdir(), "sdl-derived-refresh-cas-"));
+    await initLadybugDb(graphDbPath);
+    const repoId = "repo-derived-refresh-cas";
+    const entered = deferred();
+    const release = deferred();
+    await markDerivedStateDirty(repoId, "v1", {
+      clusters: true,
+      processes: true,
+      algorithms: true,
+    });
+    _setDerivedRefreshHooksForTesting({
+      refresh: async () => {
+        entered.resolve();
+        await release.promise;
+      },
+    });
+
+    enqueueDerivedRefresh(repoId, "v1");
+    await entered.promise;
+    await markDerivedStateDirty(repoId, "v2", {
+      clusters: true,
+      processes: true,
+      algorithms: true,
+    });
+    release.resolve();
+    await waitForDerivedRefreshIdle(repoId, 5_000, 10);
+
+    const state = await getDerivedState(repoId);
+    assert.ok(state);
+    assert.strictEqual(state.targetVersionId, "v2");
+    assert.strictEqual(state.computedVersionId, null);
+    assert.strictEqual(state.clustersDirty, true);
+    assert.strictEqual(state.processesDirty, true);
+    assert.strictEqual(state.algorithmsDirty, true);
   });
 });
 

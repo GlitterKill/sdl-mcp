@@ -221,7 +221,7 @@ describe("main.ts shutdown wiring", () => {
     const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
     const initIndex = source.indexOf("await initGraphDb(");
     const cleanupIndex = source.indexOf(
-      'shutdownMgr.addCleanup("db", () => closeLadybugDb())',
+      'shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork)',
     );
     const signalsIndex = source.indexOf("shutdownMgr.registerSignals()");
     const stdinIndex = source.indexOf("shutdownMgr.monitorStdin()");
@@ -240,7 +240,7 @@ describe("main.ts shutdown wiring", () => {
       'shutdownMgr.addCleanup("graphIntegrityVerifier"',
     );
     const dbCleanup = source.indexOf(
-      'shutdownMgr.addCleanup("db", () => closeLadybugDb())',
+      'shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork)',
     );
 
     assert.ok(verifierCleanup >= 0, "main.ts should register verifier cleanup");
@@ -346,7 +346,7 @@ describe("serve.ts shutdown wiring", () => {
     );
     const initIndex = source.indexOf("await initGraphDb(");
     const cleanupIndex = source.indexOf(
-      'shutdownMgr.addCleanup("db", () => closeLadybugDb())',
+      'shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork)',
     );
     const signalsIndex = source.indexOf("shutdownMgr.registerSignals()");
     const stdinIndex = source.indexOf("shutdownMgr.monitorStdin()");
@@ -368,7 +368,7 @@ describe("serve.ts shutdown wiring", () => {
       'shutdownMgr.addCleanup("graphIntegrityVerifier"',
     );
     const dbCleanup = source.indexOf(
-      'shutdownMgr.addCleanup("db", () => closeLadybugDb())',
+      'shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork)',
     );
 
     assert.ok(verifierCleanup >= 0, "serve.ts should register verifier cleanup");

@@ -21,9 +21,6 @@ await import("../../dist/db/ladybug.js")
     closeLadybugDb = async () => {};
   });
 
-function containsAny(text: string, words: string[]): boolean {
-  return words.some((word) => text.includes(word));
-}
 
 describe("Ladybug reindex guidance", { skip: !ladybugAvailable }, () => {
   const testRoot = join(
@@ -38,7 +35,7 @@ describe("Ladybug reindex guidance", { skip: !ladybugAvailable }, () => {
     }
   });
 
-  it("adds actionable delete/reindex guidance for incompatible graph data", async () => {
+  it("preserves incompatible graph data and recommends a safe rebuild", async () => {
     mkdirSync(testRoot, { recursive: true });
     const fakeDbPath = join(testRoot, "fake-old-db.lbug");
 
@@ -60,22 +57,17 @@ describe("Ladybug reindex guidance", { skip: !ladybugAvailable }, () => {
           "error should include initialization failure description",
         );
         assert.ok(
-          containsAny(message, ["delete", "remove"]),
-          "error should include delete/remove guidance",
-        );
-
-        assert.ok(
-          containsAny(message, ["delete", "remove"]),
-          "error should include delete/remove guidance",
-        );
-
-        assert.ok(
-          containsAny(message, ["delete", "remove"]),
-          "error should include delete/remove guidance",
+          message.includes("preserve"),
+          "error should tell operators to preserve the existing database",
         );
         assert.ok(
-          containsAny(message, ["reindex", "rebuild", "re-run"]),
-          "error should include reindex/rebuild/re-run guidance",
+          message.includes("safe-rebuild"),
+          "error should recommend building and validating a fresh candidate",
+        );
+        assert.ok(
+          !message.includes("delete the database") &&
+            !message.includes("remove the database"),
+          "error should not recommend destructive in-place recovery",
         );
 
         return true;

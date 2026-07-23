@@ -5,6 +5,8 @@ import {
   configureToolDispatchLimiter,
   getToolDispatchLimiter,
   resetToolDispatchLimiter,
+  runToolDispatch,
+  waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
 import {
   INDEXING_DISPATCH_CAP,
@@ -12,6 +14,14 @@ import {
   resetIndexingGateForTests,
   withIndexingGate,
 } from "../../dist/mcp/indexing-gate.js";
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 describe("indexing gate reshapes dispatch limiter", () => {
   beforeEach(() => {
@@ -88,6 +98,78 @@ describe("indexing gate reshapes dispatch limiter", () => {
     await outer;
     assert.strictEqual(limiter.getMaxConcurrency(), 10);
     assert.strictEqual(isIndexingActive(), false);
+  });
+
+  it("keeps background dispatch and destructive indexing mutually exclusive", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 2, queueTimeoutMs: 1_000 });
+    const releaseBackground = deferred();
+    const backgroundEntered = deferred();
+    const releaseIndex = deferred();
+    let indexPassedDrain = false;
+    let laterBackgroundEntered = false;
+
+    const background = runToolDispatch(
+      async () => {
+        backgroundEntered.resolve();
+        await releaseBackground.promise;
+      },
+      undefined,
+      "derived-refresh:repo-a",
+    );
+    await backgroundEntered.promise;
+    const index = runToolDispatch(
+      () =>
+        withIndexingGate(async () => {
+          const idle = await waitForToolDispatchIdle({
+            activeAllowance: 1,
+            timeoutMs: 1_000,
+            pollMs: 2,
+            label: "indexing gate exclusion test",
+          });
+          assert.strictEqual(idle, true);
+          indexPassedDrain = true;
+          await releaseIndex.promise;
+        }),
+      undefined,
+      "sdl.index.refresh",
+    );
+
+    let laterBackground: Promise<void> | undefined;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.strictEqual(
+        indexPassedDrain,
+        false,
+        "indexing must wait for an active background dispatch",
+      );
+
+      releaseBackground.resolve();
+      await background;
+      while (!indexPassedDrain) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+
+      laterBackground = runToolDispatch(
+        async () => {
+          laterBackgroundEntered = true;
+        },
+        undefined,
+        "derived-refresh:repo-b",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.strictEqual(
+        laterBackgroundEntered,
+        false,
+        "new background dispatch must queue behind destructive indexing",
+      );
+    } finally {
+      releaseBackground.resolve();
+      releaseIndex.resolve();
+      await Promise.allSettled(
+        laterBackground ? [background, index, laterBackground] : [background, index],
+      );
+    }
+    assert.strictEqual(laterBackgroundEntered, true);
   });
 
   it("uses the lower of configured max and INDEXING_DISPATCH_CAP", async () => {

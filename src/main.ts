@@ -3,7 +3,7 @@ import { ConfigError, DatabaseError } from "./domain/errors.js";
 import { loadConfig } from "./config/loadConfig.js";
 import { activateCliConfigPath } from "./config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "./db/initGraphDb.js";
-import { closeLadybugDb } from "./db/ladybug.js";
+import { closeLadybugDbAfterDrainingWork } from "./startup/graceful-database-shutdown.js";
 import { persistUsageSnapshot } from "./db/ladybug-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
 import { CLEANUP_INTERVAL_MS, NODE_MIN_MAJOR_VERSION } from "./config/constants.js";
@@ -75,7 +75,7 @@ async function closeDbAfterStartupFailure(): Promise<void> {
     );
   }
   try {
-    await closeLadybugDb();
+    await closeLadybugDbAfterDrainingWork();
   } catch (error) {
     log(
       `LadybugDB cleanup after startup failure failed: ${
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     }
   });
   shutdownMgr.addCleanup("graphIntegrityVerifier", stopGraphIntegrityVerifier);
-  shutdownMgr.addCleanup("db", () => closeLadybugDb());
+  shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork);
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
 
   // Hoisted so the catch handler can clean up if startup fails after the pidfile is claimed.

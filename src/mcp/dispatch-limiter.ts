@@ -382,7 +382,7 @@ export async function waitForToolDispatchIdle(params: {
 
   while (true) {
     const stats = getToolDispatchLimiter().getStats();
-    if (stats.active <= params.activeAllowance) {
+    if (stats.active <= params.activeAllowance && stats.queued === 0) {
       return true;
     }
 

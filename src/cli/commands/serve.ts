@@ -13,7 +13,8 @@ import {
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
-import { closeLadybugDb, configurePool } from "../../db/ladybug.js";
+import { configurePool } from "../../db/ladybug.js";
+import { closeLadybugDbAfterDrainingWork } from "../../startup/graceful-database-shutdown.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
 import { createWalCheckpointMaintenance } from "../../db/wal-maintenance.js";
 import { printBanner } from "../../util/banner.js";
@@ -83,7 +84,7 @@ async function closeDbAfterStartupFailure(): Promise<void> {
     );
   }
   try {
-    await closeLadybugDb();
+    await closeLadybugDbAfterDrainingWork();
   } catch (error) {
     writeStderrLine(
       `[sdl-mcp] LadybugDB cleanup after startup failure failed: ${
@@ -177,7 +178,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     }
   });
   shutdownMgr.addCleanup("graphIntegrityVerifier", stopGraphIntegrityVerifier);
-  shutdownMgr.addCleanup("db", () => closeLadybugDb());
+  shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork);
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
   if (options.transport === "stdio") {

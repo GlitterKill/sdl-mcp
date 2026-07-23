@@ -152,6 +152,84 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
   });
 
   describe("getLadybugDb", () => {
+    it("waits for lazy native initialization before reporting the database open", async (t) => {
+      const testPath = getTestDbPath("lazy-init-order");
+      cleanupTestDb("lazy-init-order");
+
+      const kuzu = await import("kuzu");
+      const { logger } = await import("../../dist/util/logger.js");
+      const initGate = deferred();
+      const initMock = t.mock.method(
+        kuzu.Database.prototype,
+        "init",
+        async () => {
+          await initGate.promise;
+        },
+      );
+      t.mock.method(kuzu.Database.prototype, "close", async () => {});
+      const infoMock = t.mock.method(logger, "info");
+
+      let settled = false;
+      const opening = getLadybugDb(testPath).then((db) => {
+        settled = true;
+        return db;
+      });
+
+      try {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.strictEqual(initMock.mock.callCount(), 1);
+        assert.strictEqual(settled, false);
+        assert.strictEqual(infoMock.mock.callCount(), 0);
+
+        initGate.resolve();
+        await opening;
+
+        assert.strictEqual(settled, true);
+        assert.strictEqual(infoMock.mock.callCount(), 1);
+        assert.strictEqual(
+          infoMock.mock.calls[0]?.arguments[0],
+          "LadybugDB database opened",
+        );
+      } finally {
+        initGate.resolve();
+        await opening.catch(() => {});
+        await closeLadybugDb();
+        cleanupTestDb("lazy-init-order");
+      }
+    });
+
+    it("fails closed without an open log when lazy native initialization rejects", async (t) => {
+      const testPath = getTestDbPath("lazy-init-failure");
+      cleanupTestDb("lazy-init-failure");
+
+      const kuzu = await import("kuzu");
+      const { logger } = await import("../../dist/util/logger.js");
+      const initFailure = new Error("WAL corrupted sentinel");
+      t.mock.method(kuzu.Database.prototype, "init", async () => {
+        throw initFailure;
+      });
+      t.mock.method(kuzu.Database.prototype, "close", async () => {});
+      const infoMock = t.mock.method(logger, "info");
+
+      try {
+        await assert.rejects(
+          getLadybugDb(testPath),
+          (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.match(error.message, /preserve/i);
+            assert.match(error.message, /--safe-rebuild/u);
+            assert.doesNotMatch(error.message, /delete the database/i);
+            return true;
+          },
+        );
+        assert.strictEqual(infoMock.mock.callCount(), 0);
+        assert.strictEqual(getLadybugDbPath(), null);
+      } finally {
+        await closeLadybugDb();
+        cleanupTestDb("lazy-init-failure");
+      }
+    });
+
     it("should create database successfully through Ladybug alias", async () => {
       const testPath = getTestDbPath("alias-db-create");
       cleanupTestDb("alias-db-create");
