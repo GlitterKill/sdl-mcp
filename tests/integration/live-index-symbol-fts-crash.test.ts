@@ -6,7 +6,6 @@ import { join, resolve } from "node:path";
 import { it } from "node:test";
 
 const MODES = [
-  "legacy-crash-baseline",
   "missing-runtime-baseline",
   "fixed-regression",
 ] as const;
@@ -166,26 +165,6 @@ for (const mode of MODES) {
       assert.notEqual(result.error?.code, "ETIMEDOUT", failureMessage(mode, result));
       const accessViolation =
         result.status !== null && accessViolationStatuses.has(result.status);
-
-      if (mode === "legacy-crash-baseline") {
-        const unavailable = unavailableEvidence(result.stderr);
-        if (unavailable) {
-          assert.equal(
-            requireModeDependencies,
-            false,
-            "required mode dependencies unavailable: " +
-              unavailable.missing.join(", "),
-          );
-          t.skip(unavailable.missing.join(", "));
-          return;
-        }
-        assert.ok(
-          accessViolation,
-          "expected native access violation 0xC0000005\n" +
-            failureMessage(mode, result),
-        );
-        return;
-      }
 
       assert.ok(
         !accessViolation,

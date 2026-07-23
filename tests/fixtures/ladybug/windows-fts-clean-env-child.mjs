@@ -11,7 +11,6 @@ import {
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 const MODES = new Set([
-  "legacy-crash-baseline",
   "missing-runtime-baseline",
   "fixed-regression",
 ]);
@@ -155,20 +154,6 @@ function dumpbinImports(extensionPath) {
   return result.stdout.toLowerCase();
 }
 
-async function legacyCrashBaseline() {
-  requireVersion("kuzu", "0.16.1");
-  try {
-    await runRealPatch({ disableSymbolFtsPause: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("lbugjs.node") || message.includes("Graph database driver not available")) {
-      dependencyUnavailable(["kuzu@0.16.1 native lbugjs.node"]);
-    }
-    throw error;
-  }
-  throw new Error("legacy 0.16.1 baseline completed without access violation");
-}
-
 async function missingRuntimeBaseline() {
   requireVersion("kuzu", "0.18.1");
   const kuzu = await import("kuzu");
@@ -225,7 +210,7 @@ function stripWindowsExtendedPathPrefix(filePath) {
   return filePath;
 }
 
-async function runRealPatch(options = {}) {
+async function runRealPatch() {
   const repoId = "windows-fts-fixed-regression";
   const repoDir = join(home, "fixture-repo");
   const sourceDir = join(repoDir, "src", "agent");
@@ -252,10 +237,6 @@ async function runRealPatch(options = {}) {
     showIndexes,
     SYMBOL_FTS_INDEX_NAME,
   } = await import("../../../dist/retrieval/index-lifecycle.js");
-  const { invalidateConfigCache } = await import(
-    "../../../dist/config/loadConfig.js"
-  );
-
   await initLadybugDb(dbPath);
   try {
     const conn = await getLadybugConn();
@@ -289,35 +270,6 @@ async function runRealPatch(options = {}) {
       indexExistsForTable(indexes, "Symbol", SYMBOL_FTS_INDEX_NAME, "fts"),
       "generated fixture is missing active Symbol FTS index",
     );
-    if (options.disableSymbolFtsPause === true) {
-      const configPath = join(home, "disable-symbol-fts-pause.json");
-      writeFileSync(
-        configPath,
-        JSON.stringify({
-          repos: [
-            {
-              repoId,
-              rootPath: repoDir,
-              ignore: [],
-              languages: ["ts"],
-              maxFileBytes: 2_000_000,
-              includeNodeModulesTypes: true,
-            },
-          ],
-          policy: {
-            maxWindowLines: 180,
-            maxWindowTokens: 1400,
-            requireIdentifiers: true,
-            allowBreakGlass: false,
-            defaultDenyRaw: true,
-          },
-          semantic: { enabled: false },
-        }),
-        "utf8",
-      );
-      process.env.SDL_CONFIG = configPath;
-      invalidateConfigCache();
-    }
     await patchSavedFile({
       repoId,
       filePath: relative(repoDir, filePath).replaceAll("\\", "/"),
@@ -456,6 +408,5 @@ async function fixedRegression() {
   console.log(JSON.stringify({ phase: "shutdown", ok: true }));
 }
 
-if (mode === "legacy-crash-baseline") await legacyCrashBaseline();
-else if (mode === "missing-runtime-baseline") await missingRuntimeBaseline();
+if (mode === "missing-runtime-baseline") await missingRuntimeBaseline();
 else await fixedRegression();

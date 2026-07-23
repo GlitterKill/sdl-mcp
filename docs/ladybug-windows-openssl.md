@@ -62,7 +62,7 @@ To verify an installed Windows runtime:
 - Invalid hashes or missing provenance: reinstall; do not copy DLLs from Git, Conda, or a system OpenSSL install.
 - Missing or old `sdl-mcp-native`: reinstall optional dependencies or update `sdl-mcp-native` to the same SDL release.
 - Unsupported Windows architecture: FTS runtime provisioning is Windows x64 only.
-- Official FTS extension missing or incompatible: rerun the clean-environment compatibility test and keep the 0.16.1 fallback until the gate passes.
+- Official FTS extension missing or incompatible: reinstall the pinned LadybugDB and SDL OpenSSL runtime, then rerun the clean-environment compatibility test; keep FTS disabled until it passes.
 
 ## Security update response
 
