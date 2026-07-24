@@ -548,6 +548,10 @@ function hasErrorCode(error: unknown, code: string): boolean {
   );
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function isResponseArtifactMetadata(
   value: unknown,
 ): value is ResponseArtifactMetadata {
@@ -557,16 +561,16 @@ function isResponseArtifactMetadata(
     typeof metadata.id === "string" &&
     typeof metadata.handle === "string" &&
     typeof metadata.repoId === "string" &&
-    typeof metadata.repoEpoch === "number" &&
+    isNonNegativeSafeInteger(metadata.repoEpoch) &&
     typeof metadata.toolName === "string" &&
     metadata.toolName.trim().length > 0 &&
     typeof metadata.createdAt === "string" &&
     Number.isFinite(Date.parse(metadata.createdAt)) &&
     typeof metadata.expiresAt === "string" &&
     Number.isFinite(Date.parse(metadata.expiresAt)) &&
-    typeof metadata.estimatedOriginalTokens === "number" &&
-    typeof metadata.originalBytes === "number" &&
-    typeof metadata.storedBytes === "number" &&
+    isNonNegativeSafeInteger(metadata.estimatedOriginalTokens) &&
+    isNonNegativeSafeInteger(metadata.originalBytes) &&
+    isNonNegativeSafeInteger(metadata.storedBytes) &&
     typeof metadata.sha256 === "string" &&
     typeof metadata.etag === "string" &&
     (metadata.contentKind === "json" || metadata.contentKind === "text") &&

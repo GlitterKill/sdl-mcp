@@ -1,6 +1,13 @@
 import { describe, it, afterEach, beforeEach } from "node:test";
 import assert from "node:assert";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -886,6 +893,90 @@ describe("response artifact storage", () => {
       },
     );
   });
+
+  for (const corruption of [
+    {
+      name: "non-finite storedBytes",
+      field: "storedBytes",
+      rawValue: "1e400",
+      entropy: "7878787878787878",
+    },
+    {
+      name: "negative estimatedOriginalTokens",
+      field: "estimatedOriginalTokens",
+      rawValue: "-1",
+      entropy: "6767676767676767",
+    },
+  ]) {
+    it(`rejects ${corruption.name} in response artifact metadata`, async () => {
+      const baseDir = makeTempDir();
+      const configPath = join(baseDir, "sdl.config.json");
+      writeFileSync(
+        configPath,
+        JSON.stringify({ repos: [], policy: {}, runtime: { artifactBaseDir: baseDir } }),
+      );
+      process.env.SDL_CONFIG = configPath;
+      invalidateConfigCache();
+      const stored = await maybeStoreLargeResponse({
+        repoId: "repo-a",
+        toolName: "symbol.search",
+        payload: "corrupt manifest",
+        responseMode: "handle",
+        contentKind: "text",
+        artifactBaseDir: baseDir,
+        entropy: () => corruption.entropy,
+      });
+      assert.strictEqual(stored.responseMode, "handle");
+      const manifestPath = join(
+        getResponseArtifactBaseDir(baseDir),
+        stored.payload.handle,
+        "manifest.json",
+      );
+      const manifest = readFileSync(manifestPath, "utf-8");
+      const fieldPrefix = `  "${corruption.field}": `;
+      const fieldLine = manifest
+        .split(/\r?\n/)
+        .find((line) => line.startsWith(fieldPrefix));
+      assert.ok(fieldLine);
+      const corruptedManifest = manifest.replace(
+        fieldLine,
+        `${fieldPrefix}${corruption.rawValue},`,
+      );
+      writeFileSync(manifestPath, corruptedManifest, "utf-8");
+
+      await assert.rejects(
+        () =>
+          handleResponseGet({
+            repoId: "repo-a",
+            handle: stored.payload.handle,
+            maxBytes: 5,
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof NotFoundError);
+          const recovery = error as NotFoundError & {
+            classification?: string;
+            retryable?: boolean;
+            fallbackTools?: string[];
+            fallbackRationale?: string;
+          };
+          assert.equal(recovery.code, "NOT_FOUND");
+          assert.equal(recovery.classification, "not_found");
+          assert.equal(recovery.retryable, false);
+          assert.equal(recovery.fallbackTools, undefined);
+          assert.match(
+            recovery.fallbackRationale ?? "",
+            /Re-run the original handle-producing call/,
+          );
+          assert.doesNotMatch(
+            error.message,
+            /manifest\.json|sdl-response-artifacts/i,
+          );
+          assert.doesNotMatch(JSON.stringify(recovery), /action\.search/);
+          return true;
+        },
+      );
+    });
+  }
 
   it("sweeps expired response artifacts before writing new ones", async () => {
     const baseDir = makeTempDir();
