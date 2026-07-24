@@ -33,6 +33,25 @@ describe("code-mode tool validation", () => {
     );
   });
 
+  it("rejects unknown sdl.context budget fields", () => {
+    const result = AgentContextRequestSchema.safeParse({
+      repoId: "demo-repo",
+      taskType: "explain",
+      taskText: "explain handleSymbolSearch",
+      budget: { maxTotalTokens: 1234 },
+    });
+
+    assert.equal(result.success, false);
+    if (result.success) return;
+    const issue = result.error.issues[0];
+    assert.equal(issue?.code, "unrecognized_keys");
+    assert.deepEqual(issue?.path, ["budget"]);
+    assert.deepEqual(
+      "keys" in issue ? issue.keys : undefined,
+      ["maxTotalTokens"],
+    );
+  });
+
   it("accepts sdl.context evidenceOptimization budgeted option", () => {
     const parsed = AgentContextRequestSchema.parse({
       repoId: "demo-repo",

@@ -1,15 +1,14 @@
 import { z } from "zod";
 import { ValidationError } from "../domain/errors.js";
+import {
+  compactJsonSchema,
+  zodSchemaToJsonSchema,
+} from "../gateway/compact-schema.js";
 import { dispatchAction, type ActionMap } from "../gateway/router.js";
 import type { ToolContext } from "../server.js";
-import {
-  RetrieveRequestSchema,
-} from "./retrieve-schema.js";
+import { RetrieveRequestSchema } from "./retrieve-schema.js";
 
-export {
-  RetrieveOpSchema,
-  RetrieveRequestSchema,
-} from "./retrieve-schema.js";
+export { RetrieveOpSchema, RetrieveRequestSchema } from "./retrieve-schema.js";
 
 export const RETRIEVE_ACTION_BY_OP = {
   symbolSearch: "symbol.search",
@@ -19,6 +18,53 @@ export const RETRIEVE_ACTION_BY_OP = {
   codeHotPath: "code.getHotPath",
   codeNeedWindow: "code.needWindow",
 } as const;
+
+/** Publish each available retrieve operation's authoritative nested arguments. */
+export function buildRetrieveWireSchema(
+  actionMap: ActionMap,
+): Record<string, unknown> {
+  const envelope = zodSchemaToJsonSchema(RetrieveRequestSchema);
+  const properties = envelope.properties as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const variants = Object.entries(RETRIEVE_ACTION_BY_OP).flatMap(
+    ([op, actionName]) => {
+      const action = actionMap[actionName];
+      if (!action) return [];
+
+      const variant = zodSchemaToJsonSchema(action.schema);
+      const variantProperties = {
+        ...(variant.properties as Record<string, unknown>),
+      };
+      // The retrieve envelope supplies repoId once for every operation.
+      delete variantProperties.repoId;
+      const required = Array.isArray(variant.required)
+        ? variant.required.filter((field) => field !== "repoId")
+        : undefined;
+
+      return [
+        {
+          ...variant,
+          title: op,
+          properties: variantProperties,
+          ...(required ? { required } : {}),
+        },
+      ];
+    },
+  );
+
+  return compactJsonSchema({
+    ...envelope,
+    properties: {
+      ...properties,
+      args: {
+        ...properties.args,
+        oneOf: variants,
+      },
+    },
+  });
+}
 
 export async function handleRetrieve(
   rawArgs: unknown,

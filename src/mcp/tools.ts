@@ -203,10 +203,12 @@ const CompressedEdgeSchema = z.tuple([
   z.number(),
 ]);
 
-const SliceBudgetSchema = z.object({
-  maxCards: z.number().int().min(1).max(500).optional(),
-  maxEstimatedTokens: z.number().int().min(1).max(200000).optional(),
-});
+const SliceBudgetSchema = z
+  .object({
+    maxCards: z.number().int().min(1).max(500).optional(),
+    maxEstimatedTokens: z.number().int().min(1).max(200000).optional(),
+  })
+  .strict();
 
 const RequiredSliceBudgetSchema = z.object({
   maxCards: z.number().int().min(1).max(500),
@@ -2513,32 +2515,29 @@ export type PRRiskAnalysisResponse = z.infer<
 // ============================================================================
 
 const AgentContextBudgetSchema = z
-  .object({
-    maxTokens: z.number().optional().describe("Maximum tokens to consume"),
-    maxEstimatedTokens: z
-      .number()
-      .optional()
-      .describe("Alias for maxTokens, accepted for slice.build compatibility"),
-    maxActions: z
-      .number()
-      .optional()
-      .describe("Maximum number of actions to execute"),
-    maxDurationMs: z
-      .number()
-      .optional()
-      .describe("Maximum duration in milliseconds"),
-  })
-  .passthrough()
-  .superRefine((budget, ctx) => {
-    if ("maxCards" in budget) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["maxCards"],
-        message:
-          "sdl.context budget does not support maxCards; use maxTokens/maxEstimatedTokens or call slice.build for card-count budgets",
-      });
-    }
-  })
+  .strictObject(
+    {
+      maxTokens: z.number().optional().describe("Maximum tokens to consume"),
+      maxEstimatedTokens: z
+        .number()
+        .optional()
+        .describe("Alias for maxTokens, accepted for slice.build compatibility"),
+      maxActions: z
+        .number()
+        .optional()
+        .describe("Maximum number of actions to execute"),
+      maxDurationMs: z
+        .number()
+        .optional()
+        .describe("Maximum duration in milliseconds"),
+    },
+    {
+      error: (issue) =>
+        issue.code === "unrecognized_keys" && issue.keys.includes("maxCards")
+          ? "sdl.context budget does not support maxCards; use maxTokens/maxEstimatedTokens or call slice.build for card-count budgets"
+          : undefined,
+    },
+  )
   .transform((budget) => ({
     ...(budget.maxTokens !== undefined ||
     budget.maxEstimatedTokens !== undefined

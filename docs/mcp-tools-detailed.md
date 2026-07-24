@@ -30,6 +30,8 @@ found by the semantic lane. Card and skeleton evidence remains bounded per file
 and per response. See [Context Modes](./feature-deep-dives/context-modes.md) for
 the detailed selection and budget contracts.
 
+The Code Mode `sdl.context` schema publishes complete nested `budget` and `options` fields, and the `sdl.retrieve` schema publishes operation-specific `args` variants. Context and slice budgets reject unknown fields at their respective validation boundaries.
+
 ## Response artifact retrieval
 
 `sdl.response.get` requires an explicit mode for JSON artifacts. Use `full: true` to return the parsed JSON value, `jsonPath` to return one complete structural value (with `offset` and `limit` for extracted arrays), or `raw: true` to request a bounded byte excerpt. Raw JSON excerpts may be syntactically incomplete. `offsetBytes` applies only to raw JSON or text excerpts and cannot be combined with `full: true` or `jsonPath`.

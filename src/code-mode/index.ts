@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { CodeModeConfig } from "../config/types.js";
 import { ValidationError } from "../domain/errors.js";
+import { buildCompactJsonSchema } from "../gateway/compact-schema.js";
 import type { ToolServices } from "../gateway/index.js";
 import { createActionMap, type ActionMap } from "../gateway/router.js";
 import { AgentContextRequestSchema } from "../mcp/tools.js";
@@ -30,6 +31,7 @@ import {
 } from "./descriptions.js";
 import { INTERNAL_TRANSFORM_NAMES } from "./transforms.js";
 import {
+  buildRetrieveWireSchema,
   handleRetrieve,
   RetrieveRequestSchema,
 } from "./retrieve.js";
@@ -486,6 +488,7 @@ export function registerCodeModeTools(
     RetrieveRequestSchema,
     async (rawArgs: unknown, context?: ToolContext) =>
       handleRetrieve(rawArgs, actionMap, context),
+    buildRetrieveWireSchema(actionMap),
   );
 
   server.registerTool(
@@ -550,27 +553,7 @@ export function registerCodeModeTools(
     AgentContextRequestSchema,
     async (rawArgs: unknown, context?: ToolContext) =>
       handleAgentContext(rawArgs, context),
-    {
-      type: "object",
-      properties: {
-        repoId: { type: "string", minLength: 1 },
-        taskType: {
-          type: "string",
-          enum: ["debug", "review", "implement", "explain"],
-        },
-        taskText: { type: "string", minLength: 1 },
-        budget: { type: "object" },
-        options: { type: "object" },
-        responseMode: {
-          type: "string",
-          enum: ["inline", "auto", "handle"],
-        },
-        includeDiagnostics: { type: "boolean" },
-        refsMode: { type: "string", enum: ["auto", "off"] },
-      },
-      required: ["repoId", "taskType", "taskText"],
-      additionalProperties: false,
-    },
+    buildCompactJsonSchema(AgentContextRequestSchema),
   );
 
   server.registerTool(

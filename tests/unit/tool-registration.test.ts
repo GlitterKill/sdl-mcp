@@ -266,6 +266,99 @@ describe("MCP tool registration", () => {
     assert.deepStrictEqual(properties.refsMode?.enum, ["auto", "off"]);
   });
 
+  it("publishes complete deterministic context and retrieve wire schemas", () => {
+    const codeModeConfig = {
+      enabled: true,
+      exclusive: false,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50000,
+      maxWorkflowDurationMs: 30000,
+      ladderValidation: "warn" as const,
+      etagCaching: true,
+    };
+    const { tools: firstTools, server: firstServer } = makeFakeServer();
+    const { tools: secondTools, server: secondServer } = makeFakeServer();
+
+    registerTools(firstServer as any, {}, undefined, codeModeConfig);
+    registerTools(secondServer as any, {}, undefined, codeModeConfig);
+
+    const publicSchemas = (tools: RegisteredToolCall[]) =>
+      tools
+        .filter((tool) => ["sdl.context", "sdl.retrieve"].includes(tool.name))
+        .map((tool) => ({ name: tool.name, wireSchema: tool.wireSchema }));
+    assert.strictEqual(
+      JSON.stringify(publicSchemas(firstTools)),
+      JSON.stringify(publicSchemas(secondTools)),
+    );
+
+    const context = firstTools.find((tool) => tool.name === "sdl.context");
+    assert.ok(context?.wireSchema, "expected sdl.context wire schema");
+    const contextProperties = context.wireSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    for (const field of ["refsMode", "wireFormat", "ifNoneMatch"]) {
+      assert.ok(field in contextProperties, `missing context ${field}`);
+    }
+    const contextBudget = contextProperties.budget.properties as Record<
+      string,
+      unknown
+    >;
+    for (const field of [
+      "maxTokens",
+      "maxEstimatedTokens",
+      "maxActions",
+      "maxDurationMs",
+    ]) {
+      assert.ok(field in contextBudget, `missing context budget.${field}`);
+    }
+    const contextOptions = contextProperties.options.properties as Record<
+      string,
+      unknown
+    >;
+    assert.ok("focusSymbols" in contextOptions);
+    assert.ok("focusPaths" in contextOptions);
+
+    const retrieve = firstTools.find((tool) => tool.name === "sdl.retrieve");
+    assert.ok(retrieve?.wireSchema, "expected sdl.retrieve wire schema");
+    const retrieveProperties = retrieve.wireSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const variants = retrieveProperties.args.oneOf as Array<
+      Record<string, unknown>
+    >;
+    assert.strictEqual(variants.length, 6);
+    assert.deepStrictEqual(
+      variants.map((variant) => variant.title),
+      [
+        "symbolSearch",
+        "symbolGetCard",
+        "sliceBuild",
+        "codeSkeleton",
+        "codeHotPath",
+        "codeNeedWindow",
+      ],
+    );
+    const sliceProperties = variants[2]?.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    assert.ok(!("repoId" in sliceProperties));
+    const sliceBudgetRef = sliceProperties.budget.$ref;
+    assert.strictEqual(typeof sliceBudgetRef, "string");
+    const sliceBudgetKey = (sliceBudgetRef as string).split("/").at(-1);
+    assert.ok(sliceBudgetKey);
+    const definitions = retrieve.wireSchema.$defs as Record<
+      string,
+      { properties?: Record<string, unknown> }
+    >;
+    const sliceBudget = definitions[sliceBudgetKey]?.properties;
+    assert.ok(sliceBudget);
+    assert.ok("maxEstimatedTokens" in sliceBudget);
+    assert.ok(!("maxTokens" in sliceBudget));
+  });
+
   it("registers only code-mode tools when exclusive mode is enabled", () => {
     const { names, server } = makeFakeServer();
 

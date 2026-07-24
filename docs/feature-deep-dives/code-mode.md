@@ -118,6 +118,8 @@ It mirrors `sdl.context`, but it sits next to `sdl.manual` and `sdl.workflow` so
 - `review`
 - `implement` when the immediate need is understanding existing code
 
+The public schema includes the complete nested `budget` and `options` contracts plus `refsMode`, `wireFormat`, and `ifNoneMatch`. Context budgets accept `maxTokens`, `maxEstimatedTokens`, `maxActions`, and `maxDurationMs`. Unknown fields fail validation, while `maxCards` returns guidance to use `slice.build` for card-count budgets.
+
 ### `sdl.retrieve`
 
 Use this when you need one exact retrieval step and do not need the planning overhead of a workflow.
@@ -130,6 +132,8 @@ Supported operations:
 - `codeSkeleton`
 - `codeHotPath`
 - `codeNeedWindow`
+
+The public `args` schema publishes one variant per operation in the order above. Each variant uses the mapped gateway action's request contract without `repoId`, which remains in the retrieve envelope. The `sliceBuild` budget accepts `maxCards` and `maxEstimatedTokens`; `maxTokens` fails validation.
 
 ### `sdl.workflow`
 

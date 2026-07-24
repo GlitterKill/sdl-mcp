@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { ValidationError } from "../../dist/domain/errors.js";
+import { SliceBuildRequestSchema } from "../../dist/mcp/tools.js";
 
 import {
   handleActionSearch,
@@ -248,6 +249,41 @@ describe("sdl.retrieve", () => {
             {
               path: "args.identifiersToFind",
               message: "Invalid input: expected array, received undefined",
+            },
+          ],
+        );
+        return true;
+      },
+    );
+  });
+
+  it("rejects unknown nested slice budget fields with an actionable path", async () => {
+    await assert.rejects(
+      () =>
+        handleRetrieve(
+          {
+            repoId: "repo",
+            op: "sliceBuild",
+            args: {
+              taskText: "debug foo",
+              budget: { maxTokens: 1234 },
+            },
+          },
+          {
+            "slice.build": {
+              schema: SliceBuildRequestSchema,
+              handler: async (args: unknown) => args,
+            },
+          } as never,
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.deepEqual(
+          (error as ValidationError & { details?: unknown }).details,
+          [
+            {
+              path: "args.budget",
+              message: 'Unrecognized key: "maxTokens"',
             },
           ],
         );

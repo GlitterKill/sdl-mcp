@@ -950,15 +950,22 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 | `taskText`           | `string`                                          | Yes      | Task description or prompt                   |
 | `budget`             | `object`                                          | No       | Budget constraints                           |
 | `options`            | `object`                                          | No       | Task-specific options                        |
+| `wireFormat`         | `"json" \| "packed" \| "auto"`                  | No       | Response wire format; default `"auto"`       |
+| `refsMode`           | `"auto" \| "off"`                               | No       | Reference deduplication mode; default `"auto"` |
+| `responseMode`       | `"inline" \| "auto" \| "handle"`                 | No       | Large-response handling                      |
+| `ifNoneMatch`        | `string`                                          | No       | Return an unchanged reference when the ETag matches |
 | `includeDiagnostics` | `boolean`                                         | No       | Include coarse phase timings in the response |
 
 `budget` fields (all optional):
 
-| Field           | Type     | Description                          |
-| --------------- | -------- | ------------------------------------ |
-| `maxTokens`     | `number` | Maximum tokens to consume            |
-| `maxActions`    | `number` | Maximum number of actions to execute |
-| `maxDurationMs` | `number` | Maximum duration in milliseconds     |
+| Field               | Type     | Description                                      |
+| ------------------- | -------- | ------------------------------------------------ |
+| `maxTokens`         | `number` | Maximum tokens to consume                        |
+| `maxEstimatedTokens` | `number` | Alias for `maxTokens`, compatible with slice budgets |
+| `maxActions`        | `number` | Maximum number of actions to execute             |
+| `maxDurationMs`     | `number` | Maximum duration in milliseconds                 |
+
+Context budgets reject unknown fields. `maxCards` returns guidance to call `slice.build` for card-count budgets.
 
 `options` fields (all optional):
 
@@ -1393,7 +1400,7 @@ Get cumulative token usage statistics and savings metrics for the current sessio
 
 Retrieve task-shaped context inside Code Mode.
 
-Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` requests when you are already operating through the Code Mode surfaces.
+Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` requests when you are already operating through the Code Mode surfaces. Its public schema exposes the complete nested `budget` and `options` contracts plus `refsMode`, `wireFormat`, and `ifNoneMatch`.
 
 ### `sdl.workflow`
 
@@ -1405,7 +1412,7 @@ Use this for runtime execution, data shaping, batch mutations, and reusable mult
 
 Run one compact retrieval operation inside Code Mode.
 
-Use it when you need a single manual-ladder step without building a workflow. Supported operations are `symbolSearch`, `symbolGetCard`, `sliceBuild`, `codeSkeleton`, `codeHotPath`, and `codeNeedWindow`; `responseMode: "auto"` or `"handle"` can keep large code-window responses handle-backed.
+Use it when you need a single manual-ladder step without building a workflow. The public `args` schema exposes one authoritative variant for each supported operation: `symbolSearch`, `symbolGetCard`, `sliceBuild`, `codeSkeleton`, `codeHotPath`, and `codeNeedWindow`. The `sliceBuild` variant accepts `budget.maxCards` and `budget.maxEstimatedTokens`, not `budget.maxTokens`. `responseMode: "auto"` or `"handle"` can keep large code-window responses handle-backed.
 
 ### `sdl.manual`
 
