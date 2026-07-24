@@ -788,7 +788,18 @@ export async function readResponseArtifact(
   // Validate the retrieval contract before reading or slicing the stored body.
   validateResponseArtifactReadMode(metadata, opts);
 
-  const compressed = await readFile(contentPath(baseDir, opts.handle));
+  let compressed: Buffer;
+  try {
+    compressed = await readFile(contentPath(baseDir, opts.handle));
+  } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) {
+      throw responseArtifactNotFound(
+        "Response artifact content is unavailable",
+        metadata,
+      );
+    }
+    throw error;
+  }
   let decompressed: Buffer;
   try {
     decompressed = await gunzipAsync(compressed, {
