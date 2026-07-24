@@ -219,7 +219,7 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
 
 - Always provide a budget (`maxTokens`, `maxActions`, optionally `maxDurationMs`).
 - Scope with `focusSymbols` and/or `focusPaths` when you have them. Explicit scope and exact symbol mentions stay on the fast path and are the best option for targeted work. If broad mode is noisy or precise mode under-covers a subsystem, use `sdl.symbol.search`/`symbolSearch` for exact symbols before escalating to skeletons or hot paths.
-- Leave `options.semantic` unset for normal use. SDL-MCP uses confidence-gated retrieval: unscoped natural-language tasks can escalate to bounded hybrid retrieval when lexical confidence is low. Set `options.semantic: true` to force hybrid retrieval, and set `options.semantic: false` for lexical-only debugging or tests.
+- Broad mode (the default) enables semantic seeding and path-aware selection unless `options.semantic: false`. Inferred paths are soft ranking hints, while explicit `focusPaths` constrain the scope strictly. Set `options.semantic: true` to force hybrid retrieval, and set `options.semantic: false` for lexical-only debugging or tests.
 - Use `contextMode: "precise"` for targeted lookups (max 4 cluster-expanded symbols, minimal tokens — beats manual workflow assembly). Use `"broad"` (default) for investigation tasks needing surrounding context (max 10 cluster-expanded symbols with diversity scoring).
 - Avoid `requireDiagnostics` unless needed; it can add a raw rung.
 - Task types: `"debug"`, `"review"`, `"implement"`, `"explain"`.

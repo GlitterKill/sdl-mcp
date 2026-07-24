@@ -58,7 +58,7 @@ When you need to understand the *shape* of a file or class without reading every
 - Control flow structures (`if`, `for`, `while`, `try/catch`)
 - Implementation bodies replaced with `/* ... */`
 
-Think of it as an interactive table of contents. You can also filter to `exportedOnly: true` for large library files.
+Think of it as an interactive table of contents. You can also filter to `exportedOnly: true` for large library files. When a variable symbol identifies only its declaration name, the skeleton expands to the enclosing declaration, including a sole export when present. Identifiers in initializers or nested definitions keep their own boundaries.
 
 ### Rung 3: Hot-Path Excerpt (`sdl.code.getHotPath`)
 

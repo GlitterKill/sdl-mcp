@@ -754,7 +754,7 @@ These tools form an escalation path. Use them in order: skeleton first, then hot
 
 ### `sdl.code.getSkeleton`
 
-Get a skeleton view of code showing signatures, control flow structure, and elided function bodies. Returns `null` for files exceeding the configured `maxFileBytes` limit.
+Get a skeleton view of code showing signatures, control flow structure, and elided function bodies. For an identifier-only variable range, SDL-MCP expands the skeleton to the enclosing declaration, including its sole export when present. Identifiers in initializers or nested definitions keep their own boundaries. Returns `null` for files exceeding the configured `maxFileBytes` limit.
 
 **Parameters:**
 

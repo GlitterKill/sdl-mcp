@@ -20,6 +20,8 @@ file whose sha256/mtime has drifted since the preview was taken. For a
 missing or expired handle, rerun `search.edit` with `mode: "preview"`
 and the original preview arguments, then apply the new `planHandle`.
 
+Any failed apply consumes its plan, so rerun preview before retrying after a drift or other apply failure.
+
 ## When to use `search.edit` vs `file.write`
 
 MCP responses are human-first. Preview and apply results show concise visible summaries with bounded diff snippets, while `structuredContent` carries task data such as `planHandle`, file entries, status, `etag`, and error details. Internal precondition snapshots, rollback bookkeeping, timings, and packed/debug stats stay out of normal visible/model-facing output unless diagnostics are explicitly requested.
@@ -207,9 +209,9 @@ from v1):
 ## Preview response
 
 Preview supports `responseMode: "inline" | "auto" | "handle"`. The default is
-`"inline"`. Use `"auto"` for large previews or `"handle"` when you always want the
-full preview stored behind `response.get`; this is useful when many `fileEntries` or
-snippets would otherwise dominate the model context. Apply still uses the returned
+`"auto"`. Use `"inline"` to force the full preview inline, or `"handle"` when you
+always want the full preview stored behind `response.get`; this is useful when many
+`fileEntries` or snippets would otherwise dominate the model context. Apply still uses the returned
 `planHandle`; `response.get({ handle, full: true })` retrieves the original preview
 payload.
 
@@ -429,6 +431,10 @@ Apply with the returned `planHandle`.
 | `Pattern contains nested quantifiers ...`                       | ReDoS guard rejected the regex.                                              |
 | `jsonPath editMode is not supported in search.edit v1`          | Use `file.write` for JSON-path edits.                                        |
 | `replacePattern editMode requires query.literal or query.regex` | Missing query field for the selected edit mode.                              |
+
+For a missing or expired plan, SDL-MCP returns structured recovery with
+`classification: "not_found"`, `retryable: false`, `fallbackTools: ["search.edit"]`,
+and a rationale to rerun the original preview before applying its new handle.
 
 ## See also
 
