@@ -21,7 +21,7 @@ import {
   ResponseGetResponseSchema,
 } from "../../dist/mcp/tools.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
-import { ValidationError } from "../../dist/domain/errors.js";
+import { NotFoundError, ValidationError } from "../../dist/domain/errors.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
 let tempDirs: string[] = [];
@@ -763,9 +763,68 @@ describe("response artifact storage", () => {
           artifactBaseDir: baseDir,
           now: () => new Date("2026-05-08T11:00:01.000Z"),
         }),
-      /Response artifact expired/,
+      (error: unknown) => {
+        assert.ok(error instanceof NotFoundError);
+        const recovery = error as NotFoundError & {
+          classification?: string;
+          retryable?: boolean;
+          fallbackTools?: string[];
+          fallbackRationale?: string;
+        };
+        assert.equal(recovery.code, "NOT_FOUND");
+        assert.equal(recovery.classification, "not_found");
+        assert.equal(recovery.retryable, false);
+        assert.deepStrictEqual(recovery.fallbackTools, ["repo.overview"]);
+        assert.match(
+          recovery.fallbackRationale ?? "",
+          /Re-run the original handle-producing call/,
+        );
+        assert.doesNotMatch(error.message, /manifest\.json|sdl-response-artifacts/i);
+        assert.doesNotMatch(JSON.stringify(recovery), /action\.search/);
+        return true;
+      },
     );
     assert.ok(!existsSync(artifactDir));
+  });
+
+  it("returns typed recovery for a valid-format missing handle through response.get", async () => {
+    const baseDir = makeTempDir();
+    const configPath = join(baseDir, "sdl.config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ repos: [], policy: {}, runtime: { artifactBaseDir: baseDir } }),
+    );
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+
+    await assert.rejects(
+      () =>
+        handleResponseGet({
+          repoId: "repo-a",
+          handle: "response-repo-a-1778234400000-9999999999999999",
+          maxBytes: 5,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof NotFoundError);
+        const recovery = error as NotFoundError & {
+          classification?: string;
+          retryable?: boolean;
+          fallbackTools?: string[];
+          fallbackRationale?: string;
+        };
+        assert.equal(recovery.code, "NOT_FOUND");
+        assert.equal(recovery.classification, "not_found");
+        assert.equal(recovery.retryable, false);
+        assert.equal(recovery.fallbackTools, undefined);
+        assert.match(
+          recovery.fallbackRationale ?? "",
+          /Re-run the original handle-producing call/,
+        );
+        assert.doesNotMatch(error.message, /manifest\.json|sdl-response-artifacts/i);
+        assert.doesNotMatch(JSON.stringify(recovery), /action\.search/);
+        return true;
+      },
+    );
   });
 
   it("sweeps expired response artifacts before writing new ones", async () => {

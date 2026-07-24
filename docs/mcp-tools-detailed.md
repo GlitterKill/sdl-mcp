@@ -38,6 +38,8 @@ The Code Mode `sdl.context` schema publishes complete nested `budget` and `optio
 
 Text artifacts retain bounded excerpt retrieval by default. Use `full: true` only when the complete text fits the configured artifact limit.
 
+Missing, malformed, expired, and stale response handles return a typed `NOT_FOUND` error with `retryable: false`. Rerun the original handle-producing call. When valid manifest metadata identifies the producer, `fallbackTools` names that tool; otherwise SDL-MCP omits the fallback instead of recommending an unrelated action.
+
 ## Find the right guide
 
 - [MCP Tools Reference](./mcp-tools-reference.md): tool parameters, responses, and usage guidance.

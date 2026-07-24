@@ -532,10 +532,17 @@ async function handleFileGatewayPreviewWindow(
 ): Promise<FileGatewayPreviewWindowResponse> {
   const plan = getSearchEditPlanStore().get(request.planHandle);
   if (!plan) {
-    throw new NotFoundError(
-      "Edit plan not found or expired: " +
-        request.planHandle +
-        ". Run searchEditPreview again.",
+    throw Object.assign(
+      new NotFoundError(
+        "Edit plan not found or expired: " + request.planHandle + ".",
+      ),
+      {
+        classification: "not_found",
+        retryable: false,
+        fallbackTools: ["search.edit"],
+        fallbackRationale:
+          'Re-run search.edit with mode:"preview" and the original preview arguments, then apply the new planHandle.',
+      },
     );
   }
   if (plan.repoId !== request.repoId) {

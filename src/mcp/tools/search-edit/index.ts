@@ -229,8 +229,17 @@ async function handleApply(
   const store = getSearchEditPlanStore();
   const plan = store.get(request.planHandle);
   if (!plan) {
-    throw new ValidationError(
-      `search.edit planHandle missing or expired: ${request.planHandle}`,
+    throw Object.assign(
+      new ValidationError(
+        `search.edit planHandle missing or expired: ${request.planHandle}`,
+      ),
+      {
+        classification: "not_found",
+        retryable: false,
+        fallbackTools: ["search.edit"],
+        fallbackRationale:
+          'Re-run search.edit with mode:"preview" and the original preview arguments, then apply the new planHandle.',
+      },
     );
   }
   if (plan.repoId !== request.repoId) {

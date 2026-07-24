@@ -1406,7 +1406,7 @@ Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` reques
 
 Execute a multi-step workflow of SDL-MCP actions and internal transforms in one round trip.
 
-Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context`. Set `includeDiagnostics: true` to include workflow phase timings.
+Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context`. Set `includeDiagnostics: true` to include workflow phase timings. Set `onlyFinalResult: true` to omit successful intermediate envelopes while retaining prior failures and skips; `intermediateResultsSuppressed` counts only omitted successes, and `$N` execution still uses the unprojected prior results.
 
 ### `sdl.retrieve`
 
@@ -1422,7 +1422,7 @@ Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, t
 
 ### `sdl.file`
 
-Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply/applyNow, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy. Set `includeDiagnostics: true` to include file gateway phase timings.
+Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply/applyNow, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy. If a search-edit plan is missing or expired, rerun `search.edit` with `mode: "preview"` and the original preview arguments, then use the new `planHandle`. Set `includeDiagnostics: true` to include file gateway phase timings.
 
 ---
 

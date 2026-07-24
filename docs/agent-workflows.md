@@ -158,7 +158,7 @@ Use this order unless task constraints force escalation:
 - **Context retrieval** _(Code Mode)_: use `sdl.context` for task-shaped explain/debug/review/implement context, `sdl.retrieve` for one exact retrieval step, `symbol.search`/`symbol.getCard` for exact symbols, and `slice.build` for graph/file frontiers. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, batch mutations, and retrieval ladders after the first SDL discovery surface. Do not wrap a single `sdl.context` call in workflow.
 - **Symbol-scoped edits** _(Code Mode)_: `sdl.file` with `op: "symbolEditPreview"` -> review `planHandle` -> `op: "symbolEditApply"`. Use `symbolEditApplyNow` only when you already hold the current `astFingerprint` and range from a fresh card.
-- **Search edits** _(Code Mode)_: `sdl.file` with `op: "searchEditPreview"` -> review `planHandle`, snippets, and `defaultCreateBackup` -> `op: "searchEditApply"` with the same backup value. On the flat `sdl.search.edit` surface, copy preview `applyArgs` directly. `file.write` retains its default sibling `.bak`; `symbol.edit` and `search.edit` remove temporary rollback copies after a successful apply.
+- **Search edits** _(Code Mode)_: `sdl.file` with `op: "searchEditPreview"` -> review `planHandle`, snippets, and `defaultCreateBackup` -> `op: "searchEditApply"` with the same backup value. On the flat `sdl.search.edit` surface, copy preview `applyArgs` directly. If a plan handle is missing or expired, rerun the original preview arguments and apply the new handle. `file.write` retains its default sibling `.bak`; `symbol.edit` and `search.edit` remove temporary rollback copies after a successful apply.
 
 ### 3) Token controls by tool
 
@@ -202,6 +202,7 @@ Use this order unless task constraints force escalation:
 - `sdl.workflow` _(Code Mode)_:
   - Set `budget.maxTotalTokens` (or the accepted alias `budget.maxTokens`) and `budget.maxSteps` to bound chain execution. If a later step references a packed-capable result, `sdl.workflow` requests JSON-compatible output for that referenced step automatically.
   - Use `onError: "continue"` (default) to skip only steps that reference failed/skipped prior steps, `"continueAll"` to run later steps even when their dependencies failed, or `"stop"` to halt on first error.
+  - Set `onlyFinalResult: true` to omit successful intermediate result envelopes. SDL-MCP retains prior failures and skips, and `intermediateResultsSuppressed` counts only the omitted successes.
 
 ### 4) Live buffer workflow
 
@@ -299,7 +300,7 @@ Workflow guidance:
 - Start with `sdl.action.search` when the right action is unclear. Use `maxTokens` to bound a catalog page and `offset` to request the next page.
 - When `codeSkeleton` returns a continuation, repeat the original target and arguments, changing only `skeletonOffset`.
 - Use `sdl.manual(query|actions)` to avoid loading the full manual when a subset is enough.
-- Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based). `$N` piping uses raw step data even when a returned page is model-projected.
+- Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based). `$N` piping uses raw step data even when a returned page is model-projected or `onlyFinalResult` omits its public envelope.
 - Retrieve a truncated step with `workflowContinuationGet`: array paths page in items, JSON/text values page in characters, and `limit` is capped at `1000`.
 - Set `budget`: `{ maxTotalTokens, maxSteps, maxDurationMs }`; `maxTokens` is accepted as an alias for `maxTotalTokens`.
 - `onError`: `"continue"` (default, skip only dependency-blocked steps), `"continueAll"` (legacy run-every-later-step behavior), or `"stop"` (halt on first error).

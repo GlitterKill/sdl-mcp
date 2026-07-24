@@ -16,7 +16,9 @@ The tool runs in two modes:
 Plan handles are stored in-process with a 15-minute TTL and an LRU
 cap of 16 handles. They do not survive server restart. Apply fails
 closed on missing, expired, or repo-mismatched handles, and on any
-file whose sha256/mtime has drifted since the preview was taken.
+file whose sha256/mtime has drifted since the preview was taken. For a
+missing or expired handle, rerun `search.edit` with `mode: "preview"`
+and the original preview arguments, then apply the new `planHandle`.
 
 ## When to use `search.edit` vs `file.write`
 
@@ -277,7 +279,7 @@ Preview snippets are hunk snippets, not raw file reads. Each snippet is anchored
 }
 ```
 
-`previewWindow` and `sourceWindow` are aliases on `sdl.file`. Both validate that the plan handle contains the requested indexed file, validate that the symbol belongs to that file, then delegate source access to the normal `code.needWindow` policy. This keeps indexed source reads gated while preserving the edit preview provenance.
+`previewWindow` and `sourceWindow` are aliases on `sdl.file`. Both validate that the plan handle contains the requested indexed file, validate that the symbol belongs to that file, then delegate source access to the normal `code.needWindow` policy. This keeps indexed source reads gated while preserving the edit preview provenance. If either operation reports a missing or expired plan, rerun the original `search.edit` preview and use the new handle.
 
 ### `retrievalEvidence`
 
@@ -421,7 +423,7 @@ Apply with the returned `planHandle`.
 
 | Error                                                           | Meaning                                                                      |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `planHandle missing or expired`                                 | Apply called with an unknown or TTL-expired handle. Produce a fresh preview. |
+| `planHandle missing or expired`                                 | Apply called with an unknown or TTL-expired handle. Rerun the original preview arguments and apply the new handle. |
 | `planHandle was created for repoId ...`                         | Repo mismatch between preview and apply.                                     |
 | `search.edit apply aborted: N file(s) drifted`                  | sha256 changed between preview and apply for one or more target files.       |
 | `Pattern contains nested quantifiers ...`                       | ReDoS guard rejected the regex.                                              |

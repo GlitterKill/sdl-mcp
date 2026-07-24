@@ -5,6 +5,7 @@ import {
   handleFileGateway,
 } from "../../dist/mcp/tools/file-gateway.js";
 import { getSearchEditPlanStore } from "../../dist/mcp/tools/search-edit/plan-store.js";
+import { NotFoundError } from "../../dist/domain/errors.js";
 
 describe("FileGatewayRequestSchema", () => {
   describe("op: read", () => {
@@ -548,28 +549,42 @@ describe("handleFileGateway dispatch", () => {
     );
   });
 
-  it("op:previewWindow dispatches to the plan-bound window handler", async () => {
-    await assert.rejects(
-      () =>
-        handleFileGateway({
-          op: "previewWindow",
-          repoId: "test-repo",
-          planHandle: "plan-fake-123",
-          symbolId: "symbol-123",
-          reason: "Inspect the planned edit before applying it",
-          expectedLines: 12,
-          identifiersToFind: ["target"],
-          responseMode: "inline",
-        }),
-      (err: any) => {
-        assert.notEqual(err?.constructor?.name, "ZodError");
-        assert.match(
-          String(err?.message ?? ""),
-          /Edit plan not found or expired/,
-        );
-        return true;
-      },
-    );
+  it("previewWindow/sourceWindow return search.edit recovery for missing plans", async () => {
+    for (const op of ["previewWindow", "sourceWindow"] as const) {
+      await assert.rejects(
+        () =>
+          handleFileGateway({
+            op,
+            repoId: "test-repo",
+            planHandle: "plan-fake-123",
+            symbolId: "symbol-123",
+            reason: "Inspect the planned edit before applying it",
+            expectedLines: 12,
+            identifiersToFind: ["target"],
+            responseMode: "inline",
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof NotFoundError);
+          const recovery = error as NotFoundError & {
+            classification?: string;
+            retryable?: boolean;
+            fallbackTools?: string[];
+            fallbackRationale?: string;
+            nextCalls?: unknown;
+          };
+          assert.match(error.message, /Edit plan not found or expired/);
+          assert.equal(recovery.classification, "not_found");
+          assert.equal(recovery.retryable, false);
+          assert.deepEqual(recovery.fallbackTools, ["search.edit"]);
+          assert.equal(
+            recovery.fallbackRationale,
+            'Re-run search.edit with mode:"preview" and the original preview arguments, then apply the new planHandle.',
+          );
+          assert.equal(recovery.nextCalls, undefined);
+          return true;
+        },
+      );
+    }
   });
 
   it("op:previewWindow without symbolId reports plan-aware guidance", async () => {

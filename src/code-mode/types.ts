@@ -143,7 +143,7 @@ export interface WorkflowTrace {
 }
 
 export interface WorkflowResponse {
-  /** Results for each step (always same length as input steps) */
+  /** Step results; onlyFinalResult omits successful intermediate envelopes. */
   results: WorkflowStepResult[];
   /** Total estimated tokens across all step results */
   totalTokens: number;

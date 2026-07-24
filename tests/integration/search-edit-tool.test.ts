@@ -35,6 +35,7 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { normalizePath } from "../../dist/util/paths.js";
+import { ValidationError } from "../../dist/domain/errors.js";
 import { loadConfiguredAdapterPlugins } from "../../dist/startup/plugins.js";
 import {
   loadBuiltInAdapters,
@@ -999,8 +1000,25 @@ describe("sdl.search.edit", { concurrency: false }, () => {
               planHandle: preview.planHandle,
             }),
           ),
-        /expired|not.*found|unknown|invalid/i,
-        "apply must reject expired handles",
+        (error: unknown) => {
+          assert.ok(error instanceof ValidationError);
+          const recovery = error as ValidationError & {
+            classification?: string;
+            retryable?: boolean;
+            fallbackTools?: string[];
+            fallbackRationale?: string;
+            nextCalls?: unknown;
+          };
+          assert.equal(recovery.classification, "not_found");
+          assert.equal(recovery.retryable, false);
+          assert.deepEqual(recovery.fallbackTools, ["search.edit"]);
+          assert.equal(
+            recovery.fallbackRationale,
+            'Re-run search.edit with mode:"preview" and the original preview arguments, then apply the new planHandle.',
+          );
+          assert.equal(recovery.nextCalls, undefined);
+          return true;
+        },
       );
 
       // Disk content unchanged.

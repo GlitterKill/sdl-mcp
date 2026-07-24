@@ -1246,7 +1246,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   "response.get": {
     prerequisites: [],
     recommendedNextActions: [],
-    fallbacks: ["action.search"],
+    fallbacks: [],
   },
   "memory.store": {
     prerequisites: ["symbol.getCard", "slice.build"],

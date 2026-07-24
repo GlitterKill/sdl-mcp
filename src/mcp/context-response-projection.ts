@@ -814,6 +814,7 @@ function projectWorkflowResultForModel(
     }
     return failureStep;
   });
+  copyIfPresent(result, projected, "intermediateResultsSuppressed");
 
   if (includeWorkflowTelemetry) {
     copyIfPresent(result, projected, "durationMs");

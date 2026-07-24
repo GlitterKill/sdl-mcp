@@ -622,10 +622,18 @@ describe("code-mode workflow executor", () => {
       { level: "verbose" },
     );
 
+    assert.deepStrictEqual(
+      result.results.map((step) => step.stepIndex),
+      [1],
+    );
     assert.strictEqual(result.intermediateResultsSuppressed, 1);
-    assert.strictEqual(result.totalTokens, result.results[1].tokens);
+    assert.strictEqual(result.totalTokens, result.results[0].tokens);
     assert.strictEqual(result.trace?.steps[0]?.tokens, 0);
     assert.strictEqual(result.trace?.steps[0]?.resultPreview, undefined);
+    assert.match(
+      result.trace?.steps[0]?.summary ?? "",
+      /suppressed by onlyFinalResult/,
+    );
     assert.strictEqual(
       result.trace?.steps.reduce((sum, step) => sum + step.tokens, 0),
       result.totalTokens,
@@ -633,7 +641,7 @@ describe("code-mode workflow executor", () => {
     assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
   });
 
-  it("keeps final trace entry when onlyFinalResult follows a soft skip", async () => {
+  it("retains a soft-skip error while keeping only the final success trace", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
@@ -663,7 +671,12 @@ describe("code-mode workflow executor", () => {
       { level: "verbose" },
     );
 
-    assert.strictEqual(result.intermediateResultsSuppressed, 1);
+    assert.strictEqual(result.intermediateResultsSuppressed, undefined);
+    assert.deepStrictEqual(
+      result.results.map((step) => step.stepIndex),
+      [0, 1],
+    );
+    assert.strictEqual(result.results[0].status, "error");
     assert.strictEqual(result.results[0].tokens, 0);
     assert.strictEqual(result.results[1].status, "ok");
     assert.strictEqual(result.trace?.steps.length, 1);
@@ -678,6 +691,55 @@ describe("code-mode workflow executor", () => {
     );
     assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
   });
+
+  it("retains prior failures while suppressing successful intermediate results", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testEcho", action: "test.echo", args: { message: "omit me" } },
+        { fn: "testFail", action: "test.fail", args: {} },
+        { fn: "testEcho", action: "test.echo", args: { message: "final response" } },
+      ],
+      onlyFinalResult: true,
+      onError: "continueAll",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+      undefined,
+      { level: "verbose" },
+    );
+
+    assert.deepStrictEqual(
+      result.results.map((step) => [step.stepIndex, step.status]),
+      [[1, "error"], [2, "ok"]],
+    );
+    assert.strictEqual(result.intermediateResultsSuppressed, 1);
+    assert.strictEqual(
+      result.totalTokens,
+      result.results.reduce((sum, step) => sum + step.tokens, 0),
+    );
+    assert.strictEqual(result.trace?.steps.length, 3);
+    assert.strictEqual(result.trace?.steps[0]?.tokens, 0);
+    assert.strictEqual(result.trace?.steps[0]?.resultPreview, undefined);
+    assert.match(
+      result.trace?.steps[0]?.summary ?? "",
+      /suppressed by onlyFinalResult/,
+    );
+    assert.match(result.trace?.steps[1]?.summary ?? "", /Intentional test failure/);
+    assert.doesNotMatch(
+      result.trace?.steps[1]?.summary ?? "",
+      /suppressed by onlyFinalResult/,
+    );
+    assert.strictEqual(
+      result.trace?.steps.reduce((sum, step) => sum + step.tokens, 0),
+      result.totalTokens,
+    );
+    assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
+  });
+
   it("exposes a truncated primitive step's continuation handle to later steps", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",

@@ -121,6 +121,7 @@ describe("code-mode action catalog", () => {
       const catalog = buildCatalog({ includeExamples: true });
       const getCard = catalog.find((d) => d.action === "symbol.getCard");
       const needWindow = catalog.find((d) => d.action === "code.needWindow");
+      const responseGet = catalog.find((d) => d.action === "response.get");
 
       assert.ok(getCard, "expected symbol.getCard descriptor");
       assert.ok(
@@ -145,6 +146,7 @@ describe("code-mode action catalog", () => {
         needWindow?.fallbacks.includes("code.getSkeleton"),
         "code.needWindow should suggest code.getSkeleton as a fallback",
       );
+      assert.deepStrictEqual(responseGet?.fallbacks, []);
     });
 
     it("includeSchemas adds schemaSummary to descriptors", () => {

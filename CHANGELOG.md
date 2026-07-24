@@ -123,6 +123,7 @@ _19 commits from 1 contributor_
 
 ### Fixed
 
+- **Code Mode final-only and recovery responses**: `sdl.workflow` now omits successful intermediate envelopes under `onlyFinalResult` while retaining failures and accurate token totals; missing, malformed, expired, or stale response handles return typed producer-aware recovery; and expired search-edit plans direct callers to rerun the original preview without fabricating partial calls.
 - **response.get**: `maxTokens` is now enforced on the returned content (estimate-based shrink after slicing) instead of only seeding a 4-bytes-per-token pre-slice byte bound; `maxBytes` remains an exact byte cap. Schema description and manual updated to match.
 - **runtime.execute**: `persistOutput: true` now writes a searchable marker artifact when a command completes with no captured stdout/stderr, instead of returning `artifactHandle: null`.
 - **Manual drift**: the workflow manual now advertises `semanticEnrichmentStatus`'s existing `detail`/`limit` params and documents `[*]` reference projection.

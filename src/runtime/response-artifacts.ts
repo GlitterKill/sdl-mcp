@@ -526,15 +526,84 @@ export async function maybeStoreLargeResponse<T>(
   };
 }
 
+function responseArtifactNotFound(
+  message: string,
+  metadata?: ResponseArtifactMetadata,
+) {
+  return Object.assign(new NotFoundError(message), {
+    classification: "not_found",
+    retryable: false,
+    ...(metadata ? { fallbackTools: [metadata.toolName] } : {}),
+    fallbackRationale:
+      "Re-run the original handle-producing call to create a new response handle.",
+  });
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === code,
+  );
+}
+
+function isResponseArtifactMetadata(
+  value: unknown,
+): value is ResponseArtifactMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const metadata = value as Partial<ResponseArtifactMetadata>;
+  return (
+    typeof metadata.id === "string" &&
+    typeof metadata.handle === "string" &&
+    typeof metadata.repoId === "string" &&
+    typeof metadata.repoEpoch === "number" &&
+    typeof metadata.toolName === "string" &&
+    metadata.toolName.trim().length > 0 &&
+    typeof metadata.createdAt === "string" &&
+    Number.isFinite(Date.parse(metadata.createdAt)) &&
+    typeof metadata.expiresAt === "string" &&
+    Number.isFinite(Date.parse(metadata.expiresAt)) &&
+    typeof metadata.estimatedOriginalTokens === "number" &&
+    typeof metadata.originalBytes === "number" &&
+    typeof metadata.storedBytes === "number" &&
+    typeof metadata.sha256 === "string" &&
+    typeof metadata.etag === "string" &&
+    (metadata.contentKind === "json" || metadata.contentKind === "text") &&
+    (metadata.requiresSameSession === undefined ||
+      typeof metadata.requiresSameSession === "boolean") &&
+    (metadata.sessionKeyHash === undefined ||
+      typeof metadata.sessionKeyHash === "string")
+  );
+}
+
 async function readMetadata(
   handle: string,
   baseDir: string,
 ): Promise<ResponseArtifactMetadata> {
   if (!isValidResponseArtifactHandle(handle)) {
-    throw new Error("Invalid response artifact handle");
+    throw responseArtifactNotFound("Invalid response artifact handle");
   }
-  const raw = await readFile(metadataPath(baseDir, handle), "utf-8");
-  return JSON.parse(raw) as ResponseArtifactMetadata;
+  let raw: string;
+  try {
+    raw = await readFile(metadataPath(baseDir, handle), "utf-8");
+  } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) {
+      throw responseArtifactNotFound("Response artifact not found");
+    }
+    throw error;
+  }
+
+  let metadata: unknown;
+  try {
+    metadata = JSON.parse(raw);
+  } catch {
+    throw responseArtifactNotFound("Response artifact metadata is unavailable");
+  }
+  if (!isResponseArtifactMetadata(metadata) || metadata.handle !== handle) {
+    throw responseArtifactNotFound("Response artifact metadata is unavailable");
+  }
+  return metadata;
 }
 
 async function readManifestEntries(
@@ -675,12 +744,15 @@ async function enforceResponseArtifactQuota(
 export async function readResponseArtifact(
   opts: ResponseArtifactReadOptions,
 ): Promise<ResponseArtifactReadResult> {
-  const repoEpoch = captureActiveRepoEpoch(opts.repoId);
-  if (repoEpoch === undefined) {
-    throw new NotFoundError(`Repository is not active: ${opts.repoId}`);
-  }
   const baseDir = getResponseArtifactBaseDir(opts.artifactBaseDir);
   const metadata = await readMetadata(opts.handle, baseDir);
+  const repoEpoch = captureActiveRepoEpoch(opts.repoId);
+  if (repoEpoch === undefined) {
+    throw responseArtifactNotFound(
+      `Repository is not active: ${opts.repoId}`,
+      metadata,
+    );
+  }
   if (metadata.repoId !== opts.repoId) {
     throw new Error("Response artifact belongs to a different repository");
   }
@@ -688,7 +760,10 @@ export async function readResponseArtifact(
     metadata.repoEpoch !== repoEpoch ||
     !isRepoEpochCurrent(opts.repoId, repoEpoch)
   ) {
-    throw new NotFoundError(`Response artifact is no longer available`);
+    throw responseArtifactNotFound(
+      "Response artifact is no longer available",
+      metadata,
+    );
   }
   if (
     metadata.requiresSameSession === true &&
@@ -700,7 +775,7 @@ export async function readResponseArtifact(
   const now = opts.now?.() ?? new Date();
   if (new Date(metadata.expiresAt).getTime() <= now.getTime()) {
     await responseArtifactRm(join(baseDir, opts.handle), { recursive: true, force: true });
-    throw new Error("Response artifact expired");
+    throw responseArtifactNotFound("Response artifact expired", metadata);
   }
 
   const maxFullBytes = opts.maxFullBytes ?? DEFAULT_RESPONSE_MAX_ARTIFACT_BYTES;

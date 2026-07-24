@@ -404,6 +404,26 @@ describe("context-response-projection", () => {
       });
     });
 
+    it("keeps intermediateResultsSuppressed immediately after workflow results", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [{ stepIndex: 1, fn: "repoStatus", status: "ok", result: {} }],
+          intermediateResultsSuppressed: 1,
+          totalTokens: 1,
+          durationMs: 2,
+          truncated: false,
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(Object.keys(projected), [
+        "results",
+        "intermediateResultsSuppressed",
+      ]);
+      assert.equal(projected.intermediateResultsSuppressed, 1);
+    });
+
     it("drops no-op runtime truncation objects in compact workflow output", () => {
       const projected = projectToolResultForModelContent(
         "sdl.workflow",

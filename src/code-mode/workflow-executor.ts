@@ -1005,43 +1005,25 @@ export async function executeWorkflow(
     };
   }
 
-  // Strip intermediate step results if onlyFinalResult is requested
+  // Omit only successful intermediate envelopes; failures remain actionable.
   if (request.onlyFinalResult && response.results.length > 1) {
-    const lastIdx = response.results.length - 1;
-    const suppressedCount = lastIdx; // All steps except the last
-    response.results = response.results.map((r, i) => {
-      if (i < lastIdx) {
-        return {
-          stepIndex: r.stepIndex,
-          fn: r.fn,
-          status: r.status,
-          tokens: 0,
-          durationMs: r.durationMs,
-          result: null,
-          ...(r.error ? { error: r.error } : {}),
-          ...(r.fallbackTools ? { fallbackTools: r.fallbackTools } : {}),
-          ...(r.blockedByStep !== undefined
-            ? { blockedByStep: r.blockedByStep }
-            : {}),
-          ...(r.blockedByFn ? { blockedByFn: r.blockedByFn } : {}),
-          ...(r.blockedByError ? { blockedByError: r.blockedByError } : {}),
-          ...(r.failureTrace ? { failureTrace: r.failureTrace } : {}),
-        };
-      }
-      return r;
+    const lastResultIndex = response.results.length - 1;
+    const suppressedStepIndexes = new Set<number>();
+    response.results = response.results.filter((result, index) => {
+      const suppress = index < lastResultIndex && result.status === "ok";
+      if (suppress) suppressedStepIndexes.add(result.stepIndex);
+      return !suppress;
     });
-    // Recalculate totalTokens as sum of kept tokens (avoids mixing pre/post truncation values)
     response.totalTokens = response.results.reduce(
-      (sum, r) => sum + r.tokens,
+      (sum, result) => sum + result.tokens,
       0,
     );
-    // Signal that intermediate results were suppressed
-    response.intermediateResultsSuppressed = suppressedCount;
+    if (suppressedStepIndexes.size > 0) {
+      response.intermediateResultsSuppressed = suppressedStepIndexes.size;
+    }
     if (response.trace) {
       response.trace.steps = response.trace.steps.map((step) => {
-        if (step.stepIndex >= lastIdx) {
-          return step;
-        }
+        if (!suppressedStepIndexes.has(step.stepIndex)) return step;
         const redactedStep = { ...step };
         delete redactedStep.resultPreview;
         return {
