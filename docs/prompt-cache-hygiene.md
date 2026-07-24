@@ -37,7 +37,7 @@ The digest uses fixed canonical tuples plus explicit UTF-8 file and symbol order
 These rules exist because each one, when broken, degrades caching for every user with no visible error. CI enforces the first four directly (see below); the rest are reviewed.
 
 1. **Every LadybugDB query orders its results explicitly**, with a deterministic tiebreaker. "It came back sorted in testing" is not ordering — parallel scan scheduling makes unordered results appear stable within a warm process and then diverge across processes.
-2. **No timestamps, durations, counters, or session state in tool responses or tool descriptions.** If a value can differ between two runs against identical source, it does not belong in the prompt. Route it to logging.
+2. **No timestamps, durations, counters, or session state in deterministic, content-shaped tool responses or in tool descriptions.** Opaque session-scoped response-artifact handles and refs remain exempt as documented above; route other values that can differ between two runs against identical source to logging.
 3. **No absolute paths outside the repository root in responses.** Report paths relative to the indexed root so output is identical across checkouts and machines.
 4. **New tools ship with determinism fixtures.** Adding a tool without adding calls to `determinism.fixtures.json` fails the build. Intentional exclusions require an allowlisted entry with a written justification, and should be treated as a design smell.
 5. **Tool definitions change only with releases, never at runtime.** No `listChanged` notifications mid-session, no schema fields computed from index state. A tool-surface change is a full-cache invalidation event for every active session and should be batched into versioned releases.
