@@ -244,6 +244,28 @@ describe("MCP tool registration", () => {
     }
   });
 
+  it("publishes refsMode on sdl.context", () => {
+    const { tools, server } = makeFakeServer();
+
+    registerTools(server as any, {}, undefined, {
+      enabled: true,
+      exclusive: false,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50000,
+      maxWorkflowDurationMs: 30000,
+      ladderValidation: "warn",
+      etagCaching: true,
+    });
+
+    const contextTool = tools.find((candidate) => candidate.name === "sdl.context");
+    assert.ok(contextTool?.wireSchema, "expected sdl.context wire schema");
+    const properties = contextTool.wireSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    assert.deepStrictEqual(properties.refsMode?.enum, ["auto", "off"]);
+  });
+
   it("registers only code-mode tools when exclusive mode is enabled", () => {
     const { names, server } = makeFakeServer();
 

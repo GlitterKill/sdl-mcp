@@ -1009,6 +1009,8 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
           repoId,
           taskType: "explain",
           taskText: "Explain alpha",
+          refsMode: "off",
+          responseMode: "inline",
           options: { contextMode: "precise" },
         },
       },

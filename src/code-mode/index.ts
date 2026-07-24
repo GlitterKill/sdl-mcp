@@ -566,6 +566,7 @@ export function registerCodeModeTools(
           enum: ["inline", "auto", "handle"],
         },
         includeDiagnostics: { type: "boolean" },
+        refsMode: { type: "string", enum: ["auto", "off"] },
       },
       required: ["repoId", "taskType", "taskText"],
       additionalProperties: false,
