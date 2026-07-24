@@ -439,6 +439,11 @@ export function buildToolResponseContentBlocks(
   return contentBlocks;
 }
 
+function shouldIncludeErrorStructuredContent(toolName: string): boolean {
+  // response.get has a strict success-only schema, so its recovery stays in text.
+  return toolName !== "sdl.response.get";
+}
+
 export function buildToolResponseEnvelope(
   primaryPayload: unknown,
   userDisplay: string | null,
@@ -446,6 +451,8 @@ export function buildToolResponseEnvelope(
   toolName = "",
   toolArgs: Record<string, unknown> = {},
   structuredPayload: unknown = primaryPayload,
+  // MCP clients validate structured content against outputSchema even for isError results.
+  includeStructuredContent = true,
 ): ToolResponseEnvelope {
   const modelPayload = projectToolResultForModelContent(
     toolName,
@@ -473,6 +480,12 @@ export function buildToolResponseEnvelope(
     ? structuredModelPayload
     : { value: structuredModelPayload };
   const visibleFooterText = shouldIncludeDisplayFooter(toolArgs) ? footerText : "";
+  if (!includeStructuredContent) {
+    return visibleFooterText
+      ? { content, _displayFooter: visibleFooterText }
+      : { content };
+  }
+
   return visibleFooterText
     ? { content, structuredContent, _displayFooter: visibleFooterText }
     : { content, structuredContent };
@@ -670,6 +683,8 @@ export class MCPServer {
                 "",
                 toolName,
                 normalizedArgs as Record<string, unknown>,
+                responseForLog,
+                shouldIncludeErrorStructuredContent(toolName),
               ),
               isError: true,
             };
@@ -992,6 +1007,8 @@ export class MCPServer {
                 "",
                 toolName,
                 normalizedArgs as Record<string, unknown>,
+                responseForLog,
+                shouldIncludeErrorStructuredContent(toolName),
               ),
               isError: true,
             };
@@ -1008,6 +1025,8 @@ export class MCPServer {
               "",
               request.params.name,
               {},
+              outerErrorResponse,
+              false,
             ),
             isError: true,
           };

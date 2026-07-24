@@ -213,4 +213,21 @@ describe("missing symbol-card MCP error envelope", () => {
     };
     assert.deepEqual(guidance(symbolRef), guidance(direct));
   });
+
+  it("keeps response.get errors compatible with the declared output schema", async () => {
+    const response = await client.callTool({
+      name: "sdl.response.get",
+      arguments: {
+        repoId: REPO_ID,
+        handle: `response-${REPO_ID}-1784866000000-deadbeefdeadbeef`,
+      },
+    });
+
+    assert.equal(response.isError, true);
+    assert.equal(response.structuredContent, undefined);
+    const text =
+      response.content.find((block) => block.type === "text")?.text ?? "";
+    assert.match(text, /Response artifact not found/);
+    assert.match(text, /Re-run the original handle-producing call/);
+  });
 });

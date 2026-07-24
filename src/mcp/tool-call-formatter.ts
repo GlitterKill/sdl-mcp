@@ -888,9 +888,11 @@ function fmtGeneric(
 
   const error = record(result.error);
   const message = str(error?.message) || str(result.message);
+  const fallbackRationale = str(error?.fallbackRationale);
   if (message) lines.push(`error: ${message}`);
+  if (fallbackRationale) lines.push(`next: ${fallbackRationale}`);
 
-  let appended = Boolean(message);
+  let appended = Boolean(message || fallbackRationale);
   for (const key of [
     "filePath",
     "file",
