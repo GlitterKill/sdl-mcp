@@ -133,7 +133,7 @@ Supported operations:
 - `codeHotPath`
 - `codeNeedWindow`
 
-The public `args` schema publishes one variant per operation in the order above. Each variant uses the mapped gateway action's request contract without `repoId`, which remains in the retrieve envelope. The `sliceBuild` budget accepts `maxCards` and `maxEstimatedTokens`; `maxTokens` fails validation.
+The public `args` schema publishes one titled variant per operation in the order above. Select the variant whose title matches `op`; the selected operation validates its arguments at dispatch. Each variant uses the mapped gateway action's request contract without `repoId`, which remains in the retrieve envelope. The `sliceBuild` budget accepts `maxCards` and `maxEstimatedTokens`; `maxTokens` fails validation.
 
 ### `sdl.workflow`
 

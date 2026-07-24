@@ -1412,7 +1412,7 @@ Use this for runtime execution, data shaping, batch mutations, and reusable mult
 
 Run one compact retrieval operation inside Code Mode.
 
-Use it when you need a single manual-ladder step without building a workflow. The public `args` schema exposes one authoritative variant for each supported operation: `symbolSearch`, `symbolGetCard`, `sliceBuild`, `codeSkeleton`, `codeHotPath`, and `codeNeedWindow`. The `sliceBuild` variant accepts `budget.maxCards` and `budget.maxEstimatedTokens`, not `budget.maxTokens`. `responseMode: "auto"` or `"handle"` can keep large code-window responses handle-backed.
+Use it when you need a single manual-ladder step without building a workflow. The public `args` schema exposes one authoritative titled variant for each supported operation. Select the variant matching `op`; the selected operation validates its arguments at dispatch: `symbolSearch`, `symbolGetCard`, `sliceBuild`, `codeSkeleton`, `codeHotPath`, and `codeNeedWindow`. The `sliceBuild` variant accepts `budget.maxCards` and `budget.maxEstimatedTokens`, not `budget.maxTokens`. `responseMode: "auto"` or `"handle"` can keep large code-window responses handle-backed.
 
 ### `sdl.manual`
 

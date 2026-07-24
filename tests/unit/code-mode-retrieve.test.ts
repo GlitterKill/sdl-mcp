@@ -43,6 +43,9 @@ describe("sdl.retrieve", () => {
   it("publishes ordered any-of variants that accept representative args", () => {
     const actionMap = createActionMap(undefined, undefined);
     const schema = buildRetrieveWireSchema(actionMap);
+    assert.ok(!("oneOf" in schema));
+    assert.ok(!("anyOf" in schema));
+    assert.ok(!("allOf" in schema));
     const properties = schema.properties as Record<
       string,
       Record<string, unknown>
@@ -75,6 +78,37 @@ describe("sdl.retrieve", () => {
       const result = action.schema.safeParse({ repoId: "repo", ...args });
       assert.equal(result.success, true, `${op} args must match its variant`);
     });
+  });
+
+  it("validates args against the selected operation at dispatch", async () => {
+    await assert.rejects(
+      () =>
+        handleRetrieve(
+          {
+            repoId: "repo",
+            op: "symbolSearch",
+            args: { symbolId: "sym" },
+          },
+          createActionMap(undefined, undefined),
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.match(
+          error.message,
+          /Either 'query' or 'pattern' must be provided/,
+        );
+        assert.deepEqual(
+          (error as ValidationError & { details?: unknown }).details,
+          [
+            {
+              path: "args",
+              message: "Either 'query' or 'pattern' must be provided",
+            },
+          ],
+        );
+        return true;
+      },
+    );
   });
 
   it("keeps the public schema compact", () => {

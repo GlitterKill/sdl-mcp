@@ -321,6 +321,9 @@ describe("MCP tool registration", () => {
 
     const retrieve = firstTools.find((tool) => tool.name === "sdl.retrieve");
     assert.ok(retrieve?.wireSchema, "expected sdl.retrieve wire schema");
+    assert.ok(!("oneOf" in retrieve.wireSchema));
+    assert.ok(!("anyOf" in retrieve.wireSchema));
+    assert.ok(!("allOf" in retrieve.wireSchema));
     const retrieveProperties = retrieve.wireSchema.properties as Record<
       string,
       Record<string, unknown>
