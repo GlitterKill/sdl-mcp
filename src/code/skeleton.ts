@@ -778,14 +778,25 @@ export function parseFile(
 
 function findNodeByRange(
   node: Parser.SyntaxNode,
-  range: { startLine: number; endLine: number },
+  range: Range,
 ): Parser.SyntaxNode | null {
-  const targetStart = range.startLine - 1; // Convert to 0-based
-  const targetEnd = range.endLine - 1;
+  const targetStart = {
+    row: range.startLine - 1,
+    column: range.startCol,
+  };
+  const targetEnd = {
+    row: range.endLine - 1,
+    column: range.endCol,
+  };
 
-  // Check if this node SPANS (contains) the target range
+  // Check if this node SPANS (contains) the target range.
   const nodeContainsRange =
-    node.startPosition.row <= targetStart && node.endPosition.row >= targetEnd;
+    (node.startPosition.row < targetStart.row ||
+      (node.startPosition.row === targetStart.row &&
+        node.startPosition.column <= targetStart.column)) &&
+    (node.endPosition.row > targetEnd.row ||
+      (node.endPosition.row === targetEnd.row &&
+        node.endPosition.column >= targetEnd.column));
 
   if (!nodeContainsRange) {
     return null;
@@ -801,6 +812,49 @@ function findNodeByRange(
 
   // No child contains the full target range. Return this node.
   return node;
+}
+
+function resolveVariableSkeletonBoundary(
+  node: Parser.SyntaxNode,
+): Parser.SyntaxNode {
+  const isVariableName =
+    node.type === "identifier" ||
+    node.type === "object_pattern" ||
+    node.type === "array_pattern" ||
+    node.type === "shorthand_property_identifier_pattern";
+  let declarator: Parser.SyntaxNode | null =
+    node.type === "variable_declarator" ? node : null;
+
+  if (!declarator && isVariableName) {
+    let ancestor = node.parent;
+    while (ancestor && ancestor.type !== "variable_declarator") {
+      ancestor = ancestor.parent;
+    }
+    declarator = ancestor;
+  }
+
+  if (!declarator) {
+    return node;
+  }
+
+  const declaration = declarator.parent;
+  if (
+    declaration?.type !== "lexical_declaration" &&
+    declaration?.type !== "variable_declaration"
+  ) {
+    return declarator;
+  }
+
+  const declarators = declaration.namedChildren.filter(
+    (child) => child.type === "variable_declarator",
+  );
+  if (declarators.length !== 1) {
+    return declarator;
+  }
+
+  return declaration.parent?.type === "export_statement"
+    ? declaration.parent
+    : declaration;
 }
 
 export async function generateSymbolSkeleton(
@@ -855,13 +909,18 @@ export async function generateSymbolSkeleton(
   // errors thrown by the tree-sitter bindings can, and returning null
   // here prevents the error from propagating up and crashing the server.
   try {
-    const symbolRange = {
+    const symbolRange: Range = {
       startLine: symbol.rangeStartLine,
+      startCol: symbol.rangeStartCol,
       endLine: symbol.rangeEndLine,
+      endCol: symbol.rangeEndCol,
     };
 
     const rootNode = tree.rootNode;
-    const symbolNode = findNodeByRange(rootNode, symbolRange);
+    const matchedNode = findNodeByRange(rootNode, symbolRange);
+    const symbolNode = matchedNode
+      ? resolveVariableSkeletonBoundary(matchedNode)
+      : null;
 
     if (!symbolNode) {
       return null;
@@ -1293,13 +1352,18 @@ export async function generateSkeletonIR(
   }
 
   try {
-    const symbolRange = {
+    const symbolRange: Range = {
       startLine: symbol.rangeStartLine,
+      startCol: symbol.rangeStartCol,
       endLine: symbol.rangeEndLine,
+      endCol: symbol.rangeEndCol,
     };
 
     const rootNode = tree.rootNode;
-    const symbolNode = findNodeByRange(rootNode, symbolRange);
+    const matchedNode = findNodeByRange(rootNode, symbolRange);
+    const symbolNode = matchedNode
+      ? resolveVariableSkeletonBoundary(matchedNode)
+      : null;
 
     if (!symbolNode) {
       return null;

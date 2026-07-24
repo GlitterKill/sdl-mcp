@@ -68,12 +68,18 @@ export function buildContinuationFixture(input: number): string {
   const zetaStage = epsilonStage - 6;
   return [alphaStage, betaStage, gammaStage, deltaStage, epsilonStage, zetaStage].join(":");
 }
+
+export const exportedSingle = makeSingle();
+export const first = makeFirst(), second = makeSecond();
     `.trim();
   const repoId = `skeleton-range-${process.pid}`;
   const fileId = `${repoId}:functions`;
   const calculateSymbolId = `${repoId}:calculateSum`;
   const resultSymbolId = `${repoId}:result`;
   const continuationSymbolId = `${repoId}:buildContinuationFixture`;
+  const exportedSingleSymbolId = `${repoId}:exportedSingle`;
+  const firstSymbolId = `${repoId}:first`;
+  const secondSymbolId = `${repoId}:second`;
   const calculateRange = { startLine: 1, startCol: 0, endLine: 5, endCol: 1 };
   const resultRange = { startLine: 2, startCol: 2, endLine: 2, endCol: 23 };
   const functionLines = functionFile.split("\n");
@@ -91,6 +97,21 @@ export function buildContinuationFixture(input: number): string {
     endLine: continuationEndLine,
     endCol: 1,
   };
+  function identifierRange(name: string): typeof calculateRange {
+    const lineIndex = functionLines.findIndex((line) => line.includes(name));
+    const startCol = functionLines[lineIndex]?.indexOf(name) ?? -1;
+    assert.notEqual(lineIndex, -1);
+    assert.notEqual(startCol, -1);
+    return {
+      startLine: lineIndex + 1,
+      startCol,
+      endLine: lineIndex + 1,
+      endCol: startCol + name.length,
+    };
+  }
+  const exportedSingleRange = identifierRange("exportedSingle");
+  const firstRange = identifierRange("first");
+  const secondRange = identifierRange("second");
   const fileRange = {
     startLine: 1,
     startCol: 0,
@@ -184,6 +205,9 @@ export enum Priority {
       { symbolId: calculateSymbolId, name: "calculateSum", kind: "function", exported: true, range: calculateRange },
       { symbolId: resultSymbolId, name: "result", kind: "variable", exported: false, range: resultRange },
       { symbolId: continuationSymbolId, name: "buildContinuationFixture", kind: "function", exported: true, range: continuationRange },
+      { symbolId: exportedSingleSymbolId, name: "exportedSingle", kind: "variable", exported: true, range: exportedSingleRange },
+      { symbolId: firstSymbolId, name: "first", kind: "variable", exported: true, range: firstRange },
+      { symbolId: secondSymbolId, name: "second", kind: "variable", exported: true, range: secondRange },
     ] as const) {
       await ladybugDb.upsertSymbol(conn, {
         symbolId: symbol.symbolId,
@@ -411,6 +435,51 @@ export enum Priority {
   });
 
   describe("skeleton source ranges", () => {
+    it("expands an exported identifier-only variable range to its single declaration", async () => {
+      const skeleton = await generateSymbolSkeleton(
+        repoId,
+        exportedSingleSymbolId,
+      );
+      const ir = await generateSkeletonIR(repoId, exportedSingleSymbolId);
+
+      assert.ok(skeleton);
+      assert.ok(ir);
+      for (const text of [skeleton.skeleton, ir.skeletonText]) {
+        assert.match(text, /export const exportedSingle = makeSingle\(\);/);
+      }
+      assertExactOrderedRange(skeleton.actualRange, exportedSingleRange);
+      assertExactOrderedRange(ir.actualRange, exportedSingleRange);
+    });
+
+    it("keeps identifier-only variables in a shared declaration isolated", async () => {
+      for (const fixture of [
+        {
+          symbolId: firstSymbolId,
+          own: "first = makeFirst()",
+          sibling: "second",
+          range: firstRange,
+        },
+        {
+          symbolId: secondSymbolId,
+          own: "second = makeSecond()",
+          sibling: "first",
+          range: secondRange,
+        },
+      ]) {
+        const skeleton = await generateSymbolSkeleton(repoId, fixture.symbolId);
+        const ir = await generateSkeletonIR(repoId, fixture.symbolId);
+
+        assert.ok(skeleton);
+        assert.ok(ir);
+        for (const text of [skeleton.skeleton, ir.skeletonText]) {
+          assert.ok(text.includes(fixture.own), text);
+          assert.ok(!text.includes(fixture.sibling), text);
+        }
+        assertExactOrderedRange(skeleton.actualRange, fixture.range);
+        assertExactOrderedRange(ir.actualRange, fixture.range);
+      }
+    });
+
     it("keeps an exact ordered range for a one-line nonzero-column symbol and IR", async () => {
       const skeleton = await generateSymbolSkeleton(repoId, resultSymbolId, {
         maxLines: 1,
