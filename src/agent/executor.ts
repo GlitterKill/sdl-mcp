@@ -871,9 +871,13 @@ export class Executor {
       );
     }
 
+    const usesSemanticSeeding =
+      task.options?.semantic === true ||
+      (task.options?.semantic !== false &&
+        task.options?.contextMode !== "precise");
     let evidencePaths: string[] = [];
     if (
-      task.options?.semantic === true &&
+      usesSemanticSeeding &&
       explicitFocusPaths(task.options).length === 0
     ) {
       const retrievalPriors = new Map<string, number>();
@@ -923,8 +927,8 @@ export class Executor {
     const inferredPaths =
       evidencePaths.length > 0
         ? evidencePaths
-        : task.options?.semantic === true
-          ? task.options.inferredFocusPaths ?? []
+        : usesSemanticSeeding
+          ? task.options?.inferredFocusPaths ?? []
           : [];
     const inferredSymbolIds =
       inferredPaths.length > 0

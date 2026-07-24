@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import type { AgentTask, ContextSeedResult } from "../../../dist/agent/types.js";
+import type {
+  AgentTask,
+  ContextSeedCandidate,
+  ContextSeedResult,
+} from "../../../dist/agent/types.js";
 
 const REPO_ID = "context-seeding-runtime-repo";
 const INGRESS_TASK_TEXT =
@@ -22,6 +26,10 @@ const PROBE_A_PROHIBITED_IDS = [
   "ingress-evaluate-seed",
   "ingress-evaluate-case",
 ] as const;
+const CANONICAL_WORKFLOW_TASK_TEXT =
+  "Explain how the canonical server workflow catalog injects SDL_MCP_SERVER_INSTRUCTIONS exactly once.";
+const INDEXED_SOURCE_TASK_TEXT =
+  "Explain why file.read refuses indexed TypeScript source and routes the request through the indexed source file gateway.";
 const DB_PATH = join(
   tmpdir(),
   `.lbug-context-seeding-runtime-${process.pid}.lbug`,
@@ -72,6 +80,29 @@ function ingressTask(
       ...(focusPaths ? { focusPaths } : {}),
     },
   };
+}
+
+function broadDefaultTask(taskText: string): AgentTask {
+  return {
+    repoId: REPO_ID,
+    taskType: "explain",
+    taskText,
+    options: {
+      contextMode: "broad",
+      includeRetrievalEvidence: true,
+    },
+  };
+}
+
+function runtimeSeedCandidates(
+  symbolIds: readonly string[],
+): ContextSeedCandidate[] {
+  return symbolIds.map((symbolId, sourceRank) => ({
+    contextRef: `symbol:${symbolId}`,
+    source: "lexical",
+    score: sourceRank === 0 ? 1 : 0.2,
+    sourceRank,
+  }));
 }
 
 describe("context seeding runtime lanes", () => {
@@ -185,6 +216,11 @@ describe("context seeding runtime lanes", () => {
       ["file-ingress-script", "scripts/evaluate-seed-resolution.ts"],
       ["file-ingress-explicit", "src/explicit-focus.ts"],
       ["file-ingress-global", "src/global-distractors.ts"],
+      ["file-live-instructions", "src/mcp/server-instructions.ts"],
+      ["file-live-file-read", "src/mcp/tools/file-read.ts"],
+      ["file-live-indexer", "src/indexer/index.ts"],
+      ["file-live-scip", "src/indexer/scip/provider.ts"],
+      ["file-live-native", "native/src/lib.rs"],
     ] as const;
     for (const [fileId, relPath] of ingressFiles) {
       await queries.upsertFile(conn, {
@@ -268,6 +304,17 @@ describe("context seeding runtime lanes", () => {
       ["ingress-signal", "file-ingress-server", "variable", "signal", "Abort signal for safe tool execution."],
       ["ingress-tool-handler", "file-ingress-descriptors", "class", "ToolHandler", "Handler contract for registered MCP tools."],
       ["ingress-tool-descriptor", "file-ingress-descriptors", "class", "ToolDescriptor", "Descriptor contract for registered MCP tools."],
+      ["live-workflow-anchor", "file-live-instructions", "function", "buildCanonicalServerWorkflowCatalog", "Build the canonical server workflow catalog."],
+      ["live-workflow-instructions", "file-live-instructions", "variable", "SDL_MCP_SERVER_INSTRUCTIONS", "Canonical server workflow instructions exposed exactly once."],
+      ["live-workflow-feedback-noise", "file-ingress-global", "class", "AgentFeedbackQueryResponse", "Unrelated feedback response."],
+      ["live-workflow-validation-noise", "file-ingress-global", "function", "validateExactlyOneMode", "Unrelated mode validator."],
+      ["live-workflow-forward-noise", "file-ingress-global", "class", "ForwardDefinition", "Unrelated native definition."],
+      ["live-indexed-check", "file-live-file-read", "function", "isIndexedSource", "Check whether a requested source file is indexed."],
+      ["live-indexed-gateway", "file-live-file-read", "function", "handleFileGateway", "Handle guarded file gateway requests."],
+      ["live-indexed-fit", "file-live-file-read", "function", "assertFullFileSourceFitsExtractionLimit", "Reject oversized full source extraction."],
+      ["live-indexed-indexer-noise", "file-live-indexer", "function", "readSourceFileList", "Read indexer source file candidates."],
+      ["live-indexed-scip-noise", "file-live-scip", "class", "TypeScriptScipProvider", "Provide TypeScript SCIP symbols."],
+      ["live-indexed-native-noise", "file-live-native", "class", "NativeTypeScriptIndexer", "Index TypeScript through the native provider."],
     ] as const;
     for (let index = 0; index < ingressTargets.length; index++) {
       const [symbolId, fileId, kind, name, summary] = ingressTargets[index];
@@ -540,6 +587,105 @@ describe("context seeding runtime lanes", () => {
   });
 
 
+
+  it("keeps the canonical workflow constant in the top broad-default evidence", async () => {
+    const probeTask = broadDefaultTask(CANONICAL_WORKFLOW_TASK_TEXT);
+    const candidates = runtimeSeedCandidates([
+      "live-workflow-anchor",
+      "live-workflow-feedback-noise",
+      "live-workflow-validation-noise",
+      "live-workflow-forward-noise",
+    ]);
+    const execute = async () =>
+      new ExecutorClass().execute(
+        probeTask,
+        ["card"],
+        candidates.map(({ contextRef }) => contextRef),
+        candidates,
+      );
+
+    const first = (await execute()).evidence
+      .filter(({ type }) => type === "symbolCard")
+      .map(({ reference, summary }) => ({ reference, summary }));
+    const targetIndex = first.findIndex(
+      ({ reference }) => reference === "symbol:live-workflow-instructions",
+    );
+
+    assert.ok(targetIndex >= 0 && targetIndex < 3, JSON.stringify(first));
+    assert.match(
+      first[targetIndex].summary,
+      /\bsrc\/mcp\/server-instructions\.ts\b/,
+    );
+    const repeated = (await execute()).evidence
+      .filter(({ type }) => type === "symbolCard")
+      .map(({ reference, summary }) => ({ reference, summary }));
+    assert.deepStrictEqual(repeated, first);
+  });
+
+  it("keeps indexed-source guards ahead of broad-default provider noise", async () => {
+    const probeTask = broadDefaultTask(INDEXED_SOURCE_TASK_TEXT);
+    const noiseIds = [
+      "live-indexed-indexer-noise",
+      "live-indexed-scip-noise",
+      "live-indexed-native-noise",
+    ] as const;
+    // The live probe found both guards behind stronger provider/indexer seeds;
+    // inferred file focus must promote them without prompt-specific vocabulary.
+    const candidates: ContextSeedCandidate[] = [
+      ...runtimeSeedCandidates(noiseIds).map((candidate) => ({
+        ...candidate,
+        score: 0.6,
+      })),
+      {
+        contextRef: "symbol:live-indexed-check",
+        source: "lexical",
+        score: 0.3,
+        sourceRank: 4,
+      },
+      {
+        contextRef: "symbol:live-indexed-gateway",
+        source: "lexical",
+        score: 0.3,
+        sourceRank: 5,
+      },
+    ];
+    const execute = async () =>
+      new ExecutorClass().execute(
+        probeTask,
+        ["card"],
+        candidates.map(({ contextRef }) => contextRef),
+        candidates,
+      );
+
+    const first = (await execute()).evidence
+      .filter(({ type }) => type === "symbolCard")
+      .map(({ reference, summary }) => ({ reference, summary }));
+    const firstNoiseIndex = first.findIndex(({ reference }) =>
+      noiseIds.some((symbolId) => reference === `symbol:${symbolId}`),
+    );
+    const checkIndex = first.findIndex(
+      ({ reference }) => reference === "symbol:live-indexed-check",
+    );
+    const gatewayIndex = first.findIndex(
+      ({ reference }) => reference === "symbol:live-indexed-gateway",
+    );
+    const fileReadIndex = first.findIndex(({ summary }) =>
+      summary.includes("src/mcp/tools/file-read.ts"),
+    );
+
+    assert.ok(firstNoiseIndex >= 0, JSON.stringify(first));
+    assert.ok(checkIndex >= 0 && checkIndex < firstNoiseIndex, JSON.stringify(first));
+    assert.ok(
+      gatewayIndex >= 0 && gatewayIndex < firstNoiseIndex,
+      JSON.stringify(first),
+    );
+    assert.ok(fileReadIndex >= 0 && fileReadIndex < firstNoiseIndex);
+    assert.ok(checkIndex < 8 && gatewayIndex < 8, JSON.stringify(first));
+    const repeated = (await execute()).evidence
+      .filter(({ type }) => type === "symbolCard")
+      .map(({ reference, summary }) => ({ reference, summary }));
+    assert.deepStrictEqual(repeated, first);
+  });
 
   it("keeps explicit focus authoritative during scoped seeding", async () => {
     const result = await buildSeedContext(
