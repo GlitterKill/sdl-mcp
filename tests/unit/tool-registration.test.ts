@@ -325,7 +325,8 @@ describe("MCP tool registration", () => {
       string,
       Record<string, unknown>
     >;
-    const variants = retrieveProperties.args.oneOf as Array<
+    assert.ok(!("oneOf" in retrieveProperties.args));
+    const variants = retrieveProperties.args.anyOf as Array<
       Record<string, unknown>
     >;
     assert.strictEqual(variants.length, 6);

@@ -60,7 +60,7 @@ export function buildRetrieveWireSchema(
       ...properties,
       args: {
         ...properties.args,
-        oneOf: variants,
+        anyOf: variants,
       },
     },
   });

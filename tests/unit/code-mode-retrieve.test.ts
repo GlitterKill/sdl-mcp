@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { ValidationError } from "../../dist/domain/errors.js";
+import { createActionMap } from "../../dist/gateway/router.js";
 import { SliceBuildRequestSchema } from "../../dist/mcp/tools.js";
 
 import {
@@ -9,6 +10,7 @@ import {
   registerCodeModeTools,
 } from "../../dist/code-mode/index.js";
 import {
+  buildRetrieveWireSchema,
   handleRetrieve,
   RETRIEVE_ACTION_BY_OP,
   RetrieveRequestSchema,
@@ -35,6 +37,43 @@ describe("sdl.retrieve", () => {
       codeSkeleton: "code.getSkeleton",
       codeHotPath: "code.getHotPath",
       codeNeedWindow: "code.needWindow",
+    });
+  });
+
+  it("publishes ordered any-of variants that accept representative args", () => {
+    const actionMap = createActionMap(undefined, undefined);
+    const schema = buildRetrieveWireSchema(actionMap);
+    const properties = schema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const argsSchema = properties.args;
+    assert.ok(!("oneOf" in argsSchema));
+    const variants = argsSchema.anyOf as Array<Record<string, unknown>>;
+    const cases = [
+      ["symbolSearch", { query: "executeWorkflow" }],
+      ["symbolGetCard", { symbolId: "sym" }],
+      ["sliceBuild", { taskText: "debug foo" }],
+      ["codeSkeleton", { file: "src/main.ts" }],
+      ["codeHotPath", { symbolId: "sym", identifiersToFind: ["foo"] }],
+      [
+        "codeNeedWindow",
+        {
+          symbolId: "sym",
+          reason: "Need the exact branch.",
+          expectedLines: 20,
+          identifiersToFind: ["foo"],
+        },
+      ],
+    ] as const;
+
+    assert.strictEqual(variants.length, cases.length);
+    cases.forEach(([op, args], index) => {
+      assert.strictEqual(variants[index]?.title, op);
+      const action = actionMap[RETRIEVE_ACTION_BY_OP[op]];
+      assert.ok(action);
+      const result = action.schema.safeParse({ repoId: "repo", ...args });
+      assert.equal(result.success, true, `${op} args must match its variant`);
     });
   });
 
