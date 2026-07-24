@@ -837,6 +837,18 @@ function resolveVariableSkeletonBoundary(
     return node;
   }
 
+  const nameNode = declarator.childForFieldName("name");
+  // Initializer identifiers can be separate definitions, such as a named
+  // function expression, and must not inherit the variable's declaration.
+  if (
+    node !== declarator &&
+    (!nameNode ||
+      node.startIndex < nameNode.startIndex ||
+      node.endIndex > nameNode.endIndex)
+  ) {
+    return node;
+  }
+
   const declaration = declarator.parent;
   if (
     declaration?.type !== "lexical_declaration" &&

@@ -71,6 +71,7 @@ export function buildContinuationFixture(input: number): string {
 
 export const exportedSingle = makeSingle();
 export const first = makeFirst(), second = makeSecond();
+export const outer = function inner() {};
     `.trim();
   const repoId = `skeleton-range-${process.pid}`;
   const fileId = `${repoId}:functions`;
@@ -80,6 +81,7 @@ export const first = makeFirst(), second = makeSecond();
   const exportedSingleSymbolId = `${repoId}:exportedSingle`;
   const firstSymbolId = `${repoId}:first`;
   const secondSymbolId = `${repoId}:second`;
+  const innerSymbolId = `${repoId}:inner`;
   const calculateRange = { startLine: 1, startCol: 0, endLine: 5, endCol: 1 };
   const resultRange = { startLine: 2, startCol: 2, endLine: 2, endCol: 23 };
   const functionLines = functionFile.split("\n");
@@ -112,6 +114,7 @@ export const first = makeFirst(), second = makeSecond();
   const exportedSingleRange = identifierRange("exportedSingle");
   const firstRange = identifierRange("first");
   const secondRange = identifierRange("second");
+  const innerRange = identifierRange("inner");
   const fileRange = {
     startLine: 1,
     startCol: 0,
@@ -208,6 +211,7 @@ export enum Priority {
       { symbolId: exportedSingleSymbolId, name: "exportedSingle", kind: "variable", exported: true, range: exportedSingleRange },
       { symbolId: firstSymbolId, name: "first", kind: "variable", exported: true, range: firstRange },
       { symbolId: secondSymbolId, name: "second", kind: "variable", exported: true, range: secondRange },
+      { symbolId: innerSymbolId, name: "inner", kind: "function", exported: false, range: innerRange },
     ] as const) {
       await ladybugDb.upsertSymbol(conn, {
         symbolId: symbol.symbolId,
@@ -478,6 +482,20 @@ export enum Priority {
         assertExactOrderedRange(skeleton.actualRange, fixture.range);
         assertExactOrderedRange(ir.actualRange, fixture.range);
       }
+    });
+
+    it("does not expand a nested definition identifier to its containing variable", async () => {
+      const skeleton = await generateSymbolSkeleton(repoId, innerSymbolId);
+      const ir = await generateSkeletonIR(repoId, innerSymbolId);
+
+      assert.ok(skeleton);
+      assert.ok(ir);
+      for (const text of [skeleton.skeleton, ir.skeletonText]) {
+        assert.equal(text.trim(), "inner");
+        assert.ok(!text.includes("outer"), text);
+      }
+      assertExactOrderedRange(skeleton.actualRange, innerRange);
+      assertExactOrderedRange(ir.actualRange, innerRange);
     });
 
     it("keeps an exact ordered range for a one-line nonzero-column symbol and IR", async () => {
