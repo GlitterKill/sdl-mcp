@@ -718,14 +718,22 @@ describe("lifetime observability contract", () => {
     const map32 = clone(durableRootFixture);
     const map32Repository = map32.repositories[REPOSITORY_KEY];
     assert.ok(map32Repository?.sections.retrieval);
-    map32Repository.sections.retrieval.byMode = boundedCounterMap(32);
-    assert.equal(Object.keys(parseDurableLifetimeRoot(map32)
-      .repositories[REPOSITORY_KEY]?.sections.retrieval?.byMode ?? {}).length, 32);
+    map32Repository.sections.retrieval.byMode = {
+      ...boundedCounterMap(32),
+      __other__: 99,
+    };
+    const parsedMap32 = parseDurableLifetimeRoot(map32)
+      .repositories[REPOSITORY_KEY]?.sections.retrieval?.byMode ?? {};
+    assert.equal(Object.keys(parsedMap32).length, 33);
+    assert.equal(Object.keys(parsedMap32)[0], "__other__");
 
     const map33 = clone(durableRootFixture);
     const map33Repository = map33.repositories[REPOSITORY_KEY];
     assert.ok(map33Repository?.sections.retrieval);
-    map33Repository.sections.retrieval.byMode = boundedCounterMap(33);
+    map33Repository.sections.retrieval.byMode = {
+      ...boundedCounterMap(33),
+      __other__: 99,
+    };
     assert.throws(() => parseDurableLifetimeRoot(map33));
   });
 
@@ -744,14 +752,22 @@ describe("lifetime observability contract", () => {
         acceptedRepository.sections.latency.perTool = Object.fromEntries(
           Object.keys(boundedCounterMap(acceptedCount)).map((key) => [key, clone(value)]),
         );
+        acceptedRepository.sections.latency.perTool.__other__ = clone(value);
       } else {
         const value = acceptedRepository.sections.packed.byEncoder["k:a"];
         assert.ok(value);
         acceptedRepository.sections.packed.byEncoder = Object.fromEntries(
           Object.keys(boundedCounterMap(acceptedCount)).map((key) => [key, clone(value)]),
         );
+        acceptedRepository.sections.packed.byEncoder.__other__ = clone(value);
       }
-      assert.doesNotThrow(() => parseDurableLifetimeRoot(accepted));
+      const parsed = parseDurableLifetimeRoot(accepted)
+        .repositories[REPOSITORY_KEY]?.sections;
+      const parsedMap = field === "perTool"
+        ? parsed?.latency?.perTool
+        : parsed?.packed?.byEncoder;
+      assert.equal(Object.keys(parsedMap ?? {}).length, 129);
+      assert.equal(Object.keys(parsedMap ?? {})[0], "__other__");
 
       const rejected = clone(accepted);
       const rejectedRepository = rejected.repositories[REPOSITORY_KEY];
@@ -868,7 +884,9 @@ describe("lifetime observability contract", () => {
         .repositories[REPOSITORY_KEY]?.sections.cache?.perSource.__other__?.hits,
       1,
     );
-    for (const invalidKey of ["plain", "k:", `k:${"a".repeat(65)}`, "k:has space"] ) {
+    for (const invalidKey of [
+      "plain", "__OTHER__", "__other__2", "k:", `k:${"a".repeat(65)}`, "k:has space",
+    ]) {
       const invalid = clone(durableRootFixture);
       const repository = invalid.repositories[REPOSITORY_KEY];
       assert.ok(repository?.sections.retrieval);

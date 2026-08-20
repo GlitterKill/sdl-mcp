@@ -376,7 +376,11 @@ const SampleTotalSchema = z.object({
 
 function orderedMap<T extends z.ZodType>(valueSchema: T, maximumKeys: number) {
   return z.record(DynamicMapKeySchema, valueSchema)
-    .refine((value) => Object.keys(value).length <= maximumKeys, "Too many map entries")
+    .refine((value) => {
+      const keys = Object.keys(value);
+      return keys.length <= maximumKeys + 1
+        && keys.filter((key) => key !== OVERFLOW_KEY).length <= maximumKeys;
+    }, "Too many map entries")
     .transform((value) => {
       const ordered: Record<string, z.output<T>> = {};
       for (const key of Object.keys(value).sort()) {
