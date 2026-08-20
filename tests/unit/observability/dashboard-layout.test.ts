@@ -94,6 +94,7 @@ type DashboardHarness = {
     announce: (message: string) => void;
     isEditMode: () => boolean;
     visibilityTarget: FakeEventTarget;
+    windowTarget: FakeEventTarget;
   }): { cancel: () => void };
 };
 
@@ -195,6 +196,7 @@ function makeKeyboardFixture(
   const harness = loadDashboardHarness();
   const panel = new FakeEventTarget();
   const visibilityTarget = new FakeEventTarget();
+  const windowTarget = new FakeEventTarget();
   const announcements: string[] = [];
   const applied: Rect[] = [];
   let layout = structuredClone(initial);
@@ -210,10 +212,12 @@ function makeKeyboardFixture(
     announce: (message) => announcements.push(message),
     isEditMode: () => editMode,
     visibilityTarget,
+    windowTarget,
   });
   return {
     panel,
     visibilityTarget,
+    windowTarget,
     announcements,
     applied,
     storage,
@@ -698,6 +702,51 @@ describe("dashboard layout geometry", () => {
     });
     assert.equal(bubbledRelease.defaultPrevented, true);
     assert.deepEqual(fixture.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
+  });
+
+  it("quarantines orphan repeats after cancellation until release without blocking a fresh press", () => {
+    const fixture = makeKeyboardFixture({
+      panel: { col: 1, row: 24, cols: 4, rows: 2 },
+    });
+    fixture.panel.dispatch("keydown", { key: "ArrowDown" });
+    assert.equal(fixture.layout().panel.row, 25);
+    fixture.panel.dispatch("keydown", { key: "Escape" });
+    assert.equal(fixture.layout().panel.row, 24);
+
+    const orphanRepeat = fixture.panel.dispatch("keydown", {
+      key: "ArrowDown",
+      repeat: true,
+    });
+    assert.equal(orphanRepeat.defaultPrevented, false);
+    assert.equal(fixture.layout().panel.row, 24);
+    fixture.panel.dispatch("keyup", { key: "ArrowDown" });
+    assert.deepEqual(fixture.storage.calls, []);
+    assert.deepEqual(fixture.announcements, []);
+
+    fixture.panel.dispatch("keydown", { key: "ArrowDown" });
+    fixture.panel.dispatch("keyup", { key: "ArrowDown" });
+    assert.equal(fixture.layout().panel.row, 25);
+    assert.deepEqual(fixture.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
+
+    const freshPress = makeKeyboardFixture();
+    freshPress.panel.dispatch("keydown", { key: "ArrowDown" });
+    freshPress.panel.dispatch("keydown", { key: "Escape" });
+    freshPress.panel.dispatch("keydown", { key: "ArrowDown", repeat: false });
+    assert.equal(freshPress.layout().panel.row, 2);
+    freshPress.panel.dispatch("keyup", { key: "ArrowDown" });
+    assert.deepEqual(freshPress.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
+  });
+
+  it("routes window blur through cancellation and ignores the later held-key release", () => {
+    const fixture = makeKeyboardFixture();
+    fixture.panel.dispatch("keydown", { key: "ArrowDown" });
+    assert.equal(fixture.layout().panel.row, 2);
+
+    fixture.windowTarget.dispatch("blur");
+    assert.equal(fixture.layout().panel.row, 1);
+    fixture.panel.dispatch("keyup", { key: "ArrowDown" });
+    assert.deepEqual(fixture.storage.calls, []);
+    assert.deepEqual(fixture.announcements, []);
   });
 
   it("cancels the active transaction identically on Escape, blur, visibility loss, or edit exit", () => {

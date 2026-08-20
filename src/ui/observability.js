@@ -1071,8 +1071,11 @@ function installKeyboardLayoutTransactions({
   announce,
   isEditMode,
   visibilityTarget,
+  windowTarget,
 }) {
   let active = null;
+  // A cancelled physical key can keep auto-repeating until its keyup arrives.
+  const cancelledHeld = new Set();
 
   const sameRect = (left, right) =>
     left.col === right.col &&
@@ -1090,6 +1093,7 @@ function installKeyboardLayoutTransactions({
     if (!active) return;
     const cancelled = active;
     active = null;
+    for (const key of cancelled.held) cancelledHeld.add(key);
     cancelled.held.clear();
     restoreOrigin(cancelled);
   };
@@ -1130,6 +1134,10 @@ function installKeyboardLayoutTransactions({
       }
       const delta = arrowDelta(event.key);
       if (!delta || !isEditMode()) return;
+      if (cancelledHeld.has(event.key)) {
+        if (event.repeat) return;
+        cancelledHeld.delete(event.key);
+      }
       event.preventDefault();
       if (active && active.panel !== entry.panel) cancel();
       if (!active) {
@@ -1149,7 +1157,9 @@ function installKeyboardLayoutTransactions({
 
     entry.panel.addEventListener("keyup", (event) => {
       const delta = arrowDelta(event.key);
-      if (!delta || !isEditMode() || active?.panel !== entry.panel) return;
+      if (!delta) return;
+      if (cancelledHeld.delete(event.key)) return;
+      if (!isEditMode() || active?.panel !== entry.panel) return;
       event.preventDefault();
       if (!active.held.delete(event.key) || active.held.size !== 0) return;
       commit();
@@ -1160,6 +1170,7 @@ function installKeyboardLayoutTransactions({
   visibilityTarget.addEventListener("visibilitychange", () => {
     if (visibilityTarget.visibilityState !== "visible") cancel();
   });
+  windowTarget.addEventListener("blur", cancel);
   return { cancel };
 }
 
@@ -1261,6 +1272,7 @@ function initDashboardLayoutEditor() {
     },
     isEditMode: () => grid.dataset.layoutEdit === "true",
     visibilityTarget: document,
+    windowTarget: window,
   }));
 
   setEditMode(false);
