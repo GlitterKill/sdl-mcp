@@ -1243,7 +1243,7 @@ export class ObservabilityService implements ObservabilityTap {
 
   packedWire(event: PackedWireTapEvent): void {
     try {
-      // packedWire is process-global (no repoId) â€” fan out to every aggregator.
+      // Session snapshots fan out globally; lifetime attribution stays repo-scoped.
       for (const { aggregator } of this.aggregators.values()) {
         aggregator.recordPackedWire(event);
       }
@@ -1420,7 +1420,7 @@ export class ObservabilityService implements ObservabilityTap {
 
   postIndexSession(event: PostIndexSessionTapEvent): void {
     try {
-      // Post-index session ends are process-global (no repoId on the event).
+      // Session snapshots fan out globally; lifetime attribution stays repo-scoped.
       const rec = {
         durationMs: event.durationMs,
         timedOut: event.timedOut,
