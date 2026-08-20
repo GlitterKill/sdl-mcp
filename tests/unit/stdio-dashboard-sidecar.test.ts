@@ -266,7 +266,11 @@ test("stdio observability dashboard sidecar serves only observability routes", a
     });
     assert.equal(html.status, 200);
     assert.match(html.headers.get("content-type") ?? "", /text\/html/);
-    assert.match(await html.text(), /observability/i);
+    const htmlBody = await html.text();
+    assert.match(htmlBody, /observability/i);
+    assert.match(htmlBody, /id="layoutEditBtn"[^>]+aria-pressed="false"/);
+    assert.match(htmlBody, /id="layoutResetBtn"/);
+    assert.match(htmlBody, /id="layoutStatus"[^>]+aria-live="polite"/);
 
     const js = await fetch(`${baseUrl}/ui/observability.js`, {
       signal: AbortSignal.timeout(5_000),

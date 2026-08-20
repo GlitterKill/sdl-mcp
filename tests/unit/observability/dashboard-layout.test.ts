@@ -16,6 +16,7 @@ type Layout = Record<string, Rect>;
 
 const html = readFileSync("src/ui/observability.html", "utf8");
 const layoutSource = readFileSync("src/ui/observability-layout.js", "utf8");
+const dashboardSource = readFileSync("src/ui/observability.js", "utf8");
 const css = readFileSync("src/ui/observability.css", "utf8");
 const panelIds = [...html.matchAll(/data-panel="([^"]+)"/g)].map((match) => match[1]);
 
@@ -61,6 +62,50 @@ function assertValidLayout(layout: Layout): void {
 }
 
 describe("dashboard layout geometry", () => {
+  it("provides opt-in accessible layout editing structure", () => {
+    assert.match(
+      html,
+      /<button[^>]+id="layoutEditBtn"[^>]+aria-pressed="false"[^>]*>\s*EDIT LAYOUT\s*<\/button>/,
+    );
+    assert.match(html, /<button[^>]+id="layoutResetBtn"[^>]*>\s*RESET LAYOUT\s*<\/button>/);
+    assert.match(html, /id="layoutInstructions"/);
+    assert.match(html, /id="layoutStatus"[^>]+aria-live="polite"[^>]+aria-atomic="true"/);
+
+    assert.match(dashboardSource, /setAttribute\("aria-labelledby", heading\.id\)/);
+    assert.match(dashboardSource, /setAttribute\("aria-describedby", "layoutInstructions"\)/);
+    assert.match(dashboardSource, /panel\.tabIndex = 0/);
+    assert.match(dashboardSource, /panel\.removeAttribute\("tabindex"\)/);
+    assert.match(dashboardSource, /window\.confirm\("Reset dashboard panel layout\?"\)/);
+    assert.match(dashboardSource, /layoutResetBtn\.focus\(\)/);
+  });
+
+  it("uses a real accessible resize handle and hides editing in the mobile stack", () => {
+    assert.match(dashboardSource, /className = "panel-resize-grip"/);
+    assert.match(dashboardSource, /setAttribute\("aria-label", `Resize \$\{panelName\}`\)/);
+    assert.match(css, /\.panel-resize-grip\s*\{[\s\S]*?width:\s*(?:2[4-9]|[3-9]\d)px;[\s\S]*?height:\s*(?:2[4-9]|[3-9]\d)px;/);
+    assert.match(
+      css,
+      /@media \(max-width: 720px\)[\s\S]*?\.layout-controls,[\s\S]*?\.panel-resize-grip\s*\{[\s\S]*?display:\s*none;/,
+    );
+  });
+
+  it("loads layout v3 atomically through the shared geometry module", () => {
+    assert.match(dashboardSource, /import \{ migrateV2Layout, movePanel \} from "\.\/observability-layout\.js";/);
+    assert.match(dashboardSource, /sdl-observability-panel-layout-v3/);
+    assert.match(dashboardSource, /sdl-observability-panel-layout-v2/);
+    assert.doesNotMatch(dashboardSource, /const defaults = \{/);
+    assert.doesNotMatch(dashboardSource, /addEventListener\("pointerdown"/);
+    assert.match(
+      dashboardSource,
+      /if \(!isCompleteLayout\(migrated, panelIds\)\) return defaults;[\s\S]*?localStorage\.setItem\(LAYOUT_V3_KEY, JSON\.stringify\(migrated\)\)/,
+    );
+    assert.match(
+      dashboardSource,
+      /catch \{[\s\S]*?return defaults;[\s\S]*?\}/,
+    );
+    assert.match(dashboardSource, /for \(const panel of panels\) \{[\s\S]*?try \{/);
+  });
+
   it("registers the same complete panel set in HTML, JavaScript defaults, and CSS", () => {
     assert.deepEqual(idsFromDefaults(), panelIds);
     assert.deepEqual(idsFromCssFallbacks(), panelIds);

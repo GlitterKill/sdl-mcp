@@ -29,12 +29,25 @@
         <button id="systemToggleBtn" type="button" class="btn btn-ghost" aria-pressed="false">
           SYSTEM STATS
         </button>
+        <div class="layout-controls" role="group" aria-label="Panel layout controls">
+          <button id="layoutEditBtn" type="button" class="btn btn-ghost" aria-pressed="false">
+            EDIT LAYOUT
+          </button>
+          <button id="layoutResetBtn" type="button" class="btn btn-ghost">
+            RESET LAYOUT
+          </button>
+        </div>
         <div id="connStatus" class="conn-status" data-state="idle" aria-live="polite">
           <span class="conn-dot" aria-hidden="true"></span>
           <span class="conn-label">IDLE</span>
         </div>
       </nav>
     </header>
+
+    <p id="layoutInstructions" class="sr-only">
+      In edit mode, focus a panel to use its layout controls.
+    </p>
+    <div id="layoutStatus" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
     <main id="dashboard" class="grid dashboard-grid" data-system-visible="false">
       <section class="dashboard-hero" aria-labelledby="dashboardTitle">

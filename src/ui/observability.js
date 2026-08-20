@@ -2,6 +2,7 @@
 // Vanilla ES module — no bundler. Pulls live data via SSE with REST fallback.
 
 import { buildToolOutputViewModel } from "./observability-tool-output.js";
+import { migrateV2Layout, movePanel } from "./observability-layout.js";
 
 const state = {
   repoId: "sdl-mcp",
@@ -993,109 +994,135 @@ function bind() {
 function init() {
   readUrlParams();
   bind();
+  initDashboardLayoutEditor();
   setStatus("idle", "IDLE");
   // initial best-effort hydration; harmless if endpoints don't exist yet
   fetchSnapshot();
   connectStream();
 }
 
+const LAYOUT_V3_KEY = "sdl-observability-panel-layout-v3";
+const LAYOUT_V2_KEY = "sdl-observability-panel-layout-v2";
+
+function isCompleteLayout(candidate, panelIds) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return false;
+  }
+  const candidateIds = Object.keys(candidate);
+  if (
+    candidateIds.length !== panelIds.length ||
+    !panelIds.every((id) => Object.hasOwn(candidate, id))
+  ) {
+    return false;
+  }
+  // A no-op move delegates rectangle bounds and collision validation to the shared engine.
+  return panelIds.length > 0 && movePanel(candidate, panelIds[0], 0, 0) !== candidate;
+}
+
+function loadDashboardLayout(panelIds) {
+  const defaults = migrateV2Layout({}, panelIds);
+  const savedV3 = localStorage.getItem(LAYOUT_V3_KEY);
+  if (savedV3 !== null) {
+    try {
+      const parsed = JSON.parse(savedV3);
+      if (isCompleteLayout(parsed, panelIds)) return parsed;
+    } catch {
+      return defaults;
+    }
+  }
+
+  const savedV2 = localStorage.getItem(LAYOUT_V2_KEY);
+  if (savedV2 === null) return defaults;
+  try {
+    const migrated = migrateV2Layout(JSON.parse(savedV2), panelIds);
+    // Publish v3 only after every panel has passed the shared collision validator.
+    if (!isCompleteLayout(migrated, panelIds)) return defaults;
+    localStorage.setItem(LAYOUT_V3_KEY, JSON.stringify(migrated));
+    return migrated;
+  } catch {
+    return defaults;
+  }
+}
+
+function initDashboardLayoutEditor() {
+  const grid = document.querySelector("#dashboard.dashboard-grid");
+  const layoutEditBtn = document.querySelector("#layoutEditBtn");
+  const layoutResetBtn = document.querySelector("#layoutResetBtn");
+  const layoutStatus = document.querySelector("#layoutStatus");
+  if (!grid || !layoutEditBtn || !layoutResetBtn) return;
+
+  const panels = Array.from(grid.querySelectorAll(":scope > .panel[data-panel]"));
+  const panelIds = panels.map((panel) => panel.dataset.panel);
+  const mobile = window.matchMedia("(max-width: 720px)");
+  const defaults = migrateV2Layout({}, panelIds);
+  let layout = loadDashboardLayout(panelIds);
+
+  const applyPanelRect = (panel, rect) => {
+    panel.style.setProperty("--panel-col", String(rect.col));
+    panel.style.setProperty("--panel-row", String(rect.row));
+    panel.style.setProperty("--panel-cols", String(rect.cols));
+    panel.style.setProperty("--panel-rows", String(rect.rows));
+  };
+
+  const setEditMode = (requested) => {
+    const enabled = requested && !mobile.matches;
+    grid.dataset.layoutEdit = String(enabled);
+    layoutEditBtn.setAttribute("aria-pressed", String(enabled));
+    for (const panel of panels) {
+      if (enabled) panel.tabIndex = 0;
+      else panel.removeAttribute("tabindex");
+      const resizeGrip = panel.querySelector(":scope > .panel-resize-grip");
+      if (resizeGrip) resizeGrip.hidden = !enabled;
+    }
+  };
+
+  layoutEditBtn.addEventListener("click", () => {
+    setEditMode(layoutEditBtn.getAttribute("aria-pressed") !== "true");
+  });
+
+  layoutResetBtn.addEventListener("click", () => {
+    if (!window.confirm("Reset dashboard panel layout?")) return;
+    try {
+      layout = defaults;
+      for (const panel of panels) applyPanelRect(panel, layout[panel.dataset.panel]);
+      localStorage.setItem(LAYOUT_V3_KEY, JSON.stringify(layout));
+      if (layoutStatus) layoutStatus.textContent = "Panel layout reset.";
+    } finally {
+      layoutResetBtn.focus();
+    }
+  });
+
+  mobile.addEventListener("change", () => setEditMode(false));
+
+  for (const panel of panels) {
+    try {
+      const heading = panel.querySelector(":scope > .panel-head h2");
+      if (!heading) continue;
+      const panelName = heading.textContent.trim();
+      heading.id ||= `panel-${panel.dataset.panel}-title`;
+      panel.removeAttribute("aria-label");
+      panel.setAttribute("aria-labelledby", heading.id);
+      panel.setAttribute("aria-describedby", "layoutInstructions");
+      applyPanelRect(panel, layout[panel.dataset.panel]);
+
+      const resizeGrip = document.createElement("button");
+      resizeGrip.type = "button";
+      resizeGrip.className = "panel-resize-grip";
+      resizeGrip.tabIndex = -1;
+      resizeGrip.hidden = true;
+      resizeGrip.setAttribute("aria-label", `Resize ${panelName}`);
+      resizeGrip.setAttribute("aria-describedby", "layoutInstructions");
+      panel.append(resizeGrip);
+    } catch {
+      panel.removeAttribute("tabindex");
+    }
+  }
+
+  setEditMode(false);
+}
+
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
 } else {
   init();
-}
-
-initDashboardLayoutEditor();
-
-function initDashboardLayoutEditor() {
-  const grid = document.querySelector("#dashboard.dashboard-grid");
-  if (!grid) return;
-  const defaults = {
-    bottleneck: [1, 2, 6, 2], health: [7, 2, 3, 2], latency: [10, 2, 3, 2],
-    tokenEfficiency: [1, 4, 6, 2], retrieval: [7, 4, 3, 2], cache: [10, 4, 3, 2],
-    predictiveContext: [1, 6, 4, 2], beam: [5, 6, 4, 2], indexing: [9, 6, 4, 2],
-    ppr: [1, 8, 4, 2], scip: [5, 8, 4, 2], postIndex: [9, 8, 4, 2],
-    toolVolume: [1, 10, 6, 2], resources: [7, 10, 6, 2],
-  };
-  const storageKey = "sdl-observability-panel-layout-v2";
-  const mobile = window.matchMedia("(max-width: 720px)");
-  const panels = new Map(Array.from(grid.querySelectorAll(":scope > .panel[data-panel]")).map((panel) => [panel.dataset.panel, panel]));
-  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-  const item = (id, value) => {
-    const base = defaults[id];
-    const source = value || { col: base[0], row: base[1], cols: base[2], rows: base[3] };
-    const cols = clamp(Math.round(Number(source.cols) || base[2]), 2, 12);
-    const rows = clamp(Math.round(Number(source.rows) || base[3]), 1, 4);
-    return {
-      col: clamp(Math.round(Number(source.col) || base[0]), 1, 13 - cols),
-      row: clamp(Math.round(Number(source.row) || base[1]), 2, 24),
-      cols,
-      rows,
-    };
-  };
-
-  function loadLayout() {
-    let saved = {};
-    try { saved = JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { saved = {}; }
-    return Object.fromEntries(Object.keys(defaults).map((id) => [id, item(id, saved[id])]));
-  }
-
-  let layout = loadLayout();
-  const applyLayout = () => {
-    for (const [id, panel] of panels) {
-      const next = layout[id];
-      panel.style.setProperty("--panel-col", String(next.col));
-      panel.style.setProperty("--panel-row", String(next.row));
-      panel.style.setProperty("--panel-cols", String(next.cols));
-      panel.style.setProperty("--panel-rows", String(next.rows));
-    }
-  };
-  const cellMetrics = () => {
-    const styles = getComputedStyle(grid);
-    const gap = parseFloat(styles.columnGap) || 0;
-    return { col: (grid.clientWidth + gap) / 12, row: parseFloat(styles.gridAutoRows) || 112 };
-  };
-  grid.dataset.layoutEdit = mobile.matches ? "false" : "true";
-  applyLayout();
-  const start = (event, id, mode) => {
-    if (mobile.matches || event.button !== 0) return;
-    const panel = panels.get(id);
-    const metrics = cellMetrics();
-    const origin = { x: event.clientX, y: event.clientY, value: { ...layout[id] } };
-    let lastGood = { ...origin.value };
-    event.preventDefault();
-    panel.setPointerCapture?.(event.pointerId);
-    panel.classList.add(mode === "move" ? "is-moving" : "is-resizing");
-    document.body.classList.add("layout-interacting");
-    const move = (moveEvent) => {
-      moveEvent.preventDefault();
-      const dc = Math.round((moveEvent.clientX - origin.x) / metrics.col);
-      const dr = Math.round((moveEvent.clientY - origin.y) / metrics.row);
-      const next = mode === "move" ? item(id, { ...origin.value, col: origin.value.col + dc, row: origin.value.row + dr }) : item(id, { ...origin.value, cols: origin.value.cols + dc, rows: origin.value.rows + dr });
-      lastGood = next; layout[id] = next; applyLayout();
-    };
-    const end = () => {
-      layout[id] = lastGood;
-      applyLayout();
-      localStorage.setItem(storageKey, JSON.stringify(layout));
-      panel.releasePointerCapture?.(event.pointerId);
-      panel.classList.remove("is-moving", "is-resizing", "is-layout-blocked");
-      document.body.classList.remove("layout-interacting");
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", end);
-      window.removeEventListener("pointercancel", end);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
-  };
-
-  grid.addEventListener("pointerdown", (event) => {
-    const panel = event.target.closest(".panel[data-panel]");
-    if (!panel || !grid.contains(panel)) return;
-    const rect = panel.getBoundingClientRect();
-    const resize = event.clientX > rect.right - 28 && event.clientY > rect.bottom - 28;
-    const move = Boolean(event.target.closest(".panel-head"));
-    if (resize || move) start(event, panel.dataset.panel, resize ? "resize" : "move");
-  });
 }
