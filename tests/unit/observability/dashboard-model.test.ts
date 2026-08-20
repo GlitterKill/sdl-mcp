@@ -18,7 +18,10 @@ import {
   DEFAULT_AGGREGATOR_OPTIONS,
 } from "../../../dist/observability/aggregator.js";
 import { emptyLifetimeSections } from "../../../dist/observability/lifetime-accumulator.js";
-import { SECTION_IDS } from "../../../dist/observability/lifetime-types.js";
+import {
+  parseLifetimeEnvelope,
+  SECTION_IDS,
+} from "../../../dist/observability/lifetime-types.js";
 
 const TYPES_PATH = "src/observability/types.ts";
 const GENERATED_AT = "2026-08-20T12:01:00.000Z";
@@ -497,6 +500,64 @@ test("session state keeps transport clocks and repositories independent", () => 
   );
 });
 
+test("session state preserves exact server timestamp ordering", () => {
+  const older = "2026-08-20T12:00:00.000000001Z";
+  const newer = "2026-08-20T12:00:00.000000999Z";
+  const parsedLifetime = parseLifetimeEnvelope({
+    schemaVersion: 1,
+    sampleIntervalMs: 2_000,
+    generatedAt: older,
+    repoId: "repo-a",
+    persistenceState: "recoveryRequired",
+    recoveryReason: "corruptCandidates",
+  });
+  assert.equal(parsedLifetime.generatedAt, older);
+
+  const input = {
+    sessionRepoId: "repo-a",
+    lifetimeRepoId: "repo-a",
+    monotonicNowMs: 20_000,
+    sessionReceivedAtMs: 20_000,
+    lifetimeReceivedAtMs: 20_000,
+    sessionGeneratedAt: newer,
+    lifetimeGeneratedAt: older,
+    freshnessAvailable: true,
+    sectionPresent: true,
+    lastEventAt: older,
+    sampleIntervalMs: 2_000,
+  };
+
+  assert.equal(sessionPanelState(input), "FRESHNESS UNAVAILABLE");
+  assert.equal(
+    sessionPanelState({ ...input, lifetimeGeneratedAt: newer }),
+    "LIVE",
+  );
+  assert.equal(
+    sessionPanelState({
+      ...input,
+      sessionGeneratedAt: older,
+      lifetimeGeneratedAt: newer,
+    }),
+    "LIVE",
+  );
+  assert.equal(
+    sessionPanelState({
+      ...input,
+      lifetimeGeneratedAt: "2026-08-20T07:00:00.000000999-05:00",
+    }),
+    "LIVE",
+  );
+  assert.equal(
+    sessionPanelState({
+      ...input,
+      sessionGeneratedAt: older,
+      lifetimeGeneratedAt: newer,
+      lastEventAt: "2026-08-20T11:59:00.000000998Z",
+    }),
+    "IDLE",
+  );
+});
+
 test("session state applies exact no-data and activity boundaries", () => {
   const input = {
     sessionRepoId: "repo-a",
@@ -552,6 +613,14 @@ test("session state fails closed for hostile time values", () => {
       ...input,
       sessionReceivedAtMs: 20_000,
       lifetimeGeneratedAt: "2026-02-30T12:01:00.000Z",
+    }),
+    "FRESHNESS UNAVAILABLE",
+  );
+  assert.equal(
+    sessionPanelState({
+      ...input,
+      sessionReceivedAtMs: 20_000,
+      lifetimeGeneratedAt: "2026-08-20T12:01:00.1234567890Z",
     }),
     "FRESHNESS UNAVAILABLE",
   );

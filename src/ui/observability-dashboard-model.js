@@ -378,7 +378,8 @@ export function stableArrayRows(rows, key) {
 }
 
 const ISO_TIMESTAMP =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-](\d{2}):(\d{2}))$/;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
 
 function timestamp(value) {
   if (typeof value !== "string") return null;
@@ -390,8 +391,8 @@ function timestamp(value) {
   const hour = Number(match[4]);
   const minute = Number(match[5]);
   const second = Number(match[6]);
-  const offsetHour = match[7] === undefined ? 0 : Number(match[7]);
-  const offsetMinute = match[8] === undefined ? 0 : Number(match[8]);
+  const offsetHour = match[9] === undefined ? 0 : Number(match[9]);
+  const offsetMinute = match[10] === undefined ? 0 : Number(match[10]);
   const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   if (
@@ -400,8 +401,22 @@ function timestamp(value) {
     hour > 23 || minute > 59 || second > 59 ||
     offsetHour > 23 || offsetMinute > 59
   ) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  const fraction = (match[7] ?? "").padEnd(9, "0");
+  const parsed = Date.parse(
+    `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}.${fraction.slice(0, 3)}${match[8]}`,
+  );
+  return Number.isFinite(parsed)
+    ? BigInt(parsed) * NANOSECONDS_PER_MILLISECOND + BigInt(fraction.slice(3))
+    : null;
+}
+
+function withinAge(later, earlier, maximumAgeMs) {
+  return later - earlier <= BigInt(maximumAgeMs) * NANOSECONDS_PER_MILLISECOND;
+}
+
+function ageMilliseconds(later, earlier) {
+  const age = later - earlier;
+  return age <= 0n ? 0 : Number(age / NANOSECONDS_PER_MILLISECOND);
 }
 
 function validInterval(value) {
@@ -745,7 +760,7 @@ export function sessionPanelState(input) {
   if (input.sectionPresent !== true || input.lastEventAt === null) return "NO DATA";
   const lastEventAt = timestamp(input.lastEventAt);
   if (lastEventAt === null) return "FRESHNESS UNAVAILABLE";
-  return Math.max(0, lifetimeGeneratedAt - lastEventAt) <= 60_000 ? "LIVE" : "IDLE";
+  return withinAge(lifetimeGeneratedAt, lastEventAt, 60_000) ? "LIVE" : "IDLE";
 }
 
 function presentation(state, sections, processPeaks, checkpointAgeMs, warning) {
@@ -790,7 +805,7 @@ export function lifetimePresentation(envelope, transportAgeMs) {
   const generatedAt = timestamp(envelope.generatedAt);
   const lastCheckpointAt = timestamp(envelope.lastCheckpointAt);
   const checkpointAgeMs = generatedAt !== null && lastCheckpointAt !== null
-    ? Math.max(0, generatedAt - lastCheckpointAt)
+    ? ageMilliseconds(generatedAt, lastCheckpointAt)
     : null;
 
   if (envelope.persistenceState === "readOnly") {
