@@ -101,6 +101,9 @@ describe("lifetime store", () => {
     const writer = await openLifetimeStore({ directory, pid: 41 });
     assert.deepEqual(writer.state(), { mode: "writer", root: null, generation: null });
     assert.deepEqual(Object.keys(writer.state()), ["mode", "root", "generation"]);
+    const beforeWriterRefresh = await snapshotDirectory(directory);
+    assert.deepEqual(await writer.refreshReadOnly(), { status: "unchanged" });
+    assert.deepEqual(await snapshotDirectory(directory), beforeWriterRefresh);
 
     const secondary = await openLifetimeStore({
       directory,
@@ -362,16 +365,24 @@ describe("lifetime store", () => {
       pidExists: () => true,
     });
     assert.deepEqual(secondary.state(), { mode: "readOnly", root: root(0), generation: 0 });
+    assert.deepEqual(await secondary.refreshReadOnly(), { status: "unchanged" });
 
     assert.equal((await writer.checkpoint(root(1, ISO_2))).status, "committed");
     const before = await snapshotDirectory(directory);
-    await secondary.refreshReadOnly();
+    assert.deepEqual(await secondary.refreshReadOnly(), {
+      status: "refreshed",
+      root: root(1, ISO_2),
+      generation: 1,
+    });
     assert.deepEqual(secondary.state(), { mode: "readOnly", root: root(1, ISO_2), generation: 1 });
     assert.deepEqual(await snapshotDirectory(directory), before);
+    assert.deepEqual(await secondary.refreshReadOnly(), { status: "unchanged" });
 
     await writer.close();
     await writeFile(join(directory, PRIMARY), JSON.stringify(root(0)));
-    await secondary.refreshReadOnly();
+    assert.deepEqual(await secondary.refreshReadOnly(), { status: "unchanged" });
+    await unlink(join(directory, PRIMARY));
+    assert.deepEqual(await secondary.refreshReadOnly(), { status: "unchanged" });
     assert.deepEqual(secondary.state(), { mode: "readOnly", root: root(1, ISO_2), generation: 1 });
     await assert.rejects(secondary.reset(root(2, ISO_3)), /read-only/i);
     assert.equal(await missing(join(directory, LIFETIME_LOCK_FILENAME)), true);
@@ -383,28 +394,33 @@ describe("lifetime store", () => {
     const writer = await openLifetimeStore({ directory, pid: 49 });
     assert.equal((await writer.checkpoint(root(0))).status, "committed");
     const base = resolveLifetimeFileSystem();
-    let failRead = false;
+    let failureCode: "EIO" | "EMFILE" | null = null;
     const secondary = await openLifetimeStore({
       directory,
       pid: 50,
       pidExists: () => true,
       fs: {
         open: async (path, flags, mode) => {
-          if (failRead && String(path) === join(directory, PRIMARY)) {
-            throw Object.assign(new Error("transient read failure"), { code: "EIO" });
+          if (failureCode && String(path) === join(directory, PRIMARY)) {
+            throw Object.assign(new Error("transient read failure"), { code: failureCode });
           }
           return base.open(path, flags, mode);
         },
       },
     });
 
-    failRead = true;
-    await secondary.refreshReadOnly();
-    assert.deepEqual(secondary.state(), { mode: "readOnly", root: root(0), generation: 0 });
-    failRead = false;
+    for (const code of ["EIO", "EMFILE"] as const) {
+      failureCode = code;
+      assert.deepEqual(await secondary.refreshReadOnly(), { status: "ioFailure" }, code);
+      assert.deepEqual(secondary.state(), { mode: "readOnly", root: root(0), generation: 0 });
+    }
+    failureCode = null;
     await writeFile(join(directory, PRIMARY), "{\"schemaVersion\":1}");
     const before = await snapshotDirectory(directory);
-    await secondary.refreshReadOnly();
+    assert.deepEqual(await secondary.refreshReadOnly(), {
+      status: "recoveryRequired",
+      reason: "corruptCandidates",
+    });
     assert.deepEqual(secondary.state(), {
       mode: "recoveryRequired",
       root: root(0),
@@ -413,6 +429,36 @@ describe("lifetime store", () => {
     });
     assert.deepEqual(await snapshotDirectory(directory), before);
 
+    await secondary.close();
+    await writer.close();
+  });
+
+  it("reports unknown-schema recovery without mutating the read-only primary", async () => {
+    const directory = await temporaryDirectory();
+    const writer = await openLifetimeStore({ directory, pid: 65 });
+    assert.equal((await writer.checkpoint(root(0))).status, "committed");
+    const secondary = await openLifetimeStore({
+      directory,
+      pid: 66,
+      pidExists: () => true,
+    });
+    await writeFile(
+      join(directory, PRIMARY),
+      JSON.stringify({ schemaVersion: 2, generation: 9, opaque: "future" }),
+    );
+    const before = await snapshotDirectory(directory);
+
+    assert.deepEqual(await secondary.refreshReadOnly(), {
+      status: "recoveryRequired",
+      reason: "unknownSchema",
+    });
+    assert.deepEqual(secondary.state(), {
+      mode: "recoveryRequired",
+      root: root(0),
+      generation: 0,
+      reason: "unknownSchema",
+    });
+    assert.deepEqual(await snapshotDirectory(directory), before);
     await secondary.close();
     await writer.close();
   });

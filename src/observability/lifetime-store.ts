@@ -8,6 +8,7 @@ import {
   loadLifetimeGenerationReadOnly,
   publishLifetimeGeneration,
   recoverLifetimeGeneration,
+  type ReadOnlyLoadOutcome,
 } from "./lifetime-publication.js";
 import {
   parseDurableLifetimeRoot,
@@ -19,6 +20,18 @@ import type { LifetimeFileSystemOverrides } from "./lifetime-evidence.js";
 export type LifetimeFs = LifetimeFileSystemOverrides;
 export type PublishOutcome = Awaited<ReturnType<typeof publishLifetimeGeneration>>;
 type NonCommittedPublishOutcome = Exclude<PublishOutcome, { readonly status: "committed" }>;
+export type ReadOnlyRefreshOutcome =
+  | { readonly status: "unchanged" }
+  | {
+      readonly status: "refreshed";
+      readonly root: DurableLifetimeRoot;
+      readonly generation: number;
+    }
+  | Extract<
+      ReadOnlyLoadOutcome,
+      { readonly status: "ioFailure" }
+    >
+  | { readonly status: "recoveryRequired"; readonly reason: RecoveryReason };
 
 export class LifetimeStoreCloseError extends Error {
   readonly outcome: NonCommittedPublishOutcome;
@@ -48,7 +61,7 @@ export interface LifetimeStore {
   state(): StoreState;
   checkpoint(snapshot: DurableLifetimeRoot): Promise<PublishOutcome>;
   reset(snapshot: DurableLifetimeRoot): Promise<PublishOutcome>;
-  refreshReadOnly(): Promise<void>;
+  refreshReadOnly(): Promise<ReadOnlyRefreshOutcome>;
   close(finalSnapshot?: DurableLifetimeRoot): Promise<void>;
 }
 
@@ -240,18 +253,23 @@ export async function openLifetimeStore(
       return queuePublication(snapshot);
     },
 
-    refreshReadOnly(): Promise<void> {
+    refreshReadOnly(): Promise<ReadOnlyRefreshOutcome> {
       try {
         ensureOpen();
       } catch (error) {
         return Promise.reject(error);
       }
-      if (lease) return Promise.reject(new Error("Lifetime store is not read-only"));
+      if (lease) return Promise.resolve({ status: "unchanged" });
       if (currentState.mode === "recoveryRequired") {
-        return Promise.reject(new Error("Lifetime store recovery required"));
+        return Promise.resolve({
+          status: "recoveryRequired",
+          reason: currentState.reason,
+        });
       }
       return enqueue(async () => {
-        if (currentState.mode === "recoveryRequired") return;
+        if (currentState.mode === "recoveryRequired") {
+          return { status: "recoveryRequired", reason: currentState.reason } as const;
+        }
         const loaded = await loadLifetimeGenerationReadOnly(
           options.directory,
           { fileSystem: options.fs },
@@ -263,13 +281,20 @@ export async function openLifetimeStore(
             parseDurableLifetimeRoot(loaded.root),
             loaded.generation,
           );
+          return {
+            status: "refreshed",
+            root: loaded.root,
+            generation: loaded.generation,
+          } as const;
         } else if (loaded.status === "recoveryRequired") {
           currentState = recoveryState(
             currentState.root,
             currentState.generation,
             loaded.reason,
           );
+          return loaded;
         }
+        return loaded.status === "ioFailure" ? loaded : { status: "unchanged" };
       });
     },
 
