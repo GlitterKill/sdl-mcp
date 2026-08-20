@@ -115,6 +115,34 @@ describe("lifetime publication", () => {
     }
   });
 
+  it("publishes generation zero into an empty directory with full durability ordering", async () => {
+    const directory = await temporaryDirectory();
+    const stages: string[] = [];
+
+    const result = await publishLifetimeGeneration(directory, root(0), 0, {
+      fault: (stage) => { stages.push(stage); },
+    });
+
+    assert.deepEqual(result, { status: "committed", root: root(0), generation: 0 });
+    assert.equal(await generationAt(directory), 0);
+    assert.deepEqual(stages, [
+      "beforeTempCreate",
+      "tempWrite",
+      "tempSync",
+      "tempClose",
+      "tempReopen",
+      "tempValidation",
+      "afterTempValidation",
+      "backupDisposition",
+      "tempToPrimary",
+      "afterTempToPrimary",
+      "directoryFlush",
+      "finalPrimaryReopen",
+      "finalPrimaryRead",
+      "finalPrimaryValidation",
+    ]);
+  });
+
   it("rejects stale and oversized generations before replacing a valid primary", async () => {
     const directory = await temporaryDirectory();
     assert.equal((await publishLifetimeGeneration(directory, root(4), 0)).status, "committed");
@@ -447,12 +475,118 @@ describe("lifetime publication", () => {
       generation: 2,
     });
   });
+
+  it("keeps a committed primary valid when duplicate-backup cleanup fails before its move", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, BACKUP), serialized(root(0)));
+    const base = resolveLifetimeFileSystem();
+    let cleanupAttempted = false;
+
+    const result = await publishLifetimeGeneration(directory, root(0), 0, {
+      fileSystem: {
+        rename: async (source, target) => {
+          if (String(source) === join(directory, BACKUP) &&
+              basename(String(target)).startsWith("sdl-observability-lifetime.evidence.")) {
+            cleanupAttempted = true;
+            throw Object.assign(new Error("permanent pre-move cleanup failure"), { code: "EIO" });
+          }
+          await base.rename(source, target);
+        },
+      },
+    });
+
+    assert.equal(cleanupAttempted, true);
+    assert.deepEqual(result, {
+      status: "indeterminate",
+      reason: "publicationCommitUncertain",
+      stage: "commit",
+    });
+    assert.equal(await generationAt(directory), 0);
+    assert.equal(await generationAt(directory, BACKUP), 0);
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(0),
+      generation: 0,
+    });
+  });
+
+  it("keeps a committed primary valid when duplicate-backup claim cleanup fails after its move", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, BACKUP), serialized(root(0)));
+    const base = resolveLifetimeFileSystem();
+    let backupMoved = false;
+    let cleanupFailed = false;
+
+    const result = await publishLifetimeGeneration(directory, root(0), 0, {
+      fileSystem: {
+        rename: async (source, target) => {
+          await base.rename(source, target);
+          if (String(source) === join(directory, BACKUP) &&
+              basename(String(target)).startsWith("sdl-observability-lifetime.evidence.")) {
+            backupMoved = true;
+          }
+        },
+        unlink: async (path) => {
+          const name = basename(String(path));
+          if (backupMoved && (name.startsWith(".sdl-observability-lifetime.claim-source.") ||
+              name.startsWith(".sdl-observability-lifetime.claim-cleanup.") ||
+              name.startsWith(".sdl-observability-lifetime.claim-record."))) {
+            cleanupFailed = true;
+            throw Object.assign(new Error("permanent post-move cleanup failure"), { code: "EIO" });
+          }
+          await base.unlink(path);
+        },
+      },
+    });
+
+    assert.equal(backupMoved, true);
+    assert.equal(cleanupFailed, true);
+    assert.deepEqual(result, {
+      status: "indeterminate",
+      reason: "publicationCommitUncertain",
+      stage: "commit",
+    });
+    assert.equal(await generationAt(directory), 0);
+    assert.equal(await missing(join(directory, BACKUP)), true);
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(0),
+      generation: 0,
+    });
+  });
 });
 
 describe("lifetime recovery", () => {
   it("distinguishes an uninitialized directory from corrupt candidates", async () => {
     const directory = await temporaryDirectory();
     assert.deepEqual(await recoverLifetimeGeneration(directory), { status: "empty" });
+  });
+
+  it("recovers a backup-only generation zero into the canonical primary", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, BACKUP), serialized(root(0)));
+
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(0),
+      generation: 0,
+    });
+    assert.equal(await generationAt(directory), 0);
+  });
+
+  it("recovers a temp-only generation zero into the canonical primary", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, `${TEMP_PREFIX}${"0".repeat(32)}.json`),
+      serialized(root(0)),
+    );
+
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(0),
+      generation: 0,
+    });
+    assert.equal(await generationAt(directory), 0);
   });
 
   it("reports coded read failures as operational rather than corrupt", async () => {

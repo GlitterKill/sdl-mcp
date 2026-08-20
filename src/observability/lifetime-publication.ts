@@ -493,10 +493,6 @@ export async function publishLifetimeGeneration(
       }
       previousPrimary = primary.source;
     }
-    if (serialized.root.generation === currentCommittedGeneration) {
-      return { status: "notPublished", reason: "generationConflict" };
-    }
-
     await inject(options, "beforeTempCreate");
     const temp = await createTemp(trusted, fileSystem, options);
     tempPath = temp.path;
