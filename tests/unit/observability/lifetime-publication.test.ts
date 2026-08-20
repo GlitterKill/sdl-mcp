@@ -314,9 +314,244 @@ describe("lifetime publication", () => {
       }, cleanupName);
     }
   });
+
+  it("returns indeterminate when a valid pre-commit temp cannot be neutralized", async () => {
+    const directory = await temporaryDirectory();
+    assert.equal((await publishLifetimeGeneration(directory, root(1), 0)).status, "committed");
+    const base = resolveLifetimeFileSystem();
+    const result = await publishLifetimeGeneration(directory, root(2), 1, {
+      fault: (stage) => {
+        if (stage === "afterTempValidation") throw new Error("stop before commit");
+      },
+      fileSystem: {
+        rename: async (source, target) => {
+          if (basename(String(source)).startsWith(TEMP_PREFIX) &&
+              basename(String(target)).startsWith(".sdl-observability-lifetime.aux-delete.")) {
+            throw Object.assign(new Error("temp neutralization failed"), { code: "EIO" });
+          }
+          await base.rename(source, target);
+        },
+      },
+    });
+
+    assert.deepEqual(result, {
+      status: "indeterminate",
+      reason: "tempNeutralizationUncertain",
+      stage: "tempCleanup",
+    });
+    assert.equal((await readdir(directory)).some((name) => name.startsWith(TEMP_PREFIX)), true);
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(2),
+      generation: 2,
+    });
+  });
+
+  it("does not claim notPublished when claim cleanup and temp neutralization both fail", async () => {
+    const directory = await temporaryDirectory();
+    assert.equal((await publishLifetimeGeneration(directory, root(1), 0)).status, "committed");
+    const base = resolveLifetimeFileSystem();
+    let primaryMoved = false;
+    let claimCleanupFailed = false;
+    const result = await publishLifetimeGeneration(directory, root(2), 1, {
+      fileSystem: {
+        rename: async (source, target) => {
+          if (basename(String(source)).startsWith(TEMP_PREFIX) &&
+              basename(String(target)).startsWith(".sdl-observability-lifetime.aux-delete.")) {
+            throw Object.assign(new Error("temp remains recoverable"), { code: "EIO" });
+          }
+          await base.rename(source, target);
+          if (String(target) === join(directory, BACKUP)) primaryMoved = true;
+        },
+        unlink: async (path) => {
+          if (primaryMoved && !claimCleanupFailed &&
+              basename(String(path)).startsWith(".sdl-observability-lifetime.claim-source.")) {
+            claimCleanupFailed = true;
+            throw Object.assign(new Error("claim cleanup failed"), { code: "EIO" });
+          }
+          await base.unlink(path);
+        },
+      },
+    });
+
+    assert.equal(claimCleanupFailed, true);
+    assert.deepEqual(result, {
+      status: "indeterminate",
+      reason: "tempNeutralizationUncertain",
+      stage: "tempCleanup",
+    });
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(2),
+      generation: 2,
+    });
+  });
+
+  it("rejects a candidate older than an existing backup before mutation", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, PRIMARY), serialized(root(1)));
+    await writeFile(join(directory, BACKUP), serialized(root(3)));
+    const before = new Map<string, Buffer>();
+    for (const name of await readdir(directory)) before.set(name, await readFile(join(directory, name)));
+
+    assert.deepEqual(await publishLifetimeGeneration(directory, root(2), 1), {
+      status: "notPublished",
+      reason: "staleGeneration",
+    });
+    assert.deepEqual((await readdir(directory)).sort(), [...before.keys()].sort());
+    for (const [name, content] of before) {
+      assert.deepEqual(await readFile(join(directory, name)), content);
+    }
+  });
+
+  it("rejects equal-generation backup content conflicts before mutation", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, PRIMARY), serialized(root(1)));
+    await writeFile(join(directory, BACKUP), serialized(root(2, "2026-08-20T02:02:03.004Z")));
+    const before = await readFile(join(directory, BACKUP));
+
+    assert.deepEqual(await publishLifetimeGeneration(directory, root(2), 1), {
+      status: "notPublished",
+      reason: "generationConflict",
+    });
+    assert.deepEqual(await readFile(join(directory, BACKUP)), before);
+    assert.equal((await readdir(directory)).some((name) => name.startsWith(TEMP_PREFIX)), false);
+  });
+
+  it("makes an exact equal primary idempotent and rejects divergent equal content", async () => {
+    const directory = await temporaryDirectory();
+    const authoritative = root(2);
+    assert.equal((await publishLifetimeGeneration(directory, authoritative, 0)).status, "committed");
+    const beforeNames = (await readdir(directory)).sort();
+    const beforePrimary = await readFile(join(directory, PRIMARY));
+
+    assert.deepEqual(await publishLifetimeGeneration(directory, authoritative, 2), {
+      status: "committed",
+      root: authoritative,
+      generation: 2,
+    });
+    assert.deepEqual((await readdir(directory)).sort(), beforeNames);
+    assert.deepEqual(await readFile(join(directory, PRIMARY)), beforePrimary);
+
+    assert.deepEqual(
+      await publishLifetimeGeneration(
+        directory,
+        root(2, "2026-08-20T02:02:03.004Z"),
+        2,
+      ),
+      { status: "notPublished", reason: "generationConflict" },
+    );
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: authoritative,
+      generation: 2,
+    });
+  });
 });
 
 describe("lifetime recovery", () => {
+  it("distinguishes an uninitialized directory from corrupt candidates", async () => {
+    const directory = await temporaryDirectory();
+    assert.deepEqual(await recoverLifetimeGeneration(directory), { status: "empty" });
+  });
+
+  it("reports coded read failures as operational rather than corrupt", async () => {
+    for (const code of ["EIO", "EMFILE"] as const) {
+      const directory = await temporaryDirectory();
+      await writeFile(join(directory, PRIMARY), serialized(root(1)));
+      const base = resolveLifetimeFileSystem();
+      assert.deepEqual(await recoverLifetimeGeneration(directory, {
+        fileSystem: {
+          open: async (path, flags, mode) => {
+            if (String(path) === join(directory, PRIMARY)) {
+              throw Object.assign(new Error(code), { code });
+            }
+            return base.open(path, flags, mode);
+          },
+        },
+      }), { status: "ioFailure" }, code);
+    }
+  });
+
+  it("preserves a backup winner across every interrupted recovery stage", async () => {
+    const stages = [
+      "beforeTempCreate",
+      "tempWrite",
+      "tempSync",
+      "tempClose",
+      "tempReopen",
+      "tempValidation",
+      "afterTempValidation",
+      "backupDisposition",
+      "afterPrimaryToBackup",
+      "tempToPrimary",
+      "afterTempToPrimary",
+      "directoryFlush",
+      "finalPrimaryReopen",
+      "finalPrimaryRead",
+      "finalPrimaryValidation",
+    ] as const;
+
+    for (const stage of stages) {
+      const directory = await temporaryDirectory();
+      await writeFile(join(directory, PRIMARY), serialized(root(2)));
+      await writeFile(join(directory, BACKUP), serialized(root(3)));
+      const interrupted = await recoverLifetimeGeneration(directory, {
+        fault: (current) => {
+          if (current === stage) throw new Error(stage);
+        },
+      });
+      assert.notDeepEqual(interrupted, {
+        status: "recoveryRequired",
+        reason: "corruptCandidates",
+      }, stage);
+      assert.deepEqual(await recoverLifetimeGeneration(directory), {
+        status: "ready",
+        root: root(3),
+        generation: 3,
+      }, stage);
+    }
+  });
+
+  it("preserves a backup winner when lower-primary evidence claim cleanup fails", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, PRIMARY), serialized(root(2)));
+    await writeFile(join(directory, BACKUP), serialized(root(3)));
+    const base = resolveLifetimeFileSystem();
+    let primaryDispositionAttempted = false;
+    let failed = false;
+    const interrupted = await recoverLifetimeGeneration(directory, {
+      fileSystem: {
+        rename: async (source, target) => {
+          await base.rename(source, target);
+          if (String(source) === join(directory, PRIMARY) &&
+              basename(String(target)).startsWith("sdl-observability-lifetime.evidence.")) {
+            primaryDispositionAttempted = true;
+          }
+        },
+        unlink: async (path) => {
+          if (primaryDispositionAttempted && !failed &&
+              basename(String(path)).startsWith(".sdl-observability-lifetime.claim-source.")) {
+            failed = true;
+            throw Object.assign(new Error("claim cleanup failure"), { code: "EIO" });
+          }
+          await base.unlink(path);
+        },
+      },
+    });
+
+    assert.equal(failed, true);
+    assert.notDeepEqual(interrupted, {
+      status: "recoveryRequired",
+      reason: "corruptCandidates",
+    });
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(3),
+      generation: 3,
+    });
+  });
+
   it("selects the highest primary, backup, or bounded temp deterministically", async () => {
     const directory = await temporaryDirectory();
     await writeFile(join(directory, PRIMARY), serialized(root(2)), { mode: 0o600 });
