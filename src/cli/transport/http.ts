@@ -349,7 +349,13 @@ function lifetimeRouteError(res: ServerResponse, code: LifetimeRouteErrorCode): 
   json(res, detail.status, payload);
 }
 
-function requestedLifetimeRepoId(url: URL): string | null {
+function requestedLifetimeRepoId(url: URL, rawUrl: string): string | null {
+  const rawQuery = rawUrl.split("?", 2)[1] ?? "";
+  try {
+    decodeURIComponent(rawQuery.replace(/\+/g, "%20"));
+  } catch {
+    return null;
+  }
   const values = url.searchParams.getAll("repoId");
   if (values.length !== 1) return null;
   const repoId = values[0]?.trim() ?? "";
@@ -871,10 +877,10 @@ async function routeObservabilityApiRequest(
     && pathname === "/api/observability/lifetime"
   ) {
     if (!observabilityService) {
-      json(res, 503, { error: "observability_disabled" });
+      lifetimeRouteError(res, "persistence_failed");
       return true;
     }
-    const repoId = requestedLifetimeRepoId(url);
+    const repoId = requestedLifetimeRepoId(url, req.url ?? "");
     if (repoId === null) {
       lifetimeRouteError(res, "invalid_query");
       return true;
@@ -892,7 +898,7 @@ async function routeObservabilityApiRequest(
     && pathname === "/api/observability/lifetime/reset"
   ) {
     if (!observabilityService) {
-      json(res, 503, { error: "observability_disabled" });
+      lifetimeRouteError(res, "persistence_failed");
       return true;
     }
     if (req.headers["content-type"] !== "application/json") {
@@ -943,6 +949,14 @@ async function routeObservabilityApiRequest(
         lifetimeRouteError(res, "persistence_failed");
         return true;
       }
+      if (reset.persistenceState === "readOnly") {
+        lifetimeRouteError(res, "read_only");
+        return true;
+      }
+      if (reset.persistenceState === "capacityExceeded") {
+        lifetimeRouteError(res, "lifetime_capacity_exceeded");
+        return true;
+      }
       if (reset.resetAt === null || reset.lastCheckpointAt === null) {
         lifetimeRouteError(res, "persistence_failed");
         return true;
@@ -955,18 +969,25 @@ async function routeObservabilityApiRequest(
         lastCheckpointAt: reset.lastCheckpointAt,
         persistenceState: "ready",
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/indeterminate/i.test(message)) {
-        lifetimeRouteError(res, "persistence_indeterminate");
-      } else if (/read-only/i.test(message)) {
+    } catch {
+      let state: LifetimeEnvelopeV1;
+      try {
+        state = await observabilityService.getLifetime(request.repoId);
+      } catch {
+        lifetimeRouteError(res, "persistence_failed");
+        return true;
+      }
+      if (state.persistenceState === "recoveryRequired") {
+        lifetimeRouteError(
+          res,
+          state.recoveryReason === "indeterminatePublication"
+            ? "persistence_indeterminate"
+            : "recovery_required",
+        );
+      } else if (state.persistenceState === "readOnly") {
         lifetimeRouteError(res, "read_only");
-      } else if (/capacity exceeded/i.test(message)) {
+      } else if (state.persistenceState === "capacityExceeded") {
         lifetimeRouteError(res, "lifetime_capacity_exceeded");
-      } else if (/recovery required/i.test(message)) {
-        lifetimeRouteError(res, "recovery_required");
-      } else if (/not registered/i.test(message)) {
-        lifetimeRouteError(res, "repository_not_found");
       } else {
         lifetimeRouteError(res, "persistence_failed");
       }

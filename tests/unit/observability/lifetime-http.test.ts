@@ -5,7 +5,10 @@ import {
   setupObservabilityDashboardSidecar,
   type HttpTransportServices,
 } from "../../../dist/cli/transport/http.js";
+import { ObservabilityConfigSchema } from "../../../dist/config/types.js";
 import { emptyLifetimeSections } from "../../../dist/observability/lifetime-accumulator.js";
+import type { LifetimeStore } from "../../../dist/observability/lifetime-store.js";
+import { ObservabilityService } from "../../../dist/observability/service.js";
 import {
   SECTION_IDS,
   type LifetimeEnvelopeV1,
@@ -200,6 +203,7 @@ test("lifetime GET validates one registered repoId and awaits a closed envelope"
       "/api/observability/lifetime",
       "/api/observability/lifetime?repoId=",
       "/api/observability/lifetime?repoId=%20",
+      "/api/observability/lifetime?repoId=%",
       `/api/observability/lifetime?repoId=${"x".repeat(257)}`,
       "/api/observability/lifetime?repoId=repo-a&repoId=repo-a",
     ]) {
@@ -241,6 +245,40 @@ test("lifetime GET validates one registered repoId and awaits a closed envelope"
     ]);
     assert.deepEqual(responseBody, expected);
     assert.equal(calls, 1);
+  } finally {
+    await server.close();
+  }
+});
+
+test("disabled lifetime routes return the closed approved persistence error", async () => {
+  const server = await setupObservabilityDashboardSidecar(
+    0,
+    { isRegisteredRepoId: (repoId) => repoId === "repo-a" },
+    { enabled: true, token: "test-token" },
+    async () => true,
+  );
+  try {
+    const get = await request(server, "/api/observability/lifetime?repoId=repo-a");
+    assert.equal(get.status, 503);
+    assertRouteError(
+      await body(get),
+      "persistence_failed",
+      "Repository lifetime persistence failed.",
+      true,
+    );
+
+    const reset = await request(server, "/api/observability/lifetime/reset", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: "not-json",
+    });
+    assert.equal(reset.status, 503);
+    assertRouteError(
+      await body(reset),
+      "persistence_failed",
+      "Repository lifetime persistence failed.",
+      true,
+    );
   } finally {
     await server.close();
   }
@@ -397,8 +435,19 @@ test("lifetime reset maps repository and persistence outcomes without uncertain 
     resetLifetime: async (repoId) => {
       resetCalls.push(repoId);
       if (repoId === "not-published") return withEvent(ready(repoId, "degraded"));
-      if (repoId === "indeterminate") throw new Error("Lifetime reset indeterminate: after_replace");
+      if (repoId === "indeterminate") {
+        modes.set(repoId, {
+          schemaVersion: 1,
+          sampleIntervalMs: 2_000,
+          generatedAt: NOW,
+          repoId,
+          persistenceState: "recoveryRequired",
+          recoveryReason: "indeterminatePublication",
+        });
+        throw new Error("publication state unavailable");
+      }
       if (repoId === "failed") throw new Error("disk unavailable");
+      if (repoId === "read-only-filesystem") throw new Error("read-only filesystem");
       return {
         ...withEvent(ready(repoId)),
         epoch: 1,
@@ -410,6 +459,7 @@ test("lifetime reset maps repository and persistence outcomes without uncertain 
   const registered = new Set([
     "empty", "read-only", "capacity", "recovery", "ok",
     "not-published", "indeterminate", "failed",
+    "read-only-filesystem",
   ]);
   const server = await start(service, registered);
   const reset = (repoId: string) => request(
@@ -434,6 +484,7 @@ test("lifetime reset maps repository and persistence outcomes without uncertain 
       ["not-published", 503, "persistence_failed", "Repository lifetime persistence failed.", true],
       ["indeterminate", 503, "persistence_indeterminate", "Repository lifetime persistence is indeterminate.", false],
       ["failed", 503, "persistence_failed", "Repository lifetime persistence failed.", true],
+      ["read-only-filesystem", 503, "persistence_failed", "Repository lifetime persistence failed.", true],
     ] as const;
     for (const [repoId, status, code, message, retryable] of expectations) {
       const response = await reset(repoId);
@@ -460,6 +511,65 @@ test("lifetime reset maps repository and persistence outcomes without uncertain 
     });
   } finally {
     await server.close();
+  }
+});
+
+test("recovery reset performs zero store file operations", async () => {
+  let fileOperations = 0;
+  const store: LifetimeStore = {
+    state: () => ({
+      mode: "recoveryRequired",
+      reason: "corruptCandidates",
+      root: null,
+      generation: null,
+    }),
+    checkpoint: async () => {
+      fileOperations += 1;
+      return { status: "notPublished", reason: "ioFailure" };
+    },
+    reset: async () => {
+      fileOperations += 1;
+      return { status: "notPublished", reason: "ioFailure" };
+    },
+    refreshReadOnly: async () => {
+      fileOperations += 1;
+      return { status: "ioFailure" };
+    },
+    close: async () => {
+      fileOperations += 1;
+    },
+  };
+  const service = new ObservabilityService(
+    ObservabilityConfigSchema.parse({ sampleIntervalMs: 2_000 }),
+    {
+      lifetimeDirectory: "unused",
+      openLifetimeStore: async () => store,
+      isRegisteredRepoId: (repoId) => repoId === "repo-a",
+      scheduleInterval: () => ({ unref() {} }),
+      clearScheduledInterval: () => {},
+    },
+  );
+  await service.start();
+  const server = await start(service, new Set(["repo-a"]));
+  try {
+    const response = await request(server, "/api/observability/lifetime/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repoId: "repo-a",
+        confirmation: "RESET REPOSITORY LIFETIME: repo-a",
+      }),
+    });
+    assert.equal(response.status, 409);
+    assertRouteError(
+      await body(response),
+      "recovery_required",
+      "Repository lifetime recovery is required.",
+    );
+    assert.equal(fileOperations, 0);
+  } finally {
+    await server.close();
+    await service.stop();
   }
 });
 
