@@ -1095,6 +1095,7 @@ function mapContainer(
   root: DurableLifetimeRoot,
   repositoryKey: string,
   location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+  parentStorageKey?: string,
 ): { container: UnknownMap; field: string } {
   const repository = root.repositories[repositoryKey];
   assert.ok(repository);
@@ -1106,7 +1107,9 @@ function mapContainer(
 
   const perTool = section[field];
   assert.ok(isUnknownMap(perTool));
-  const toolKey = Object.keys(perTool).filter((key) => key !== OVERFLOW_KEY).sort()[0];
+  const toolKey = parentStorageKey
+    ?? Object.keys(perTool).filter((key) => key !== OVERFLOW_KEY).sort()[0]
+    ?? (Object.hasOwn(perTool, OVERFLOW_KEY) ? OVERFLOW_KEY : undefined);
   assert.ok(toolKey);
   const tool = perTool[toolKey];
   assert.ok(isUnknownMap(tool));
@@ -1117,8 +1120,9 @@ function dynamicMapAt(
   root: DurableLifetimeRoot,
   repositoryKey: string,
   location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+  parentStorageKey?: string,
 ): UnknownMap {
-  const { container, field } = mapContainer(root, repositoryKey, location);
+  const { container, field } = mapContainer(root, repositoryKey, location, parentStorageKey);
   const map = container[field];
   assert.ok(isUnknownMap(map));
   return map;
@@ -1129,6 +1133,7 @@ function replaceDynamicMap(
   repositoryKey: string,
   location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
   map: Readonly<UnknownMap>,
+  parentStorageKey?: string,
 ): DurableLifetimeRoot {
   const repository = root.repositories[repositoryKey];
   assert.ok(repository);
@@ -1142,7 +1147,9 @@ function replaceDynamicMap(
   } else {
     const perTool = section[field];
     assert.ok(isUnknownMap(perTool));
-    const toolKey = Object.keys(perTool).filter((key) => key !== OVERFLOW_KEY).sort()[0];
+    const toolKey = parentStorageKey
+      ?? Object.keys(perTool).filter((key) => key !== OVERFLOW_KEY).sort()[0]
+      ?? (Object.hasOwn(perTool, OVERFLOW_KEY) ? OVERFLOW_KEY : undefined);
     assert.ok(toolKey);
     const tool = perTool[toolKey];
     assert.ok(isUnknownMap(tool));
@@ -1170,8 +1177,9 @@ function firstMapValue(
   root: DurableLifetimeRoot,
   repositoryKey: string,
   location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+  parentStorageKey?: string,
 ): unknown {
-  const map = dynamicMapAt(root, repositoryKey, location);
+  const map = dynamicMapAt(root, repositoryKey, location, parentStorageKey);
   const key = Object.keys(map).filter((candidate) => candidate !== OVERFLOW_KEY).sort()[0]
     ?? Object.keys(map)[0];
   assert.ok(key);
@@ -1184,11 +1192,23 @@ function admitAtLocation(
   location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
   rawIdentifier: string,
   incoming: unknown,
+  parentStorageKey?: string,
 ) {
+  const target = location === "toolOutput.perTool.detailCounts"
+    || location === "toolOutput.perTool.profileCounts"
+    ? {
+        location,
+        parentStorageKey: parentStorageKey
+          ?? Object.keys(dynamicMapAt(root, repositoryKey, "toolOutput.perTool"))
+            .filter((key) => key !== OVERFLOW_KEY)
+            .sort()[0]
+          ?? OVERFLOW_KEY,
+      }
+    : location;
   return admitDynamicMapEntry(
     root,
     repositoryKey,
-    location,
+    target,
     rawIdentifier,
     incoming,
   );
@@ -1284,8 +1304,9 @@ const nearLimitRoots = new Map<string, ReturnType<typeof buildDynamicRoot>>();
 
 function nearLimitDynamicRoot(
   emptyTargetLocation?: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+  parentStorageKey?: string,
 ) {
-  const cacheKey = emptyTargetLocation ?? "reserved-overflows";
+  const cacheKey = `${emptyTargetLocation ?? "reserved-overflows"}:${parentStorageKey ?? "default"}`;
   const cached = nearLimitRoots.get(cacheKey);
   if (cached !== undefined) return cached;
   const target = buildDynamicRoot(1, false);
@@ -1295,6 +1316,7 @@ function nearLimitDynamicRoot(
       target.repositoryKey,
       emptyTargetLocation,
       {},
+      parentStorageKey,
     );
   }
   const maximal = buildDynamicRoot(0, true);
@@ -1615,6 +1637,77 @@ describe("bounded lifetime accumulator", () => {
       Object.keys(dynamicMapAt(sampleRoot, REPOSITORY_KEY, "retrieval.phaseLatencyMs")),
       expectedKeys,
     );
+  });
+
+  it("addresses nested tool-output maps by explicit parent storage key", () => {
+    const fixture = parseDurableLifetimeRoot(durableRootFixture);
+    const template = firstMapValue(fixture, REPOSITORY_KEY, "toolOutput.perTool");
+    assert.ok(isUnknownMap(template));
+    const toolA = { ...structuredClone(template), detailCounts: {}, profileCounts: {} };
+    const toolB = { ...structuredClone(template), detailCounts: {}, profileCounts: {} };
+    const otherTool = { ...structuredClone(template), detailCounts: {}, profileCounts: {} };
+    const root = replaceDynamicMap(
+      fixture,
+      REPOSITORY_KEY,
+      "toolOutput.perTool",
+      { "k:a": toolA, "k:b": toolB, [OVERFLOW_KEY]: otherTool },
+    );
+    const repository = root.repositories[REPOSITORY_KEY];
+    assert.ok(repository?.sections.toolOutput);
+    const originalPerTool = repository.sections.toolOutput.perTool;
+    const before = clone(root);
+
+    const detail = admitAtLocation(
+      root,
+      REPOSITORY_KEY,
+      "toolOutput.perTool.detailCounts",
+      "selected",
+      3,
+      "k:b",
+    );
+    const detailPerTool = detail.root.repositories[REPOSITORY_KEY]?.sections.toolOutput?.perTool;
+    assert.ok(detailPerTool);
+    assert.deepEqual(detailPerTool["k:b"]?.detailCounts, { "k:selected": 3 });
+    assert.deepEqual(detailPerTool["k:a"]?.detailCounts, {});
+    assert.deepEqual(detailPerTool[OVERFLOW_KEY]?.detailCounts, {});
+    assert.equal(detailPerTool["k:a"], originalPerTool["k:a"]);
+    assert.equal(detailPerTool[OVERFLOW_KEY], originalPerTool[OVERFLOW_KEY]);
+    assert.notEqual(detailPerTool["k:b"], originalPerTool["k:b"]);
+    assert.deepEqual(root, before);
+
+    const profile = admitAtLocation(
+      detail.root,
+      REPOSITORY_KEY,
+      "toolOutput.perTool.profileCounts",
+      "overflow-profile",
+      5,
+      OVERFLOW_KEY,
+    );
+    const profilePerTool = profile.root.repositories[REPOSITORY_KEY]?.sections.toolOutput?.perTool;
+    assert.ok(profilePerTool);
+    assert.deepEqual(profilePerTool[OVERFLOW_KEY]?.profileCounts, { "k:overflow-profile": 5 });
+    assert.equal(profilePerTool["k:a"], detailPerTool["k:a"]);
+    assert.equal(profilePerTool["k:b"], detailPerTool["k:b"]);
+    assert.notEqual(profilePerTool[OVERFLOW_KEY], detailPerTool[OVERFLOW_KEY]);
+  });
+
+  it("rejects missing or malformed nested parent storage keys without mutation", () => {
+    const root = parseDurableLifetimeRoot(durableRootFixture);
+    const before = clone(root);
+    for (const parentStorageKey of ["k:missing", "raw parent", "k:bad key"]) {
+      assert.throws(
+        () => admitAtLocation(
+          root,
+          REPOSITORY_KEY,
+          "toolOutput.perTool.detailCounts",
+          "new-key",
+          1,
+          parentStorageKey,
+        ),
+        /parent/i,
+      );
+      assert.deepEqual(root, before);
+    }
   });
 
   it("keeps 128 perTool and byEncoder keys before overflowing key 129", () => {
@@ -2170,6 +2263,30 @@ describe("bounded lifetime accumulator", () => {
       location,
       "invalid key",
       1,
+    );
+
+    assert.equal(result.status, "capacityRejected");
+    assert.equal(result.root, nearLimit.root);
+    assert.deepEqual(nearLimit.root, before);
+  });
+
+  it("rejects a new nested key for a non-first parent without mutation", () => {
+    const location = "toolOutput.perTool.detailCounts" as const;
+    const parentStorageKey = `k:${maxCanonicalKey(1)}`;
+    const nearLimit = nearLimitDynamicRoot(location, parentStorageKey);
+    const before = clone(nearLimit.root);
+    assert.deepEqual(
+      dynamicMapAt(nearLimit.root, nearLimit.repositoryKey, location, parentStorageKey),
+      {},
+    );
+
+    const result = admitAtLocation(
+      nearLimit.root,
+      nearLimit.repositoryKey,
+      location,
+      "invalid key",
+      1,
+      parentStorageKey,
     );
 
     assert.equal(result.status, "capacityRejected");

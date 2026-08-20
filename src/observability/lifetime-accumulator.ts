@@ -14,6 +14,7 @@ import {
 } from "./lifetime-types.js";
 
 const CANONICAL_IDENTIFIER = /^[A-Za-z0-9._:-]{1,64}$/;
+const CANONICAL_STORAGE_KEY = /^k:[A-Za-z0-9._:-]{1,64}$/;
 const MAX_DYNAMIC_KEYS = 32;
 const MAX_LARGE_DYNAMIC_KEYS = 128;
 const MAXIMUM_FIELDS = new Set([
@@ -67,6 +68,14 @@ export const DYNAMIC_MAP_LOCATIONS = [
 ] as const;
 
 export type DynamicMapLocation = (typeof DYNAMIC_MAP_LOCATIONS)[number];
+export type NestedDynamicMapLocation =
+  | "toolOutput.perTool.detailCounts"
+  | "toolOutput.perTool.profileCounts";
+export type FlatDynamicMapLocation = Exclude<DynamicMapLocation, NestedDynamicMapLocation>;
+export type DynamicMapTarget = FlatDynamicMapLocation | {
+  location: NestedDynamicMapLocation;
+  parentStorageKey: string;
+};
 
 export interface SaturatingResult<T> {
   value: T;
@@ -279,7 +288,7 @@ function validateCounterMap(value: unknown): Record<string, Counter> {
   const realKeys = entries.filter(([key]) => key !== OVERFLOW_KEY);
   if (
     realKeys.length > MAX_DYNAMIC_KEYS
-    || entries.some(([key]) => key !== OVERFLOW_KEY && !/^k:[A-Za-z0-9._:-]{1,64}$/.test(key))
+    || entries.some(([key]) => key !== OVERFLOW_KEY && !CANONICAL_STORAGE_KEY.test(key))
   ) {
     throw new RangeError("Lifetime counter map exceeds its key contract");
   }
@@ -393,11 +402,36 @@ interface LocatedDynamicMap {
   ) => DurableLifetimeRoot;
 }
 
+interface ResolvedDynamicMapTarget {
+  location: DynamicMapLocation;
+  parentStorageKey: string | null;
+}
+
+function resolveDynamicMapTarget(target: DynamicMapTarget): ResolvedDynamicMapTarget {
+  if (typeof target === "string") {
+    return { location: target, parentStorageKey: null };
+  }
+  if (
+    target.location !== "toolOutput.perTool.detailCounts"
+    && target.location !== "toolOutput.perTool.profileCounts"
+  ) {
+    throw new Error("Nested lifetime parent target has an invalid location");
+  }
+  if (
+    target.parentStorageKey !== OVERFLOW_KEY
+    && !CANONICAL_STORAGE_KEY.test(target.parentStorageKey)
+  ) {
+    throw new Error("Nested lifetime parent storage key is invalid");
+  }
+  return target;
+}
+
 function locateDynamicMap(
   root: DurableLifetimeRoot,
   repositoryKey: string,
-  location: DynamicMapLocation,
+  target: ResolvedDynamicMapTarget,
 ): LocatedDynamicMap {
+  const { location, parentStorageKey } = target;
   const repository = root.repositories[repositoryKey];
   if (repository === undefined) throw new Error("Lifetime repository is missing");
   const [sectionName, field, nestedField] = location.split(".");
@@ -424,6 +458,9 @@ function locateDynamicMap(
   });
 
   if (nestedField === undefined) {
+    if (parentStorageKey !== null) {
+      throw new Error(`Lifetime parent is invalid for flat location ${location}`);
+    }
     const current = section[field];
     if (!isRecord(current)) throw new Error(`Lifetime map is unavailable for ${location}`);
     return {
@@ -437,8 +474,10 @@ function locateDynamicMap(
 
   const perTool = section[field];
   if (!isRecord(perTool)) throw new Error(`Lifetime map is unavailable for ${location}`);
-  const toolKey = Object.keys(perTool).filter((key) => key !== OVERFLOW_KEY).sort()[0];
-  if (toolKey === undefined) throw new Error(`Lifetime tool is unavailable for ${location}`);
+  if (parentStorageKey === null || !Object.hasOwn(perTool, parentStorageKey)) {
+    throw new Error(`Lifetime parent is unavailable for ${location}`);
+  }
+  const toolKey = parentStorageKey;
   const tool = perTool[toolKey];
   if (!isRecord(tool)) throw new Error(`Lifetime tool is invalid for ${location}`);
   const current = tool[nestedField];
@@ -461,11 +500,13 @@ function locateDynamicMap(
 export function admitDynamicMapEntry<T>(
   root: DurableLifetimeRoot,
   repositoryKey: string,
-  location: DynamicMapLocation,
+  target: DynamicMapTarget,
   rawIdentifier: string,
   incoming: T,
 ): DynamicMapAdmission<T> {
-  const located = locateDynamicMap(root, repositoryKey, location);
+  const resolvedTarget = resolveDynamicMapTarget(target);
+  const { location } = resolvedTarget;
+  const located = locateDynamicMap(root, repositoryKey, resolvedTarget);
   const current = located.current as Readonly<Record<string, T>>;
   const validatedIncoming = validateDynamicValue(location, incoming) as T;
   const requestedKey = canonicalDynamicKey(rawIdentifier);
