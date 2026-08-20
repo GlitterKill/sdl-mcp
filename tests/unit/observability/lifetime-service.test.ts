@@ -56,7 +56,10 @@ class FakeStore implements LifetimeStore {
   checkpointOutcomes: PublishOutcome[] = [];
   resetOutcome: PublishOutcome | null = null;
   onRefresh: (() => void) | null = null;
+  onCheckpoint: ((snapshot: DurableLifetimeRoot) => Promise<PublishOutcome>) | null = null;
   onReset: ((snapshot: DurableLifetimeRoot) => Promise<PublishOutcome>) | null = null;
+  onClose: ((snapshot?: DurableLifetimeRoot) => Promise<void>) | null = null;
+  closeSnapshots: Array<DurableLifetimeRoot | undefined> = [];
 
   constructor(state: StoreState = { mode: "writer", root: null, generation: null }) {
     this.current = state;
@@ -68,6 +71,11 @@ class FakeStore implements LifetimeStore {
 
   async checkpoint(snapshot: DurableLifetimeRoot): Promise<PublishOutcome> {
     this.checkpoints.push(structuredClone(snapshot));
+    if (this.onCheckpoint) {
+      const outcome = await this.onCheckpoint(snapshot);
+      this.apply(outcome);
+      return outcome;
+    }
     const queued = this.checkpointOutcomes.shift();
     const outcome: PublishOutcome = queued?.status === "committed" ? {
       status: "committed",
@@ -102,6 +110,8 @@ class FakeStore implements LifetimeStore {
 
   async close(finalSnapshot?: DurableLifetimeRoot): Promise<void> {
     this.closed += 1;
+    this.closeSnapshots.push(finalSnapshot === undefined ? undefined : structuredClone(finalSnapshot));
+    if (this.onClose) return this.onClose(finalSnapshot);
     if (finalSnapshot) await this.checkpoint(finalSnapshot);
   }
 
@@ -472,9 +482,246 @@ describe("ObservabilityService lifetime integration", () => {
     assert.equal(getObservabilityTap(), null);
     resolveStore(base.store);
     await starting;
-    assert.equal(getObservabilityTap(), service);
+    assert.equal(getObservabilityTap(), null);
     await service.stop();
     assert.equal(base.store.closed, 1);
     resetObservabilityTap();
+  });
+
+  it("keeps a pending checkpoint visible and restores or commits its boundary exactly once", async () => {
+    for (const outcomeKind of ["notPublished", "committed"] as const) {
+      const h = harness();
+      let resolveCheckpoint!: (outcome: PublishOutcome) => void;
+      h.store.onCheckpoint = async () => new Promise<PublishOutcome>((resolve) => {
+        resolveCheckpoint = resolve;
+      });
+      await h.service.start();
+      cache(h.service, "repo-a");
+      const timer = h.timers.find((entry) => entry.delay === 30_000);
+      assert.ok(timer);
+      timer.callback();
+      await settle();
+      cache(h.service, "repo-a");
+      const pending = await h.service.getLifetime("repo-a");
+      assert.notEqual(pending.persistenceState, "recoveryRequired");
+      if (pending.persistenceState !== "recoveryRequired") {
+        assert.equal(pending.sections.cache?.hits, 2);
+      }
+      const candidate = h.store.checkpoints[0];
+      assert.ok(candidate);
+      resolveCheckpoint(outcomeKind === "committed"
+        ? { status: "committed", root: candidate, generation: candidate.generation }
+        : { status: "notPublished", reason: "ioFailure" });
+      await settle();
+      const settled = await h.service.getLifetime("repo-a");
+      assert.notEqual(settled.persistenceState, "recoveryRequired");
+      if (settled.persistenceState !== "recoveryRequired") {
+        assert.equal(settled.sections.cache?.hits, 2);
+      }
+      h.store.onCheckpoint = null;
+      await h.service.stop();
+    }
+  });
+
+  it("serializes stop after a pending checkpoint and surfaces final-close failure", async () => {
+    const h = harness();
+    let resolveCheckpoint!: (outcome: PublishOutcome) => void;
+    h.store.onCheckpoint = async () => new Promise<PublishOutcome>((resolve) => {
+      resolveCheckpoint = resolve;
+    });
+    h.store.onClose = async () => { throw new Error("final checkpoint not committed"); };
+    await h.service.start();
+    cache(h.service, "repo-a");
+    const timer = h.timers.find((entry) => entry.delay === 30_000);
+    assert.ok(timer);
+    timer.callback();
+    await settle();
+    cache(h.service, "repo-a");
+    const stopping = h.service.stop();
+    await settle();
+    assert.equal(h.store.closed, 0);
+    const candidate = h.store.checkpoints[0];
+    assert.ok(candidate);
+    resolveCheckpoint({ status: "committed", root: candidate, generation: candidate.generation });
+    await assert.rejects(stopping, /final checkpoint not committed/);
+    assert.equal(h.store.closed, 1);
+    const finalSnapshot = h.store.closeSnapshots[0];
+    assert.ok(finalSnapshot);
+    assert.equal(finalSnapshot.generation, candidate.generation + 1);
+    assert.equal(finalSnapshot.repositories[repositoryStorageKey("repo-a")]?.sections.cache?.hits, 2);
+    assert.ok(h.timers.every((entry) => entry.cleared));
+  });
+
+  it("keeps non-target repository state live throughout a pending reset", async () => {
+    const h = harness();
+    let resolveReset!: (outcome: PublishOutcome) => void;
+    h.store.onReset = async () => new Promise<PublishOutcome>((resolve) => {
+      resolveReset = resolve;
+    });
+    await h.service.start();
+    cache(h.service, "repo-a");
+    cache(h.service, "repo-b");
+    const resetting = h.service.resetLifetime("repo-a");
+    await settle();
+    cache(h.service, "repo-a");
+    cache(h.service, "repo-b");
+    const bPending = await h.service.getLifetime("repo-b");
+    assert.notEqual(bPending.persistenceState, "recoveryRequired");
+    if (bPending.persistenceState !== "recoveryRequired") {
+      assert.equal(bPending.sections.cache?.hits, 2);
+      assert.equal(bPending.epoch, 0);
+    }
+    resolveReset({ status: "notPublished", reason: "ioFailure" });
+    const resetResult = await resetting;
+    assert.equal(resetResult.persistenceState, "degraded");
+    const a = await h.service.getLifetime("repo-a");
+    const b = await h.service.getLifetime("repo-b");
+    if (a.persistenceState !== "recoveryRequired" && b.persistenceState !== "recoveryRequired") {
+      assert.equal(a.sections.cache?.hits, 2);
+      assert.equal(b.sections.cache?.hits, 2);
+    }
+    await h.service.stop();
+  });
+
+  it("uses exact sample algebra and bounded canonical dynamic maps", async () => {
+    const h = harness();
+    await h.service.start();
+    h.service.cacheLookup({ repoId: "repo-a", source: "card", hit: true, latencyMs: 1 });
+    h.service.cacheLookup({ repoId: "repo-a", source: "card", hit: true, latencyMs: 9 });
+    h.service.indexPhase({ repoId: "repo-a", phase: "pass1", language: "ts", durationMs: 2 });
+    h.service.indexPhase({ repoId: "repo-a", phase: "pass1", language: "ts", durationMs: 7 });
+    h.service.semanticSearch({
+      repoId: "repo-a", semanticEnabled: true, latencyMs: 3, candidateCount: 1, alpha: 0.5,
+      candidateCountPerSource: Object.fromEntries([
+        ...Array.from({ length: 34 }, (_, index) => [`source-${String(index).padStart(2, "0")}`, 1]),
+        ["bad key", 2], ["__other__", 3],
+      ]),
+    });
+    for (let index = 0; index < 129; index += 1) {
+      h.service.toolCall({
+        tool: `tool-${String(index).padStart(3, "0")}`,
+        repoId: "repo-a", request: {}, response: {}, durationMs: 1,
+        projection: {
+          profile: { projector: "test", observabilityProfile: "standard", defaultDetail: "compact", budgetClass: "small", largeResponseStrategy: "truncate", recoveryPolicy: "none" },
+          effectiveDetail: "compact", diagnosticsIncluded: false, rawBytes: 2, rawTokens: 2,
+          projectedBytes: 1, projectedTokens: 1, removedFieldCount: 0, truncated: false,
+          responseHandled: true, recoveryEmitted: false, invalidRecoveryCount: 0,
+        },
+      });
+    }
+    for (let index = 0; index < 34; index += 1) {
+      h.service.toolCall({
+        tool: "nested-tool", repoId: "repo-a", request: {}, response: {}, durationMs: 1,
+        projection: {
+          profile: { projector: "test", observabilityProfile: "standard", defaultDetail: "compact", budgetClass: "small", largeResponseStrategy: "truncate", recoveryPolicy: "none" },
+          effectiveDetail: `detail-${String(index).padStart(2, "0")}`,
+          diagnosticsIncluded: false, rawBytes: 2, rawTokens: 2, projectedBytes: 1,
+          projectedTokens: 1, removedFieldCount: 0, truncated: false,
+          responseHandled: true, recoveryEmitted: false, invalidRecoveryCount: 0,
+        },
+      });
+    }
+    h.service.toolCall({ tool: "bad key", repoId: "repo-a", request: {}, response: {}, durationMs: 1 });
+    h.service.toolCall({ tool: "__other__", repoId: "repo-a", request: {}, response: {}, durationMs: 1 });
+    const value = await h.service.getLifetime("repo-a");
+    assert.notEqual(value.persistenceState, "recoveryRequired");
+    if (value.persistenceState === "recoveryRequired") return;
+    assert.deepEqual(value.sections.cache?.lookupMs, { count: 2, sum: 10, max: 9 });
+    assert.deepEqual(value.sections.indexing?.languageMs["k:ts"], { count: 2, sum: 9, max: 7 });
+    assert.equal(Object.keys(value.sections.retrieval?.candidatesBySource ?? {}).length, 33);
+    assert.equal(Object.values(value.sections.retrieval?.candidatesBySource ?? {}).reduce((a, b) => a + b, 0), 39);
+    assert.equal(Object.keys(value.sections.latency?.perTool ?? {}).length, 129);
+    assert.equal(value.sections.latency?.perTool.__other__?.calls, 4);
+    assert.equal(Object.keys(value.sections.toolOutput?.perTool ?? {}).length, 129);
+    assert.equal(value.sections.toolOutput?.perTool["k:tool-000"]?.detailCounts["k:compact"], 1);
+    const nestedDetails = value.sections.toolOutput?.perTool["k:nested-tool"]?.detailCounts ?? {};
+    assert.equal(Object.keys(nestedDetails).length, 33);
+    assert.equal(Object.values(nestedDetails).reduce((a, b) => a + b, 0), 34);
+    await h.service.stop();
+  });
+
+  it("records every SampleTotal from exact event values without percentile-derived maxima", async () => {
+    const h = harness();
+    await h.service.start();
+    h.service.semanticSearch({
+      repoId: "repo-a", semanticEnabled: true, latencyMs: 3, candidateCount: 1, alpha: 0.5,
+      phaseLatencyMs: { fusion: 4 }, finalResultCount: 1,
+    });
+    h.service.sliceBuild({
+      repoId: "repo-a", durationMs: 5, accepted: 2, evicted: 1, rejected: 0,
+      maxFrontierSize: 6,
+    });
+    h.service.deltaBlastRadius({
+      repoId: "repo-a", changedSymbolCount: 2, blastRadiusCount: 3, durationMs: 7,
+      dbRoundTrips: 8, fallbackPathQueryCount: 1, pathExplanationLatencyMs: 9,
+    });
+    h.service.prefetch({
+      repoId: "repo-a", hitRate: 0.5, wasteRate: 0.25, avgLatencyReductionMs: 10,
+      queueDepth: 0, outcomeSamples: 4,
+    });
+    h.service.scipIngest({
+      repoId: "repo-a", edgesCreated: 1, edgesUpgraded: 2, durationMs: 11, failed: false,
+    });
+    h.service.pprResult({
+      repoId: "repo-a", backend: "native", computeMs: 12, touched: 13, seedCount: 14,
+    });
+    h.service.postIndexSession({
+      repoId: "repo-a", sessionId: "sample-audit", durationMs: 15, timedOut: false,
+    });
+    const value = await h.service.getLifetime("repo-a");
+    assert.notEqual(value.persistenceState, "recoveryRequired");
+    if (value.persistenceState === "recoveryRequired") return;
+    assert.deepEqual(value.sections.retrieval?.latencyMs, { count: 1, sum: 3, max: 3 });
+    assert.deepEqual(value.sections.retrieval?.phaseLatencyMs["k:fusion"], { count: 1, sum: 4, max: 4 });
+    assert.deepEqual(value.sections.beam?.buildMs, { count: 1, sum: 5, max: 5 });
+    assert.deepEqual(value.sections.beam?.frontierMax, { count: 1, sum: 6, max: 6 });
+    assert.deepEqual(value.sections.delta?.blastRadiusMs, { count: 1, sum: 7, max: 7 });
+    assert.deepEqual(value.sections.delta?.dbRoundTrips, { count: 1, sum: 4, max: 4 });
+    assert.deepEqual(value.sections.delta?.pathExplanationMs, { count: 1, sum: 9, max: 9 });
+    assert.deepEqual(value.sections.predictiveContext?.latencyReductionMs, { count: 4, sum: 40, max: 0 });
+    assert.deepEqual(value.sections.scip?.ingestMs, { count: 1, sum: 11, max: 11 });
+    assert.deepEqual(value.sections.ppr?.computeMs, { count: 1, sum: 12, max: 12 });
+    assert.deepEqual(value.sections.ppr?.touched, { count: 1, sum: 13, max: 13 });
+    assert.deepEqual(value.sections.ppr?.seeds, { count: 1, sum: 14, max: 14 });
+    assert.deepEqual(value.sections.postIndex?.durationMs, { count: 1, sum: 15, max: 15 });
+    await h.service.stop();
+  });
+
+  it("clips direct and nested totals atomically and propagates saturation", async () => {
+    const h = harness();
+    await h.service.start();
+    h.service.cacheLookup({
+      repoId: "repo-a", source: "card", hit: true, latencyMs: Number.MAX_SAFE_INTEGER,
+      count: Number.MAX_SAFE_INTEGER, hits: Number.MAX_SAFE_INTEGER,
+    });
+    h.service.cacheLookup({ repoId: "repo-a", source: "card", hit: true, latencyMs: 1 });
+    const value = await h.service.getLifetime("repo-a");
+    assert.notEqual(value.persistenceState, "recoveryRequired");
+    if (value.persistenceState === "recoveryRequired") return;
+    assert.equal(value.saturated, true);
+    assert.equal(value.sections.cache?.hits, Number.MAX_SAFE_INTEGER);
+    assert.equal(value.sections.cache?.lookupMs.count, Number.MAX_SAFE_INTEGER);
+    assert.equal(value.sections.cache?.lookupMs.sum, Number.MAX_SAFE_INTEGER);
+    assert.equal(value.sections.cache?.perSource["k:card"]?.hits, Number.MAX_SAFE_INTEGER);
+    await h.service.stop();
+  });
+
+  it("keeps legacy start session-only when lifetime persistence is not configured", async () => {
+    resetObservabilityTap();
+    const timers: FakeTimer[] = [];
+    const service = new ObservabilityService(CONFIG, {
+      scheduleInterval: (callback, delay) => {
+        const timer: FakeTimer = { callback, delay, cleared: false, unref() {} };
+        timers.push(timer);
+        return timer;
+      },
+      clearScheduledInterval: (timer) => { (timer as FakeTimer).cleared = true; },
+    });
+    await service.start();
+    assert.deepEqual(timers.map((entry) => entry.delay), [2_000]);
+    assert.equal(getObservabilityTap(), null);
+    cache(service, "legacy-repo");
+    assert.equal(service.getSnapshot("legacy-repo").cache.totalHits, 1);
+    await service.stop();
   });
 });
