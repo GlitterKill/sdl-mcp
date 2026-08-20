@@ -452,6 +452,66 @@ test("timeseries destinations and row builders have stable immutable order", () 
   });
 });
 
+test("dashboard registers a consuming renderer for every rendered or derived metric", async () => {
+  const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { readyState: "loading", addEventListener() {} },
+  });
+  try {
+    const dashboard = await import("../../../dist/ui/observability.js");
+    const registry = dashboard.METRIC_RENDERERS as Record<string, unknown> | undefined;
+    assert.ok(registry);
+    const claimed = Object.entries(METRIC_DISPOSITIONS)
+      .filter(([, entry]) => entry.disposition !== "sessionOnly")
+      .map(([path]) => path);
+    assert.deepEqual(Object.keys(registry), claimed);
+    for (const path of claimed) assert.equal(typeof registry[path], "function", path);
+
+    for (const path of [
+      "latency.perTool[].phases[].count",
+      "latency.perTool[].phases[].maxMs",
+    ]) assert.equal(registry[path]?.name, "renderLatencyPanel");
+    for (const path of ["toolVolume.perTool[]", "toolVolume.perToolErrors[]"])
+      assert.equal(registry[path]?.name, "renderToolVolumePanel");
+    for (const path of [
+      "tokenEfficiency.compressionLayers.bySource[].storedBytes",
+      "tokenEfficiency.compressionLayers.byTool[].hitRatePct",
+      "packed.axisHits.none",
+      "packed.byEncoder[].tokensSavedRatio",
+    ]) assert.equal(registry[path]?.name, "renderTokenEfficiencyPanel");
+    for (const path of [
+      "toolOutput.overall.rawBytesTotal",
+      "toolOutput.overall.profileCounts[]",
+      "toolOutput.perTool[].maxProjectedTokens",
+    ]) assert.equal(registry[path]?.name, "renderToolOutputPanel");
+  } finally {
+    if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("dashboard consumes every existing 15-minute series without browser history", async () => {
+  const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { readyState: "loading", addEventListener() {} },
+  });
+  try {
+    const dashboard = await import("../../../dist/ui/observability.js");
+    const consumers = dashboard.TIMESERIES_RENDERERS as Record<string, unknown> | undefined;
+    assert.ok(consumers);
+    assert.deepEqual(Object.keys(consumers), Object.keys(TIMESERIES_PANEL_MAP));
+    for (const [series, destination] of Object.entries(TIMESERIES_PANEL_MAP)) {
+      assert.equal(typeof consumers[series], "function", `${series}:${destination.panel}.${destination.field}`);
+    }
+    assert.doesNotMatch(readFileSync("src/ui/observability.js", "utf8"), /hitRateHistory/);
+  } finally {
+    if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
 test("session state keeps transport clocks and repositories independent", () => {
   const input = {
     sessionRepoId: "repo-a",

@@ -60,7 +60,8 @@
           <h2 id="dashboardTitle">SDL Dashboard</h2>
         </div>
         <div class="hero-meta" aria-label="Dashboard focus">
-          <span>Latency</span>
+          <span>REPO <output data-dashboard-field="repoId">—</output></span>
+          <span>SESSION <output data-dashboard-field="generatedAt">—</output></span>
           <span>Retrieval</span>
           <span>Indexing</span>
           <span>Token flow</span>
@@ -85,15 +86,12 @@
           <h2>CACHE</h2>
           <span class="panel-sub" data-field="hitRate">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">HITS</span>
-          <span class="kv-val" data-field="totalHits">—</span>
-          <span class="kv-key">MISSES</span>
-          <span class="kv-val" data-field="totalMisses">—</span>
-          <span class="kv-key">LOOKUP</span>
-          <span class="kv-val" data-field="avgLookupLatencyMs">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">HITS</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalHits">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalHits">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">MISSES</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalMisses">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalMisses">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">LOOKUP</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgLookupLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgLookupLatencyMs">—</output></span></span></div>
         </div>
-        <div class="bar-list" data-field="perSource" aria-label="Per-source hit rate"></div>
+        <div class="metric-table" data-field="perSource"></div>
         <svg class="spark" data-field="hitRateSpark" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true"></svg>
       </section>
 
@@ -102,23 +100,15 @@
           <h2>PREDICTIVE CONTEXT</h2>
           <span class="panel-sub" data-field="policyMode">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">SAMPLES</span>
-          <span class="kv-val" data-field="outcomeSamples">—</span>
-          <span class="kv-key">HIT</span>
-          <span class="kv-val" data-field="hitRatePct">—</span>
-          <span class="kv-key">WASTE</span>
-          <span class="kv-val" data-field="wasteRatePct">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">SAMPLES</span><span class="stat-values"><span><small>SESSION</small><output data-field="outcomeSamples">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="outcomeSamples">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">HIT</span><span class="stat-values"><span><small>SESSION</small><output data-field="hitRatePct">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="hitRatePct">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">WASTE</span><span class="stat-values"><span><small>SESSION</small><output data-field="wasteRatePct">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="wasteRatePct">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">ACCEPT</span><span class="stat-values"><span><small>SESSION</small><output data-field="acceptedPrefetch">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="acceptedPrefetch">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">SUPPRESS</span><span class="stat-values"><span><small>SESSION</small><output data-field="suppressedPrefetch">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="suppressedPrefetch">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">LATENCY</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgLatencyReductionMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgLatencyReductionMs">—</output></span></span></div>
         </div>
-        <div class="kv-row">
-          <span class="kv-key">ACCEPT</span>
-          <span class="kv-val" data-field="acceptedPrefetch">—</span>
-          <span class="kv-key">SUPPRESS</span>
-          <span class="kv-val" data-field="suppressedPrefetch">—</span>
-          <span class="kv-key">LATENCY</span>
-          <span class="kv-val" data-field="avgLatencyReductionMs">—</span>
-        </div>
-        <div class="bar-list" data-field="topStrategies" aria-label="Predictive context strategies"></div>
+        <div class="metric-table" data-field="topStrategies"></div>
       </section>
 
       <section class="panel" data-panel="retrieval" aria-label="Retrieval">
@@ -126,17 +116,15 @@
           <h2>RETRIEVAL</h2>
           <span class="panel-sub" data-field="totalRetrievals">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">AVG</span>
-          <span class="kv-val" data-field="avgLatencyMs">—</span>
-          <span class="kv-key">P95</span>
-          <span class="kv-val" data-field="p95LatencyMs">—</span>
-          <span class="kv-key">EMPTY</span>
-          <span class="kv-val" data-field="emptyResultCount">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgLatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95LatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95LatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">EMPTY</span><span class="stat-values"><span><small>SESSION</small><output data-field="emptyResultCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="emptyResultCount">—</output></span></span></div>
         </div>
         <div class="stack-bar" data-field="hybridMix" aria-label="Hybrid mix"></div>
         <div class="bar-list" data-field="candidateCounts" aria-label="Candidate counts per source"></div>
         <div class="bar-list" data-field="phaseLatencyMs" aria-label="Retrieval phase latency"></div>
+        <div class="metric-table" data-field="retrievalDetails"></div>
       </section>
 
       <section class="panel" data-panel="beam" aria-label="Beam">
@@ -144,27 +132,15 @@
           <h2>BEAM SEARCH</h2>
           <span class="panel-sub" data-field="totalSliceBuilds">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">AVG MS</span>
-          <span class="kv-val" data-field="avgBuildMs">—</span>
-          <span class="kv-key">P95 MS</span>
-          <span class="kv-val" data-field="p95BuildMs">—</span>
-          <span class="kv-key">HANDLES</span>
-          <span class="kv-val" data-field="retainedExplainHandles">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">ACCEPT</span>
-          <span class="kv-val" data-field="avgAccepted">—</span>
-          <span class="kv-key">EVICT</span>
-          <span class="kv-val" data-field="avgEvicted">—</span>
-          <span class="kv-key">REJECT</span>
-          <span class="kv-val" data-field="avgRejected">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">FRONTIER AVG</span>
-          <span class="kv-val" data-field="avgFrontierMaxSize">—</span>
-          <span class="kv-key">FRONTIER P95</span>
-          <span class="kv-val" data-field="p95FrontierMaxSize">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">AVG MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgBuildMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgBuildMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P95 MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95BuildMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95BuildMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">HANDLES</span><span class="stat-values"><span><small>SESSION</small><output data-field="retainedExplainHandles">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="retainedExplainHandles">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">ACCEPT</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgAccepted">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgAccepted">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">EVICT</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgEvicted">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgEvicted">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">REJECT</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgRejected">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgRejected">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">FRONTIER AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgFrontierMaxSize">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgFrontierMaxSize">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">FRONTIER P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95FrontierMaxSize">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95FrontierMaxSize">—</output></span></span></div>
         </div>
         <form id="beamExplainForm" class="beam-form">
           <input id="beamSliceHandle" placeholder="sliceHandle" autocomplete="off" spellcheck="false" />
@@ -173,18 +149,32 @@
         </form>
       </section>
 
+      <section class="panel" data-panel="delta" aria-label="Delta analysis">
+        <header class="panel-head">
+          <h2>DELTA</h2>
+          <span class="panel-sub" data-field="totalBlastRadiusComputations">—</span>
+        </header>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">BLAST AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgBlastRadiusLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgBlastRadiusLatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">BLAST P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95BlastRadiusLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95BlastRadiusLatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">DB ROUND TRIPS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgDbRoundTripsPerChangedSymbol">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgDbRoundTripsPerChangedSymbol">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">PATH AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgPathExplanationLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgPathExplanationLatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">PATH P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95PathExplanationLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95PathExplanationLatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">FALLBACKS</span><span class="stat-values"><span><small>SESSION</small><output data-field="fallbackPathQueryCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="fallbackPathQueryCount">—</output></span></span></div>
+        </div>
+      </section>
+
       <section class="panel" data-panel="indexing" aria-label="Indexing">
         <header class="panel-head">
           <h2>INDEXING</h2>
           <span class="panel-sub" data-field="filesPerMinute">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">PASS1</span>
-          <span class="kv-val" data-field="avgPass1Ms">—</span>
-          <span class="kv-key">PASS2</span>
-          <span class="kv-val" data-field="avgPass2Ms">—</span>
-          <span class="kv-key">FAIL</span>
-          <span class="kv-val" data-field="failures">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">EVENTS</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalEvents">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalEvents">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">PASS1</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgPass1Ms">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgPass1Ms">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">PASS2</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgPass2Ms">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgPass2Ms">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">FAIL</span><span class="stat-values"><span><small>SESSION</small><output data-field="failures">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="failures">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">DERIVED LAG</span><span class="stat-values"><span><small>SESSION</small><output data-field="derivedStateLagMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="derivedStateLagMs">—</output></span></span></div>
         </div>
         <div class="donut-row">
           <svg class="donut" data-field="engineDonut" viewBox="0 0 36 36" aria-hidden="true">
@@ -197,6 +187,7 @@
           </div>
         </div>
         <div class="bar-list" data-field="slowestLanguages" aria-label="Slowest languages"></div>
+        <div class="metric-table" data-field="indexingPhases"></div>
       </section>
 
       <section class="panel" data-panel="tokenEfficiency" aria-label="Token efficiency">
@@ -204,25 +195,20 @@
           <h2>TOKEN EFFICIENCY</h2>
           <span class="panel-sub" data-field="savingsRatio">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">USED</span>
-          <span class="kv-val" data-field="totalUsed">—</span>
-          <span class="kv-key">SAVED</span>
-          <span class="kv-val" data-field="totalSaved">—</span>
-          <span class="kv-key">AVG/CALL</span>
-          <span class="kv-val" data-field="avgPerCall">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">USED</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalUsed">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalUsed">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">SAVED</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalSaved">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalSaved">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">AVG/CALL</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgPerCall">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgPerCall">—</output></span></span></div>
         </div>
         <div class="stack-bar" data-field="usedVsSaved" aria-label="Used vs saved"></div>
-        <div class="kv-row">
-          <span class="kv-key">PACKED</span>
-          <span class="kv-val" data-field="packedAdoptionPct">—</span>
-          <span class="kv-key">TOKENS SAVED</span>
-          <span class="kv-val" data-field="packedTokensSaved">—</span>
-          <span class="kv-key">BYTES SAVED</span>
-          <span class="kv-val" data-field="packedBytesSaved">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">PACKED</span><span class="stat-values"><span><small>SESSION</small><output data-field="packedAdoptionPct">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="packedAdoptionPct">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">TOKENS SAVED</span><span class="stat-values"><span><small>SESSION</small><output data-field="packedTokensSaved">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="packedTokensSaved">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">BYTES SAVED</span><span class="stat-values"><span><small>SESSION</small><output data-field="packedBytesSaved">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="packedBytesSaved">—</output></span></span></div>
         </div>
-        <div class="layer-breakdown-row" data-field="compressionLayers">—</div>
-        <div class="per-encoder-row" data-field="packedByEncoder">—</div>
+        <div class="metric-table" data-field="packedSummary"></div>
+        <div class="metric-table" data-field="compressionLayers">—</div>
+        <div class="metric-table" data-field="packedByEncoder">—</div>
       </section>
 
       <section class="panel" data-panel="health" aria-label="Health">
@@ -231,37 +217,19 @@
           <span class="panel-sub" data-field="score">—</span>
         </header>
         <div class="bar-list" data-field="components" aria-label="Health components"></div>
-        <div class="kv-row">
-          <span class="kv-key">WATCHER</span>
-          <span class="kv-val" data-field="watcherRunning">—</span>
-          <span class="kv-key">PROVIDER</span>
-          <span class="kv-val" data-field="watcherProvider">—</span>
-          <span class="kv-key">CONFIG</span>
-          <span class="kv-val" data-field="watcherConfiguredProvider">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">QUEUE</span>
-          <span class="kv-val" data-field="watcherQueueDepth">—</span>
-          <span class="kv-key">STALE</span>
-          <span class="kv-val" data-field="watcherStale">—</span>
-          <span class="kv-key">ERR</span>
-          <span class="kv-val" data-field="watcherErrors">—</span>
-          <span class="kv-key">RESTARTS</span>
-          <span class="kv-val" data-field="watcherRestartCount">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">WM WARN</span>
-          <span class="kv-val" data-field="watcherWatchmanWarningCount">—</span>
-          <span class="kv-key">WM RECRAWL</span>
-          <span class="kv-val" data-field="watcherWatchmanRecrawlCount">—</span>
-          <span class="kv-key">WM FRESH</span>
-          <span class="kv-val" data-field="watcherWatchmanFreshInstanceCount">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">WM VER</span>
-          <span class="kv-val" data-field="watcherWatchmanVersion">—</span>
-          <span class="kv-key">WM CLOCK</span>
-          <span class="kv-val" data-field="watcherWatchmanLastClock">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">WATCHER</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherRunning">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">PROVIDER</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherProvider">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">CONFIG</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherConfiguredProvider">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">QUEUE</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherQueueDepth">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">STALE</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherStale">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">ERR</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherErrors">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="watcherErrors">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">RESTARTS</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherRestartCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="watcherRestartCount">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">WM WARN</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherWatchmanWarningCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="watcherWatchmanWarningCount">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">WM RECRAWL</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherWatchmanRecrawlCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="watcherWatchmanRecrawlCount">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">WM FRESH</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherWatchmanFreshInstanceCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="watcherWatchmanFreshInstanceCount">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">WM VER</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherWatchmanVersion">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">WM CLOCK</span><span class="stat-values"><span><small>SESSION</small><output data-field="watcherWatchmanLastClock">—</output></span></span></div>
         </div>
         <div class="mono-row" data-field="watcherWatchmanRoot">—</div>
         <div class="mono-row" data-field="watcherWatchmanWarnings">—</div>
@@ -273,17 +241,13 @@
           <h2>LATENCY</h2>
           <span class="panel-sub" data-field="p95Ms">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">AVG</span>
-          <span class="kv-val" data-field="avgMs">—</span>
-          <span class="kv-key">P50</span>
-          <span class="kv-val" data-field="p50Ms">—</span>
-          <span class="kv-key">P99</span>
-          <span class="kv-val" data-field="p99Ms">—</span>
-          <span class="kv-key">MAX</span>
-          <span class="kv-val" data-field="maxMs">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P50</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50Ms">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p50Ms">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P99</span><span class="stat-values"><span><small>SESSION</small><output data-field="p99Ms">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p99Ms">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">MAX</span><span class="stat-values"><span><small>SESSION</small><output data-field="maxMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="maxMs">—</output></span></span></div>
         </div>
-        <div class="tool-table" data-field="perTool" aria-label="Slowest tools"></div>
+        <div class="metric-table" data-field="perTool"></div>
       </section>
 
       <section class="panel" data-panel="ppr" aria-label="PPR">
@@ -291,13 +255,12 @@
           <h2>PAGERANK</h2>
           <span class="panel-sub" data-field="totalRuns">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">AVG MS</span>
-          <span class="kv-val" data-field="avgComputeMs">—</span>
-          <span class="kv-key">P95 MS</span>
-          <span class="kv-val" data-field="p95ComputeMs">—</span>
-          <span class="kv-key">SEEDS</span>
-          <span class="kv-val" data-field="avgSeedCount">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">AVG MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgComputeMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgComputeMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P95 MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95ComputeMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95ComputeMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">SEEDS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgSeedCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgSeedCount">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">TOUCHED</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgTouched">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgTouched">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">NATIVE RATIO</span><span class="stat-values"><span><small>SESSION</small><output data-field="nativeRatio">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="nativeRatio">—</output></span></span></div>
         </div>
         <div class="stack-bar" data-field="dispatchMix" aria-label="Backend dispatch"></div>
       </section>
@@ -307,19 +270,13 @@
           <h2>SCIP</h2>
           <span class="panel-sub" data-field="lastIngestAt">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">OK</span>
-          <span class="kv-val" data-field="successCount">—</span>
-          <span class="kv-key">FAIL</span>
-          <span class="kv-val" data-field="failureCount">—</span>
-          <span class="kv-key">AVG MS</span>
-          <span class="kv-val" data-field="avgIngestMs">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">EDGES NEW</span>
-          <span class="kv-val" data-field="totalEdgesCreated">—</span>
-          <span class="kv-key">UPGRADED</span>
-          <span class="kv-val" data-field="totalEdgesUpgraded">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">INGESTS</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalIngests">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalIngests">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">OK</span><span class="stat-values"><span><small>SESSION</small><output data-field="successCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="successCount">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">FAIL</span><span class="stat-values"><span><small>SESSION</small><output data-field="failureCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="failureCount">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">AVG MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgIngestMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgIngestMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">EDGES NEW</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalEdgesCreated">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalEdgesCreated">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">UPGRADED</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalEdgesUpgraded">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalEdgesUpgraded">—</output></span></span></div>
         </div>
       </section>
 
@@ -328,11 +285,10 @@
           <h2>TOOL VOLUME</h2>
           <span class="panel-sub" data-field="callsPerMinute">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">TOTAL</span>
-          <span class="kv-val" data-field="totalCalls">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">TOTAL</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalCalls">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalCalls">—</output></span></span></div>
         </div>
-        <div class="bar-list" data-field="perTool" aria-label="Per-tool calls"></div>
+        <div class="metric-table" data-field="perTool"></div>
       </section>
 
       <section class="panel panel-wide" data-panel="toolOutput" aria-label="Tool output">
@@ -342,27 +298,17 @@
         </header>
         <div class="tool-output-empty muted" data-field="noData">No tool-output metrics yet.</div>
         <div class="tool-output-content" data-field="content" hidden>
-          <div class="kv-row">
-            <span class="kv-key">CALLS</span>
-            <span class="kv-val" data-field="calls">—</span>
-            <span class="kv-key">ERRORS</span>
-            <span class="kv-val" data-field="errors">—</span>
-            <span class="kv-key">HANDLED</span>
-            <span class="kv-val" data-field="handled">—</span>
-            <span class="kv-key">TRUNCATED</span>
-            <span class="kv-val" data-field="truncated">—</span>
+          <div class="stat-grid">
+            <div class="stat-cell"><span class="stat-label">CALLS</span><span class="stat-values"><span><small>SESSION</small><output data-field="calls">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="calls">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">ERRORS</span><span class="stat-values"><span><small>SESSION</small><output data-field="errors">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="errors">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">HANDLED</span><span class="stat-values"><span><small>SESSION</small><output data-field="handled">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="handled">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">TRUNCATED</span><span class="stat-values"><span><small>SESSION</small><output data-field="truncated">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="truncated">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">P50 TOKENS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50Tokens">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p50Tokens">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">P95 TOKENS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95Tokens">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95Tokens">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">DETAIL</span><span class="stat-values"><span><small>SESSION</small><output data-field="detail">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="detail">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">RECOVERY</span><span class="stat-values"><span><small>SESSION</small><output data-field="recovery">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="recovery">—</output></span></span></div>
           </div>
-          <div class="kv-row">
-            <span class="kv-key">P50 TOKENS</span>
-            <span class="kv-val" data-field="p50Tokens">—</span>
-            <span class="kv-key">P95 TOKENS</span>
-            <span class="kv-val" data-field="p95Tokens">—</span>
-            <span class="kv-key">DETAIL</span>
-            <span class="kv-val" data-field="detail">—</span>
-            <span class="kv-key">RECOVERY</span>
-            <span class="kv-val" data-field="recovery">—</span>
-          </div>
-          <div class="tool-output-table" data-field="perTool" aria-label="Per-tool output health"></div>
+          <div class="metric-table" data-field="perTool"></div>
         </div>
       </section>
 
@@ -371,29 +317,22 @@
           <h2>POST-INDEX</h2>
           <span class="panel-sub" data-field="lastDurationMs">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">SESSIONS</span>
-          <span class="kv-val" data-field="totalSessions">—</span>
-          <span class="kv-key">P95</span>
-          <span class="kv-val" data-field="p95DurationMs">—</span>
+        <div class="stat-grid">
+          <div class="stat-cell"><span class="stat-label">SESSIONS</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalSessions">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalSessions">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgDurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgDurationMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P50</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50DurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p50DurationMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95DurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95DurationMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P99</span><span class="stat-values"><span><small>SESSION</small><output data-field="p99DurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p99DurationMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">MAX</span><span class="stat-values"><span><small>SESSION</small><output data-field="maxDurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="maxDurationMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">TIMEOUTS</span><span class="stat-values"><span><small>SESSION</small><output data-field="timeoutCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="timeoutCount">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">LAST TIMED OUT</span><span class="stat-values"><span><small>SESSION</small><output data-field="lastTimedOut">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="lastTimedOut">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">LAST ENDED</span><span class="stat-values"><span><small>SESSION</small><output data-field="lastEndedAt">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="lastEndedAt">—</output></span></span></div>
         </div>
-        <div class="kv-row">
-          <span class="kv-key">P99</span>
-          <span class="kv-val" data-field="p99DurationMs">—</span>
-          <span class="kv-key">MAX</span>
-          <span class="kv-val" data-field="maxDurationMs">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">TIMEOUTS</span>
-          <span class="kv-val" data-field="timeoutCount">—</span>
-          <span class="kv-key">AUDIT BUF</span>
-          <span class="kv-val" data-field="auditBufferDepth">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">AUDIT MAX</span>
-          <span class="kv-val" data-field="auditBufferMaxDepth">—</span>
-          <span class="kv-key">AUDIT DROP</span>
-          <span class="kv-val" data-field="auditBufferDropped">—</span>
+        <div class="stat-grid" data-metric-scope="audit">
+          <div class="stat-cell"><span class="stat-label">AUDIT BUF</span><span class="stat-values"><span><small>SESSION</small><output data-field="auditBufferDepth">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">AUDIT MAX</span><span class="stat-values"><span><small>SESSION</small><output data-field="auditBufferMaxDepth">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">AUDIT DROP</span><span class="stat-values"><span><small>SESSION</small><output data-field="auditBufferDropped">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">AUDIT ACTIVE</span><span class="stat-values"><span><small>SESSION</small><output data-field="auditBufferActive">—</output></span></span></div>
         </div>
       </section>
 
@@ -402,38 +341,18 @@
           <h2>SYSTEM STATS</h2>
           <span class="panel-sub" data-field="cpuPctAvg">—</span>
         </header>
-        <div class="kv-row">
-          <span class="kv-key">CPU AVG</span>
-          <span class="kv-val" data-field="cpuPctAvg2">—</span>
-          <span class="kv-key">CPU MAX</span>
-          <span class="kv-val" data-field="cpuPctMax">—</span>
+        <div class="stat-grid" data-metric-scope="resources">
+          <div class="stat-cell"><span class="stat-label">CPU AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="cpuPctAvg2">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">CPU MAX</span><span class="stat-values"><span><small>SERVER PEAK</small><output data-field="cpuPctMax">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">RSS</span><span class="stat-values"><span><small>CURRENT</small><output data-field="rssMb">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">RSS MAX</span><span class="stat-values"><span><small>SERVER PEAK</small><output data-field="rssMbMax">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">HEAP</span><span class="stat-values"><span><small>CURRENT</small><output data-field="heapUsedMb">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">HEAP TOTAL</span><span class="stat-values"><span><small>CURRENT</small><output data-field="heapTotalMb">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">EVENT-LOOP P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="eventLoopLagP95Ms">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">EVENT-LOOP MAX</span><span class="stat-values"><span><small>SERVER PEAK</small><output data-field="eventLoopLagMaxMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">UPTIME</span><span class="stat-values"><span><small>SESSION</small><output data-field="uptimeMs">—</output></span></span></div>
         </div>
-        <div class="kv-row">
-          <span class="kv-key">RSS</span>
-          <span class="kv-val" data-field="rssMb">—</span>
-          <span class="kv-key">RSS MAX</span>
-          <span class="kv-val" data-field="rssMbMax">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">HEAP</span>
-          <span class="kv-val" data-field="heapUsedMb">—</span>
-          <span class="kv-key">HEAP TOTAL</span>
-          <span class="kv-val" data-field="heapTotalMb">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">EVENT-LOOP P95</span>
-          <span class="kv-val" data-field="eventLoopLagP95Ms">—</span>
-          <span class="kv-key">MAX</span>
-          <span class="kv-val" data-field="eventLoopLagMaxMs">—</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-key">UPTIME</span>
-          <span class="kv-val" data-field="uptimeMs">—</span>
-          <span class="kv-key">POOL Q</span>
-          <span class="kv-val" data-field="avgWriteQueued">—</span>
-          <span class="kv-key">DRAIN Q</span>
-          <span class="kv-val" data-field="avgDrainQueueDepth">—</span>
-        </div>
+        <div class="metric-table" data-metric-scope="pool" data-field="poolTable"></div>
       </section>
     </main>
 

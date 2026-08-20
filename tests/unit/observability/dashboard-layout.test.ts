@@ -22,6 +22,11 @@ const layoutSource = readFileSync("src/ui/observability-layout.js", "utf8");
 const dashboardSource = readFileSync("src/ui/observability.js", "utf8");
 const css = readFileSync("src/ui/observability.css", "utf8");
 const panelIds = [...html.matchAll(/data-panel="([^"]+)"/g)].map((match) => match[1]);
+const EXPECTED_PANEL_ORDER = [
+  "bottleneck", "cache", "predictiveContext", "retrieval", "beam", "delta",
+  "indexing", "tokenEfficiency", "health", "latency", "ppr", "scip",
+  "toolVolume", "toolOutput", "postIndex", "resources",
+];
 
 function idsFromDefaults(): string[] {
   const body = layoutSource.match(/const DEFAULT_LAYOUT = Object\.freeze\(\{([\s\S]*?)\n\}\);/)?.[1] ?? "";
@@ -286,7 +291,8 @@ function makeStorage(
 function loadDashboardHarness(): DashboardHarness {
   const source = dashboardSource
     .replace(/^import[\s\S]*?;\s*$/gm, "")
-    .replace(/\nif \(document\.readyState === "loading"\)[\s\S]*$/, "");
+    .replace(/\bexport (?=(?:const|function)\b)/g, "")
+    .replace(/\nif \(typeof document !== "undefined"[\s\S]*$/, "");
   const context = {
     getComputedStyle: () => ({ columnGap: "14px" }),
     GRID,
@@ -294,6 +300,8 @@ function loadDashboardHarness(): DashboardHarness {
     movePanel,
     normalizeV3Layout,
     resizePanel,
+    METRIC_DISPOSITIONS: {},
+    TIMESERIES_PANEL_MAP: {},
   } as Record<string, unknown>;
   runInNewContext(
     `${source}\nglobalThis.__layoutHarness = { loadDashboardLayout, resetDashboardLayout, installKeyboardLayoutTransactions, installPointerLayoutTransactions: typeof installPointerLayoutTransactions === "function" ? installPointerLayoutTransactions : undefined };`,
@@ -437,6 +445,11 @@ function makeKeyboardFixture(
 }
 
 describe("dashboard layout geometry", () => {
+  it("keeps the Delta panel in the shared deterministic panel order", () => {
+    assert.deepEqual(panelIds, EXPECTED_PANEL_ORDER);
+    assert.deepEqual(idsFromDefaults(), EXPECTED_PANEL_ORDER);
+    assert.deepEqual(idsFromCssFallbacks(), EXPECTED_PANEL_ORDER);
+  });
   it("provides opt-in accessible layout editing structure", () => {
     assert.match(
       html,

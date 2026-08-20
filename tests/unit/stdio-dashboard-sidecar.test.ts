@@ -271,12 +271,33 @@ test("stdio observability dashboard sidecar serves only observability routes", a
     assert.match(htmlBody, /id="layoutEditBtn"[^>]+aria-pressed="false"/);
     assert.match(htmlBody, /id="layoutResetBtn"/);
     assert.match(htmlBody, /id="layoutStatus"[^>]+aria-live="polite"/);
+    assert.doesNotMatch(htmlBody, /class="kv-(?:row|key|val)"/);
+    assert.match(htmlBody, /class="stat-cell"[\s\S]*?class="stat-label"[\s\S]*?class="stat-values"/);
+    assert.match(htmlBody, />SESSION</);
+    assert.match(htmlBody, />REPO LIFETIME</);
+    assert.match(htmlBody, />CURRENT</);
+    assert.match(htmlBody, />SERVER PEAK</);
+    assert.match(htmlBody, /data-panel="delta"/);
+    for (const scope of ["pool", "audit", "resources"]) {
+      const cell = htmlBody.match(new RegExp(`<[^>]+data-metric-scope="${scope}"[\\s\\S]*?<\\/div>`))?.[0] ?? "";
+      assert.notEqual(cell, "", scope);
+      assert.doesNotMatch(cell, /REPO LIFETIME/, scope);
+    }
 
     const js = await fetch(`${baseUrl}/ui/observability.js`, {
       signal: AbortSignal.timeout(5_000),
     });
     assert.equal(js.status, 200);
     assert.match(js.headers.get("content-type") ?? "", /javascript/);
+    const jsBody = await js.text();
+    for (const builder of [
+      "renderLatencyTable", "renderToolVolumeTable", "renderCompressionTable",
+      "renderEncoderTable", "renderToolOutputTable",
+    ]) assert.match(jsBody, new RegExp(`function ${builder}\\b`));
+    for (const caption of [
+      "Latency by tool and phase", "Tool calls and errors", "Compression by source",
+      "Packed wire encoders", "Tool output health",
+    ]) assert.match(jsBody, new RegExp(`caption:\\s*"${caption}"`));
 
     const toolOutputJs = await fetch(
       `${baseUrl}/ui/observability-tool-output.js`,

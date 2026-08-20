@@ -12,6 +12,7 @@ const DEFAULT_LAYOUT = Object.freeze({
   predictiveContext: Object.freeze({ col: 1, row: 10, cols: 8, rows: 4 }),
   retrieval: Object.freeze({ col: 13, row: 6, cols: 6, rows: 4 }),
   beam: Object.freeze({ col: 9, row: 10, cols: 8, rows: 4 }),
+  delta: Object.freeze({ col: 1, row: 26, cols: 8, rows: 4 }),
   indexing: Object.freeze({ col: 17, row: 10, cols: 8, rows: 4 }),
   tokenEfficiency: Object.freeze({ col: 1, row: 6, cols: 12, rows: 4 }),
   health: Object.freeze({ col: 13, row: 2, cols: 6, rows: 4 }),

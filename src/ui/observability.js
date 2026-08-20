@@ -3,6 +3,10 @@
 
 import { buildToolOutputViewModel } from "./observability-tool-output.js";
 import {
+  METRIC_DISPOSITIONS,
+  TIMESERIES_PANEL_MAP,
+} from "./observability-dashboard-model.js";
+import {
   GRID,
   migrateV2Layout,
   movePanel,
@@ -16,8 +20,6 @@ const state = {
   abortController: null,
   reconnectAttempt: 0,
   reconnectTimer: null,
-  hitRateHistory: [],
-  hitRateMax: 60,
   lastSnapshot: null,
 };
 
@@ -248,7 +250,7 @@ function updateBottleneck(b) {
     list.innerHTML = signals
       .map(
         (s) =>
-          `<li class="chip"><strong>${escapeHtml(s.name)}</strong>${escapeHtml(fmtNum(s.value, 2))}<em>${escapeHtml(s.unit || "")}</em></li>`,
+          `<li class="chip"><strong>${escapeHtml(s.name)}</strong>${escapeHtml(fmtNum(s.value, 2))}<em>${escapeHtml(s.unit || "")} · w ${escapeHtml(fmtNum(s.weight, 2))}</em></li>`,
       )
       .join("");
   }
@@ -263,20 +265,18 @@ function updateCache(c) {
   setVal(panel, "avgLookupLatencyMs", fmtMs(c.avgLookupLatencyMs));
 
   const perSource = c.perSource || {};
-  const entries = Object.entries(perSource).map(([k, v]) => ({
-    key: k,
-    value: v?.hitRatePct ?? 0,
-  }));
-  renderBarList(panelField(panel, "perSource"), entries, {
-    max: 100,
-    valueFormatter: (v) => fmtPct(v, 0),
+  renderNativeTable(panelField(panel, "perSource"), {
+    caption: "Cache by source",
+    columns: [
+      { key: "source", label: "Source" },
+      { key: "hits", label: "Hits", format: fmtNum },
+      { key: "misses", label: "Misses", format: fmtNum },
+      { key: "hitRatePct", label: "Hit rate", format: fmtPct },
+      { key: "avgLatencyMs", label: "Avg latency", format: fmtMs },
+    ],
+    rows: Object.entries(perSource).map(([source, value]) => ({ source, ...value })),
   });
 
-  state.hitRateHistory.push(c.overallHitRatePct ?? 0);
-  if (state.hitRateHistory.length > state.hitRateMax) {
-    state.hitRateHistory.shift();
-  }
-  renderSparkline(panelField(panel, "hitRateSpark"), state.hitRateHistory);
 }
 
 function updatePredictiveContext(p) {
@@ -289,13 +289,19 @@ function updatePredictiveContext(p) {
   setVal(panel, "acceptedPrefetch", fmtNum(p.acceptedPrefetch));
   setVal(panel, "suppressedPrefetch", fmtNum(p.suppressedPrefetch));
   setVal(panel, "avgLatencyReductionMs", fmtMs(p.avgLatencyReductionMs));
-  const entries = (p.topStrategies || []).map((strategy) => ({
-    key: `${strategy.strategy}:${strategy.resourceKind}`,
-    value: strategy.score ?? 0,
-  }));
-  renderBarList(panelField(panel, "topStrategies"), entries, {
-    valueFormatter: (v) => fmtNum(v, 2),
-    limit: 5,
+  renderNativeTable(panelField(panel, "topStrategies"), {
+    caption: "Predictive strategies",
+    columns: [
+      { key: "strategy", label: "Strategy" },
+      { key: "resourceKind", label: "Resource" },
+      { key: "samples", label: "Samples", format: fmtNum },
+      { key: "hitRatePct", label: "Hit", format: fmtPct },
+      { key: "acceptedRatePct", label: "Accepted", format: fmtPct },
+      { key: "wasteRatePct", label: "Waste", format: fmtPct },
+      { key: "score", label: "Score", format: (value) => fmtNum(value, 2) },
+      { key: "suppressed", label: "Suppressed", format: fmtNum },
+    ],
+    rows: p.topStrategies || [],
   });
 }
 
@@ -341,6 +347,21 @@ function updateRetrieval(r) {
     valueFormatter: (v) => fmtMs(v),
     limit: 6,
   });
+  renderNativeTable(panelField(panel, "retrievalDetails"), {
+    caption: "Retrieval modes, types, and phases",
+    columns: [
+      { key: "name", label: "Mode / type / phase" },
+      { key: "count", label: "Count", format: fmtNum },
+      { key: "avgMs", label: "Avg", format: fmtMs },
+      { key: "p95Ms", label: "P95", format: fmtMs },
+      { key: "maxMs", label: "Max", format: fmtMs },
+    ],
+    rows: [
+      ...Object.entries(r.byMode || {}).map(([name, count]) => ({ name: `mode:${name}`, count })),
+      ...Object.entries(r.byRetrievalType || {}).map(([name, count]) => ({ name: `type:${name}`, count })),
+      ...Object.entries(r.phaseLatencyMs || {}).map(([name, values]) => ({ name: `phase:${name}`, ...values })),
+    ],
+  });
 }
 
 function updateBeam(b) {
@@ -357,13 +378,27 @@ function updateBeam(b) {
   setVal(panel, "p95FrontierMaxSize", fmtNum(b.p95FrontierMaxSize, 1));
 }
 
+function updateDelta(d) {
+  const panel = $('[data-panel="delta"]');
+  if (!panel || !d) return;
+  setVal(panel, "totalBlastRadiusComputations", fmtNum(d.totalBlastRadiusComputations));
+  setVal(panel, "avgBlastRadiusLatencyMs", fmtMs(d.avgBlastRadiusLatencyMs));
+  setVal(panel, "p95BlastRadiusLatencyMs", fmtMs(d.p95BlastRadiusLatencyMs));
+  setVal(panel, "avgDbRoundTripsPerChangedSymbol", fmtNum(d.avgDbRoundTripsPerChangedSymbol, 1));
+  setVal(panel, "avgPathExplanationLatencyMs", fmtMs(d.avgPathExplanationLatencyMs));
+  setVal(panel, "p95PathExplanationLatencyMs", fmtMs(d.p95PathExplanationLatencyMs));
+  setVal(panel, "fallbackPathQueryCount", fmtNum(d.fallbackPathQueryCount));
+}
+
 function updateIndexing(i) {
   const panel = $('[data-panel="indexing"]');
   if (!panel || !i) return;
   setVal(panel, "filesPerMinute", fmtNum(i.filesPerMinute, 1) + "/min");
+  setVal(panel, "totalEvents", fmtNum(i.totalEvents));
   setVal(panel, "avgPass1Ms", fmtMs(i.avgPass1Ms));
   setVal(panel, "avgPass2Ms", fmtMs(i.avgPass2Ms));
   setVal(panel, "failures", fmtNum(i.failures));
+  setVal(panel, "derivedStateLagMs", fmtMs(i.derivedStateLagMs));
 
   const ed = i.engineDispatch || { rust: 0, ts: 0 };
   const total = (ed.rust || 0) + (ed.ts || 0);
@@ -380,6 +415,14 @@ function updateIndexing(i) {
   renderBarList(panelField(panel, "slowestLanguages"), langEntries, {
     valueFormatter: (v) => fmtMs(v),
     limit: 5,
+  });
+  renderNativeTable(panelField(panel, "indexingPhases"), {
+    caption: "Indexing phases",
+    columns: [
+      { key: "phase", label: "Phase" },
+      { key: "count", label: "Events", format: fmtNum },
+    ],
+    rows: Object.entries(i.phaseCounts || {}).map(([phase, count]) => ({ phase, count })),
   });
 }
 
@@ -400,56 +443,93 @@ function updateTokenEfficiency(t, packed) {
     setVal(panel, "packedAdoptionPct", fmtPct(packed.packedAdoptionPct, 1));
     setVal(panel, "packedTokensSaved", fmtNum(packed.tokensSaved || 0));
     setVal(panel, "packedBytesSaved", fmtBytes(packed.bytesSaved));
-    renderPerEncoderBreakdown(panel, packed.byEncoder ?? {});
+    renderPackedSummary(panel, packed);
+    renderEncoderTable(panel, packed);
   }
-  renderCompressionLayerBreakdown(panel, t.compressionLayers);
+  renderCompressionTable(panel, t.compressionLayers);
 }
 
-function renderCompressionLayerBreakdown(panel, layers) {
+function renderCompressionTable(panel, layers) {
   const host = panelField(panel, "compressionLayers");
-  if (!host) return;
-  const bySource = layers?.bySource || {};
-  const entries = Object.entries(bySource)
-    .filter(([, m]) => (m.events || 0) > 0 || (m.estimatedTokensAvoided || 0) > 0)
-    .sort(
-      (a, b) =>
-        (b[1].estimatedTokensAvoided || 0) - (a[1].estimatedTokensAvoided || 0) ||
-        (b[1].events || 0) - (a[1].events || 0),
-    )
-    .slice(0, 6);
-  if (entries.length === 0) {
-    host.textContent = "—";
-    return;
-  }
-  const rows = entries.map(([source, m]) => {
-    const hitRate = (m.opportunities || 0) > 0 ? fmtPct(m.hitRatePct || 0, 1) : "—";
-    const bytes = (m.storedBytes || 0) > 0 ? fmtBytes(m.storedBytes) : "—";
-    return `<tr><td class="layer">${escapeHtml(source)}</td><td class="tokens">${escapeHtml(fmtNum(m.estimatedTokensAvoided || 0))}</td><td class="hit">${escapeHtml(hitRate)}</td><td class="bytes">${escapeHtml(bytes)}</td><td class="count">${escapeHtml(String(m.events || 0))}</td></tr>`;
+  const rows = [
+    {
+      kind: "total",
+      name: "ALL",
+      events: layers?.totalEvents,
+      realizedEvents: layers?.totalRealizedEvents,
+      estimatedTokensAvoided: layers?.totalEstimatedTokensAvoided,
+      originalTokens: layers?.totalOriginalTokens,
+      returnedTokens: layers?.totalReturnedTokens,
+      savedTokens: layers?.totalSavedTokens,
+      storedBytes: layers?.totalStoredBytes,
+    },
+    ...Object.entries(layers?.bySource || {}).map(([source, metric]) => ({ kind: "source", name: source, ...metric })),
+    ...Object.entries(layers?.byTool || {}).map(([tool, metric]) => ({ kind: "tool", name: tool, ...metric })),
+  ];
+  renderNativeTable(host, {
+    caption: "Compression by source",
+    columns: [
+      { key: "name", label: "Source / tool" },
+      { key: "kind", label: "Kind" },
+      { key: "source", label: "Source" },
+      { key: "events", label: "Events", format: fmtNum },
+      { key: "realizedEvents", label: "Realized", format: fmtNum },
+      { key: "estimatedTokensAvoided", label: "Est saved", format: fmtNum },
+      { key: "originalTokens", label: "Original", format: fmtNum },
+      { key: "returnedTokens", label: "Returned", format: fmtNum },
+      { key: "savedTokens", label: "Saved", format: fmtNum },
+      { key: "opportunities", label: "Opps", format: fmtNum },
+      { key: "hits", label: "Hits", format: fmtNum },
+      { key: "hitRatePct", label: "Hit rate", format: fmtPct },
+      { key: "storedBytes", label: "Stored", format: fmtBytes },
+    ],
+    rows,
   });
-  host.innerHTML = `<table class="layer-breakdown"><thead><tr><th>layer</th><th>tok saved</th><th>hit</th><th>bytes</th><th>n</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
-function renderPerEncoderBreakdown(panel, byEncoder) {
+function renderEncoderTable(panel, packed) {
   const host = panelField(panel, "packedByEncoder");
-  if (!host) return;
-  const entries = Object.entries(byEncoder);
-  if (entries.length === 0) {
-    host.textContent = "—";
-    return;
-  }
-  const rows = entries
-    .sort(
-      (a, b) =>
-        (b[1].tokensSaved || 0) - (a[1].tokensSaved || 0) ||
-        b[1].bytesSaved - a[1].bytesSaved,
-    )
-    .map(([id, m]) => {
-      const adoption = fmtPct(m.packedAdoptionPct, 1);
-      const tokens = fmtNum(m.tokensSaved || 0);
-      const bytes = fmtBytes(m.bytesSaved);
-      return `<tr><td class="enc">${escapeHtml(id)}</td><td class="adopt">${escapeHtml(adoption)}</td><td class="tokens">${escapeHtml(tokens)}</td><td class="saved">${escapeHtml(bytes)}</td><td class="count">${escapeHtml(String(m.totalDecisions))}</td></tr>`;
-    });
-  host.innerHTML = `<table class="per-encoder"><thead><tr><th>encoder</th><th>adoption</th><th>tok saved</th><th>byte saved</th><th>n</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  const counts = packed?.perEncoder || {};
+  const names = new Set([...Object.keys(counts), ...Object.keys(packed?.byEncoder || {})]);
+  const rows = [...names].sort().map((encoder) => {
+    const metric = packed?.byEncoder?.[encoder] || {};
+    return { encoder, decisions: counts[encoder] ?? metric.totalDecisions, ...metric };
+  });
+  renderNativeTable(host, {
+    caption: "Packed wire encoders",
+    columns: [
+      { key: "encoder", label: "Encoder" },
+      { key: "decisions", label: "Decisions", format: fmtNum },
+      { key: "packedCount", label: "Packed", format: fmtNum },
+      { key: "fallbackCount", label: "Fallback", format: fmtNum },
+      { key: "packedAdoptionPct", label: "Adoption", format: fmtPct },
+      { key: "jsonBaselineBytesTotal", label: "JSON bytes", format: fmtBytes },
+      { key: "packedBytesTotal", label: "Packed bytes", format: fmtBytes },
+      { key: "bytesSaved", label: "Saved bytes", format: fmtBytes },
+      { key: "bytesSavedRatio", label: "Byte ratio", format: (value) => fmtPct(value * 100) },
+      { key: "jsonBaselineTokensTotal", label: "JSON tokens", format: fmtNum },
+      { key: "packedTokensTotal", label: "Packed tokens", format: fmtNum },
+      { key: "tokensSaved", label: "Saved tokens", format: fmtNum },
+      { key: "tokensSavedRatio", label: "Token ratio", format: (value) => fmtPct(value * 100) },
+    ],
+    rows,
+  });
+}
+
+function renderPackedSummary(panel, packed) {
+  renderNativeTable(panelField(panel, "packedSummary"), {
+    caption: "Packed wire totals",
+    columns: [{ key: "name", label: "Metric" }, { key: "value", label: "Session" }],
+    rows: [
+      { name: "Decisions", value: fmtNum(packed.totalDecisions) },
+      { name: "Packed / fallback", value: `${fmtNum(packed.packedCount)} / ${fmtNum(packed.fallbackCount)}` },
+      { name: "Packed / JSON bytes", value: `${fmtBytes(packed.packedBytesTotal)} / ${fmtBytes(packed.jsonBaselineBytesTotal)}` },
+      { name: "Bytes saved / ratio", value: `${fmtBytes(packed.bytesSaved)} / ${fmtPct(packed.bytesSavedRatio * 100)}` },
+      { name: "Packed / JSON tokens", value: `${fmtNum(packed.packedTokensTotal)} / ${fmtNum(packed.jsonBaselineTokensTotal)}` },
+      { name: "Tokens saved / ratio", value: `${fmtNum(packed.tokensSaved)} / ${fmtPct(packed.tokensSavedRatio * 100)}` },
+      { name: "Axis bytes / tokens / none", value: `${fmtNum(packed.axisHits?.bytes)} / ${fmtNum(packed.axisHits?.tokens)} / ${fmtNum(packed.axisHits?.none)}` },
+    ],
+  });
 }
 
 function updateHealth(h) {
@@ -516,46 +596,47 @@ function updateLatency(l) {
   setVal(panel, "p99Ms", fmtMs(l.p99Ms));
   setVal(panel, "maxMs", fmtMs(l.maxMs));
 
-  const tools = l.perTool || {};
-  const rows = Object.entries(tools)
-    .map(([name, m]) => ({
-      name,
-      count: m?.count ?? 0,
-      avgMs: m?.avgMs ?? 0,
-      p95Ms: m?.p95Ms ?? 0,
-      errors: m?.errorCount ?? 0,
-    }))
-    .sort((a, b) => b.p95Ms - a.p95Ms)
-    .slice(0, 6);
+  renderLatencyTable(panel, l.perTool || {});
+}
 
-  const container = panelField(panel, "perTool");
-  if (!container) return;
-  if (rows.length === 0) {
-    container.innerHTML = '<div class="muted">No calls yet.</div>';
-    return;
+function renderLatencyTable(panel, tools) {
+  const rows = [];
+  for (const [tool, metric] of Object.entries(tools)) {
+    rows.push({ name: tool, ...metric });
+    for (const [phase, phaseMetric] of Object.entries(metric?.phases || {})) {
+      rows.push({ name: `${tool} / ${phase}`, errorCount: null, ...phaseMetric });
+    }
   }
-  container.innerHTML = `
-    <span class="th">TOOL</span>
-    <span class="th td-num">N</span>
-    <span class="th td-num">P95</span>
-    <span class="th td-num">ERR</span>
-    ${rows
-      .map(
-        (r) => `
-      <span class="td td-name" title="${escapeAttr(r.name)}">${escapeHtml(r.name)}</span>
-      <span class="td td-num">${escapeHtml(fmtNum(r.count))}</span>
-      <span class="td td-num">${escapeHtml(fmtMs(r.p95Ms))}</span>
-      <span class="td td-num">${escapeHtml(fmtNum(r.errors))}</span>
-    `,
-      )
-      .join("")}`;
+  renderNativeTable(panelField(panel, "perTool"), {
+    caption: "Latency by tool and phase",
+    columns: [
+      { key: "name", label: "Tool / phase" },
+      { key: "count", label: "Calls", format: fmtNum },
+      { key: "avgMs", label: "Avg", format: fmtMs },
+      { key: "p95Ms", label: "P95", format: fmtMs },
+      { key: "maxMs", label: "Max", format: fmtMs },
+      { key: "errorCount", label: "Errors", format: fmtNum },
+    ],
+    rows,
+    empty: "No calls yet.",
+  });
 }
 
 function updatePool(p) {
   const panel = $('[data-panel="resources"]');
   if (!panel || !p) return;
-  setVal(panel, "avgWriteQueued", fmtNum(p.avgWriteQueued, 1));
-  setVal(panel, "avgDrainQueueDepth", fmtNum(p.avgDrainQueueDepth, 1));
+  renderNativeTable(panelField(panel, "poolTable"), {
+    caption: "Session pool and queues",
+    columns: [{ key: "name", label: "Metric" }, { key: "value", label: "Session" }],
+    rows: [
+      { name: "Dispatch active / queued / max", value: `${fmtNum(p.dispatchActive)} / ${fmtNum(p.dispatchQueued)} / ${fmtNum(p.dispatchMax)}` },
+      { name: "Dispatch active / queued peak", value: `${fmtNum(p.maxDispatchActive)} / ${fmtNum(p.maxDispatchQueued)}` },
+      { name: "Write queued avg / max", value: `${fmtNum(p.avgWriteQueued, 1)} / ${fmtNum(p.maxWriteQueued)}` },
+      { name: "Write active avg", value: fmtNum(p.avgWriteActive, 1) },
+      { name: "Drain depth avg / max", value: `${fmtNum(p.avgDrainQueueDepth, 1)} / ${fmtNum(p.maxDrainQueueDepth)}` },
+      { name: "Drain failures", value: fmtNum(p.totalDrainFailures) },
+    ],
+  });
 }
 
 function updateScip(s) {
@@ -566,16 +647,12 @@ function updateScip(s) {
     "lastIngestAt",
     s.lastIngestAt ? new Date(s.lastIngestAt).toLocaleTimeString() : "never",
   );
+  setVal(panel, "totalIngests", fmtNum(s.totalIngests));
   setVal(panel, "successCount", fmtNum(s.successCount));
   setVal(panel, "failureCount", fmtNum(s.failureCount));
   setVal(panel, "avgIngestMs", fmtMs(s.avgIngestMs));
   setVal(panel, "totalEdgesCreated", fmtNum(s.totalEdgesCreated));
   setVal(panel, "totalEdgesUpgraded", fmtNum(s.totalEdgesUpgraded));
-}
-
-function updatePacked(p) {
-  // packed metrics also surface in tokenEfficiency panel; nothing else needs updating here
-  void p;
 }
 
 function updatePpr(p) {
@@ -585,6 +662,8 @@ function updatePpr(p) {
   setVal(panel, "avgComputeMs", fmtMs(p.avgComputeMs));
   setVal(panel, "p95ComputeMs", fmtMs(p.p95ComputeMs));
   setVal(panel, "avgSeedCount", fmtNum(p.avgSeedCount, 1));
+  setVal(panel, "avgTouched", fmtNum(p.avgTouched, 1));
+  setVal(panel, "nativeRatio", fmtPct(p.nativeRatio * 100, 1));
   renderStackBar(panelField(panel, "dispatchMix"), [
     { key: "native", value: p.nativeCount || 0 },
     { key: "js", value: p.jsCount || 0 },
@@ -614,16 +693,26 @@ function updateToolVolume(t) {
   setVal(panel, "callsPerMinute", fmtNum(t.callsPerMinute, 1) + "/min");
   setVal(panel, "totalCalls", fmtNum(t.totalCalls));
 
-  const perTool = t.perTool || {};
-  const errs = t.perToolErrors || {};
-  const rows = Object.entries(perTool).map(([k, v]) => ({
-    key: k,
-    value: v || 0,
-    errors: errs[k] || 0,
-  }));
-  renderBarList(panelField(panel, "perTool"), rows, {
-    valueFormatter: (v) => fmtNum(v),
-    limit: 8,
+  renderToolVolumeTable(panel, t);
+}
+
+function renderToolVolumeTable(panel, volume) {
+  const names = new Set([
+    ...Object.keys(volume.perTool || {}),
+    ...Object.keys(volume.perToolErrors || {}),
+  ]);
+  renderNativeTable(panelField(panel, "perTool"), {
+    caption: "Tool calls and errors",
+    columns: [
+      { key: "tool", label: "Tool" },
+      { key: "calls", label: "Calls", format: fmtNum },
+      { key: "errors", label: "Errors", format: fmtNum },
+    ],
+    rows: [...names].sort().map((tool) => ({
+      tool,
+      calls: volume.perTool?.[tool] || 0,
+      errors: volume.perToolErrors?.[tool] || 0,
+    })),
   });
 }
 
@@ -633,15 +722,20 @@ function updatePostIndex(p, audit) {
   if (p) {
     setVal(panel, "lastDurationMs", fmtMs(p.lastDurationMs));
     setVal(panel, "totalSessions", fmtNum(p.totalSessions));
+    setVal(panel, "avgDurationMs", fmtMs(p.avgDurationMs));
+    setVal(panel, "p50DurationMs", fmtMs(p.p50DurationMs));
     setVal(panel, "p95DurationMs", fmtMs(p.p95DurationMs));
     setVal(panel, "p99DurationMs", fmtMs(p.p99DurationMs));
     setVal(panel, "maxDurationMs", fmtMs(p.maxDurationMs));
     setVal(panel, "timeoutCount", fmtNum(p.timeoutCount));
+    setVal(panel, "lastTimedOut", p.lastTimedOut ? "YES" : "NO");
+    setVal(panel, "lastEndedAt", p.lastEndedAt ? new Date(p.lastEndedAt).toLocaleTimeString() : "never");
   }
   if (audit) {
     setVal(panel, "auditBufferDepth", fmtNum(audit.depth));
     setVal(panel, "auditBufferMaxDepth", fmtNum(audit.maxDepth));
     setVal(panel, "auditBufferDropped", fmtNum(audit.droppedTotal));
+    setVal(panel, "auditBufferActive", audit.sessionActive ? "YES" : "NO");
   }
 }
 
@@ -679,35 +773,132 @@ function updateToolOutput(toolOutput) {
     `${fmtNum(summary.recoveryEmittedCount)} emitted · ${fmtNum(summary.invalidRecoveryCount)} invalid`,
   );
 
-  const table = panelField(panel, "perTool");
-  const headers = [
-    "TOOL",
-    "CALLS",
-    "P50",
-    "P95",
-    "REDUCE",
-    "HANDLED",
-    "TRUNC",
-    "DETAIL",
-    "ERR",
-    "RECOVERY",
+  renderToolOutputTable(panel, toolOutput);
+}
+
+function renderToolOutputTable(panel, toolOutput) {
+  const rows = [
+    { tool: "OVERALL", schemaVersion: toolOutput.schemaVersion, ...toolOutput.overall },
+    ...(toolOutput.perTool || []).slice(0, 12),
   ];
-  const cells = headers.map((header) => `<span class="th">${header}</span>`);
-  for (const row of view.rows) {
-    cells.push(
-      `<span class="td td-name" title="${escapeAttr(row.tool)}">${escapeHtml(row.tool)}</span>`,
-      `<span class="td">${fmtNum(row.calls)}</span>`,
-      `<span class="td">${fmtNum(row.p50ProjectedTokens)}</span>`,
-      `<span class="td">${fmtNum(row.p95ProjectedTokens)}</span>`,
-      `<span class="td">${fmtPct(row.reductionRatio * 100)}</span>`,
-      `<span class="td">${fmtNum(row.handledCount)}</span>`,
-      `<span class="td">${fmtNum(row.truncatedCount)}</span>`,
-      `<span class="td">C${fmtNum(row.detailCounts.compact)}/S${fmtNum(row.detailCounts.standard)}/F${fmtNum(row.detailCounts.full)}</span>`,
-      `<span class="td">${fmtNum(row.errors)}</span>`,
-      `<span class="td">${fmtNum(row.recoveryEmittedCount)}/${fmtNum(row.invalidRecoveryCount)}</span>`,
-    );
+  const detail = (value = {}) => `Σ${fmtNum(value.summary)} C${fmtNum(value.compact)} S${fmtNum(value.standard)} F${fmtNum(value.full)}`;
+  const profiles = (value = {}) => Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => `${name}:${count}`).join(" · ") || "—";
+  renderNativeTable(panelField(panel, "perTool"), {
+    caption: "Tool output health",
+    columns: [
+      { key: "tool", label: "Tool" },
+      { key: "schemaVersion", label: "Schema", format: fmtNum },
+      { key: "calls", label: "Calls", format: fmtNum },
+      { key: "errors", label: "Errors", format: fmtNum },
+      { key: "rawBytesTotal", label: "Raw bytes", format: fmtBytes },
+      { key: "projectedBytesTotal", label: "Projected bytes", format: fmtBytes },
+      { key: "rawTokensTotal", label: "Raw tokens", format: fmtNum },
+      { key: "projectedTokensTotal", label: "Projected tokens", format: fmtNum },
+      { key: "reductionRatio", label: "Reduction", format: (value) => fmtPct(value * 100) },
+      { key: "removedFieldTotal", label: "Removed", format: fmtNum },
+      { key: "handledCount", label: "Handled", format: fmtNum },
+      { key: "handledRate", label: "Handled rate", format: (value) => fmtPct(value * 100) },
+      { key: "truncatedCount", label: "Truncated", format: fmtNum },
+      { key: "truncatedRate", label: "Truncated rate", format: (value) => fmtPct(value * 100) },
+      { key: "detailCounts", label: "Detail", format: detail },
+      { key: "profileCounts", label: "Profiles", format: profiles },
+      { key: "recoveryEmittedCount", label: "Recovery", format: fmtNum },
+      { key: "invalidRecoveryCount", label: "Invalid", format: fmtNum },
+      { key: "p50ProjectedBytes", label: "P50 bytes", format: fmtBytes },
+      { key: "p95ProjectedBytes", label: "P95 bytes", format: fmtBytes },
+      { key: "maxProjectedBytes", label: "Max bytes", format: fmtBytes },
+      { key: "p50ProjectedTokens", label: "P50 tokens", format: fmtNum },
+      { key: "p95ProjectedTokens", label: "P95 tokens", format: fmtNum },
+      { key: "maxProjectedTokens", label: "Max tokens", format: fmtNum },
+    ],
+    rows,
+  });
+}
+
+function renderBottleneckPanel(snapshot) {
+  updateBottleneck(snapshot.bottleneck);
+  setText(document.querySelector('[data-dashboard-field="repoId"]'), snapshot.repoId);
+  setText(document.querySelector('[data-dashboard-field="generatedAt"]'), snapshot.generatedAt);
+}
+function renderCachePanel(snapshot) { updateCache(snapshot.cache); }
+function renderRetrievalPanel(snapshot) { updateRetrieval(snapshot.retrieval); }
+function renderBeamPanel(snapshot) { updateBeam(snapshot.beam); }
+function renderDeltaPanel(snapshot) { updateDelta(snapshot.delta); }
+function renderIndexingPanel(snapshot) { updateIndexing(snapshot.indexing); }
+function renderTokenEfficiencyPanel(snapshot) { updateTokenEfficiency(snapshot.tokenEfficiency, snapshot.packed); }
+function renderPredictiveContextPanel(snapshot) { updatePredictiveContext(snapshot.predictiveContext); }
+function renderHealthPanel(snapshot) { updateHealth(snapshot.health); }
+function renderLatencyPanel(snapshot) { updateLatency(snapshot.latency); }
+function renderScipPanel(snapshot) { updateScip(snapshot.scip); }
+function renderPprPanel(snapshot) { updatePpr(snapshot.ppr); }
+function renderToolVolumePanel(snapshot) { updateToolVolume(snapshot.toolVolume); }
+function renderPostIndexPanel(snapshot) { updatePostIndex(snapshot.postIndexSession, null); }
+function renderToolOutputPanel(snapshot) { updateToolOutput(snapshot.toolOutput); }
+
+const PANEL_RENDERERS = Object.freeze({
+  bottleneck: renderBottleneckPanel,
+  cache: renderCachePanel,
+  retrieval: renderRetrievalPanel,
+  beam: renderBeamPanel,
+  delta: renderDeltaPanel,
+  indexing: renderIndexingPanel,
+  tokenEfficiency: renderTokenEfficiencyPanel,
+  predictiveContext: renderPredictiveContextPanel,
+  health: renderHealthPanel,
+  latency: renderLatencyPanel,
+  scip: renderScipPanel,
+  ppr: renderPprPanel,
+  toolVolume: renderToolVolumePanel,
+  postIndex: renderPostIndexPanel,
+  toolOutput: renderToolOutputPanel,
+});
+
+export const METRIC_RENDERERS = Object.freeze(Object.fromEntries(
+  Object.entries(METRIC_DISPOSITIONS)
+    .filter(([, entry]) => entry.disposition !== "sessionOnly")
+    .map(([path, entry]) => [path, PANEL_RENDERERS[entry.panel]]),
+));
+
+function renderMappedSeries(points, destination, seriesName) {
+  const panel = document.querySelector(`[data-panel="${destination.panel}"]`);
+  if (!panel) return;
+  let svg = panel.querySelector(`[data-series="${seriesName}"]`);
+  if (!svg) {
+    let bank = panel.querySelector(".trend-bank");
+    if (!bank) {
+      bank = document.createElement("div");
+      bank.className = "trend-bank";
+      panel.append(bank);
+    }
+    const figure = document.createElement("figure");
+    figure.className = "metric-trend";
+    const caption = document.createElement("figcaption");
+    caption.textContent = `${destination.field} · 15M`;
+    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 200 40");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    svg.classList.add("spark");
+    svg.dataset.series = seriesName;
+    figure.append(caption, svg);
+    bank.append(figure);
   }
-  table.innerHTML = cells.join("");
+  const values = (points || []).map((point) => {
+    const field = Object.keys(point).find((key) => key !== "t");
+    return field ? point[field] : 0;
+  });
+  renderSparkline(svg, values);
+}
+
+export const TIMESERIES_RENDERERS = Object.freeze(Object.fromEntries(
+  Object.keys(TIMESERIES_PANEL_MAP).map((series) => [series, renderMappedSeries]),
+));
+
+export function applyTimeseries(timeseries) {
+  if (!timeseries || timeseries.window !== "15m") return;
+  for (const [series, destination] of Object.entries(TIMESERIES_PANEL_MAP)) {
+    TIMESERIES_RENDERERS[series](timeseries.series?.[series], destination, series);
+  }
 }
 
 // -------- Main snapshot apply --------
@@ -715,23 +906,10 @@ function applySnapshot(snap) {
   if (!snap || typeof snap !== "object") return;
   state.lastSnapshot = snap;
   try {
-    updateBottleneck(snap.bottleneck);
-    updateCache(snap.cache);
-    updatePredictiveContext(snap.predictiveContext);
-    updateRetrieval(snap.retrieval);
-    updateBeam(snap.beam);
-    updateIndexing(snap.indexing);
-    updateTokenEfficiency(snap.tokenEfficiency, snap.packed);
-    updateHealth(snap.health);
-    updateLatency(snap.latency);
+    for (const renderer of new Set(Object.values(METRIC_RENDERERS))) renderer(snap);
     updatePool(snap.pool);
-    updateScip(snap.scip);
-    updatePacked(snap.packed);
-    updatePpr(snap.ppr);
     updateResources(snap.resources, snap.uptimeMs);
-    updateToolVolume(snap.toolVolume);
-    updateToolOutput(snap.toolOutput);
-    updatePostIndex(snap.postIndexSession, snap.auditBuffer);
+    updatePostIndex(null, snap.auditBuffer);
   } catch (err) {
     console.error("[observability] applySnapshot error:", err);
   }
@@ -1020,6 +1198,46 @@ function parseMigratableV2(raw) {
   } catch {
     return null;
   }
+}
+
+function renderNativeTable(host, { caption, columns, rows, empty = "No data." }) {
+  if (!host) return;
+  host.replaceChildren();
+  if (rows.length === 0) {
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = empty;
+    host.append(message);
+    return;
+  }
+
+  const table = document.createElement("table");
+  const captionElement = document.createElement("caption");
+  captionElement.textContent = caption;
+  table.append(captionElement);
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const column of columns) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = column.label;
+    headRow.append(th);
+  }
+  head.append(headRow);
+  table.append(head);
+  const body = document.createElement("tbody");
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    columns.forEach((column, index) => {
+      const cell = document.createElement(index === 0 ? "th" : "td");
+      if (index === 0) cell.scope = "row";
+      cell.textContent = column.format ? column.format(row[column.key], row) : String(row[column.key] ?? "—");
+      tr.append(cell);
+    });
+    body.append(tr);
+  }
+  table.append(body);
+  host.append(table);
 }
 
 function loadDashboardLayout(panelIds, storage) {
@@ -1540,8 +1758,8 @@ function initDashboardLayoutEditor() {
   setEditMode(false);
 }
 
-if (document.readyState === "loading") {
+if (typeof document !== "undefined" && document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
-} else {
+} else if (typeof document !== "undefined") {
   init();
 }

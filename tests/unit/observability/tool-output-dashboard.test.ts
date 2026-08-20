@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { buildToolOutputViewModel } from "../../../dist/ui/observability-tool-output.js";
@@ -86,6 +87,20 @@ const snapshot = {
 };
 
 describe("tool-output dashboard view model", () => {
+  it("renders complete output health through an accessible native table", () => {
+    const dashboard = readFileSync("src/ui/observability.js", "utf8");
+    assert.match(dashboard, /function renderToolOutputTable/);
+    assert.match(dashboard, /caption:\s*"Tool output health"/);
+    assert.match(dashboard, /scope = "col"/);
+    assert.match(dashboard, /scope = "row"/);
+    for (const field of [
+      "rawBytesTotal", "projectedBytesTotal", "rawTokensTotal", "projectedTokensTotal",
+      "removedFieldTotal", "handledRate", "truncatedRate", "profileCounts",
+      "p50ProjectedBytes", "p95ProjectedBytes", "maxProjectedBytes",
+      "p50ProjectedTokens", "p95ProjectedTokens", "maxProjectedTokens",
+    ]) assert.match(dashboard, new RegExp(`\\b${field}\\b`), field);
+  });
+
   it("maps exact aggregate health and stable per-tool rows", () => {
     const view = buildToolOutputViewModel(snapshot);
 
