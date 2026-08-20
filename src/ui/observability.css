@@ -1300,6 +1300,11 @@ table.per-encoder td.enc {
 }
 
 @media (min-width: 721px) {
+  .dashboard-grid[data-layout-edit="true"] .panel-head,
+  .dashboard-grid[data-layout-edit="true"] .panel-resize-grip {
+    touch-action: none;
+  }
+
   .dashboard-grid[data-layout-edit="true"] .panel:focus-visible {
     outline: 3px solid var(--accent);
     outline-offset: 2px;

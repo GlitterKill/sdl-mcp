@@ -1202,8 +1202,45 @@ function installKeyboardLayoutTransactions({
   return { cancel };
 }
 
-const INTERACTIVE_HEADER_TARGET =
-  'a, button, input, select, textarea, summary, [contenteditable], [role], [tabindex]:not([tabindex="-1"])';
+const INTERACTIVE_HEADER_TARGET = [
+  "a[href]",
+  "area[href]",
+  "button",
+  'input:not([type="hidden"])',
+  "select",
+  "textarea",
+  "summary",
+  "iframe",
+  "audio[controls]",
+  "video[controls]",
+  '[contenteditable]:not([contenteditable="false"])',
+  '[tabindex]:not([tabindex="-1"])',
+  '[role="button"]',
+  '[role="checkbox"]',
+  '[role="combobox"]',
+  '[role="grid"]',
+  '[role="gridcell"]',
+  '[role="link"]',
+  '[role="listbox"]',
+  '[role="menu"]',
+  '[role="menubar"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="option"]',
+  '[role="radio"]',
+  '[role="radiogroup"]',
+  '[role="searchbox"]',
+  '[role="slider"]',
+  '[role="spinbutton"]',
+  '[role="switch"]',
+  '[role="tab"]',
+  '[role="tablist"]',
+  '[role="textbox"]',
+  '[role="tree"]',
+  '[role="treegrid"]',
+  '[role="treeitem"]',
+].join(", ");
 
 function installPointerLayoutTransactions({
   entries,
@@ -1334,9 +1371,11 @@ function installPointerLayoutTransactions({
 
   for (const entry of entries) {
     entry.header.addEventListener("pointerdown", (event) => {
+      const interactive = event.target?.closest?.(INTERACTIVE_HEADER_TARGET);
       if (
-        event.target !== event.currentTarget &&
-        event.target?.closest?.(INTERACTIVE_HEADER_TARGET)
+        interactive &&
+        interactive !== entry.header &&
+        entry.header.contains(interactive)
       ) return;
       start(entry, "move", entry.header, event);
     });

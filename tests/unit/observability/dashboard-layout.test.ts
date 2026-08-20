@@ -183,6 +183,72 @@ class FakeEventTarget {
   }
 }
 
+class FakeElement extends FakeEventTarget {
+  parentElement: FakeElement | null = null;
+  readonly children: FakeElement[] = [];
+  readonly element: {
+    tag?: string;
+    role?: string;
+    tabIndex?: number;
+    href?: boolean;
+    contentEditable?: boolean;
+  };
+
+  constructor(
+    element: {
+      tag?: string;
+      role?: string;
+      tabIndex?: number;
+      href?: boolean;
+      contentEditable?: boolean;
+    } = {},
+  ) {
+    super();
+    this.element = element;
+  }
+
+  append(...children: FakeElement[]): void {
+    for (const child of children) {
+      child.parentElement = this;
+      this.children.push(child);
+    }
+  }
+
+  contains(target: unknown): boolean {
+    for (let current = target instanceof FakeElement ? target : null; current; current = current.parentElement) {
+      if (current === this) return true;
+    }
+    return false;
+  }
+
+  closest(selector: string): FakeElement | null {
+    for (let current: FakeElement | null = this; current; current = current.parentElement) {
+      if (current.matches(selector)) return current;
+    }
+    return null;
+  }
+
+  private matches(selector: string): boolean {
+    const tag = this.element.tag?.toLowerCase();
+    if (tag === "button" && /(?:^|,\s*)button(?:,|$)/.test(selector)) return true;
+    if (tag === "input" && /(?:^|,\s*)input/.test(selector)) return true;
+    if (tag === "select" && /(?:^|,\s*)select(?:,|$)/.test(selector)) return true;
+    if (tag === "textarea" && /(?:^|,\s*)textarea(?:,|$)/.test(selector)) return true;
+    if (tag === "summary" && /(?:^|,\s*)summary(?:,|$)/.test(selector)) return true;
+    if (tag === "a" && this.element.href && selector.includes("a[href]")) return true;
+    if (
+      this.element.contentEditable &&
+      selector.includes('[contenteditable]:not([contenteditable="false"])')
+    ) return true;
+    if (
+      this.element.tabIndex !== undefined &&
+      this.element.tabIndex !== -1 &&
+      selector.includes('[tabindex]:not([tabindex="-1"])')
+    ) return true;
+    return this.element.role !== undefined && selector.includes(`[role="${this.element.role}"]`);
+  }
+}
+
 function makeStorage(
   initial: Record<string, string> = {},
   fail?: { operation: "get" | "set" | "remove"; key: string },
@@ -242,9 +308,13 @@ function makePointerFixture(
 ) {
   const harness = loadDashboardHarness();
   assert.ok(harness.installPointerLayoutTransactions, "pointer transaction adapter exists");
-  const panel = new FakeEventTarget();
-  const header = new FakeEventTarget();
-  const resizeGrip = new FakeEventTarget();
+  const panel = new FakeElement({ tag: "section", tabIndex: 0 });
+  const header = new FakeElement({ tag: "header" });
+  const heading = new FakeElement({ tag: "h2" });
+  const panelSub = new FakeElement({ tag: "span", role: "status" });
+  const resizeGrip = new FakeElement({ tag: "button", tabIndex: -1 });
+  panel.append(header, resizeGrip);
+  header.append(heading, panelSub);
   const grid = new FakeEventTarget();
   const visibilityTarget = new FakeEventTarget();
   const windowTarget = new FakeEventTarget();
@@ -269,6 +339,8 @@ function makePointerFixture(
   return {
     panel,
     header,
+    heading,
+    panelSub,
     resizeGrip,
     grid,
     visibilityTarget,
@@ -280,6 +352,11 @@ function makePointerFixture(
     layout: () => layout,
     setEditMode: (enabled: boolean) => {
       editMode = enabled;
+    },
+    addHeaderChild: (element: ConstructorParameters<typeof FakeElement>[0]) => {
+      const child = new FakeElement(element);
+      header.append(child);
+      return child;
     },
   };
 }
@@ -356,6 +433,17 @@ describe("dashboard layout geometry", () => {
     assert.match(
       css,
       /@media \(max-width: 720px\)[\s\S]*?\.layout-controls,[\s\S]*?\.panel-resize-grip\s*\{[\s\S]*?display:\s*none;/,
+    );
+  });
+
+  it("owns touch and pen gestures only for active desktop layout controls", () => {
+    assert.match(
+      css,
+      /@media \(min-width: 721px\)[\s\S]*?\.dashboard-grid\[data-layout-edit="true"\] \.panel-head,\s*\.dashboard-grid\[data-layout-edit="true"\] \.panel-resize-grip\s*\{[\s\S]*?touch-action:\s*none;/,
+    );
+    assert.doesNotMatch(
+      css,
+      /(?:^|\n)\.panel-head\s*\{[^}]*touch-action:\s*none;/,
     );
   });
 
@@ -906,21 +994,17 @@ describe("dashboard layout geometry", () => {
     fixture.setEditMode(false);
     fixture.header.dispatch("pointerdown", {
       ...pointer,
-      target: { closest: () => null },
+      target: fixture.heading,
     });
     fixture.setEditMode(true);
     fixture.panel.dispatch("pointerdown", pointer);
     fixture.header.dispatch("pointerdown", { ...pointer, button: 1 });
     fixture.header.dispatch("pointerdown", { ...pointer, isPrimary: false });
-    fixture.header.dispatch("pointerdown", {
-      ...pointer,
-      target: { closest: () => ({}) },
-    });
     assert.deepEqual(fixture.header.captureCalls, []);
 
     fixture.header.dispatch("pointerdown", {
       ...pointer,
-      target: { closest: () => null },
+      target: fixture.heading,
     });
     assert.deepEqual(fixture.header.captureCalls, ["capture:7"]);
     assert.equal(fixture.panel.focusCount, 1);
@@ -950,6 +1034,47 @@ describe("dashboard layout geometry", () => {
     assert.deepEqual(fixture.announcements, [
       "Cache, column 3, row 2, width 4, height 2",
     ]);
+  });
+
+  it("rejects only interactive descendants within the current header", () => {
+    for (const interactive of [
+      { tag: "button" },
+      { tag: "input" },
+      { tag: "a", href: true },
+      { role: "button" },
+      { role: "link" },
+      { role: "checkbox" },
+    ]) {
+      const fixture = makePointerFixture();
+      const target = fixture.addHeaderChild(interactive);
+      fixture.header.dispatch("pointerdown", {
+        pointerId: 31,
+        button: 0,
+        isPrimary: true,
+        clientX: 0,
+        clientY: 0,
+        target,
+      });
+      assert.deepEqual(fixture.header.captureCalls, [], JSON.stringify(interactive));
+    }
+
+    for (const role of ["status", "img", "note"]) {
+      const fixture = makePointerFixture();
+      const target = role === "status"
+        ? fixture.panelSub
+        : fixture.addHeaderChild({ tag: "span", role });
+      fixture.header.dispatch("pointerdown", {
+        pointerId: 32,
+        button: 0,
+        isPrimary: true,
+        clientX: 0,
+        clientY: 0,
+        target,
+      });
+      assert.deepEqual(fixture.header.captureCalls, ["capture:32"], role);
+      fixture.header.dispatch("pointercancel", { pointerId: 32 });
+      assert.deepEqual(fixture.header.captureCalls, ["capture:32", "release:32"], role);
+    }
   });
 
   it("resizes only from the exact bottom-right handle and skips no-op commits", () => {
