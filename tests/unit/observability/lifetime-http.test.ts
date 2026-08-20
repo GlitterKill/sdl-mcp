@@ -642,7 +642,7 @@ test("lifetime reset reports deregistration that races its persistence call", as
       }),
       isRegisteredRepoId: () => {
         registrationChecks += 1;
-        return registrationChecks === 1;
+        return registrationChecks < 3;
       },
     },
     { enabled: true, token: "test-token" },
@@ -663,7 +663,57 @@ test("lifetime reset reports deregistration that races its persistence call", as
       "repository_not_found",
       "The repository was not found.",
     );
+    assert.equal(registrationChecks, 3);
+  } finally {
+    await server.close();
+  }
+});
+
+test("lifetime reset revalidates registration after its awaited preflight", async () => {
+  let registrationChecks = 0;
+  let resetCalls = 0;
+  let resolveLifetime!: (value: LifetimeEnvelopeV1) => void;
+  const lifetime = new Promise<LifetimeEnvelopeV1>((resolve) => {
+    resolveLifetime = resolve;
+  });
+  const server = await setupObservabilityDashboardSidecar(
+    0,
+    {
+      observabilityService: serviceDouble({
+        getLifetime: async () => lifetime,
+        resetLifetime: async (repoId) => {
+          resetCalls += 1;
+          return withEvent(ready(repoId));
+        },
+      }),
+      isRegisteredRepoId: () => {
+        registrationChecks += 1;
+        return registrationChecks === 1;
+      },
+    },
+    { enabled: true, token: "test-token" },
+    async () => true,
+  );
+  try {
+    const responsePromise = request(server, "/api/observability/lifetime/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repoId: "repo-a",
+        confirmation: "RESET REPOSITORY LIFETIME: repo-a",
+      }),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    resolveLifetime(withEvent(ready("repo-a")));
+    const response = await responsePromise;
+    assert.equal(response.status, 404);
+    assertRouteError(
+      await body(response),
+      "repository_not_found",
+      "The repository was not found.",
+    );
     assert.equal(registrationChecks, 2);
+    assert.equal(resetCalls, 0);
   } finally {
     await server.close();
   }
@@ -815,10 +865,13 @@ test("observability SSE waits for drain when a schema-valid lifetime exceeds the
   }
 });
 
-test("observability SSE bounds snapshots retained behind a stalled lifetime", async () => {
+test("observability SSE finishes the active pair before closing on producer overload", async () => {
   let subscriber: SnapshotSubscriber | null = null;
   let lifetimeCalls = 0;
-  const stalled = new Promise<LifetimeEnvelopeV1>(() => {});
+  let resolveLifetime!: (value: LifetimeEnvelopeV1) => void;
+  const stalled = new Promise<LifetimeEnvelopeV1>((resolve) => {
+    resolveLifetime = resolve;
+  });
   const server = await start(serviceDouble({
     getLifetime: async () => {
       lifetimeCalls += 1;
@@ -839,11 +892,18 @@ test("observability SSE bounds snapshots retained behind a stalled lifetime", as
     for (let index = 0; index < 3; index += 1) {
       subscriber({ schemaVersion: 1, generatedAt: NOW, repoId: "repo-a" } as ObservabilitySnapshot);
     }
-    const closed = await Promise.race([
-      reader.read().then((result) => result.done),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), 250)),
-    ]);
-    assert.equal(closed, true);
+    assert.equal(lifetimeCalls, 1);
+    resolveLifetime(ready("repo-a"));
+    let remaining = "";
+    let done = false;
+    while (!done) {
+      const next = await reader.read();
+      done = next.done;
+      if (next.value) remaining += new TextDecoder().decode(next.value);
+    }
+    assert.match(remaining, /event: lifetime/);
+    assert.equal((remaining.match(/event: snapshot/g) ?? []).length, 0);
+    assert.equal((remaining.match(/event: lifetime/g) ?? []).length, 1);
     assert.equal(lifetimeCalls, 1);
   } finally {
     await reader?.cancel();

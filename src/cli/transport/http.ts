@@ -944,6 +944,10 @@ async function routeObservabilityApiRequest(
       lifetimeRouteError(res, "persistence_failed");
       return true;
     }
+    if (!services.isRegisteredRepoId?.(request.repoId)) {
+      lifetimeRouteError(res, "repository_not_found");
+      return true;
+    }
     if (current.persistenceState === "recoveryRequired") {
       lifetimeRouteError(res, "recovery_required");
       return true;
@@ -1202,6 +1206,7 @@ async function routeObservabilityApiRequest(
     let maxStreamTimer: NodeJS.Timeout | null = null;
     let pendingSnapshot: ObservabilitySnapshot | null = null;
     let snapshotDelivery: Promise<void> | null = null;
+    let closeAfterCurrentPair = false;
     const pendingWriteCancellations = new Set<() => void>();
     let resolveStreamClosed!: () => void;
     const streamClosed = new Promise<void>((resolve) => {
@@ -1280,11 +1285,13 @@ async function routeObservabilityApiRequest(
     };
 
     const enqueueSnapshot = (snapshot: ObservabilitySnapshot): void => {
-      if (closed) return;
+      if (closed || closeAfterCurrentPair) return;
       if (pendingSnapshot !== null) {
         // The service emits on a fixed cadence. One pending tick is bounded;
-        // further overload closes so no required snapshot/lifetime pair is dropped.
-        endStream();
+        // overload drops only work that has not emitted, then closes after the
+        // active snapshot receives its required lifetime partner.
+        pendingSnapshot = null;
+        closeAfterCurrentPair = true;
         return;
       }
       pendingSnapshot = snapshot;
@@ -1301,6 +1308,10 @@ async function routeObservabilityApiRequest(
             ]);
             if (lifetime === null) return;
             if (!await sendEvent("lifetime", lifetime)) throw new Error("lifetime write failed");
+            if (closeAfterCurrentPair) {
+              endStream();
+              return;
+            }
           }
         } catch (err) {
           logger.warn("Observability SSE snapshot pair failed", { error: err });
