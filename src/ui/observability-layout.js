@@ -140,6 +140,21 @@ export function migrateV2Layout(saved, panelIds) {
   return layout;
 }
 
+export function normalizeV3Layout(saved, panelIds) {
+  const source = saved !== null && typeof saved === "object" && !Array.isArray(saved)
+    ? saved
+    : {};
+  const layout = {};
+
+  for (const id of panelIds) {
+    const fallback = DEFAULT_LAYOUT[id] ?? { col: 1, row: 1, cols: 4, rows: 2 };
+    const preferred = isLayoutRect(source[id]) ? source[id] : fallback;
+    layout[id] = placeBelow(layout, preferred) ?? placeBelow(layout, fallback) ?? { ...fallback };
+  }
+
+  return layout;
+}
+
 export function movePanel(layout, id, dx, dy) {
   const current = layout[id];
   if (

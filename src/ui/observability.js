@@ -2,7 +2,7 @@
 // Vanilla ES module — no bundler. Pulls live data via SSE with REST fallback.
 
 import { buildToolOutputViewModel } from "./observability-tool-output.js";
-import { migrateV2Layout, movePanel } from "./observability-layout.js";
+import { migrateV2Layout, normalizeV3Layout } from "./observability-layout.js";
 
 const state = {
   repoId: "sdl-mcp",
@@ -1004,43 +1004,56 @@ function init() {
 const LAYOUT_V3_KEY = "sdl-observability-panel-layout-v3";
 const LAYOUT_V2_KEY = "sdl-observability-panel-layout-v2";
 
-function isCompleteLayout(candidate, panelIds) {
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return false;
+function parseMigratableV2(raw) {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
   }
-  const candidateIds = Object.keys(candidate);
-  if (
-    candidateIds.length !== panelIds.length ||
-    !panelIds.every((id) => Object.hasOwn(candidate, id))
-  ) {
-    return false;
-  }
-  // No-op moves delegate every rectangle and pairwise collision check to the shared engine.
-  return panelIds.length > 0 && panelIds.every((id) => movePanel(candidate, id, 0, 0) !== candidate);
 }
 
-function loadDashboardLayout(panelIds) {
+function loadDashboardLayout(panelIds, storage) {
   const defaults = migrateV2Layout({}, panelIds);
-  const savedV3 = localStorage.getItem(LAYOUT_V3_KEY);
-  if (savedV3 !== null) {
-    try {
-      const parsed = JSON.parse(savedV3);
-      return isCompleteLayout(parsed, panelIds) ? parsed : defaults;
-    } catch {
-      return defaults;
-    }
-  }
-
-  const savedV2 = localStorage.getItem(LAYOUT_V2_KEY);
-  if (savedV2 === null) return defaults;
   try {
-    const migrated = migrateV2Layout(JSON.parse(savedV2), panelIds);
-    // Publish v3 only after every panel has passed the shared collision validator.
-    if (!isCompleteLayout(migrated, panelIds)) return defaults;
-    localStorage.setItem(LAYOUT_V3_KEY, JSON.stringify(migrated));
+    const savedV3 = storage.getItem(LAYOUT_V3_KEY);
+    if (savedV3 !== null) {
+      try {
+        return normalizeV3Layout(JSON.parse(savedV3), panelIds);
+      } catch {
+        return defaults;
+      }
+    }
+
+    const savedV2 = parseMigratableV2(storage.getItem(LAYOUT_V2_KEY));
+    if (savedV2 === null) return defaults;
+    const migrated = migrateV2Layout(savedV2, panelIds);
+    storage.setItem(LAYOUT_V3_KEY, JSON.stringify(migrated));
     return migrated;
   } catch {
     return defaults;
+  }
+}
+
+function resetDashboardLayoutStorage(storage) {
+  const savedV2 = storage.getItem(LAYOUT_V2_KEY);
+  if (parseMigratableV2(savedV2) !== null) storage.removeItem(LAYOUT_V2_KEY);
+  storage.removeItem(LAYOUT_V3_KEY);
+}
+
+function resetDashboardLayout(storage, current, defaults, apply, announce) {
+  try {
+    resetDashboardLayoutStorage(storage);
+    apply(defaults);
+    announce("Panel layout reset.");
+    return defaults;
+  } catch {
+    apply(current);
+    announce("Panel layout reset failed.");
+    return current;
   }
 }
 
@@ -1055,7 +1068,7 @@ function initDashboardLayoutEditor() {
   const panelIds = panels.map((panel) => panel.dataset.panel);
   const mobile = window.matchMedia("(max-width: 720px)");
   const defaults = migrateV2Layout({}, panelIds);
-  let layout = loadDashboardLayout(panelIds);
+  let layout = loadDashboardLayout(panelIds, localStorage);
 
   const applyPanelRect = (panel, rect) => {
     panel.style.setProperty("--panel-col", String(rect.col));
@@ -1083,10 +1096,17 @@ function initDashboardLayoutEditor() {
   layoutResetBtn.addEventListener("click", () => {
     try {
       if (!window.confirm("Reset dashboard panel layout?")) return;
-      layout = defaults;
-      for (const panel of panels) applyPanelRect(panel, layout[panel.dataset.panel]);
-      localStorage.removeItem(LAYOUT_V3_KEY);
-      if (layoutStatus) layoutStatus.textContent = "Panel layout reset.";
+      layout = resetDashboardLayout(
+        localStorage,
+        layout,
+        defaults,
+        (next) => {
+          for (const panel of panels) applyPanelRect(panel, next[panel.dataset.panel]);
+        },
+        (message) => {
+          if (layoutStatus) layoutStatus.textContent = message;
+        },
+      );
     } finally {
       layoutResetBtn.focus();
     }

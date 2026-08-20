@@ -1299,6 +1299,13 @@ table.per-encoder td.enc {
   pointer-events: auto;
 }
 
+@media (min-width: 721px) {
+  .dashboard-grid[data-layout-edit="true"] .panel:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
 @media (max-width: 720px) {
   .layout-controls,
   .panel-resize-grip {

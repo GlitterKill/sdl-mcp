@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { runInNewContext } from "node:vm";
 
 import {
   GRID,
   PANEL_BOUNDS,
   migrateV2Layout,
   movePanel,
+  normalizeV3Layout,
   resizePanel,
 } from "../../../dist/ui/observability-layout.js";
 
@@ -61,6 +63,74 @@ function assertValidLayout(layout: Layout): void {
   }
 }
 
+type StorageHarness = {
+  calls: string[];
+  values: Map<string, string>;
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+type DashboardHarness = {
+  loadDashboardLayout(panelIds: string[], storage: StorageHarness): Layout;
+  resetDashboardLayout(
+    storage: StorageHarness,
+    current: Layout,
+    defaults: Layout,
+    apply: (layout: Layout) => void,
+    announce: (message: string) => void,
+  ): Layout;
+};
+
+function makeStorage(
+  initial: Record<string, string> = {},
+  fail?: { operation: "get" | "set" | "remove"; key: string },
+): StorageHarness {
+  const values = new Map(Object.entries(initial));
+  const calls: string[] = [];
+  const throwIfRequested = (operation: "get" | "set" | "remove", key: string) => {
+    if (fail?.operation === operation && fail.key === key) {
+      const error = new Error("Storage access denied");
+      error.name = "SecurityError";
+      throw error;
+    }
+  };
+  return {
+    calls,
+    values,
+    getItem(key) {
+      calls.push(`get:${key}`);
+      throwIfRequested("get", key);
+      return values.get(key) ?? null;
+    },
+    setItem(key, value) {
+      calls.push(`set:${key}`);
+      throwIfRequested("set", key);
+      values.set(key, value);
+    },
+    removeItem(key) {
+      calls.push(`remove:${key}`);
+      throwIfRequested("remove", key);
+      values.delete(key);
+    },
+  };
+}
+
+function loadDashboardHarness(): DashboardHarness {
+  const source = dashboardSource
+    .replace(/^import .*;\s*$/gm, "")
+    .replace(/\nif \(document\.readyState === "loading"\)[\s\S]*$/, "");
+  const context = {
+    migrateV2Layout,
+    normalizeV3Layout,
+  } as Record<string, unknown>;
+  runInNewContext(
+    `${source}\nglobalThis.__layoutHarness = { loadDashboardLayout, resetDashboardLayout };`,
+    context,
+  );
+  return context.__layoutHarness as DashboardHarness;
+}
+
 describe("dashboard layout geometry", () => {
   it("provides opt-in accessible layout editing structure", () => {
     assert.match(
@@ -96,16 +166,22 @@ describe("dashboard layout geometry", () => {
     );
   });
 
+  it("shows a distinct high-contrast desktop focus indicator", () => {
+    assert.match(
+      css,
+      /@media \(min-width: 721px\)[\s\S]*?\.dashboard-grid\[data-layout-edit="true"\] \.panel:focus-visible\s*\{[\s\S]*?outline:\s*3px solid var\(--accent\);[\s\S]*?outline-offset:\s*2px;/,
+    );
+  });
+
   it("loads layout v3 atomically through the shared geometry module", () => {
-    assert.match(dashboardSource, /import \{ migrateV2Layout, movePanel \} from "\.\/observability-layout\.js";/);
+    assert.match(
+      dashboardSource,
+      /import \{ migrateV2Layout, normalizeV3Layout \} from "\.\/observability-layout\.js";/,
+    );
     assert.match(dashboardSource, /sdl-observability-panel-layout-v3/);
     assert.match(dashboardSource, /sdl-observability-panel-layout-v2/);
     assert.doesNotMatch(dashboardSource, /const defaults = \{/);
     assert.doesNotMatch(dashboardSource, /addEventListener\("pointerdown"/);
-    assert.match(
-      dashboardSource,
-      /if \(!isCompleteLayout\(migrated, panelIds\)\) return defaults;[\s\S]*?localStorage\.setItem\(LAYOUT_V3_KEY, JSON\.stringify\(migrated\)\)/,
-    );
     assert.match(
       dashboardSource,
       /catch \{[\s\S]*?return defaults;[\s\S]*?\}/,
@@ -124,25 +200,112 @@ describe("dashboard layout geometry", () => {
       panelIds.every((id) => movePanel(laterCollision, id, 0, 0) !== laterCollision),
       false,
     );
-    assert.match(
-      dashboardSource,
-      /return panelIds\.length > 0 && panelIds\.every\(\(id\) => movePanel\(candidate, id, 0, 0\) !== candidate\);/,
-    );
+    assertValidLayout(normalizeV3Layout(laterCollision, panelIds));
   });
 
-  it("leaves invalid v3 untouched and reset removes only v3", () => {
-    assert.match(
-      dashboardSource,
-      /if \(savedV3 !== null\) \{[\s\S]*?return isCompleteLayout\(parsed, panelIds\) \? parsed : defaults;[\s\S]*?catch \{\s*return defaults;\s*\}/,
+  it("normalizes v3 per panel without discarding unrelated valid placement", () => {
+    const saved = {
+      cache: { col: 19, row: 40, cols: 6, rows: 4 },
+      health: { col: 0, row: 2, cols: 6, rows: 4 },
+    };
+    const normalized = normalizeV3Layout(saved, panelIds);
+    assert.deepEqual(normalized.cache, saved.cache);
+    assert.deepEqual(normalized.health, migrateV2Layout({}, ["health"]).health);
+    assertValidLayout(normalized);
+
+    const hostileInputs = [null, [], "layout", 42, { cache: { col: 1, row: 1e16, cols: 6, rows: 4 } }];
+    for (const hostile of hostileInputs) {
+      assertValidLayout(normalizeV3Layout(hostile, panelIds));
+    }
+  });
+
+  it("falls back from storage SecurityError and continues without writes", () => {
+    const harness = loadDashboardHarness();
+    const storage = makeStorage({}, {
+      operation: "get",
+      key: "sdl-observability-panel-layout-v3",
+    });
+    assert.deepEqual(
+      harness.loadDashboardLayout(panelIds, storage),
+      migrateV2Layout({}, panelIds),
     );
-    assert.match(
-      dashboardSource,
-      /layout = defaults;[\s\S]*?localStorage\.removeItem\(LAYOUT_V3_KEY\)/,
+    assert.deepEqual(storage.calls, ["get:sdl-observability-panel-layout-v3"]);
+  });
+
+  it("resets durably without allowing valid v2 to resurrect", () => {
+    const harness = loadDashboardHarness();
+    const defaults = migrateV2Layout({}, panelIds);
+    const current = normalizeV3Layout(
+      { cache: { col: 19, row: 40, cols: 6, rows: 4 } },
+      panelIds,
     );
-    assert.doesNotMatch(
-      dashboardSource,
-      /layoutResetBtn\.addEventListener[\s\S]*?localStorage\.setItem\(LAYOUT_V3_KEY/,
+    const storage = makeStorage({
+      "sdl-observability-panel-layout-v2": JSON.stringify({
+        cache: { col: 10, row: 4, cols: 3, rows: 2 },
+      }),
+      "sdl-observability-panel-layout-v3": JSON.stringify(current),
+    });
+    const applied: Layout[] = [];
+    const announcements: string[] = [];
+    const result = harness.resetDashboardLayout(
+      storage,
+      current,
+      defaults,
+      (layout) => applied.push(layout),
+      (message) => announcements.push(message),
     );
+    assert.equal(result, defaults);
+    assert.deepEqual(storage.calls.slice(0, 3), [
+      "get:sdl-observability-panel-layout-v2",
+      "remove:sdl-observability-panel-layout-v2",
+      "remove:sdl-observability-panel-layout-v3",
+    ]);
+    assert.equal(storage.values.size, 0);
+    assert.deepEqual(applied, [defaults]);
+    assert.deepEqual(announcements, ["Panel layout reset."]);
+    assert.deepEqual(harness.loadDashboardLayout(panelIds, storage), defaults);
+    assert.equal(storage.calls.some((call) => call.startsWith("set:")), false);
+  });
+
+  it("preserves invalid v2 and current UI when reset storage access fails", () => {
+    const harness = loadDashboardHarness();
+    const defaults = migrateV2Layout({}, panelIds);
+    const current = normalizeV3Layout(
+      { cache: { col: 19, row: 40, cols: 6, rows: 4 } },
+      panelIds,
+    );
+
+    const invalidV2 = makeStorage({
+      "sdl-observability-panel-layout-v2": "not-json",
+      "sdl-observability-panel-layout-v3": JSON.stringify(current),
+    });
+    harness.resetDashboardLayout(invalidV2, current, defaults, () => {}, () => {});
+    assert.equal(invalidV2.values.get("sdl-observability-panel-layout-v2"), "not-json");
+    assert.equal(invalidV2.values.has("sdl-observability-panel-layout-v3"), false);
+
+    for (const fail of [
+      { operation: "get" as const, key: "sdl-observability-panel-layout-v2" },
+      { operation: "remove" as const, key: "sdl-observability-panel-layout-v2" },
+      { operation: "remove" as const, key: "sdl-observability-panel-layout-v3" },
+    ]) {
+      const storage = makeStorage({
+        "sdl-observability-panel-layout-v2": JSON.stringify({ cache: { col: 10, row: 4, cols: 3, rows: 2 } }),
+        "sdl-observability-panel-layout-v3": JSON.stringify(current),
+      }, fail);
+      const applied: Layout[] = [];
+      const announcements: string[] = [];
+      const result = harness.resetDashboardLayout(
+        storage,
+        current,
+        defaults,
+        (layout) => applied.push(layout),
+        (message) => announcements.push(message),
+      );
+      assert.equal(result, current);
+      assert.equal(storage.values.has("sdl-observability-panel-layout-v3"), true);
+      assert.deepEqual(applied, [current]);
+      assert.deepEqual(announcements, ["Panel layout reset failed."]);
+    }
   });
 
   it("registers the same complete panel set in HTML, JavaScript defaults, and CSS", () => {
