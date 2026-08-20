@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
@@ -43,6 +44,16 @@ function toolProjection(
 }
 
 describe("Aggregator", () => {
+  it("preserves the legacy snapshot deep-key serialization order", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    const snapshot = agg.getSnapshot(REPO);
+    const normalized = { ...snapshot, generatedAt: "<timestamp>", uptimeMs: 0 };
+    assert.equal(
+      createHash("sha256").update(JSON.stringify(normalized)).digest("hex"),
+      "e7a24d6147256d4621894b0eed4a3ce6a6e05ecbeeba45ef5bd0c640a1f343df",
+    );
+  });
+
   it("starts with a fresh schema-versioned snapshot", () => {
     const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
     const snap = agg.getSnapshot(REPO);

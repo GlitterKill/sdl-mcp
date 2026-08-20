@@ -1,5 +1,8 @@
-﻿import { cpus } from "node:os";
+import { cpus } from "node:os";
 import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
+import { mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import type { ObservabilityConfig } from "../config/types.js";
 import type {
@@ -18,6 +21,17 @@ import type {
 import { getToolDispatchStats } from "../mcp/dispatch-limiter.js";
 import { logger } from "../util/logger.js";
 import { Aggregator, DEFAULT_AGGREGATOR_OPTIONS } from "./aggregator.js";
+import {
+  admitRepository,
+  canonicalDynamicKey,
+  emptyLifetimeSections,
+  emptyRepositoryLifetime,
+  incrementSessionCount,
+  lifetimeView,
+  mergeProcessPeaks,
+  mergeRepositoryLifetime,
+  resetRepositoryLifetime,
+} from "./lifetime-accumulator.js";
 import type {
   IndexPhaseTapEvent,
   CacheLookupTapEvent,
@@ -33,6 +47,28 @@ import type {
   PostIndexSessionTapEvent,
   TokenSavingsTapEvent,
 } from "./event-tap.js";
+import {
+  getObservabilityTap,
+  installObservabilityTap,
+  resetObservabilityTap,
+} from "./event-tap.js";
+import {
+  openLifetimeStore,
+  type LifetimeStore,
+  type PublishOutcome,
+} from "./lifetime-store.js";
+import {
+  LIFETIME_SCHEMA_VERSION,
+  SECTION_IDS,
+  repositoryStorageKey,
+  type DurableLifetimeRepository,
+  type DurableLifetimeRoot,
+  type LifetimeEnvelopeV1,
+  type LifetimeFreshness,
+  type LifetimeReadyV1,
+  type ProcessPeaks,
+  type SectionId,
+} from "./lifetime-types.js";
 import { RingBuffer } from "./ring-buffer.js";
 import type {
   BeamExplainResponse,
@@ -62,6 +98,36 @@ export type BeamExplainStoreLike = {
 type SnapshotSubscriber = (snapshot: ObservabilitySnapshot) => void;
 type GraphSubscriber = (event: GraphActivityEvent) => void;
 
+interface IntervalHandle {
+  unref?(): void;
+}
+
+export interface ObservabilityServiceOptions {
+  readonly lifetimeDirectory?: string;
+  readonly openLifetimeStore?: (directory: string) => Promise<LifetimeStore>;
+  readonly now?: () => Date;
+  readonly isRegisteredRepoId?: (repoId: string) => boolean;
+  readonly scheduleInterval?: (callback: () => void, delayMs: number) => IntervalHandle;
+  readonly clearScheduledInterval?: (timer: IntervalHandle) => void;
+}
+
+interface LifetimeRepositoryState {
+  baseline: DurableLifetimeRepository;
+  activeCarry: DurableLifetimeRepository;
+  active: Aggregator;
+  seen: Set<SectionId>;
+  eventProduced: boolean;
+  sessionCounted: boolean;
+}
+
+interface PublicationBoundary {
+  readonly actives: Map<string, DurableLifetimeRepository>;
+  readonly eventProduced: Map<string, boolean>;
+  readonly processPeaks: ProcessPeaks | null;
+}
+
+const CHECKPOINT_INTERVAL_MS = 30_000;
+
 /**
  * Per-repo observability service.
  *
@@ -75,20 +141,46 @@ type GraphSubscriber = (event: GraphActivityEvent) => void;
  */
 export class ObservabilityService implements ObservabilityTap {
   private readonly config: ObservabilityConfig;
+  private readonly options: Required<Pick<ObservabilityServiceOptions,
+    "now" | "isRegisteredRepoId" | "scheduleInterval" | "clearScheduledInterval"
+  >> & Pick<ObservabilityServiceOptions, "lifetimeDirectory" | "openLifetimeStore">;
   private readonly aggregators = new Map<string, Aggregator>();
   private readonly subscribers = new Set<SnapshotSubscriber>();
   private readonly graphSubscribers = new Set<GraphSubscriber>();
   private readonly graphEvents = new RingBuffer<GraphActivityEvent>(200);
 
-  private sampleTimer: NodeJS.Timeout | null = null;
+  private sampleTimer: IntervalHandle | null = null;
+  private checkpointTimer: IntervalHandle | null = null;
   private eventLoopHistogram: IntervalHistogram | null = null;
   private prevCpuUsage: NodeJS.CpuUsage | null = null;
   private prevCpuSampleAt: number = 0;
   private startedAt: number = 0;
   private beamExplainStore: BeamExplainStoreLike | null = null;
+  private lifetimeStore: LifetimeStore | null = null;
+  private committedLifetime: DurableLifetimeRoot | null = null;
+  private readonly lifetimeRepositories = new Map<string, LifetimeRepositoryState>();
+  private readonly lifetimeFreshness = new Map<string, LifetimeFreshness>();
+  private readonly capacityExceeded = new Set<string>();
+  private readonly processFreshness = emptyFreshness();
+  private processPeakEpoch: ProcessPeaks | null = null;
+  private lifetimeWriter = false;
+  private lifetimeFrozen = false;
+  private lifetimeOpenFailed = false;
+  private startPromise: Promise<void> | null = null;
+  private lifetimeTail: Promise<void> = Promise.resolve();
 
-  constructor(config: ObservabilityConfig) {
+  constructor(config: ObservabilityConfig, options: ObservabilityServiceOptions = {}) {
     this.config = config;
+    this.options = {
+      lifetimeDirectory: options.lifetimeDirectory,
+      openLifetimeStore: options.openLifetimeStore,
+      now: options.now ?? (() => new Date()),
+      isRegisteredRepoId: options.isRegisteredRepoId ?? (() => false),
+      scheduleInterval: options.scheduleInterval
+        ?? ((callback, delayMs) => setInterval(callback, delayMs)),
+      clearScheduledInterval: options.clearScheduledInterval
+        ?? ((timer) => clearInterval(timer as NodeJS.Timeout)),
+    };
   }
 
   /**
@@ -98,8 +190,29 @@ export class ObservabilityService implements ObservabilityTap {
    * `stop()`) is a no-op. The interval timer is `.unref()`-ed so it does
    * not keep the process alive.
    */
-  start(): void {
-    if (this.sampleTimer !== null) return;
+  async start(): Promise<void> {
+    if (this.startPromise !== null) return this.startPromise;
+    this.startPromise = this.startInternal();
+    return this.startPromise;
+  }
+
+  private async startInternal(): Promise<void> {
+    const directory = this.options.lifetimeDirectory ?? join(homedir(), ".sdl-mcp");
+    this.lifetimeOpenFailed = false;
+    try {
+      if (this.options.openLifetimeStore === undefined) await mkdir(directory, { recursive: true });
+      this.lifetimeStore = await (this.options.openLifetimeStore?.(directory)
+        ?? openLifetimeStore({ directory, now: this.options.now }));
+      const state = this.lifetimeStore.state();
+      this.committedLifetime = state.root ?? emptyLifetimeRoot(this.nowIso());
+      this.lifetimeWriter = state.mode === "writer" || state.mode === "degraded";
+      this.lifetimeFrozen = state.mode === "recoveryRequired";
+    } catch (err) {
+      this.logWarn("lifetime store open failed", err);
+      this.committedLifetime = emptyLifetimeRoot(this.nowIso());
+      this.lifetimeWriter = false;
+      this.lifetimeOpenFailed = true;
+    }
     this.startedAt = Date.now();
     try {
       this.eventLoopHistogram = monitorEventLoopDelay({ resolution: 20 });
@@ -116,23 +229,37 @@ export class ObservabilityService implements ObservabilityTap {
       this.prevCpuUsage = null;
     }
     const interval = clampInterval(this.config.sampleIntervalMs);
-    const timer = setInterval(() => {
+    const timer = this.options.scheduleInterval(() => {
       this.tick();
     }, interval);
     // Required so the sampler does not keep the process alive (round 8 fix).
-    timer.unref();
+    timer.unref?.();
     this.sampleTimer = timer;
+    const checkpointTimer = this.options.scheduleInterval(() => {
+      void this.queueLifetimeOperation(() => this.checkpointLifetime()).catch((err) => {
+        this.logWarn("lifetime checkpoint failed", err);
+      });
+    }, CHECKPOINT_INTERVAL_MS);
+    checkpointTimer.unref?.();
+    this.checkpointTimer = checkpointTimer;
+    installObservabilityTap(this);
   }
 
   /**
    * Stop sampling. Releases the interval timer and disables the
    * event-loop histogram. Safe to call when not started.
    */
-  stop(): void {
+  async stop(): Promise<void> {
+    if (this.startPromise !== null) await this.startPromise;
     if (this.sampleTimer !== null) {
-      clearInterval(this.sampleTimer);
+      this.options.clearScheduledInterval(this.sampleTimer);
       this.sampleTimer = null;
     }
+    if (this.checkpointTimer !== null) {
+      this.options.clearScheduledInterval(this.checkpointTimer);
+      this.checkpointTimer = null;
+    }
+    if (getObservabilityTap() === this) resetObservabilityTap();
     if (this.eventLoopHistogram !== null) {
       try {
         this.eventLoopHistogram.disable();
@@ -142,6 +269,33 @@ export class ObservabilityService implements ObservabilityTap {
       this.eventLoopHistogram = null;
     }
     this.prevCpuUsage = null;
+    const store = this.lifetimeStore;
+    if (store !== null) {
+      let snapshot: DurableLifetimeRoot | undefined;
+      try {
+        snapshot = this.lifetimeWriter && !this.lifetimeFrozen
+          ? this.buildLifetimeCandidate(this.nowIso(), true)
+          : undefined;
+        await store.close(snapshot);
+        if (snapshot !== undefined) {
+          this.committedLifetime = snapshot;
+          for (const [repoId, state] of this.lifetimeRepositories) {
+            const stored = snapshot.repositories[repositoryStorageKey(repoId)];
+            if (stored !== undefined) state.baseline = stored;
+            if (state.eventProduced) state.sessionCounted = true;
+            state.activeCarry = activeLifetimeMetadata(state.baseline);
+            state.active = this.newAggregator();
+            state.seen.clear();
+            state.eventProduced = false;
+          }
+          this.processPeakEpoch = null;
+        }
+      } catch (err) {
+        this.logWarn("lifetime final checkpoint failed", err);
+      }
+      this.lifetimeStore = null;
+    }
+    this.startPromise = null;
   }
 
   /**
@@ -153,6 +307,16 @@ export class ObservabilityService implements ObservabilityTap {
     try {
       const sample = this.collectResourceSample();
       const dispatchSample = getToolDispatchStats();
+      this.recordProcessFreshness("resources");
+      if (this.lifetimeWriter && !this.lifetimeFrozen) {
+        this.processPeakEpoch = mergeProcessPeaks(this.processPeakEpoch, {
+          cpuPct: safeTotal(sample.cpuPct),
+          rssMb: safeTotal(sample.rssMb),
+          heapUsedMb: safeTotal(sample.heapUsedMb),
+          heapTotalMb: safeTotal(sample.heapTotalMb),
+          eventLoopLagMs: safeTotal(sample.eventLoopLagMs),
+        });
+      }
       for (const aggregator of this.aggregators.values()) {
         try {
           aggregator.recordResourceSample(sample);
@@ -246,19 +410,23 @@ export class ObservabilityService implements ObservabilityTap {
   private getAggregator(repoId: string): Aggregator {
     let agg = this.aggregators.get(repoId);
     if (!agg) {
-      const shortMin = this.config.retentionShortMinutes;
-      const longHr = this.config.retentionLongHours;
-      agg = new Aggregator({
-        shortWindowMs: shortMin * 60_000,
-        shortCapacity: shortMin * 60,
-        longWindowMs: longHr * 3_600_000,
-        longCapacity: longHr * 60,
-        ioThroughputSaturationMbPerSec:
-          DEFAULT_AGGREGATOR_OPTIONS.ioThroughputSaturationMbPerSec,
-      });
+      agg = this.newAggregator();
       this.aggregators.set(repoId, agg);
     }
     return agg;
+  }
+
+  private newAggregator(): Aggregator {
+    const shortMin = this.config.retentionShortMinutes;
+    const longHr = this.config.retentionLongHours;
+    return new Aggregator({
+      shortWindowMs: shortMin * 60_000,
+      shortCapacity: shortMin * 60,
+      longWindowMs: longHr * 3_600_000,
+      longCapacity: longHr * 60,
+      ioThroughputSaturationMbPerSec:
+        DEFAULT_AGGREGATOR_OPTIONS.ioThroughputSaturationMbPerSec,
+    });
   }
 
   /**
@@ -280,6 +448,350 @@ export class ObservabilityService implements ObservabilityTap {
    */
   getTimeseries(repoId: string, window: TimeseriesWindow): TimeseriesResponse {
     return this.getAggregator(repoId).getTimeseries(repoId, window);
+  }
+
+  async getLifetime(repoId: string): Promise<LifetimeEnvelopeV1> {
+    if (this.startPromise !== null) await this.startPromise;
+    const store = this.lifetimeStore;
+    if (store !== null && store.state().mode === "readOnly") {
+      try {
+        await store.refreshReadOnly();
+        const refreshed = store.state();
+        if (refreshed.root !== null) this.committedLifetime = refreshed.root;
+      } catch (err) {
+        this.logWarn("lifetime read-only refresh failed", err);
+      }
+    }
+
+    const state = store?.state();
+    const generatedAt = this.nowIso();
+    if (this.lifetimeFrozen || state?.mode === "recoveryRequired") {
+      return {
+        schemaVersion: LIFETIME_SCHEMA_VERSION,
+        sampleIntervalMs: clampInterval(this.config.sampleIntervalMs),
+        generatedAt,
+        repoId,
+        persistenceState: "recoveryRequired",
+        recoveryReason: state?.mode === "recoveryRequired"
+          ? state.reason
+          : "indeterminatePublication",
+      };
+    }
+
+    const readOnly = state?.mode === "readOnly";
+    const capacityExceeded = !readOnly && this.capacityExceeded.has(repoId);
+    const stored = this.committedLifetime?.repositories[repositoryStorageKey(repoId)];
+    const live = this.lifetimeRepositories.get(repoId);
+    const value = capacityExceeded
+      ? emptyRepositoryLifetime()
+      : readOnly
+        ? stored ?? emptyRepositoryLifetime()
+        : live === undefined
+          ? stored ?? emptyRepositoryLifetime()
+          : lifetimeView(live.baseline, this.activeLifetime(repoId, live));
+    return {
+      schemaVersion: LIFETIME_SCHEMA_VERSION,
+      sampleIntervalMs: clampInterval(this.config.sampleIntervalMs),
+      generatedAt,
+      repoId,
+      epoch: value.epoch,
+      resetAt: value.resetAt,
+      lastCheckpointAt: value.lastCheckpointAt,
+      persistenceState: readOnly
+        ? "readOnly"
+        : capacityExceeded
+          ? "capacityExceeded"
+          : state?.mode === "degraded" || this.lifetimeOpenFailed
+            ? "degraded"
+            : "ready",
+      sessionCount: value.sessionCount,
+      saturated: value.saturated,
+      sections: capacityExceeded ? emptyLifetimeSections() : structuredClone(value.sections),
+      freshness: this.responseFreshness(repoId),
+      processPeaks: mergeProcessPeaks(
+        this.committedLifetime?.processPeaks ?? null,
+        this.lifetimeWriter && !this.lifetimeFrozen ? this.processPeakEpoch : null,
+      ),
+    };
+  }
+
+  async resetLifetime(repoId: string): Promise<LifetimeReadyV1> {
+    if (this.startPromise !== null) await this.startPromise;
+    return this.queueLifetimeOperation(async () => {
+      const store = this.lifetimeStore;
+      const mode = store?.state().mode;
+      if (store === null || mode === "readOnly") throw new Error("Lifetime store is read-only");
+      if (this.lifetimeFrozen || mode === "recoveryRequired") {
+        throw new Error("Lifetime recovery required");
+      }
+      if (!this.isRegisteredRepoId(repoId)) throw new Error("Repository is not registered");
+      const target = this.ensureLifetimeRepository(repoId);
+      if (target === null) throw new Error("Lifetime repository capacity exceeded");
+
+      const resetAt = this.nowIso();
+      const boundary = this.capturePublicationBoundary();
+      const oldTargetBaseline = target.baseline;
+      const candidate = this.buildLifetimeCandidate(resetAt, false, boundary, repoId);
+      const resetValue = candidate.repositories[repositoryStorageKey(repoId)];
+      if (resetValue === undefined) throw new Error("Reset repository is unavailable");
+
+      // Swap before awaiting publication so concurrent events land in the new epoch.
+      target.baseline = resetValue;
+      target.activeCarry = activeLifetimeMetadata(resetValue);
+      target.active = this.newAggregator();
+      target.seen.clear();
+      target.eventProduced = false;
+      let outcome: PublishOutcome;
+      try {
+        outcome = await store.reset(candidate);
+      } catch (err) {
+        target.baseline = oldTargetBaseline;
+        target.activeCarry = activeLifetimeMetadata(oldTargetBaseline);
+        this.restorePublicationBoundary(boundary);
+        throw err;
+      }
+      if (outcome.status === "committed") {
+        this.acceptCommittedLifetime(outcome.root, boundary, false);
+        return this.readyLifetime(repoId, "ready");
+      }
+      if (outcome.status === "notPublished") {
+        target.baseline = oldTargetBaseline;
+        target.activeCarry = activeLifetimeMetadata(oldTargetBaseline);
+        this.restorePublicationBoundary(boundary);
+        return this.readyLifetime(repoId, "degraded");
+      }
+      this.lifetimeFrozen = true;
+      throw new Error(`Lifetime reset indeterminate: ${outcome.reason}`);
+    });
+  }
+
+  private readyLifetime(
+    repoId: string,
+    persistenceState: LifetimeReadyV1["persistenceState"],
+  ): LifetimeReadyV1 {
+    const state = this.lifetimeRepositories.get(repoId);
+    const value = state === undefined
+      ? this.committedLifetime?.repositories[repositoryStorageKey(repoId)]
+        ?? emptyRepositoryLifetime()
+      : lifetimeView(state.baseline, this.activeLifetime(repoId, state));
+    return {
+      schemaVersion: LIFETIME_SCHEMA_VERSION,
+      sampleIntervalMs: clampInterval(this.config.sampleIntervalMs),
+      generatedAt: this.nowIso(),
+      repoId,
+      epoch: value.epoch,
+      resetAt: value.resetAt,
+      lastCheckpointAt: value.lastCheckpointAt,
+      persistenceState,
+      sessionCount: value.sessionCount,
+      saturated: value.saturated,
+      sections: structuredClone(value.sections),
+      freshness: this.responseFreshness(repoId),
+      processPeaks: mergeProcessPeaks(
+        this.committedLifetime?.processPeaks ?? null,
+        this.processPeakEpoch,
+      ),
+    };
+  }
+
+  private queueLifetimeOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.lifetimeTail.then(operation, operation);
+    this.lifetimeTail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async checkpointLifetime(): Promise<void> {
+    const store = this.lifetimeStore;
+    if (store === null || !this.lifetimeWriter || this.lifetimeFrozen) return;
+    const checkpointAt = this.nowIso();
+    const boundary = this.capturePublicationBoundary();
+    const candidate = this.buildLifetimeCandidate(checkpointAt, true, boundary);
+    let outcome: PublishOutcome;
+    try {
+      outcome = await store.checkpoint(candidate);
+    } catch (err) {
+      this.restorePublicationBoundary(boundary);
+      throw err;
+    }
+    if (outcome.status === "committed") {
+      this.acceptCommittedLifetime(outcome.root, boundary, true);
+    } else if (outcome.status === "notPublished") {
+      this.restorePublicationBoundary(boundary);
+    } else {
+      this.lifetimeFrozen = true;
+    }
+  }
+
+  private capturePublicationBoundary(): PublicationBoundary {
+    const actives = new Map<string, DurableLifetimeRepository>();
+    const eventProduced = new Map<string, boolean>();
+    for (const [repoId, state] of this.lifetimeRepositories) {
+      actives.set(repoId, this.activeLifetime(repoId, state));
+      eventProduced.set(repoId, state.eventProduced);
+      state.activeCarry = activeLifetimeMetadata(state.baseline);
+      state.active = this.newAggregator();
+      state.seen.clear();
+      state.eventProduced = false;
+    }
+    const processPeaks = this.processPeakEpoch;
+    this.processPeakEpoch = null;
+    return { actives, eventProduced, processPeaks };
+  }
+
+  private restorePublicationBoundary(boundary: PublicationBoundary): void {
+    for (const [repoId, active] of boundary.actives) {
+      const state = this.lifetimeRepositories.get(repoId);
+      if (state === undefined) continue;
+      state.activeCarry = mergeRepositoryLifetime(active, state.activeCarry);
+      state.eventProduced = (boundary.eventProduced.get(repoId) ?? false)
+        || state.eventProduced;
+    }
+    this.processPeakEpoch = mergeProcessPeaks(boundary.processPeaks, this.processPeakEpoch);
+  }
+
+  private buildLifetimeCandidate(
+    timestamp: string,
+    countSessions: boolean,
+    boundary?: PublicationBoundary,
+    resetRepoId?: string,
+  ): DurableLifetimeRoot {
+    const base = structuredClone(this.committedLifetime ?? emptyLifetimeRoot(timestamp));
+    for (const [repoId, state] of this.lifetimeRepositories) {
+      const active = boundary?.actives.get(repoId) ?? this.activeLifetime(repoId, state);
+      let repository = lifetimeView(state.baseline, active);
+      if (repoId === resetRepoId) {
+        repository = resetRepositoryLifetime(repository, timestamp);
+      } else {
+        const produced = boundary?.eventProduced.get(repoId) ?? state.eventProduced;
+        if (countSessions && produced && !state.sessionCounted) {
+          repository = incrementSessionCount(repository).value;
+        }
+        repository = { ...repository, lastCheckpointAt: timestamp };
+      }
+      base.repositories[repositoryStorageKey(repoId)] = repository;
+    }
+    return {
+      ...base,
+      generation: Math.min(Number.MAX_SAFE_INTEGER, base.generation + 1),
+      updatedAt: timestamp,
+      processPeaks: mergeProcessPeaks(
+        base.processPeaks,
+        boundary?.processPeaks ?? this.processPeakEpoch,
+      ),
+      repositories: Object.fromEntries(
+        Object.entries(base.repositories).sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    };
+  }
+
+  private acceptCommittedLifetime(
+    root: DurableLifetimeRoot,
+    boundary: PublicationBoundary,
+    countSessions: boolean,
+  ): void {
+    this.committedLifetime = structuredClone(root);
+    for (const [repoId, state] of this.lifetimeRepositories) {
+      const stored = root.repositories[repositoryStorageKey(repoId)];
+      if (stored !== undefined) state.baseline = stored;
+      if (countSessions && (boundary.eventProduced.get(repoId) ?? false)) {
+        state.sessionCounted = true;
+      }
+      state.activeCarry = activeLifetimeMetadata(state.baseline, state.activeCarry);
+    }
+  }
+
+  private buildCurrentLifetimeRoot(timestamp: string): DurableLifetimeRoot {
+    const root = structuredClone(this.committedLifetime ?? emptyLifetimeRoot(timestamp));
+    for (const [repoId, state] of this.lifetimeRepositories) {
+      root.repositories[repositoryStorageKey(repoId)] = lifetimeView(
+        state.baseline,
+        this.activeLifetime(repoId, state),
+      );
+    }
+    root.processPeaks = mergeProcessPeaks(root.processPeaks, this.processPeakEpoch);
+    return root;
+  }
+
+  private ensureLifetimeRepository(repoId: string): LifetimeRepositoryState | null {
+    const existing = this.lifetimeRepositories.get(repoId);
+    if (existing !== undefined) return existing;
+    if (this.capacityExceeded.has(repoId)) return null;
+    const baseline = this.committedLifetime?.repositories[repositoryStorageKey(repoId)]
+      ?? emptyRepositoryLifetime();
+    const admission = admitRepository(
+      this.buildCurrentLifetimeRoot(this.nowIso()),
+      repoId,
+      baseline,
+    );
+    if (!admission.admitted) {
+      this.capacityExceeded.add(repoId);
+      return null;
+    }
+    const created: LifetimeRepositoryState = {
+      baseline,
+      activeCarry: activeLifetimeMetadata(baseline),
+      active: this.newAggregator(),
+      seen: new Set(),
+      eventProduced: false,
+      sessionCounted: false,
+    };
+    this.lifetimeRepositories.set(repoId, created);
+    return created;
+  }
+
+  private recordLifetimeEvent(
+    repoId: string | undefined,
+    sections: readonly SectionId[],
+    update: (aggregator: Aggregator) => void,
+  ): void {
+    if (repoId === undefined || !this.isRegisteredRepoId(repoId)) return;
+    const timestamp = this.nowIso();
+    const freshness = this.lifetimeFreshness.get(repoId) ?? emptyFreshness();
+    for (const section of sections) freshness[section] = timestamp;
+    this.lifetimeFreshness.set(repoId, freshness);
+    if (!this.lifetimeWriter || this.lifetimeFrozen) return;
+    const state = this.ensureLifetimeRepository(repoId);
+    if (state === null) return;
+    update(state.active);
+    for (const section of sections) state.seen.add(section);
+    state.eventProduced = true;
+  }
+
+  private activeLifetime(
+    repoId: string,
+    state: LifetimeRepositoryState,
+  ): DurableLifetimeRepository {
+    return mergeRepositoryLifetime(
+      state.activeCarry,
+      projectLifetimeSnapshot(state.active.getSnapshot(repoId), state.seen, state.baseline),
+    );
+  }
+
+  private recordProcessFreshness(section: "pool" | "auditBuffer" | "resources"): void {
+    this.processFreshness[section] = this.nowIso();
+  }
+
+  private responseFreshness(repoId: string): LifetimeFreshness {
+    const freshness = this.lifetimeFreshness.get(repoId) ?? emptyFreshness();
+    return {
+      ...freshness,
+      pool: this.processFreshness.pool,
+      auditBuffer: this.processFreshness.auditBuffer,
+      resources: this.processFreshness.resources,
+    };
+  }
+
+  private isRegisteredRepoId(repoId: string): boolean {
+    try {
+      repositoryStorageKey(repoId);
+      return repoId !== "_global" && this.options.isRegisteredRepoId(repoId);
+    } catch {
+      return false;
+    }
+  }
+
+  private nowIso(): string {
+    return this.options.now().toISOString();
   }
 
   /**
@@ -383,6 +895,14 @@ export class ObservabilityService implements ObservabilityTap {
     try {
       const repoId = event.repoId ?? "_global";
       this.getAggregator(repoId).recordToolCall(event);
+      const sections: SectionId[] = ["latency"];
+      if (event.tokensUsed !== undefined || event.tokensSaved !== undefined) {
+        sections.push("tokenEfficiency");
+      }
+      if (event.projection !== undefined) sections.push("toolOutput");
+      this.recordLifetimeEvent(event.repoId, sections, (aggregator) => {
+        aggregator.recordToolCall(event);
+      });
     } catch (err) {
       this.logWarn("toolCall failed", err);
     }
@@ -391,6 +911,9 @@ export class ObservabilityService implements ObservabilityTap {
   indexEvent(event: IndexEvent): void {
     try {
       this.getAggregator(event.repoId).recordIndexEvent(event);
+      this.recordLifetimeEvent(event.repoId, ["indexing"], (aggregator) => {
+        aggregator.recordIndexEvent(event);
+      });
     } catch (err) {
       this.logWarn("indexEvent failed", err);
     }
@@ -414,6 +937,9 @@ export class ObservabilityService implements ObservabilityTap {
   semanticSearch(event: SemanticSearchTelemetryEvent): void {
     try {
       this.getAggregator(event.repoId).recordSemanticSearch(event);
+      this.recordLifetimeEvent(event.repoId, ["retrieval"], (aggregator) => {
+        aggregator.recordSemanticSearch(event);
+      });
     } catch (err) {
       this.logWarn("semanticSearch failed", err);
     }
@@ -430,6 +956,9 @@ export class ObservabilityService implements ObservabilityTap {
   prefetch(event: PrefetchTelemetryEvent): void {
     try {
       this.getAggregator(event.repoId).recordPrefetch(event);
+      this.recordLifetimeEvent(event.repoId, ["predictiveContext"], (aggregator) => {
+        aggregator.recordPrefetch(event);
+      });
     } catch (err) {
       this.logWarn("prefetch failed", err);
     }
@@ -438,6 +967,9 @@ export class ObservabilityService implements ObservabilityTap {
   watcherHealth(event: WatcherHealthTelemetryEvent): void {
     try {
       this.getAggregator(event.repoId).recordWatcherHealth(event);
+      this.recordLifetimeEvent(event.repoId, ["health"], (aggregator) => {
+        aggregator.recordWatcherHealth(event);
+      });
     } catch (err) {
       this.logWarn("watcherHealth failed", err);
     }
@@ -454,6 +986,9 @@ export class ObservabilityService implements ObservabilityTap {
   runtimeExecution(event: RuntimeExecutionEvent): void {
     try {
       this.getAggregator(event.repoId).recordRuntimeExecution(event);
+      this.recordLifetimeEvent(event.repoId, ["latency"], (aggregator) => {
+        aggregator.recordRuntimeExecution(event);
+      });
     } catch (err) {
       this.logWarn("runtimeExecution failed", err);
     }
@@ -500,6 +1035,9 @@ export class ObservabilityService implements ObservabilityTap {
         seedCount: event.seedCount,
         iterations: event.iterations,
       });
+      this.recordLifetimeEvent(event.repoId, ["ppr"], (aggregator) => {
+        aggregator.recordPprResult(event);
+      });
     } catch (err) {
       this.logWarn("pprResult failed", err);
     }
@@ -512,6 +1050,9 @@ export class ObservabilityService implements ObservabilityTap {
         edgesUpgraded: event.edgesUpgraded,
         durationMs: event.durationMs,
         failed: event.failed,
+      });
+      this.recordLifetimeEvent(event.repoId, ["scip"], (aggregator) => {
+        aggregator.recordScipIngest(event);
       });
     } catch (err) {
       this.logWarn("scipIngest failed", err);
@@ -533,6 +1074,9 @@ export class ObservabilityService implements ObservabilityTap {
       for (const aggregator of this.aggregators.values()) {
         aggregator.recordPackedWire(event);
       }
+      this.recordLifetimeEvent(event.repoId, ["packed", "tokenEfficiency"], (aggregator) => {
+        aggregator.recordPackedWire(event);
+      });
     } catch (err) {
       this.logWarn("packedWire failed", err);
     }
@@ -549,6 +1093,9 @@ export class ObservabilityService implements ObservabilityTap {
         hit: event.hit,
         realized: event.realized,
       });
+      this.recordLifetimeEvent(event.repoId, ["tokenEfficiency"], (aggregator) => {
+        aggregator.recordTokenSavingsEvent(event);
+      });
     } catch (err) {
       this.logWarn("tokenSavings failed", err);
     }
@@ -560,6 +1107,7 @@ export class ObservabilityService implements ObservabilityTap {
       for (const aggregator of this.aggregators.values()) {
         aggregator.recordPoolSample(event);
       }
+      this.recordProcessFreshness("pool");
     } catch (err) {
       this.logWarn("poolSample failed", err);
     }
@@ -569,6 +1117,16 @@ export class ObservabilityService implements ObservabilityTap {
     try {
       for (const aggregator of this.aggregators.values()) {
         aggregator.recordResourceSample(event);
+      }
+      this.recordProcessFreshness("resources");
+      if (this.lifetimeWriter && !this.lifetimeFrozen) {
+        this.processPeakEpoch = mergeProcessPeaks(this.processPeakEpoch, {
+          cpuPct: safeTotal(event.cpuPct),
+          rssMb: safeTotal(event.rssMb),
+          heapUsedMb: safeTotal(event.heapUsedMb),
+          heapTotalMb: safeTotal(event.heapTotalMb),
+          eventLoopLagMs: safeTotal(event.eventLoopLagMs),
+        });
       }
     } catch (err) {
       this.logWarn("resourceSample failed", err);
@@ -585,6 +1143,9 @@ export class ObservabilityService implements ObservabilityTap {
           language: event.language,
           engine: event.engine,
           durationMs: event.durationMs,
+        });
+        this.recordLifetimeEvent(targetRepoId, ["indexing"], (aggregator) => {
+          aggregator.recordIndexPhase(event);
         });
         if (event.phase.toLowerCase().includes("start")) {
           this.recordGraphEvent({ type: "graph.index.started", repoId: targetRepoId, mode: event.phase });
@@ -614,6 +1175,9 @@ export class ObservabilityService implements ObservabilityTap {
         count: event.count,
         hits: event.hits,
       });
+      this.recordLifetimeEvent(event.repoId, ["cache"], (aggregator) => {
+        aggregator.recordCacheOutcome(event);
+      });
     } catch (err) {
       this.logWarn("cacheLookup failed", err);
     }
@@ -627,6 +1191,9 @@ export class ObservabilityService implements ObservabilityTap {
         evicted: event.evicted,
         rejected: event.rejected,
         maxFrontierSize: event.maxFrontierSize,
+      });
+      this.recordLifetimeEvent(event.repoId, ["beam"], (aggregator) => {
+        aggregator.recordBeamBuild(event);
       });
     } catch (err) {
       this.logWarn("sliceBuild failed", err);
@@ -648,6 +1215,9 @@ export class ObservabilityService implements ObservabilityTap {
         dbRoundTrips: event.dbRoundTrips,
         fallbackPathQueryCount: event.fallbackPathQueryCount,
         pathExplanationLatencyMs: event.pathExplanationLatencyMs,
+      });
+      this.recordLifetimeEvent(event.repoId, ["delta"], (aggregator) => {
+        aggregator.recordDeltaBlastRadius(event);
       });
     } catch (err) {
       this.logWarn("deltaBlastRadius failed", err);
@@ -678,6 +1248,7 @@ export class ObservabilityService implements ObservabilityTap {
         droppedTotal: event.droppedTotal,
         sessionActive: event.sessionActive,
       });
+      this.recordProcessFreshness("auditBuffer");
     } catch (err) {
       this.logWarn("auditBufferSample failed", err);
     }
@@ -695,6 +1266,9 @@ export class ObservabilityService implements ObservabilityTap {
         aggregator.recordPostIndexSession(rec);
       }
       this.getAggregator("_global").recordPostIndexSession(rec);
+      this.recordLifetimeEvent(event.repoId, ["postIndex"], (aggregator) => {
+        aggregator.recordPostIndexSession(event);
+      });
     } catch (err) {
       this.logWarn("postIndexSession failed", err);
     }
@@ -719,15 +1293,325 @@ export class ObservabilityService implements ObservabilityTap {
   }
 }
 
-/**
- * Construct an `ObservabilityService` configured from the provided
- * `ObservabilityConfig`. The service is returned in a stopped state;
- * callers should invoke `.start()` to begin sampling.
- */
+function emptyLifetimeRoot(updatedAt: string): DurableLifetimeRoot {
+  return {
+    schemaVersion: LIFETIME_SCHEMA_VERSION,
+    generation: 0,
+    updatedAt,
+    processPeaks: null,
+    repositories: {},
+  };
+}
+
+function emptyFreshness(): LifetimeFreshness {
+  return Object.fromEntries(SECTION_IDS.map((section) => [section, null])) as LifetimeFreshness;
+}
+
+function activeLifetimeMetadata(
+  baseline: DurableLifetimeRepository,
+  existing = emptyRepositoryLifetime(),
+): DurableLifetimeRepository {
+  return {
+    ...structuredClone(existing),
+    epoch: baseline.epoch,
+    resetAt: null,
+    lastCheckpointAt: null,
+    sessionCount: 0,
+  };
+}
+
+function safeCounter(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(value))
+    : 0;
+}
+
+function safeTotal(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.min(Number.MAX_SAFE_INTEGER, value)
+    : 0;
+}
+
+function sample(count: unknown, average: unknown, maximum = average) {
+  const safeCount = safeCounter(count);
+  return {
+    count: safeCount,
+    sum: Math.min(Number.MAX_SAFE_INTEGER, safeCount * safeTotal(average)),
+    max: safeTotal(maximum),
+  };
+}
+
+function counterMap(value: Readonly<Record<string, number>>): Record<string, number> {
+  return Object.fromEntries(Object.entries(value)
+    .map(([key, count]) => [canonicalDynamicKey(key), safeCounter(count)])
+    .sort(([left], [right]) => String(left).localeCompare(String(right))));
+}
+
+function projectLifetimeSnapshot(
+  snapshot: ObservabilitySnapshot,
+  seen: ReadonlySet<SectionId>,
+  baseline: DurableLifetimeRepository,
+): DurableLifetimeRepository {
+  const sections = emptyLifetimeSections();
+  if (seen.has("cache")) {
+    sections.cache = {
+      hits: safeCounter(snapshot.cache.totalHits),
+      misses: safeCounter(snapshot.cache.totalMisses),
+      lookupMs: sample(
+        snapshot.cache.totalHits + snapshot.cache.totalMisses,
+        snapshot.cache.avgLookupLatencyMs,
+      ),
+      perSource: Object.fromEntries(Object.entries(snapshot.cache.perSource)
+        .map(([key, value]) => [canonicalDynamicKey(key), {
+          hits: safeCounter(value.hits),
+          misses: safeCounter(value.misses),
+          lookupMs: sample(value.hits + value.misses, value.avgLatencyMs),
+        }]).sort(([left], [right]) => String(left).localeCompare(String(right)))),
+    };
+  }
+  if (seen.has("retrieval")) {
+    sections.retrieval = {
+      calls: safeCounter(snapshot.retrieval.totalRetrievals),
+      emptyResults: safeCounter(snapshot.retrieval.emptyResultCount),
+      latencyMs: sample(
+        snapshot.retrieval.totalRetrievals,
+        snapshot.retrieval.avgLatencyMs,
+        snapshot.retrieval.p95LatencyMs,
+      ),
+      byMode: counterMap(snapshot.retrieval.byMode),
+      byType: counterMap(snapshot.retrieval.byRetrievalType),
+      candidatesBySource: counterMap(snapshot.retrieval.candidateCountPerSource),
+      phaseLatencyMs: Object.fromEntries(Object.entries(snapshot.retrieval.phaseLatencyMs)
+        .map(([key, value]) => [canonicalDynamicKey(key), sample(value.count, value.avgMs, value.maxMs)])
+        .sort(([left], [right]) => String(left).localeCompare(String(right)))),
+    };
+  }
+  if (seen.has("beam")) {
+    const value = snapshot.beam;
+    sections.beam = {
+      builds: safeCounter(value.totalSliceBuilds),
+      buildMs: sample(value.totalSliceBuilds, value.avgBuildMs, value.p95BuildMs),
+      accepted: safeCounter(value.avgAccepted * value.totalSliceBuilds),
+      evicted: safeCounter(value.avgEvicted * value.totalSliceBuilds),
+      rejected: safeCounter(value.avgRejected * value.totalSliceBuilds),
+      frontierMax: sample(
+        value.totalSliceBuilds,
+        value.avgFrontierMaxSize,
+        value.p95FrontierMaxSize,
+      ),
+      retainedHandlesPeak: safeCounter(value.retainedExplainHandles),
+    };
+  }
+  if (seen.has("delta")) {
+    const value = snapshot.delta;
+    sections.delta = {
+      computations: safeCounter(value.totalBlastRadiusComputations),
+      blastRadiusMs: sample(
+        value.totalBlastRadiusComputations,
+        value.avgBlastRadiusLatencyMs,
+        value.p95BlastRadiusLatencyMs,
+      ),
+      dbRoundTrips: sample(
+        value.totalBlastRadiusComputations,
+        value.avgDbRoundTripsPerChangedSymbol,
+      ),
+      pathExplanationMs: value.avgPathExplanationLatencyMs === 0
+        ? sample(0, 0)
+        : sample(
+          value.totalBlastRadiusComputations,
+          value.avgPathExplanationLatencyMs,
+          value.p95PathExplanationLatencyMs,
+        ),
+      fallbackPathQueries: safeCounter(value.fallbackPathQueryCount),
+    };
+  }
+  if (seen.has("indexing")) {
+    const value = snapshot.indexing;
+    sections.indexing = {
+      events: safeCounter(value.totalEvents),
+      pass1Ms: sample(value.phaseCounts.pass1 ?? 0, value.avgPass1Ms),
+      pass2Ms: sample(value.phaseCounts.pass2 ?? 0, value.avgPass2Ms),
+      failures: safeCounter(value.failures),
+      phaseCounts: counterMap(value.phaseCounts),
+      languageMs: Object.fromEntries(Object.entries(value.perLanguageAvgMs)
+        .map(([key, average]) => [canonicalDynamicKey(key), sample(1, average)])
+        .sort(([left], [right]) => String(left).localeCompare(String(right)))),
+      engineDispatch: counterMap(value.engineDispatch),
+      derivedLagMs: value.derivedStateLagMs === null
+        ? sample(0, 0)
+        : sample(1, value.derivedStateLagMs),
+    };
+  }
+  if (seen.has("tokenEfficiency")) {
+    const value = snapshot.tokenEfficiency;
+    sections.tokenEfficiency = {
+      calls: safeCounter(snapshot.toolVolume.totalCalls),
+      usedTokens: safeCounter(value.totalUsed),
+      savedTokens: safeCounter(value.totalSaved),
+      compressionBySource: Object.fromEntries(
+        Object.entries(value.compressionLayers.bySource)
+          .filter(([, layer]) => layer.events > 0)
+          .map(([key, layer]) => [canonicalDynamicKey(key), {
+            events: safeCounter(layer.events),
+            realizedEvents: safeCounter(layer.realizedEvents),
+            estimatedTokensAvoided: safeCounter(layer.estimatedTokensAvoided),
+            originalTokens: safeCounter(layer.originalTokens),
+            returnedTokens: safeCounter(layer.returnedTokens),
+            savedTokens: safeCounter(layer.savedTokens),
+            opportunities: safeCounter(layer.opportunities),
+            hits: safeCounter(layer.hits),
+            storedBytes: safeCounter(layer.storedBytes),
+          }]).sort(([left], [right]) => String(left).localeCompare(String(right))),
+      ),
+    };
+  }
+  if (seen.has("predictiveContext")) {
+    const value = snapshot.predictiveContext;
+    sections.predictiveContext = {
+      outcomeSamples: safeCounter(value.outcomeSamples),
+      hitOutcomes: safeCounter(value.outcomeSamples * value.hitRatePct / 100),
+      wasteOutcomes: safeCounter(value.outcomeSamples * value.wasteRatePct / 100),
+      accepted: safeCounter(value.acceptedPrefetch),
+      suppressed: safeCounter(value.suppressedPrefetch),
+      latencyReductionMs: sample(value.outcomeSamples, value.avgLatencyReductionMs),
+      byStrategy: Object.fromEntries(value.topStrategies.map((strategy) => [
+        canonicalDynamicKey(strategy.strategy),
+        {
+          samples: safeCounter(strategy.samples),
+          hits: safeCounter(strategy.samples * strategy.hitRatePct / 100),
+          wasted: safeCounter(strategy.samples * strategy.wasteRatePct / 100),
+          accepted: safeCounter(strategy.samples * strategy.acceptedRatePct / 100),
+          suppressed: safeCounter(strategy.suppressed),
+          latencyReductionMs: sample(strategy.samples, value.avgLatencyReductionMs),
+        },
+      ]).sort(([left], [right]) => String(left).localeCompare(String(right)))),
+    };
+  }
+  if (seen.has("health")) {
+    const value = snapshot.health;
+    sections.health = {
+      watcherErrors: safeCounter(value.watcherErrors),
+      watcherRestarts: safeCounter(value.watcherRestartCount),
+      watchmanWarnings: safeCounter(value.watcherWatchmanWarningCount),
+      watchmanRecrawls: safeCounter(value.watcherWatchmanRecrawlCount),
+      watchmanFreshInstances: safeCounter(value.watcherWatchmanFreshInstanceCount),
+    };
+  }
+  if (seen.has("latency")) {
+    const value = snapshot.latency;
+    sections.latency = {
+      calls: safeCounter(snapshot.toolVolume.totalCalls),
+      errors: safeCounter(Object.values(snapshot.toolVolume.perToolErrors)
+        .reduce((total, count) => total + count, 0)),
+      durationMs: sample(snapshot.toolVolume.totalCalls, value.avgMs, value.maxMs),
+      perTool: Object.fromEntries(Object.entries(value.perTool).map(([key, tool]) => [
+        canonicalDynamicKey(key),
+        {
+          calls: safeCounter(tool.count),
+          errors: safeCounter(tool.errorCount),
+          durationMs: sample(tool.count, tool.avgMs, tool.p95Ms),
+        },
+      ]).sort(([left], [right]) => String(left).localeCompare(String(right)))),
+    };
+  }
+  if (seen.has("scip")) {
+    const value = snapshot.scip;
+    sections.scip = {
+      ingests: safeCounter(value.totalIngests),
+      successes: safeCounter(value.successCount),
+      failures: safeCounter(value.failureCount),
+      edgesCreated: safeCounter(value.totalEdgesCreated),
+      edgesUpgraded: safeCounter(value.totalEdgesUpgraded),
+      ingestMs: sample(value.totalIngests, value.avgIngestMs),
+    };
+  }
+  if (seen.has("packed")) {
+    const value = snapshot.packed;
+    sections.packed = {
+      decisions: safeCounter(value.totalDecisions),
+      packed: safeCounter(value.packedCount),
+      fallback: safeCounter(value.fallbackCount),
+      packedBytes: safeCounter(value.packedBytesTotal),
+      baselineBytes: safeCounter(value.jsonBaselineBytesTotal),
+      packedTokens: safeCounter(value.packedTokensTotal),
+      baselineTokens: safeCounter(value.jsonBaselineTokensTotal),
+      axisHits: counterMap(value.axisHits),
+      byEncoder: Object.fromEntries(Object.entries(value.byEncoder).map(([key, encoder]) => [
+        canonicalDynamicKey(key),
+        {
+          decisions: safeCounter(encoder.totalDecisions),
+          packed: safeCounter(encoder.packedCount),
+          fallback: safeCounter(encoder.fallbackCount),
+          packedBytes: safeCounter(encoder.packedBytesTotal),
+          baselineBytes: safeCounter(encoder.jsonBaselineBytesTotal),
+          packedTokens: safeCounter(encoder.packedTokensTotal),
+          baselineTokens: safeCounter(encoder.jsonBaselineTokensTotal),
+        },
+      ]).sort(([left], [right]) => String(left).localeCompare(String(right)))),
+    };
+  }
+  if (seen.has("ppr")) {
+    const value = snapshot.ppr;
+    sections.ppr = {
+      runs: safeCounter(value.totalRuns),
+      native: safeCounter(value.nativeCount),
+      javascript: safeCounter(value.jsCount),
+      fallback: safeCounter(value.fallbackCount),
+      computeMs: sample(value.totalRuns, value.avgComputeMs, value.p95ComputeMs),
+      touched: sample(value.totalRuns, value.avgTouched),
+      seeds: sample(value.totalRuns, value.avgSeedCount),
+    };
+  }
+  if (seen.has("postIndex")) {
+    const value = snapshot.postIndexSession;
+    sections.postIndex = {
+      sessions: safeCounter(value.totalSessions),
+      durationMs: sample(value.totalSessions, value.avgDurationMs, value.maxDurationMs),
+      timeouts: safeCounter(value.timeoutCount),
+    };
+  }
+  if (seen.has("toolOutput")) {
+    const value = snapshot.toolOutput;
+    const counters = (item: typeof value.overall) => ({
+      calls: safeCounter(item.calls),
+      errors: safeCounter(item.errors),
+      rawBytes: safeCounter(item.rawBytesTotal),
+      projectedBytes: safeCounter(item.projectedBytesTotal),
+      rawTokens: safeCounter(item.rawTokensTotal),
+      projectedTokens: safeCounter(item.projectedTokensTotal),
+      removedFields: safeCounter(item.removedFieldTotal),
+      handled: safeCounter(item.handledCount),
+      truncated: safeCounter(item.truncatedCount),
+      recoveryEmitted: safeCounter(item.recoveryEmittedCount),
+      invalidRecovery: safeCounter(item.invalidRecoveryCount),
+      projectedBytesMax: safeCounter(item.maxProjectedBytes),
+      projectedTokensMax: safeCounter(item.maxProjectedTokens),
+      detailCounts: counterMap(item.detailCounts),
+      profileCounts: counterMap(item.profileCounts),
+    });
+    sections.toolOutput = {
+      ...counters(value.overall),
+      perTool: Object.fromEntries(value.perTool.map((tool) => [
+        canonicalDynamicKey(tool.tool),
+        counters(tool),
+      ]).sort(([left], [right]) => String(left).localeCompare(String(right)))),
+    };
+  }
+  return {
+    epoch: baseline.epoch,
+    resetAt: null,
+    lastCheckpointAt: null,
+    sessionCount: 0,
+    saturated: false,
+    sections,
+  };
+}
+
 export function createObservabilityService(
   config: ObservabilityConfig,
+  options?: ObservabilityServiceOptions,
 ): ObservabilityService {
-  return new ObservabilityService(config);
+  return new ObservabilityService(config, options);
 }
 
 export function clampInterval(ms: number): number {
@@ -746,4 +1630,3 @@ function getCoreCount(): number {
   }
   return 1;
 }
-

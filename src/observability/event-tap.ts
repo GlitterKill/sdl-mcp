@@ -45,6 +45,7 @@ export interface ScipIngestTapEvent {
 }
 
 export interface PackedWireTapEvent {
+  repoId?: string;
   encoderId: string;
   jsonBytes: number;
   packedBytes: number;
@@ -146,6 +147,7 @@ export interface AuditBufferTapEvent {
 }
 
 export interface PostIndexSessionTapEvent {
+  repoId?: string;
   sessionId: string;
   durationMs: number;
   timedOut: boolean;

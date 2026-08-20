@@ -122,7 +122,7 @@ export {
 
 export { classifyBottleneck } from "./bottleneck-classifier.js";
 
-export type { BeamExplainStoreLike } from "./service.js";
+export type { BeamExplainStoreLike, ObservabilityServiceOptions } from "./service.js";
 export { ObservabilityService, createObservabilityService } from "./service.js";
 
 
