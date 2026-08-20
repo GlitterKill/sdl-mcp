@@ -427,6 +427,39 @@ describe("ObservabilityService lifetime integration", () => {
     }
   });
 
+  it("re-arms the writer session count only after a committed reset", async () => {
+    const h = harness();
+    await h.service.start();
+    const timer = h.timers.find((entry) => entry.delay === 30_000);
+    assert.ok(timer);
+    cache(h.service, "repo-a");
+    cache(h.service, "repo-b");
+    timer.callback();
+    await settle();
+    assert.equal((await h.service.getLifetime("repo-a")).sessionCount, 1);
+
+    const reset = await h.service.resetLifetime("repo-a");
+    assert.equal(reset.sessionCount, 0);
+    assert.equal((await h.service.getLifetime("repo-b")).sessionCount, 1);
+    cache(h.service, "repo-a");
+    timer.callback();
+    await settle();
+    assert.equal((await h.service.getLifetime("repo-a")).sessionCount, 1);
+    cache(h.service, "repo-a");
+    timer.callback();
+    await settle();
+    assert.equal((await h.service.getLifetime("repo-a")).sessionCount, 1);
+
+    h.store.resetOutcome = { status: "notPublished", reason: "ioFailure" };
+    await h.service.resetLifetime("repo-a");
+    cache(h.service, "repo-a");
+    timer.callback();
+    await settle();
+    assert.equal((await h.service.getLifetime("repo-a")).sessionCount, 1);
+    assert.equal((await h.service.getLifetime("repo-b")).sessionCount, 1);
+    await h.service.stop();
+  });
+
   it("freezes all durable accumulation after an indeterminate reset while session metrics continue", async () => {
     const h = harness();
     await h.service.start();
@@ -468,6 +501,7 @@ describe("ObservabilityService lifetime integration", () => {
         section === "cache" ? "2026-08-20T12:00:00.000Z" : null])),
       processPeaks: null,
     });
+    assert.equal(Object.hasOwn(h.service, "capacityExceeded"), false);
   });
 
   it("does not allocate durable state on GET and keeps eventless/read-only session counts at zero", async () => {
@@ -556,18 +590,65 @@ describe("ObservabilityService lifetime integration", () => {
     await settle();
     cache(h.service, "repo-a");
     const stopping = h.service.stop();
+    const sameStop = h.service.stop();
+    assert.strictEqual(sameStop, stopping);
     await settle();
     assert.equal(h.store.closed, 0);
     const candidate = h.store.checkpoints[0];
     assert.ok(candidate);
     resolveCheckpoint({ status: "committed", root: candidate, generation: candidate.generation });
-    await assert.rejects(stopping, /final checkpoint not committed/);
+    const outcomes = await Promise.allSettled([stopping, sameStop]);
+    assert.equal(outcomes[0]?.status, "rejected");
+    assert.equal(outcomes[1]?.status, "rejected");
+    if (outcomes[0]?.status === "rejected" && outcomes[1]?.status === "rejected") {
+      assert.strictEqual(outcomes[0].reason, outcomes[1].reason);
+      assert.match(String(outcomes[0].reason), /final checkpoint not committed/);
+    }
     assert.equal(h.store.closed, 1);
     const finalSnapshot = h.store.closeSnapshots[0];
     assert.ok(finalSnapshot);
     assert.equal(finalSnapshot.generation, candidate.generation + 1);
     assert.equal(finalSnapshot.repositories[repositoryStorageKey("repo-a")]?.sections.cache?.hits, 2);
     assert.ok(h.timers.every((entry) => entry.cleared));
+  });
+
+  it("shares a successful concurrent stop and starts a fresh stop lifecycle after restart", async () => {
+    const h = harness();
+    let releaseClose!: () => void;
+    h.store.onClose = async (snapshot) => new Promise<void>((resolve) => {
+      releaseClose = () => {
+        assert.ok(snapshot);
+        h.store.current = {
+          mode: "writer", root: structuredClone(snapshot), generation: snapshot.generation,
+        };
+        resolve();
+      };
+    });
+    await h.service.start();
+    cache(h.service, "repo-a");
+    const first = h.service.stop();
+    const concurrent = h.service.stop();
+    assert.strictEqual(concurrent, first);
+    await settle();
+    assert.equal(h.store.closed, 1);
+    assert.equal(h.store.closeSnapshots[0]?.generation, 1);
+    assert.equal(
+      h.store.closeSnapshots[0]?.repositories[repositoryStorageKey("repo-a")]?.sections.cache?.hits,
+      1,
+    );
+    cache(h.service, "repo-a");
+    releaseClose();
+    await first;
+    assert.equal(h.store.closed, 1);
+    assert.equal((await h.service.getLifetime("repo-a")).sessionCount, 1);
+    assert.equal((await h.service.getLifetime("repo-a")).sections.cache?.hits, 2);
+
+    h.store.onClose = null;
+    await h.service.start();
+    const restarted = h.service.stop();
+    assert.notStrictEqual(restarted, first);
+    await restarted;
+    assert.equal(h.store.closed, 2);
   });
 
   it("keeps non-target repository state live throughout a pending reset", async () => {
@@ -702,6 +783,40 @@ describe("ObservabilityService lifetime integration", () => {
     assert.deepEqual(value.sections.ppr?.touched, { count: 1, sum: 13, max: 13 });
     assert.deepEqual(value.sections.ppr?.seeds, { count: 1, sum: 14, max: 14 });
     assert.deepEqual(value.sections.postIndex?.durationMs, { count: 1, sum: 15, max: 15 });
+    await h.service.stop();
+  });
+
+  it("keeps canonical session and lifetime empty and error totals aligned", async () => {
+    const h = harness();
+    await h.service.start();
+    h.service.semanticSearch({
+      repoId: "repo-a", semanticEnabled: true, latencyMs: 3, candidateCount: 1,
+      alpha: 0.5, finalResultCount: 1,
+    });
+    h.service.toolCall({
+      repoId: "repo-a", tool: "sdl.context", request: {}, durationMs: 2,
+      response: { error: { message: "failed" } },
+      projection: {
+        profile: {
+          projector: "test", observabilityProfile: "standard", defaultDetail: "compact",
+          budgetClass: "small", largeResponseStrategy: "truncate", recoveryPolicy: "none",
+        },
+        effectiveDetail: "compact", diagnosticsIncluded: false,
+        rawBytes: 2, rawTokens: 2, projectedBytes: 1, projectedTokens: 1,
+        removedFieldCount: 0, truncated: false, responseHandled: false,
+        recoveryEmitted: false, invalidRecoveryCount: 0,
+      },
+    });
+
+    const session = h.service.getSnapshot("repo-a");
+    const lifetime = await h.service.getLifetime("repo-a");
+    assert.notEqual(lifetime.persistenceState, "recoveryRequired");
+    if (lifetime.persistenceState !== "recoveryRequired") {
+      assert.equal(session.retrieval.emptyResultCount, lifetime.sections.retrieval?.emptyResults);
+      assert.equal(session.latency.perTool["sdl.context"]?.errorCount, 1);
+      assert.equal(session.toolOutput.overall.errors, lifetime.sections.toolOutput?.errors);
+      assert.equal(lifetime.sections.latency?.perTool["k:sdl.context"]?.errors, 1);
+    }
     await h.service.stop();
   });
 

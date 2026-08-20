@@ -191,9 +191,9 @@ function populatedAggregatorSnapshot(repoId: string) {
         source: "source-secret",
         content: "response-content-secret",
         handle: "response-handle-secret",
+        ...(errored ? { error: { message: "failed" } } : {}),
       },
       durationMs: 10,
-      errored,
       projection,
     });
   }

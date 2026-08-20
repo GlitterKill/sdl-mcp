@@ -681,14 +681,13 @@ export class Aggregator {
 
   recordToolCall(
     event: ToolCallEvent & {
-      errored?: boolean;
       tokensUsed?: number;
       tokensSaved?: number;
     },
   ): void {
     const tool = event.tool;
     const dur = Number.isFinite(event.durationMs) ? event.durationMs : 0;
-    const errored = event.errored === true;
+    const errored = event.response.error !== undefined;
     this.toolCallTotal += 1;
     let bucket = this.toolPerName.get(tool);
     if (!bucket) {
@@ -946,7 +945,6 @@ export class Aggregator {
       retrievalType?: string;
       candidateCountPerSource?: Record<string, number>;
       phaseLatencyMs?: Record<string, number>;
-      resultCount?: number;
     };
     const dur = Number.isFinite(evt.latencyMs)
       ? evt.latencyMs
@@ -955,7 +953,7 @@ export class Aggregator {
         : 0;
     this.retrievalDurationSum += dur;
     pushBoundedSorted(this.retrievalLatencies, dur, LATENCY_WINDOW_SIZE);
-    if ((evt.resultCount ?? 0) === 0) this.retrievalEmpty += 1;
+    if ((evt.finalResultCount ?? 0) === 0) this.retrievalEmpty += 1;
     const mode = evt.retrievalMode ?? "unknown";
     this.retrievalByMode.set(mode, (this.retrievalByMode.get(mode) ?? 0) + 1);
     const rtype = evt.retrievalType ?? "unknown";
@@ -1076,9 +1074,10 @@ export class Aggregator {
         method: "runtime",
         params: undefined,
       } as ToolCallEvent["request"],
-      response: { result: undefined } as ToolCallEvent["response"],
+      response: evt.failed === true
+        ? { error: { message: "Runtime execution failed" } }
+        : { result: undefined },
       durationMs: dur,
-      errored: evt.failed === true,
       diagnostics: event.diagnostics,
     });
   }

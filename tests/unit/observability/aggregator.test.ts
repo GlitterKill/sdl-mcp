@@ -277,6 +277,7 @@ describe("Aggregator", () => {
       alpha: 0.6,
       retrievalMode: "hybrid",
       retrievalType: "hybrid",
+      finalResultCount: 3,
       phaseLatencyMs: { fts: 6, vector: 14, fusion: 2 },
     });
     agg.recordSemanticSearch({
@@ -287,6 +288,7 @@ describe("Aggregator", () => {
       alpha: 0.6,
       retrievalMode: "hybrid",
       retrievalType: "hybrid",
+      finalResultCount: 0,
       phaseLatencyMs: { fts: 10, vector: 20, ppr: 12 },
     });
     agg.recordBeamBuild({
@@ -310,6 +312,7 @@ describe("Aggregator", () => {
     assert.equal(snap.retrieval.phaseLatencyMs.fts.avgMs, 8);
     assert.equal(snap.retrieval.phaseLatencyMs.vector.p95Ms, 20);
     assert.equal(snap.retrieval.phaseLatencyMs.ppr.count, 1);
+    assert.equal(snap.retrieval.emptyResultCount, 1);
     assert.equal(snap.beam.avgFrontierMaxSize, 5);
     assert.equal(snap.beam.p95FrontierMaxSize, 7);
   });
@@ -591,9 +594,9 @@ describe("Aggregator", () => {
           source: "source-secret",
           handle: "handle-secret",
           diagnostics: { arbitrary: "diagnostic-secret" },
+          ...(errored ? { error: { message: "failed" } } : {}),
         },
         durationMs: 10,
-        errored,
         projection,
       });
     }

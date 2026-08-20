@@ -55,6 +55,7 @@ import {
 } from "./lifetime-store.js";
 import {
   LIFETIME_SCHEMA_VERSION,
+  MAX_REPOSITORIES,
   OVERFLOW_KEY,
   SECTION_IDS,
   repositoryStorageKey,
@@ -166,13 +167,13 @@ export class ObservabilityService implements ObservabilityTap {
   private committedLifetime: DurableLifetimeRoot | null = null;
   private readonly lifetimeRepositories = new Map<string, LifetimeRepositoryState>();
   private readonly lifetimeFreshness = new Map<string, LifetimeFreshness>();
-  private readonly capacityExceeded = new Set<string>();
   private readonly processFreshness = emptyFreshness();
   private processPeakEpoch: ProcessPeaks | null = null;
   private lifetimeWriter = false;
   private lifetimeFrozen = false;
   private lifetimeOpenFailed = false;
   private startPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
   private lifetimeTail: Promise<void> = Promise.resolve();
   private pendingCheckpoint: PublicationBoundary | null = null;
   private pendingReset: PendingReset | null = null;
@@ -208,6 +209,7 @@ export class ObservabilityService implements ObservabilityTap {
    */
   async start(): Promise<void> {
     if (this.startPromise !== null) return this.startPromise;
+    this.stopPromise = null;
     this.startPromise = this.startInternal();
     return this.startPromise;
   }
@@ -268,7 +270,13 @@ export class ObservabilityService implements ObservabilityTap {
    * Stop sampling. Releases the interval timer and disables the
    * event-loop histogram. Safe to call when not started.
    */
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopPromise !== null) return this.stopPromise;
+    this.stopPromise = this.stopInternal();
+    return this.stopPromise;
+  }
+
+  private async stopInternal(): Promise<void> {
     if (this.startPromise !== null) await this.startPromise;
     if (this.sampleTimer !== null) {
       this.options.clearScheduledInterval(this.sampleTimer);
@@ -500,10 +508,15 @@ export class ObservabilityService implements ObservabilityTap {
       };
     }
 
-    const readOnly = state?.mode === "readOnly";
-    const capacityExceeded = !readOnly && this.capacityExceeded.has(repoId);
     const stored = this.committedLifetime?.repositories[repositoryStorageKey(repoId)];
     const live = this.lifetimeRepositories.get(repoId);
+    const readOnly = state?.mode === "readOnly";
+    const capacityExceeded = !readOnly
+      && this.lifetimeFreshness.has(repoId)
+      && stored === undefined
+      && live === undefined
+      && Object.keys(this.buildCurrentLifetimeRoot(generatedAt).repositories).length
+        >= MAX_REPOSITORIES;
     const value = capacityExceeded
       ? emptyRepositoryLifetime()
       : readOnly
@@ -770,6 +783,7 @@ export class ObservabilityService implements ObservabilityTap {
       if (repoId === targetRepoId) {
         state.baseline = stored ?? resetValue;
         state.active = activeLifetimeMetadata(state.baseline, state.active);
+        state.sessionCounted = false;
         continue;
       }
       if (stored !== undefined) state.baseline = stored;
@@ -813,7 +827,6 @@ export class ObservabilityService implements ObservabilityTap {
   private ensureLifetimeRepository(repoId: string): LifetimeRepositoryState | null {
     const existing = this.lifetimeRepositories.get(repoId);
     if (existing !== undefined) return existing;
-    if (this.capacityExceeded.has(repoId)) return null;
     const baseline = this.committedLifetime?.repositories[repositoryStorageKey(repoId)]
       ?? emptyRepositoryLifetime();
     const admission = admitRepository(
@@ -821,10 +834,7 @@ export class ObservabilityService implements ObservabilityTap {
       repoId,
       baseline,
     );
-    if (!admission.admitted) {
-      this.capacityExceeded.add(repoId);
-      return null;
-    }
+    if (!admission.admitted) return null;
     const created: LifetimeRepositoryState = {
       baseline,
       active: activeLifetimeMetadata(baseline),
@@ -849,13 +859,13 @@ export class ObservabilityService implements ObservabilityTap {
     const state = this.ensureLifetimeRepository(repoId);
     if (state === null) return;
     const delta = createDelta();
-    state.active = addLifetimeDelta(state.active, delta);
+    state.active = mergeRepositoryLifetime(state.active, delta);
     state.eventProduced = true;
     const pending = this.pendingReset;
     if (pending !== null && pending.targetRepoId !== repoId) {
       const interleaved = pending.interleaved.get(repoId)
         ?? activeLifetimeMetadata(state.baseline);
-      pending.interleaved.set(repoId, addLifetimeDelta(interleaved, delta));
+      pending.interleaved.set(repoId, mergeRepositoryLifetime(interleaved, delta));
       pending.eventProduced.add(repoId);
     }
   }
@@ -1476,17 +1486,13 @@ function sectionDelta<K extends keyof DurableLifetimeSections>(
   };
 }
 
-function addLifetimeDelta(
-  active: DurableLifetimeRepository,
-  delta: DurableLifetimeRepository,
-): DurableLifetimeRepository {
-  return mergeRepositoryLifetime(active, delta);
-}
-
 function combineLifetimeDeltas(
   deltas: readonly DurableLifetimeRepository[],
 ): DurableLifetimeRepository {
-  return deltas.reduce(addLifetimeDelta, emptyRepositoryLifetime());
+  return deltas.reduce(
+    (active, delta) => mergeRepositoryLifetime(active, delta),
+    emptyRepositoryLifetime(),
+  );
 }
 
 function dynamicEntry<T>(rawIdentifier: string, value: T): Record<string, T> {
@@ -1920,12 +1926,8 @@ function toolOutputLifetimeDelta(event: ToolCallEvent): DurableLifetimeRepositor
   });
 }
 
-function codeUnitCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
 function orderedRecord<T>(value: Readonly<Record<string, T>>): Record<string, T> {
-  return Object.fromEntries(Object.keys(value).sort(codeUnitCompare).map((key) => [key, value[key]]));
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
 }
 
 export function createObservabilityService(
