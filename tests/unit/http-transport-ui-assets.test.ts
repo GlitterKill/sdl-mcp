@@ -90,3 +90,23 @@ test("GET /ui/graph redirects to /ui/viewer", async () => {
     await rmWithRetry(tempDir, { required: false });
   }
 });
+
+test("GET /ui/observability-layout.js serves the layout geometry module", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "sdl-mcp-http-ui-"));
+  const viewerDbPath = join(tempDir, "viewer.lbug");
+  let server;
+  try {
+    server = await setupHttpTransport("127.0.0.1", 0, viewerDbPath, {});
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/ui/observability-layout.js`,
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "application/javascript; charset=utf-8");
+    assert.match(await response.text(), /export const GRID/);
+  } finally {
+    await server?.close();
+    await delay(100);
+    await rmWithRetry(tempDir, { required: false });
+  }
+});

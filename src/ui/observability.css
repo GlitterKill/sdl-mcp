@@ -246,7 +246,7 @@ input:focus {
 /* Grid */
 .grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-columns: repeat(24, minmax(0, 1fr));
   gap: 14px;
   padding: 16px 20px 32px;
   max-width: 1600px;
@@ -1113,12 +1113,12 @@ table.per-encoder td.enc {
 }
 
 /* User-arrangeable snap grid -------------------------------------------------
-   The dashboard keeps a deterministic 12-column grid at desktop widths. The
+   The dashboard keeps a deterministic 24-column grid at desktop widths. The
    runtime layout editor writes per-panel CSS variables, so live data hooks stay
    attached to their original panel nodes. */
 @media (min-width: 721px) {
   .dashboard-grid {
-    --grid-row: 112px;
+    --grid-row: 56px;
     grid-auto-flow: row;
     grid-auto-rows: var(--grid-row);
     align-items: stretch;
@@ -1127,13 +1127,13 @@ table.per-encoder td.enc {
   }
 
   .dashboard-grid > .dashboard-hero {
-    grid-column: 1 / span 12;
+    grid-column: 1 / span 24;
     grid-row: 1 / span 1;
     min-height: 0;
   }
 
   .dashboard-grid > .panel {
-    grid-column: var(--panel-col, auto) / span var(--panel-cols, 4);
+    grid-column: var(--panel-col, auto) / span var(--panel-cols, 8);
     grid-row: var(--panel-row, auto) / span var(--panel-rows, 2);
     min-height: 0;
     height: 100%;
@@ -1146,92 +1146,106 @@ table.per-encoder td.enc {
   .dashboard-grid > [data-panel="bottleneck"] {
     --panel-col: 1;
     --panel-row: 2;
+    --panel-cols: 12;
+    --panel-rows: 4;
+  }
+
+  .dashboard-grid > [data-panel="cache"] {
+    --panel-col: 19;
+    --panel-row: 6;
     --panel-cols: 6;
-    --panel-rows: 2;
+    --panel-rows: 4;
   }
 
-  .dashboard-grid > [data-panel="health"] {
-    --panel-col: 7;
-    --panel-row: 2;
-    --panel-cols: 3;
-    --panel-rows: 2;
+  .dashboard-grid > [data-panel="predictiveContext"] {
+    --panel-col: 1;
+    --panel-row: 10;
+    --panel-cols: 8;
+    --panel-rows: 4;
   }
 
-  .dashboard-grid > [data-panel="latency"] {
-    --panel-col: 10;
-    --panel-row: 2;
-    --panel-cols: 3;
-    --panel-rows: 2;
+  .dashboard-grid > [data-panel="retrieval"] {
+    --panel-col: 13;
+    --panel-row: 6;
+    --panel-cols: 6;
+    --panel-rows: 4;
+  }
+
+  .dashboard-grid > [data-panel="beam"] {
+    --panel-col: 9;
+    --panel-row: 10;
+    --panel-cols: 8;
+    --panel-rows: 4;
+  }
+
+  .dashboard-grid > [data-panel="indexing"] {
+    --panel-col: 17;
+    --panel-row: 10;
+    --panel-cols: 8;
+    --panel-rows: 4;
   }
 
   .dashboard-grid > [data-panel="tokenEfficiency"] {
     --panel-col: 1;
-    --panel-row: 4;
+    --panel-row: 6;
+    --panel-cols: 12;
+    --panel-rows: 4;
+  }
+
+  .dashboard-grid > [data-panel="health"] {
+    --panel-col: 13;
+    --panel-row: 2;
     --panel-cols: 6;
-    --panel-rows: 2;
+    --panel-rows: 4;
   }
 
-  .dashboard-grid > [data-panel="retrieval"] {
-    --panel-col: 7;
-    --panel-row: 4;
-    --panel-cols: 3;
-    --panel-rows: 2;
-  }
-
-  .dashboard-grid > [data-panel="cache"] {
-    --panel-col: 10;
-    --panel-row: 4;
-    --panel-cols: 3;
-    --panel-rows: 2;
-  }
-
-  .dashboard-grid > [data-panel="beam"] {
-    --panel-col: 1;
-    --panel-row: 6;
-    --panel-cols: 4;
-    --panel-rows: 2;
-  }
-
-  .dashboard-grid > [data-panel="indexing"] {
-    --panel-col: 5;
-    --panel-row: 6;
-    --panel-cols: 4;
-    --panel-rows: 2;
+  .dashboard-grid > [data-panel="latency"] {
+    --panel-col: 19;
+    --panel-row: 2;
+    --panel-cols: 6;
+    --panel-rows: 4;
   }
 
   .dashboard-grid > [data-panel="ppr"] {
-    --panel-col: 9;
-    --panel-row: 6;
-    --panel-cols: 4;
-    --panel-rows: 2;
+    --panel-col: 1;
+    --panel-row: 14;
+    --panel-cols: 8;
+    --panel-rows: 4;
   }
 
   .dashboard-grid > [data-panel="scip"] {
-    --panel-col: 1;
-    --panel-row: 8;
-    --panel-cols: 3;
-    --panel-rows: 2;
-  }
-
-  .dashboard-grid > [data-panel="postIndex"] {
-    --panel-col: 4;
-    --panel-row: 8;
-    --panel-cols: 3;
-    --panel-rows: 2;
+    --panel-col: 9;
+    --panel-row: 14;
+    --panel-cols: 8;
+    --panel-rows: 4;
   }
 
   .dashboard-grid > [data-panel="toolVolume"] {
-    --panel-col: 7;
-    --panel-row: 8;
-    --panel-cols: 6;
-    --panel-rows: 2;
+    --panel-col: 1;
+    --panel-row: 18;
+    --panel-cols: 12;
+    --panel-rows: 4;
+  }
+
+  .dashboard-grid > [data-panel="toolOutput"] {
+    --panel-col: 1;
+    --panel-row: 22;
+    --panel-cols: 24;
+    --panel-rows: 4;
+  }
+
+  .dashboard-grid > [data-panel="postIndex"] {
+    --panel-col: 17;
+    --panel-row: 14;
+    --panel-cols: 8;
+    --panel-rows: 4;
   }
 
   .dashboard-grid > [data-panel="resources"] {
-    --panel-col: 1;
-    --panel-row: 10;
+    --panel-col: 13;
+    --panel-row: 18;
     --panel-cols: 12;
-    --panel-rows: 2;
+    --panel-rows: 4;
   }
 }
 
@@ -1314,7 +1328,7 @@ body.layout-interacting {
 
   .dashboard-grid > .panel,
   .dashboard-grid > .dashboard-hero {
-    grid-column: span 12 !important;
+    grid-column: span 24 !important;
     grid-row: auto !important;
     height: auto;
     overflow: visible;
