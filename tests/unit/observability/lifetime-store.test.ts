@@ -183,6 +183,86 @@ describe("lifetime store", () => {
     await store.close();
   });
 
+  it("uses only committed authority after definitely-not-published queued writes", async () => {
+    const lowerDirectory = await temporaryDirectory();
+    const base = resolveLifetimeFileSystem();
+    let failNextTemp = false;
+    const lowerStore = await openLifetimeStore({
+      directory: lowerDirectory,
+      pid: 60,
+      fs: {
+        open: async (path, flags, mode) => {
+          if (failNextTemp && basename(String(path)).startsWith(TEMP_PREFIX)) {
+            failNextTemp = false;
+            throw Object.assign(new Error("definite publication failure"), { code: "EIO" });
+          }
+          return base.open(path, flags, mode);
+        },
+      },
+    });
+    assert.equal((await lowerStore.checkpoint(root(0))).status, "committed");
+    failNextTemp = true;
+    const failedHigher = lowerStore.checkpoint(root(2, ISO_3));
+    const queuedLower = lowerStore.checkpoint(root(1, ISO_2));
+
+    assert.deepEqual(await failedHigher, { status: "notPublished", reason: "ioFailure" });
+    assert.equal((await queuedLower).status, "committed");
+    assert.deepEqual(lowerStore.state(), {
+      mode: "writer",
+      root: root(1, ISO_2),
+      generation: 1,
+    });
+    await lowerStore.close();
+
+    const retryDirectory = await temporaryDirectory();
+    failNextTemp = false;
+    const retryStore = await openLifetimeStore({
+      directory: retryDirectory,
+      pid: 61,
+      fs: {
+        open: async (path, flags, mode) => {
+          if (failNextTemp && basename(String(path)).startsWith(TEMP_PREFIX)) {
+            failNextTemp = false;
+            throw Object.assign(new Error("definite reset failure"), { code: "EIO" });
+          }
+          return base.open(path, flags, mode);
+        },
+      },
+    });
+    assert.equal((await retryStore.checkpoint(root(0))).status, "committed");
+    failNextTemp = true;
+    const failedReset = retryStore.reset(root(2, ISO_2));
+    const updatedRetry = retryStore.reset(root(2, ISO_3));
+
+    assert.deepEqual(await failedReset, { status: "notPublished", reason: "ioFailure" });
+    assert.deepEqual(await updatedRetry, {
+      status: "committed",
+      root: root(2, ISO_3),
+      generation: 2,
+    });
+    await retryStore.close();
+  });
+
+  it("queues invalid snapshots, degrades without mutation, and permits a valid retry", async () => {
+    const directory = await temporaryDirectory();
+    const store = await openLifetimeStore({ directory, pid: 62 });
+    const before = await snapshotDirectory(directory);
+    const invalid = root(0);
+    invalid.generation = -1;
+    const invalidOutcome = store.checkpoint(invalid);
+    invalid.generation = 0;
+
+    assert.deepEqual(await invalidOutcome, {
+      status: "notPublished",
+      reason: "invalidGeneration",
+    });
+    assert.deepEqual(store.state(), { mode: "degraded", root: null, generation: null });
+    assert.deepEqual(await snapshotDirectory(directory), before);
+    assert.equal((await store.checkpoint(root(0))).status, "committed");
+    assert.deepEqual(store.state(), { mode: "writer", root: root(0), generation: 0 });
+    await store.close();
+  });
+
   it("refreshes the lease only after commits and keeps prior authority across a retry", async () => {
     const directory = await temporaryDirectory();
     const base = resolveLifetimeFileSystem();
@@ -245,7 +325,11 @@ describe("lifetime store", () => {
 
     current = new Date(ISO_3);
     failAfterCommit = true;
-    assert.equal((await store.checkpoint(root(1, ISO_2))).status, "indeterminate");
+    const uncertain = store.checkpoint(root(1, ISO_2));
+    const invalid = root(2, ISO_3);
+    invalid.generation = -1;
+    const queuedInvalid = store.checkpoint(invalid);
+    assert.equal((await uncertain).status, "indeterminate");
     assert.deepEqual(store.state(), {
       mode: "recoveryRequired",
       root: root(0),
@@ -253,6 +337,7 @@ describe("lifetime store", () => {
       reason: "indeterminatePublication",
     });
     assert.equal(await lockCreatedAt(directory), ISO_2);
+    await assert.rejects(queuedInvalid, /recovery required/i);
     await assert.rejects(store.checkpoint(root(2, ISO_3)), /recovery required/i);
     assert.equal(primaryCommits, 2);
     await store.close();

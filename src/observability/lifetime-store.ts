@@ -42,9 +42,17 @@ export interface LifetimeStore {
 }
 
 interface CapturedSnapshot {
+  readonly status: "valid";
   readonly root: DurableLifetimeRoot;
   readonly content: string;
 }
+
+interface CapturedInvalidSnapshot {
+  readonly status: "invalid";
+  readonly outcome: PublishOutcome;
+}
+
+type CapturedPublication = CapturedSnapshot | CapturedInvalidSnapshot;
 
 interface OpenLifetimeStoreOptions {
   readonly directory: string;
@@ -54,12 +62,15 @@ interface OpenLifetimeStoreOptions {
   readonly fs?: LifetimeFs;
 }
 
-function captureSnapshot(snapshot: DurableLifetimeRoot): CapturedSnapshot | null {
+function captureSnapshot(snapshot: DurableLifetimeRoot): CapturedPublication {
   try {
     const root = parseDurableLifetimeRoot(snapshot);
-    return { root, content: JSON.stringify(root) };
+    return { status: "valid", root, content: JSON.stringify(root) };
   } catch {
-    return null;
+    return {
+      status: "invalid",
+      outcome: { status: "notPublished", reason: "invalidGeneration" },
+    };
   }
 }
 
@@ -119,8 +130,8 @@ export async function openLifetimeStore(
     currentState = loadedState(lease ? "writer" : "readOnly", null, null);
   }
 
-  let authoritativeGeneration = currentState.generation ?? -1;
-  let authoritativeContent = currentState.root === null
+  let committedGeneration = currentState.generation ?? -1;
+  let committedContent = currentState.root === null
     ? null
     : JSON.stringify(currentState.root);
   let tail: Promise<void> = Promise.resolve();
@@ -140,25 +151,7 @@ export async function openLifetimeStore(
     if (closing || closed) throw new Error("Lifetime store is closed");
   };
 
-  const reserve = (capture: CapturedSnapshot): PublishOutcome | null => {
-    if (capture.root.generation < authoritativeGeneration) {
-      return { status: "notPublished", reason: "staleGeneration" };
-    }
-    if (capture.root.generation === authoritativeGeneration &&
-        authoritativeContent !== null && capture.content !== authoritativeContent) {
-      return { status: "notPublished", reason: "generationConflict" };
-    }
-    if (capture.root.generation > authoritativeGeneration) {
-      authoritativeGeneration = capture.root.generation;
-      authoritativeContent = capture.content;
-    }
-    return null;
-  };
-
-  const publish = async (
-    capture: CapturedSnapshot,
-    reservedOutcome: PublishOutcome | null,
-  ): Promise<PublishOutcome> => {
+  const publish = async (capture: CapturedPublication): Promise<PublishOutcome> => {
     if (!lease) throw new Error("Lifetime store is read-only");
     if (currentState.mode === "recoveryRequired") {
       throw new Error("Lifetime store recovery required");
@@ -167,9 +160,18 @@ export async function openLifetimeStore(
       currentState = loadedState("degraded", currentState.root, currentState.generation);
       return { status: "notPublished", reason: "ioFailure" };
     }
-    if (reservedOutcome) {
+    if (capture.status === "invalid") {
       currentState = loadedState("degraded", currentState.root, currentState.generation);
-      return reservedOutcome;
+      return capture.outcome;
+    }
+    if (capture.root.generation < committedGeneration) {
+      currentState = loadedState("degraded", currentState.root, currentState.generation);
+      return { status: "notPublished", reason: "staleGeneration" };
+    }
+    if (capture.root.generation === committedGeneration &&
+        committedContent !== null && capture.content !== committedContent) {
+      currentState = loadedState("degraded", currentState.root, currentState.generation);
+      return { status: "notPublished", reason: "generationConflict" };
     }
 
     let outcome: PublishOutcome;
@@ -177,7 +179,7 @@ export async function openLifetimeStore(
       outcome = await publishLifetimeGeneration(
         options.directory,
         capture.root,
-        currentState.generation ?? 0,
+        committedGeneration < 0 ? 0 : committedGeneration,
         publicationOptions,
       );
     } catch (error) {
@@ -186,8 +188,8 @@ export async function openLifetimeStore(
     }
     if (outcome.status === "committed") {
       const root = parseDurableLifetimeRoot(outcome.root);
-      authoritativeGeneration = outcome.generation;
-      authoritativeContent = JSON.stringify(root);
+      committedGeneration = outcome.generation;
+      committedContent = JSON.stringify(root);
       const refreshed = await refreshLifetimeLease(lease, publicationOptions).catch(() => false);
       if (!refreshed) leaseWritable = false;
       currentState = loadedState(refreshed ? "writer" : "degraded", root, outcome.generation);
@@ -209,19 +211,8 @@ export async function openLifetimeStore(
     } catch (error) {
       return Promise.reject(error);
     }
-    if (!lease) return Promise.reject(new Error("Lifetime store is read-only"));
-    if (currentState.mode === "recoveryRequired") {
-      return Promise.reject(new Error("Lifetime store recovery required"));
-    }
     const capture = captureSnapshot(snapshot);
-    if (!capture) {
-      return enqueue<PublishOutcome>(async () => ({
-        status: "notPublished",
-        reason: "invalidGeneration",
-      }));
-    }
-    const reservedOutcome = reserve(capture);
-    return enqueue(() => publish(capture, reservedOutcome));
+    return enqueue(() => publish(capture));
   };
 
   return {
@@ -275,11 +266,10 @@ export async function openLifetimeStore(
       if (closePromise) return closePromise;
       closing = true;
       const capture = finalSnapshot === undefined ? null : captureSnapshot(finalSnapshot);
-      const reservedOutcome = capture ? reserve(capture) : null;
       closePromise = enqueue(async () => {
         try {
           if (lease && capture && currentState.mode !== "recoveryRequired") {
-            await publish(capture, reservedOutcome);
+            await publish(capture);
           }
         } finally {
           if (lease) {
