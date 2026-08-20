@@ -15,9 +15,32 @@ import {
   parseResetRequest,
   repositoryStorageKey,
   type DurableLifetimeRoot,
+  type DurableLifetimeRepository,
+  type DurableLifetimeSections,
   type LifetimeRouteErrorV1,
   type LifetimeResetSuccessV1,
 } from "../../../dist/observability/lifetime-types.js";
+import {
+  DYNAMIC_MAP_LOCATIONS,
+  admitDynamicMapEntry,
+  admitRepository,
+  canonicalDynamicKey,
+  dynamicMapLimit,
+  emptyRepositoryLifetime,
+  incrementSessionCount,
+  lifetimeView,
+  mergeCounter,
+  mergeDynamicMaps,
+  mergeProcessPeaks,
+  mergeRepositoryLifetime,
+  mergeSample,
+  mergeSampleWithSaturation,
+  normalizeDynamicMap,
+  reservedSerializedBytes,
+  resetRepositoryLifetime,
+  saturatingAdd,
+  saturatingAddWithSaturation,
+} from "../../../dist/observability/lifetime-accumulator.js";
 
 const ISO = "2026-08-19T12:34:56.789Z";
 const REPOSITORY_KEY =
@@ -969,5 +992,332 @@ describe("lifetime observability contract", () => {
       parsed.repositories[REPOSITORY_KEY]?.sections,
       durableRootFixture.repositories[REPOSITORY_KEY]?.sections,
     );
+  });
+});
+
+function maxCanonicalKey(index: number): string {
+  return `${index.toString().padStart(3, "0")}${"x".repeat(61)}`;
+}
+
+function maximalMap<T>(count: number, value: T): Record<string, T> {
+  return Object.fromEntries([
+    [OVERFLOW_KEY, clone(value)],
+    ...Array.from({ length: count }, (_, index) => [
+      `k:${maxCanonicalKey(index)}`,
+      clone(value),
+    ]),
+  ]);
+}
+
+function maximalSections(): DurableLifetimeSections {
+  const maximal = clone(
+    parseDurableLifetimeRoot(durableRootFixture).repositories[REPOSITORY_KEY]?.sections,
+  );
+  assert.ok(maximal?.cache);
+  assert.ok(maximal.retrieval);
+  assert.ok(maximal.indexing);
+  assert.ok(maximal.tokenEfficiency);
+  assert.ok(maximal.predictiveContext);
+  assert.ok(maximal.latency);
+  assert.ok(maximal.packed);
+  assert.ok(maximal.toolOutput);
+
+  const maximum = Number.MAX_SAFE_INTEGER;
+  const maximize = (value: unknown): unknown => {
+    if (typeof value === "number") return maximum;
+    if (value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(maximize);
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, maximize(nested)]));
+  };
+  const filled = maximize(maximal) as DurableLifetimeSections;
+  assert.ok(filled.cache);
+  assert.ok(filled.retrieval);
+  assert.ok(filled.indexing);
+  assert.ok(filled.tokenEfficiency);
+  assert.ok(filled.predictiveContext);
+  assert.ok(filled.latency);
+  assert.ok(filled.packed);
+  assert.ok(filled.toolOutput);
+
+  filled.cache.perSource = maximalMap(32, filled.cache.perSource["k:a"]);
+  filled.retrieval.byMode = maximalMap(32, maximum);
+  filled.retrieval.byType = maximalMap(32, maximum);
+  filled.retrieval.candidatesBySource = maximalMap(32, maximum);
+  filled.retrieval.phaseLatencyMs = maximalMap(32, filled.retrieval.latencyMs);
+  filled.indexing.phaseCounts = maximalMap(32, maximum);
+  filled.indexing.languageMs = maximalMap(32, filled.indexing.pass1Ms);
+  filled.indexing.engineDispatch = maximalMap(32, maximum);
+  filled.tokenEfficiency.compressionBySource = maximalMap(
+    32,
+    filled.tokenEfficiency.compressionBySource["k:a"],
+  );
+  filled.predictiveContext.byStrategy = maximalMap(
+    32,
+    filled.predictiveContext.byStrategy["k:a"],
+  );
+  filled.latency.perTool = maximalMap(128, filled.latency.perTool["k:a"]);
+  filled.packed.axisHits = maximalMap(32, maximum);
+  filled.packed.byEncoder = maximalMap(128, filled.packed.byEncoder["k:a"]);
+  filled.toolOutput.detailCounts = maximalMap(32, maximum);
+  filled.toolOutput.profileCounts = maximalMap(32, maximum);
+  const maximalTool = clone(filled.toolOutput.perTool["k:a"]);
+  maximalTool.detailCounts = maximalMap(32, maximum);
+  maximalTool.profileCounts = maximalMap(32, maximum);
+  filled.toolOutput.perTool = maximalMap(128, maximalTool);
+  return filled;
+}
+
+describe("bounded lifetime accumulator", () => {
+  it("adds counters and samples without averaging averages", () => {
+    assert.equal(saturatingAdd(4, 7), 11);
+    assert.deepEqual(mergeCounter(4, 7), { value: 11, saturated: false });
+    const left = { count: 2, sum: 20, max: 15 };
+    const right = { count: 8, sum: 24, max: 6 };
+    assert.deepEqual(mergeSample(left, right), { count: 10, sum: 44, max: 15 });
+    assert.equal(mergeSample(left, right).sum / mergeSample(left, right).count, 4.4);
+  });
+
+  it("clamps safe-integer additions and reports sample saturation", () => {
+    assert.deepEqual(saturatingAddWithSaturation(Number.MAX_SAFE_INTEGER, 1), {
+      value: Number.MAX_SAFE_INTEGER,
+      saturated: true,
+    });
+    assert.deepEqual(
+      mergeSampleWithSaturation(
+        { count: Number.MAX_SAFE_INTEGER, sum: Number.MAX_SAFE_INTEGER - 1, max: 8 },
+        { count: 1, sum: 2, max: 9 },
+      ),
+      {
+        value: {
+          count: Number.MAX_SAFE_INTEGER,
+          sum: Number.MAX_SAFE_INTEGER,
+          max: 9,
+        },
+        saturated: true,
+      },
+    );
+  });
+
+  it("merges repository sections exactly without mutating either input", () => {
+    const baseline = parseDurableLifetimeRoot(durableRootFixture).repositories[REPOSITORY_KEY];
+    assert.ok(baseline?.sections.cache);
+    const epoch = clone(baseline);
+    epoch.epoch = 3;
+    epoch.sessionCount = 1;
+    epoch.sections.cache.hits = 4;
+    epoch.sections.cache.lookupMs = { count: 2, sum: 8, max: 7 };
+    const baselineBefore = clone(baseline);
+    const epochBefore = clone(epoch);
+
+    const merged = lifetimeView(baseline, epoch);
+
+    assert.equal(merged.epoch, 3);
+    assert.equal(merged.sessionCount, 4);
+    assert.equal(merged.sections.cache?.hits, 5);
+    assert.deepEqual(merged.sections.cache?.lookupMs, { count: 3, sum: 10, max: 7 });
+    assert.deepEqual(baseline, baselineBefore);
+    assert.deepEqual(epoch, epochBefore);
+    assert.notEqual(merged.sections, baseline.sections);
+  });
+
+  it("propagates saturation to the repository entry", () => {
+    const baseline = emptyRepositoryLifetime();
+    const epoch = emptyRepositoryLifetime();
+    baseline.sessionCount = Number.MAX_SAFE_INTEGER;
+    epoch.sessionCount = 1;
+    assert.deepEqual(mergeRepositoryLifetime(baseline, epoch), {
+      ...baseline,
+      saturated: true,
+    });
+
+    const sectionBaseline = parseDurableLifetimeRoot(durableRootFixture)
+      .repositories[REPOSITORY_KEY];
+    assert.ok(sectionBaseline?.sections.cache);
+    const sectionEpoch = clone(sectionBaseline);
+    sectionBaseline.sections.cache.hits = Number.MAX_SAFE_INTEGER;
+    sectionEpoch.sections.cache.hits = 1;
+    const sectionMerged = mergeRepositoryLifetime(sectionBaseline, sectionEpoch);
+    assert.equal(sectionMerged.sections.cache?.hits, Number.MAX_SAFE_INTEGER);
+    assert.equal(sectionMerged.saturated, true);
+  });
+
+  it("accepts only canonical raw identifiers and never persists invalid raw keys", () => {
+    for (const valid of ["a", "A-Z_9", "tool.name:v1", "x".repeat(64)]) {
+      assert.equal(canonicalDynamicKey(valid), `k:${valid}`);
+    }
+    for (const invalid of ["", "has space", "slash/name", "x".repeat(65), OVERFLOW_KEY]) {
+      assert.equal(canonicalDynamicKey(invalid), OVERFLOW_KEY);
+      const result = admitDynamicMapEntry({}, invalid, 1, {
+        location: "retrieval.byMode",
+        merge: mergeCounter,
+      });
+      assert.deepEqual(Object.keys(result.map), [OVERFLOW_KEY]);
+      if (invalid !== OVERFLOW_KEY) assert.equal(Object.hasOwn(result.map, invalid), false);
+    }
+  });
+
+  it("applies every dynamic-map cap and routes the next key to overflow", () => {
+    for (const location of DYNAMIC_MAP_LOCATIONS) {
+      const limit = dynamicMapLimit(location);
+      assert.equal(limit, location.endsWith("perTool") || location === "packed.byEncoder" ? 128 : 32);
+      let map: Record<string, number> = {};
+      for (let index = limit - 1; index >= 0; index -= 1) {
+        map = admitDynamicMapEntry(map, `key${index.toString().padStart(3, "0")}`, 1, {
+          location,
+          merge: mergeCounter,
+        }).map;
+      }
+      assert.equal(Object.keys(map).length, limit);
+      const overflowed = admitDynamicMapEntry(map, "beyond-cap", 2, {
+        location,
+        merge: mergeCounter,
+      });
+      assert.equal(overflowed.admitted, false);
+      assert.equal(overflowed.storageKey, OVERFLOW_KEY);
+      assert.equal(overflowed.map[OVERFLOW_KEY], 2);
+      assert.deepEqual(Object.keys(overflowed.map), [...Object.keys(overflowed.map)].sort());
+    }
+  });
+
+  it("merges and normalizes dynamic maps lexically", () => {
+    const left = { "k:z": 1, "k:a": 2 };
+    const right = { __other__: 4, "k:a": 3 };
+    const merged = mergeDynamicMaps(left, right, {
+      location: "retrieval.byMode",
+      merge: mergeCounter,
+    });
+    assert.deepEqual(merged, {
+      value: { __other__: 4, "k:a": 5, "k:z": 1 },
+      saturated: false,
+    });
+    assert.deepEqual(normalizeDynamicMap(left), { "k:a": 2, "k:z": 1 });
+    assert.deepEqual(left, { "k:z": 1, "k:a": 2 });
+    assert.deepEqual(right, { __other__: 4, "k:a": 3 });
+  });
+
+  it("keeps 128 perTool and byEncoder keys before overflowing key 129", () => {
+    for (const location of ["latency.perTool", "toolOutput.perTool", "packed.byEncoder"] as const) {
+      let map: Record<string, number> = {};
+      for (let index = 0; index < 128; index += 1) {
+        map = admitDynamicMapEntry(map, `key${index.toString().padStart(3, "0")}`, 1, {
+          location,
+          merge: mergeCounter,
+        }).map;
+      }
+      assert.equal(Object.keys(map).filter((key) => key !== OVERFLOW_KEY).length, 128);
+      const next = admitDynamicMapEntry(map, "key128", 1, {
+        location,
+        merge: mergeCounter,
+      });
+      assert.equal(next.storageKey, OVERFLOW_KEY);
+      assert.equal(Object.keys(next.map).length, 129);
+    }
+  });
+
+  it("rejects a byte-unreserved dynamic key without mutating the source map", () => {
+    const map = { [OVERFLOW_KEY]: 3 };
+    const result = admitDynamicMapEntry(map, "new-key", 4, {
+      location: "retrieval.byMode",
+      merge: mergeCounter,
+      reserve: () => false,
+    });
+    assert.equal(result.admitted, false);
+    assert.equal(result.storageKey, OVERFLOW_KEY);
+    assert.deepEqual(result.map, { [OVERFLOW_KEY]: 7 });
+    assert.deepEqual(map, { [OVERFLOW_KEY]: 3 });
+  });
+
+  it("admits 32 repositories and rejects repository 33 without mutation", () => {
+    let root: DurableLifetimeRoot = {
+      schemaVersion: 1,
+      generation: 0,
+      updatedAt: ISO,
+      processPeaks: null,
+      repositories: {},
+    };
+    for (let index = 0; index < 32; index += 1) {
+      const admission = admitRepository(root, `repo-${index}`, emptyRepositoryLifetime());
+      assert.equal(admission.admitted, true);
+      root = admission.root;
+    }
+    const before = clone(root);
+    const rejected = admitRepository(root, "repo-32", emptyRepositoryLifetime());
+    assert.equal(rejected.admitted, false);
+    assert.equal(rejected.reason, "repositoryLimit");
+    assert.equal(rejected.root, root);
+    assert.deepEqual(root, before);
+    assert.equal(Object.keys(root.repositories).length, MAX_REPOSITORIES);
+  });
+
+  it("resets one repository epoch and counts a writer session once", () => {
+    const original = emptyRepositoryLifetime();
+    const counted = incrementSessionCount(original);
+    const countedAgain = incrementSessionCount(counted.value, true);
+    assert.equal(counted.value.sessionCount, 1);
+    assert.equal(countedAgain.value.sessionCount, 1);
+    const reset = resetRepositoryLifetime(counted.value, ISO);
+    assert.equal(reset.epoch, 1);
+    assert.equal(reset.resetAt, ISO);
+    assert.equal(reset.lastCheckpointAt, ISO);
+    assert.equal(reset.sessionCount, 0);
+    assert.deepEqual(reset.sections, emptySections);
+    assert.deepEqual(original, emptyRepositoryLifetime());
+  });
+
+  it("merges process peaks by maxima", () => {
+    assert.deepEqual(
+      mergeProcessPeaks(
+        { cpuPct: 10, rssMb: 100, heapUsedMb: 30, heapTotalMb: 50, eventLoopLagMs: 4 },
+        { cpuPct: 8, rssMb: 120, heapUsedMb: 20, heapTotalMb: 70, eventLoopLagMs: 2 },
+      ),
+      { cpuPct: 10, rssMb: 120, heapUsedMb: 30, heapTotalMb: 70, eventLoopLagMs: 4 },
+    );
+  });
+
+  it("keeps maximal reserved and actual durable roots below 2 MiB", () => {
+    const timestamp = "9999-12-31T23:59:59.999999999+23:59";
+    const repository: DurableLifetimeRepository = {
+      epoch: Number.MAX_SAFE_INTEGER,
+      resetAt: timestamp,
+      lastCheckpointAt: timestamp,
+      sessionCount: Number.MAX_SAFE_INTEGER,
+      saturated: false,
+      sections: maximalSections(),
+    };
+    const root: DurableLifetimeRoot = {
+      schemaVersion: 1,
+      generation: Number.MAX_SAFE_INTEGER,
+      updatedAt: timestamp,
+      processPeaks: {
+        cpuPct: Number.MAX_SAFE_INTEGER,
+        rssMb: Number.MAX_SAFE_INTEGER,
+        heapUsedMb: Number.MAX_SAFE_INTEGER,
+        heapTotalMb: Number.MAX_SAFE_INTEGER,
+        eventLoopLagMs: Number.MAX_SAFE_INTEGER,
+      },
+      repositories: { [repositoryStorageKey("maximal")]: repository },
+    };
+    const normalized = parseDurableLifetimeRoot(root);
+    const actualBytes = Buffer.byteLength(JSON.stringify(normalized));
+    const reservedBytes = reservedSerializedBytes(normalized);
+    assert.ok(reservedBytes >= actualBytes);
+    assert.ok(reservedBytes < MAX_STORE_BYTES, `${reservedBytes} reserved bytes`);
+    assert.ok(actualBytes < MAX_STORE_BYTES, `${actualBytes} actual bytes`);
+    assert.equal(JSON.stringify(normalized).includes("p50"), false);
+    assert.equal(JSON.stringify(normalized).includes("percentile"), false);
+
+    let admittedRoot = normalized;
+    let rejection: ReturnType<typeof admitRepository> | undefined;
+    for (let index = 1; index < MAX_REPOSITORIES; index += 1) {
+      const admission = admitRepository(admittedRoot, `maximal-${index}`, repository);
+      if (!admission.admitted) {
+        rejection = admission;
+        break;
+      }
+      admittedRoot = admission.root;
+    }
+    assert.ok(rejection);
+    assert.equal(rejection.reason, "storeBytes");
+    assert.equal(rejection.root, admittedRoot);
   });
 });
