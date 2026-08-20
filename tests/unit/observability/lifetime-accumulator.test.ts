@@ -1710,6 +1710,101 @@ describe("bounded lifetime accumulator", () => {
     }
   });
 
+  it("fast-path aggregates only existing nested keys for real and overflow tools", () => {
+    const fixture = parseDurableLifetimeRoot(durableRootFixture);
+    const template = firstMapValue(fixture, REPOSITORY_KEY, "toolOutput.perTool");
+    assert.ok(isUnknownMap(template));
+    const root = replaceDynamicMap(
+      fixture,
+      REPOSITORY_KEY,
+      "toolOutput.perTool",
+      { "k:a": template, [OVERFLOW_KEY]: structuredClone(template) },
+    );
+
+    for (const [sourceRoot, rawIdentifier, storageKey] of [
+      [root, "a", "k:a"],
+      [root, "invalid key", OVERFLOW_KEY],
+    ] as const) {
+      const repository = sourceRoot.repositories[REPOSITORY_KEY];
+      assert.ok(repository?.sections.toolOutput);
+      const existing = repository.sections.toolOutput.perTool[storageKey];
+      assert.ok(existing);
+      const incoming = structuredClone(existing);
+      const before = clone(sourceRoot);
+
+      const result = admitAtLocation(
+        sourceRoot,
+        REPOSITORY_KEY,
+        "toolOutput.perTool",
+        rawIdentifier,
+        incoming,
+      );
+      const stored = result.root.repositories[REPOSITORY_KEY]
+        ?.sections.toolOutput?.perTool[storageKey];
+      assert.ok(stored);
+      assert.equal(result.reservedBytes, null);
+      assert.equal(stored.calls, existing.calls * 2);
+      assert.equal(stored.detailCounts["k:a"], existing.detailCounts["k:a"] * 2);
+      assert.equal(stored.profileCounts["k:z"], existing.profileCounts["k:z"] * 2);
+      assert.equal(stored.projectedBytesMax, existing.projectedBytesMax);
+      assert.deepEqual(sourceRoot, before);
+    }
+  });
+
+  it("rejects nested shape growth through an existing outer tool near the byte limit", () => {
+    const nearLimit = nearLimitDynamicRoot();
+    const repository = nearLimit.root.repositories[nearLimit.repositoryKey];
+    assert.ok(repository?.sections.toolOutput);
+    const realStorageKey = Object.keys(repository.sections.toolOutput.perTool)
+      .filter((key) => key !== OVERFLOW_KEY)
+      .sort()[1];
+    assert.ok(realStorageKey);
+    const existingReal = repository.sections.toolOutput.perTool[realStorageKey];
+    assert.ok(existingReal);
+    const incomingReal = structuredClone(existingReal);
+    incomingReal.detailCounts["k:new-nested"] = 1;
+    const beforeReal = clone(nearLimit.root);
+    assert.ok(reservedSerializedBytes(nearLimit.root) <= MAX_STORE_BYTES);
+    assert.throws(
+      () => admitAtLocation(
+        nearLimit.root,
+        nearLimit.repositoryKey,
+        "toolOutput.perTool",
+        realStorageKey.slice(2),
+        incomingReal,
+      ),
+      /explicit nested/i,
+    );
+    assert.deepEqual(nearLimit.root, beforeReal);
+
+    const overflowAdmission = admitAtLocation(
+      nearLimit.root,
+      nearLimit.repositoryKey,
+      "toolOutput.perTool",
+      "invalid outer tool",
+      structuredClone(existingReal),
+    );
+    assert.equal(overflowAdmission.status, "overflow");
+    const overflowRepository = overflowAdmission.root.repositories[nearLimit.repositoryKey];
+    assert.ok(overflowRepository?.sections.toolOutput);
+    const existingOverflow = overflowRepository.sections.toolOutput.perTool[OVERFLOW_KEY];
+    assert.ok(existingOverflow);
+    const incomingOverflow = structuredClone(existingOverflow);
+    incomingOverflow.profileCounts["k:new-nested"] = 1;
+    const beforeOverflow = clone(overflowAdmission.root);
+    assert.throws(
+      () => admitAtLocation(
+        overflowAdmission.root,
+        nearLimit.repositoryKey,
+        "toolOutput.perTool",
+        "another invalid outer tool",
+        incomingOverflow,
+      ),
+      /explicit nested/i,
+    );
+    assert.deepEqual(overflowAdmission.root, beforeOverflow);
+  });
+
   it("keeps 128 perTool and byEncoder keys before overflowing key 129", () => {
     for (const location of ["latency.perTool", "toolOutput.perTool", "packed.byEncoder"] as const) {
       let root = parseDurableLifetimeRoot(durableRootFixture);

@@ -394,6 +394,20 @@ function mergeDynamicValue(
   );
 }
 
+function rejectOuterToolNestedShapeGrowth(existing: unknown, incoming: unknown): void {
+  if (!isRecord(existing) || !isRecord(incoming)) return;
+  for (const field of ["detailCounts", "profileCounts"] as const) {
+    const existingMap = existing[field];
+    const incomingMap = incoming[field];
+    if (!isRecord(existingMap) || !isRecord(incomingMap)) continue;
+    if (Object.keys(incomingMap).some((key) => !Object.hasOwn(existingMap, key))) {
+      throw new Error(
+        "New tool-output counter keys require the explicit nested admission target",
+      );
+    }
+  }
+}
+
 interface LocatedDynamicMap {
   current: Readonly<Record<string, unknown>>;
   replace: (
@@ -523,6 +537,9 @@ export function admitDynamicMapEntry<T>(
     if (existing === undefined) {
       next[key] = structuredClone(validatedIncoming);
     } else {
+      if (location === "toolOutput.perTool") {
+        rejectOuterToolNestedShapeGrowth(existing, validatedIncoming);
+      }
       const merged = mergeDynamicValue(location, existing, validatedIncoming);
       next[key] = merged.value as T;
       saturated = merged.saturated;
