@@ -25,8 +25,26 @@ describe("serve observability orchestration", () => {
     };
     let activated = false;
     let settled = false;
+    let closed = 0;
+    let timers = 1;
+    let serviceRef: { stop: () => Promise<void> } | null = null;
+    let cleanupPromise: Promise<void> | null = null;
+    const stopObservability = (): Promise<void> => {
+      if (serviceRef === null) return Promise.resolve();
+      cleanupPromise ??= serviceRef.stop();
+      return cleanupPromise;
+    };
+    await stopObservability();
+    const service = {
+      start: () => starting.promise,
+      stop: async () => {
+        closed += 1;
+        timers = 0;
+      },
+    };
+    serviceRef = service;
     const activation = activateObservabilityAfterStart(
-      starting.promise,
+      service,
       state,
       () => {
         activated = true;
@@ -41,10 +59,14 @@ describe("serve observability orchestration", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(activated, false);
     assert.equal(settled, false);
+    assert.equal(closed, 1);
+    assert.equal(timers, 0);
 
     shutdownComplete.resolve();
     assert.equal(await activation, false);
     assert.equal(activated, false);
+    assert.equal(closed, 1);
+    assert.equal(timers, 0);
   });
 
   it("retries a failed drain before checkpoint and still closes after stop rejection", async () => {
@@ -97,9 +119,9 @@ describe("serve observability orchestration", () => {
     }
   });
 
-  it("never checkpoints or physically closes while every drain attempt fails", async () => {
+  it("does not hide a successful third drain inside database close", async () => {
     let checkpoints = 0;
-    let databaseCleanupAttempts = 0;
+    let drainAttempts = 0;
     let physicalCloses = 0;
     let loggerClosed = false;
     const originalExit = process.exit;
@@ -111,15 +133,15 @@ describe("serve observability orchestration", () => {
       });
       registerServeFinalCleanups(manager, {
         drainWork: async () => {
+          drainAttempts += 1;
           throw new Error("still active");
         },
         stopObservability: async () => {
           checkpoints += 1;
         },
         closeDatabase: async () => {
-          databaseCleanupAttempts += 1;
-          const safeToClose = false;
-          if (!safeToClose) throw new Error("still active before physical close");
+          drainAttempts += 1;
+          assert.equal(drainAttempts, 3);
           physicalCloses += 1;
         },
       });
@@ -130,9 +152,44 @@ describe("serve observability orchestration", () => {
       await manager.shutdown("test");
 
       assert.equal(checkpoints, 0);
-      assert.equal(databaseCleanupAttempts, 1);
+      assert.equal(drainAttempts, 2);
       assert.equal(physicalCloses, 0);
       assert.equal(loggerClosed, true);
+    } finally {
+      process.exit = originalExit;
+    }
+  });
+
+  it("does not invoke database close after three modeled drain failures", async () => {
+    let drainAttempts = 0;
+    let checkpoints = 0;
+    let closeAttempts = 0;
+    const originalExit = process.exit;
+    process.exit = (() => undefined as never) as NodeJS.Process["exit"];
+    try {
+      const manager = new ShutdownManager({
+        forceTimeoutMs: 10_000,
+        log: () => {},
+      });
+      registerServeFinalCleanups(manager, {
+        drainWork: async () => {
+          drainAttempts += 1;
+          throw new Error("still active");
+        },
+        stopObservability: async () => {
+          checkpoints += 1;
+        },
+        closeDatabase: async () => {
+          closeAttempts += 1;
+          throw new Error("third drain still active");
+        },
+      });
+
+      await manager.shutdown("test");
+
+      assert.equal(drainAttempts, 2);
+      assert.equal(checkpoints, 0);
+      assert.equal(closeAttempts, 0);
     } finally {
       process.exit = originalExit;
     }

@@ -100,9 +100,7 @@ async function main(): Promise<void> {
   shutdownMgr.addCleanup("watcherStartTimer", () => {
     if (watcherStartTimer) clearTimeout(watcherStartTimer);
   });
-  shutdownMgr.addCleanup("idleMonitor", () => {
-    idleMonitor?.stop();
-  });
+  shutdownMgr.addCleanup("idleMonitor", () => idleMonitor?.stop());
   shutdownMgr.addCleanup("server", () => server.stop());
   shutdownMgr.addCleanup("persistUsage", async () => {
     try {

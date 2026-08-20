@@ -7,6 +7,8 @@ import {
   DB_SHUTDOWN_DRAIN_TIMEOUT_MS,
   SHUTDOWN_FORCE_EXIT_TIMEOUT_MS,
 } from "../../dist/config/constants.js";
+import { IdleMonitor } from "../../dist/live-index/idle-monitor.js";
+import { OverlayStore } from "../../dist/live-index/overlay-store.js";
 import { ShutdownManager } from "../../dist/util/shutdown.js";
 
 describe("ShutdownManager", () => {
@@ -295,6 +297,64 @@ describe("main.ts shutdown wiring", () => {
 
     assert.ok(closeIndex >= 0, "startup catch should close DB");
     assert.ok(closeIndex < exitIndex, "DB close must happen before exit");
+  });
+
+  it("awaits an active idle-monitor checkpoint during direct-main shutdown", async () => {
+    const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
+    const returnsStop = source.includes(
+      'shutdownMgr.addCleanup("idleMonitor", () => idleMonitor?.stop());',
+    );
+    const store = new OverlayStore();
+    store.upsertDraft({
+      repoId: "main-shutdown-repo",
+      eventType: "save",
+      filePath: "src/example.ts",
+      content: "export const value = 1;",
+      language: "typescript",
+      version: 1,
+      dirty: false,
+      timestamp: "2026-08-20T12:00:00.000Z",
+    });
+    let checkpointEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      checkpointEntered = resolve;
+    });
+    let releaseCheckpoint!: () => void;
+    const checkpoint = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    const monitor = new IdleMonitor({
+      overlayStore: store,
+      quietPeriodMs: 0,
+      now: () => Date.parse("2026-08-20T12:05:00.000Z"),
+      checkpointRepo: async (request) => {
+        checkpointEntered();
+        await checkpoint;
+        return { repoId: request.repoId, requested: true, pending: false };
+      },
+    });
+    const scan = monitor.scanOnce();
+    await entered;
+
+    const manager = new ShutdownManager({ forceTimeoutMs: 10_000, log: () => {} });
+    manager.addCleanup(
+      "idleMonitor",
+      returnsStop ? () => monitor.stop() : () => { void monitor.stop(); },
+    );
+    const originalExit = process.exit;
+    process.exit = (() => undefined as never) as NodeJS.Process["exit"];
+    let shutdownSettled = false;
+    const shutdown = manager.shutdown("test").then(() => {
+      shutdownSettled = true;
+    });
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(shutdownSettled, false);
+    } finally {
+      releaseCheckpoint();
+      await Promise.all([scan, shutdown]);
+      process.exit = originalExit;
+    }
   });
 
   it("unrefs cleanup interval so it cannot keep process alive", () => {

@@ -18,10 +18,9 @@ import {
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
-import { configurePool, getLadybugConn } from "../../db/ladybug.js";
+import { closeLadybugDb, configurePool, getLadybugConn } from "../../db/ladybug.js";
 import { listAllRepoIds } from "../../db/ladybug-queries.js";
 import {
-  closeLadybugDbAfterDrainingWork,
   drainLadybugWork,
 } from "../../startup/graceful-database-shutdown.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
@@ -93,12 +92,13 @@ async function stopGraphIntegrityVerifier(): Promise<void> {
 }
 
 export async function activateObservabilityAfterStart(
-  starting: Promise<void>,
+  service: Pick<ObservabilityService, "start" | "stop">,
   shutdown: Pick<ShutdownManager, "isShuttingDown" | "shutdownComplete">,
   activate: () => void,
 ): Promise<boolean> {
-  await starting;
+  await service.start();
   if (shutdown.isShuttingDown) {
+    await service.stop();
     await shutdown.shutdownComplete;
     return false;
   }
@@ -124,14 +124,16 @@ export function registerServeFinalCleanups(
     if (workDrained) await cleanup.stopObservability();
   });
   shutdownMgr.addCleanup("db", async () => {
-    try {
-      if (!workDrained) {
-        await drainWork();
+    if (!workDrained) {
+      await drainWork();
+      try {
         await cleanup.stopObservability();
+      } finally {
+        await cleanup.closeDatabase();
       }
-    } finally {
-      await cleanup.closeDatabase();
+      return;
     }
+    await cleanup.closeDatabase();
   });
 }
 
@@ -254,10 +256,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   const startupReadiness = createStartupReadiness();
   let observabilityCleanupPromise: Promise<void> | null = null;
   const stopObservability = (): Promise<void> => {
-    observabilityCleanupPromise ??= (async () => {
-      stopRuntimeProbes();
-      await observabilityService?.stop();
-    })();
+    stopRuntimeProbes();
+    if (observabilityService === null) return Promise.resolve();
+    observabilityCleanupPromise ??= observabilityService.stop();
     return observabilityCleanupPromise;
   };
 
@@ -320,7 +321,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   registerServeFinalCleanups(shutdownMgr, {
     drainWork: drainLadybugWork,
     stopObservability,
-    closeDatabase: closeLadybugDbAfterDrainingWork,
+    closeDatabase: closeLadybugDb,
   });
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
@@ -633,7 +634,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     });
     const service = observabilityService;
     const activated = await activateObservabilityAfterStart(
-      service.start(),
+      service,
       shutdownMgr,
       () => {
         installObservabilityTap(service);
