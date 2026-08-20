@@ -81,6 +81,15 @@ async function missing(path: string): Promise<boolean> {
   }
 }
 
+function matchesCloseError(expected: object): (error: unknown) => boolean {
+  return (error) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.name, "LifetimeStoreCloseError");
+    assert.deepEqual(Reflect.get(error, "outcome"), expected);
+    return true;
+  };
+}
+
 after(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) =>
     rm(directory, { recursive: true, force: true })));
@@ -480,6 +489,76 @@ describe("lifetime store", () => {
     assert.throws(() => store.state(), /closed/i);
     await assert.rejects(store.checkpoint(root(1)), /closed/i);
     await assert.rejects(store.refreshReadOnly(), /closed/i);
+  });
+
+  it("rejects a definitely-not-published final checkpoint after releasing its lease", async () => {
+    const directory = await temporaryDirectory();
+    const base = resolveLifetimeFileSystem();
+    let failFinalTemp = false;
+    const store = await openLifetimeStore({
+      directory,
+      pid: 63,
+      fs: {
+        open: async (path, flags, mode) => {
+          if (failFinalTemp && basename(String(path)).startsWith(TEMP_PREFIX)) {
+            failFinalTemp = false;
+            throw Object.assign(new Error("final checkpoint rejected"), { code: "EIO" });
+          }
+          return base.open(path, flags, mode);
+        },
+      },
+    });
+    failFinalTemp = true;
+
+    await assert.rejects(
+      store.close(root(0)),
+      matchesCloseError({ status: "notPublished", reason: "ioFailure" }),
+    );
+    assert.equal(await missing(join(directory, PRIMARY)), true);
+    assert.equal(await missing(join(directory, LIFETIME_LOCK_FILENAME)), true);
+    await assert.rejects(store.checkpoint(root(0)), /closed/i);
+  });
+
+  it("rejects an indeterminate final checkpoint and preserves a replacement lease", async () => {
+    const directory = await temporaryDirectory();
+    const base = resolveLifetimeFileSystem();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const replacement = JSON.stringify({
+      schemaVersion: 1,
+      pid: 100,
+      createdAt: ISO_3,
+      nonce: "1234567890abcdef1234567890abcdef",
+    });
+    let replaced = false;
+    const store = await openLifetimeStore({
+      directory,
+      pid: 64,
+      fs: {
+        rename: async (source, target) => {
+          await base.rename(source, target);
+          if (!replaced && basename(String(source)).startsWith(TEMP_PREFIX) &&
+              basename(String(target)) === PRIMARY) {
+            replaced = true;
+            await unlink(lockPath);
+            await writeFile(lockPath, replacement, { mode: 0o600 });
+            throw Object.assign(new Error("final commit acknowledgement lost"), { code: "EIO" });
+          }
+        },
+      },
+    });
+
+    await assert.rejects(
+      store.close(root(0)),
+      matchesCloseError({
+        status: "indeterminate",
+        reason: "publicationCommitUncertain",
+        stage: "commit",
+      }),
+    );
+    assert.equal(await readFile(lockPath, "utf8"), replacement);
+    const value: unknown = JSON.parse(await readFile(join(directory, PRIMARY), "utf8"));
+    assert.equal(parseDurableLifetimeRoot(value).generation, 0);
+    await assert.rejects(store.checkpoint(root(1, ISO_2)), /closed/i);
   });
 
   it("degrades safely after lease replacement and preserves the new owner on close", async () => {

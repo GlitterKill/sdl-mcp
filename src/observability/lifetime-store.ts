@@ -18,6 +18,17 @@ import type { LifetimeFileSystemOverrides } from "./lifetime-evidence.js";
 
 export type LifetimeFs = LifetimeFileSystemOverrides;
 export type PublishOutcome = Awaited<ReturnType<typeof publishLifetimeGeneration>>;
+type NonCommittedPublishOutcome = Exclude<PublishOutcome, { readonly status: "committed" }>;
+
+export class LifetimeStoreCloseError extends Error {
+  readonly outcome: NonCommittedPublishOutcome;
+
+  constructor(outcome: NonCommittedPublishOutcome) {
+    super(`Lifetime final checkpoint ${outcome.status}: ${outcome.reason}`);
+    this.name = "LifetimeStoreCloseError";
+    this.outcome = outcome;
+  }
+}
 
 interface LoadedStoreState {
   readonly root: DurableLifetimeRoot | null;
@@ -269,7 +280,8 @@ export async function openLifetimeStore(
       closePromise = enqueue(async () => {
         try {
           if (lease && capture && currentState.mode !== "recoveryRequired") {
-            await publish(capture);
+            const outcome = await publish(capture);
+            if (outcome.status !== "committed") throw new LifetimeStoreCloseError(outcome);
           }
         } finally {
           if (lease) {
