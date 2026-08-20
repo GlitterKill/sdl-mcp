@@ -921,7 +921,17 @@ export class ObservabilityService implements ObservabilityTap {
     const previous = this.prefetchCumulative.get(event.repoId);
     const retained = retainPrefetchCumulativeShadow(current, previous);
     const delta = cumulativePrefetchDelta(retained.current, previous);
-    this.prefetchCumulative.set(event.repoId, retained.next);
+    const overflowDelta = delta.byStrategy[OVERFLOW_KEY];
+    if (overflowDelta !== undefined) {
+      const previousOverflow = previous?.byStrategy[OVERFLOW_KEY];
+      retained.next.byStrategy[OVERFLOW_KEY] = previousOverflow === undefined
+        ? structuredClone(overflowDelta)
+        : mergePrefetchStrategySnapshots(previousOverflow, overflowDelta);
+    }
+    this.prefetchCumulative.set(event.repoId, {
+      ...retained.next,
+      byStrategy: orderedRecord(retained.next.byStrategy),
+    });
     return sectionDelta("predictiveContext", delta);
   }
 
@@ -1701,40 +1711,64 @@ function cumulativePrefetchDelta(
   current: NonNullable<DurableLifetimeSections["predictiveContext"]>,
   previous: NonNullable<DurableLifetimeSections["predictiveContext"]> | undefined,
 ): NonNullable<DurableLifetimeSections["predictiveContext"]> {
-  if (previous === undefined) return structuredClone(current);
-  const restarted = current.outcomeSamples < previous.outcomeSamples;
-  const byStrategy: typeof current.byStrategy = {};
-  for (const [key, value] of Object.entries(current.byStrategy)) {
-    const old = previous.byStrategy[key];
-    if (old === undefined) {
-      byStrategy[key] = structuredClone(value);
-      continue;
-    }
-    const strategyRestarted = key !== OVERFLOW_KEY && value.samples < old.samples;
-    byStrategy[key] = {
-      samples: forwardDelta(value.samples, old.samples, strategyRestarted),
-      hits: forwardDelta(value.hits, old.hits, strategyRestarted),
-      wasted: forwardDelta(value.wasted, old.wasted, strategyRestarted),
-      accepted: forwardDelta(value.accepted, old.accepted, strategyRestarted),
-      suppressed: forwardDelta(value.suppressed, old.suppressed, strategyRestarted),
-      latencyReductionMs: cumulativeSampleDelta(
-        value.latencyReductionMs,
-        old.latencyReductionMs,
-        strategyRestarted,
-      ),
-    };
-  }
-  return {
-    outcomeSamples: forwardDelta(current.outcomeSamples, previous.outcomeSamples, restarted),
-    hitOutcomes: forwardDelta(current.hitOutcomes, previous.hitOutcomes, restarted),
-    wasteOutcomes: forwardDelta(current.wasteOutcomes, previous.wasteOutcomes, restarted),
-    accepted: forwardDelta(current.accepted, previous.accepted, restarted),
-    suppressed: forwardDelta(current.suppressed, previous.suppressed, restarted),
+  const restarted = previous !== undefined && current.outcomeSamples < previous.outcomeSamples;
+  const totals = {
+    outcomeSamples: forwardDelta(current.outcomeSamples, previous?.outcomeSamples ?? 0, restarted),
+    hitOutcomes: forwardDelta(current.hitOutcomes, previous?.hitOutcomes ?? 0, restarted),
+    wasteOutcomes: forwardDelta(current.wasteOutcomes, previous?.wasteOutcomes ?? 0, restarted),
+    accepted: forwardDelta(current.accepted, previous?.accepted ?? 0, restarted),
+    suppressed: forwardDelta(current.suppressed, previous?.suppressed ?? 0, restarted),
     latencyReductionMs: cumulativeSampleDelta(
       current.latencyReductionMs,
-      previous.latencyReductionMs,
+      previous?.latencyReductionMs ?? exactSample(0, 0),
       restarted,
     ),
+  };
+  const byStrategy: typeof current.byStrategy = {};
+  let covered: PredictiveStrategy | undefined;
+  for (const [key, value] of Object.entries(current.byStrategy)) {
+    if (key === OVERFLOW_KEY) continue;
+    const old = previous?.byStrategy[key];
+    if (old === undefined) {
+      byStrategy[key] = structuredClone(value);
+    } else {
+      const strategyRestarted = value.samples < old.samples;
+      byStrategy[key] = {
+        samples: forwardDelta(value.samples, old.samples, strategyRestarted),
+        hits: forwardDelta(value.hits, old.hits, strategyRestarted),
+        wasted: forwardDelta(value.wasted, old.wasted, strategyRestarted),
+        accepted: forwardDelta(value.accepted, old.accepted, strategyRestarted),
+        suppressed: forwardDelta(value.suppressed, old.suppressed, strategyRestarted),
+        latencyReductionMs: cumulativeSampleDelta(
+          value.latencyReductionMs,
+          old.latencyReductionMs,
+          strategyRestarted,
+        ),
+      };
+    }
+    covered = covered === undefined
+      ? structuredClone(byStrategy[key])
+      : mergePrefetchStrategySnapshots(covered, byStrategy[key]);
+  }
+  const residual: PredictiveStrategy = {
+    samples: Math.max(0, totals.outcomeSamples - (covered?.samples ?? 0)),
+    hits: Math.max(0, totals.hitOutcomes - (covered?.hits ?? 0)),
+    wasted: Math.max(0, totals.wasteOutcomes - (covered?.wasted ?? 0)),
+    accepted: Math.max(0, totals.accepted - (covered?.accepted ?? 0)),
+    suppressed: Math.max(0, totals.suppressed - (covered?.suppressed ?? 0)),
+    latencyReductionMs: {
+      count: Math.max(0, totals.latencyReductionMs.count
+        - (covered?.latencyReductionMs.count ?? 0)),
+      sum: Math.max(0, totals.latencyReductionMs.sum
+        - (covered?.latencyReductionMs.sum ?? 0)),
+      max: 0,
+    },
+  };
+  if (previous?.byStrategy[OVERFLOW_KEY] !== undefined || hasPrefetchStrategyTotals(residual)) {
+    byStrategy[OVERFLOW_KEY] = residual;
+  }
+  return {
+    ...totals,
     byStrategy: orderedRecord(byStrategy),
   };
 }
@@ -1756,47 +1790,27 @@ function mergePrefetchStrategySnapshots(
   };
 }
 
-function maximumPrefetchStrategyShadow(
-  left: PredictiveStrategy,
-  right: PredictiveStrategy,
-): PredictiveStrategy {
-  return {
-    samples: Math.max(left.samples, right.samples),
-    hits: Math.max(left.hits, right.hits),
-    wasted: Math.max(left.wasted, right.wasted),
-    accepted: Math.max(left.accepted, right.accepted),
-    suppressed: Math.max(left.suppressed, right.suppressed),
-    latencyReductionMs: {
-      count: Math.max(left.latencyReductionMs.count, right.latencyReductionMs.count),
-      sum: Math.max(left.latencyReductionMs.sum, right.latencyReductionMs.sum),
-      max: Math.max(left.latencyReductionMs.max, right.latencyReductionMs.max),
-    },
-  };
+function hasPrefetchStrategyTotals(value: PredictiveStrategy): boolean {
+  return value.samples > 0 || value.hits > 0 || value.wasted > 0
+    || value.accepted > 0 || value.suppressed > 0
+    || value.latencyReductionMs.count > 0 || value.latencyReductionMs.sum > 0;
 }
 
 function retainPrefetchCumulativeShadow(
   current: PredictiveContextSection,
   previous: PredictiveContextSection | undefined,
 ): { current: PredictiveContextSection; next: PredictiveContextSection } {
-  if (previous === undefined) {
-    return { current: structuredClone(current), next: structuredClone(current) };
-  }
   const currentByStrategy: PredictiveContextSection["byStrategy"] = {};
-  const nextByStrategy = structuredClone(previous.byStrategy);
+  const nextByStrategy = structuredClone(previous?.byStrategy ?? {});
   let realKeys = Object.keys(nextByStrategy).filter((key) => key !== OVERFLOW_KEY).length;
   const limit = dynamicMapLimit("predictiveContext.byStrategy");
   for (const [key, value] of Object.entries(current.byStrategy)) {
+    if (key === OVERFLOW_KEY) continue;
     const isNewRealKey = key !== OVERFLOW_KEY && !Object.hasOwn(nextByStrategy, key);
-    const retainedKey = isNewRealKey && realKeys >= limit ? OVERFLOW_KEY : key;
-    if (isNewRealKey && retainedKey !== OVERFLOW_KEY) realKeys += 1;
-    currentByStrategy[retainedKey] = currentByStrategy[retainedKey] === undefined
-      ? structuredClone(value)
-      : mergePrefetchStrategySnapshots(currentByStrategy[retainedKey], value);
-  }
-  for (const [key, value] of Object.entries(currentByStrategy)) {
-    nextByStrategy[key] = key === OVERFLOW_KEY && nextByStrategy[key] !== undefined
-      ? maximumPrefetchStrategyShadow(nextByStrategy[key], value)
-      : structuredClone(value);
+    if (isNewRealKey && realKeys >= limit) continue;
+    if (isNewRealKey) realKeys += 1;
+    currentByStrategy[key] = structuredClone(value);
+    nextByStrategy[key] = structuredClone(value);
   }
   return {
     current: { ...current, byStrategy: orderedRecord(currentByStrategy) },

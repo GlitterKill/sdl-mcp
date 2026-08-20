@@ -952,6 +952,61 @@ describe("ObservabilityService lifetime integration", () => {
     await h.service.stop();
   });
 
+  it("reconciles bounded strategy overflow from global cumulative owners", async () => {
+    const h = harness();
+    await h.service.start();
+    const emit = (
+      outcomeSamples: number,
+      strategies: Array<{ strategy: string; samples: number }>,
+    ) => h.service.prefetch({
+      repoId: "repo-a",
+      outcomeSamples,
+      hitRate: 0,
+      wasteRate: 0,
+      avgLatencyReductionMs: 0,
+      queueDepth: 0,
+      acceptedPrefetch: 0,
+      suppressedPrefetch: 0,
+      topStrategies: strategies.map(({ strategy, samples }) => ({
+        strategy,
+        resourceKind: "symbol",
+        samples,
+        hitRate: 0,
+        acceptedRate: 0,
+        wasteRate: 0,
+        score: 1,
+        suppressed: 0,
+      })),
+    });
+    const retained = Array.from(
+      { length: 32 },
+      (_, index) => ({ strategy: `retained-${index}`, samples: 1 }),
+    );
+
+    emit(32, retained);
+    emit(33, [{ strategy: "overflow-X", samples: 1 }]);
+    emit(34, [{ strategy: "overflow-Y", samples: 1 }]);
+    let value = await h.service.getLifetime("repo-a");
+    assert.notEqual(value.persistenceState, "recoveryRequired");
+    if (value.persistenceState !== "recoveryRequired") {
+      assert.equal(value.sections.predictiveContext?.outcomeSamples, 34);
+      assert.equal(value.sections.predictiveContext?.byStrategy.__other__?.samples, 2);
+      assert.equal(Object.keys(value.sections.predictiveContext?.byStrategy ?? {}).length, 33);
+    }
+
+    emit(36, [{ strategy: "overflow-Y", samples: 3 }]);
+    emit(2, [{ strategy: "overflow-Z", samples: 2 }]);
+    emit(2, [{ strategy: "overflow-Z", samples: 2 }]);
+    value = await h.service.getLifetime("repo-a");
+    assert.notEqual(value.persistenceState, "recoveryRequired");
+    if (value.persistenceState !== "recoveryRequired") {
+      assert.equal(value.sections.predictiveContext?.outcomeSamples, 38);
+      assert.equal(value.sections.predictiveContext?.byStrategy.__other__?.samples, 6);
+      assert.equal(Object.keys(value.sections.predictiveContext?.byStrategy ?? {}).length, 33);
+    }
+    await h.service.stop();
+  });
+
   it("counts engine dispatch only from authoritative IndexEvent file totals", async () => {
     const h = harness();
     await h.service.start();
