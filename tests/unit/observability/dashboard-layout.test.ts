@@ -85,7 +85,53 @@ type DashboardHarness = {
     apply: (layout: Layout) => void,
     announce: (message: string) => void,
   ): Layout;
+  installKeyboardLayoutTransactions(options: {
+    entries: Array<{ panel: FakeEventTarget; id: string; name: string }>;
+    storage: StorageHarness;
+    getLayout: () => Layout;
+    setLayout: (layout: Layout) => void;
+    applyPanelRect: (panel: FakeEventTarget, rect: Rect) => void;
+    announce: (message: string) => void;
+    isEditMode: () => boolean;
+    visibilityTarget: FakeEventTarget;
+  }): { cancel: () => void };
 };
+
+type FakeEvent = {
+  key?: string;
+  shiftKey?: boolean;
+  repeat?: boolean;
+  defaultPrevented: boolean;
+  preventDefault(): void;
+};
+
+class FakeEventTarget {
+  readonly listeners = new Map<string, Array<(event: FakeEvent) => void>>();
+  visibilityState = "visible";
+  focusCount = 0;
+
+  addEventListener(type: string, listener: (event: FakeEvent) => void): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  dispatch(type: string, init: Omit<Partial<FakeEvent>, "preventDefault"> = {}): FakeEvent {
+    const event: FakeEvent = {
+      ...init,
+      defaultPrevented: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+    };
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+    return event;
+  }
+
+  focus(): void {
+    this.focusCount++;
+  }
+}
 
 function makeStorage(
   initial: Record<string, string> = {},
@@ -123,17 +169,56 @@ function makeStorage(
 
 function loadDashboardHarness(): DashboardHarness {
   const source = dashboardSource
-    .replace(/^import .*;\s*$/gm, "")
+    .replace(/^import[\s\S]*?;\s*$/gm, "")
     .replace(/\nif \(document\.readyState === "loading"\)[\s\S]*$/, "");
   const context = {
     migrateV2Layout,
+    movePanel,
     normalizeV3Layout,
+    resizePanel,
   } as Record<string, unknown>;
   runInNewContext(
-    `${source}\nglobalThis.__layoutHarness = { loadDashboardLayout, resetDashboardLayout };`,
+    `${source}\nglobalThis.__layoutHarness = { loadDashboardLayout, resetDashboardLayout, installKeyboardLayoutTransactions };`,
     context,
   );
   return context.__layoutHarness as DashboardHarness;
+}
+
+function makeKeyboardFixture(
+  initial: Layout = { panel: { col: 1, row: 1, cols: 4, rows: 2 } },
+  storage = makeStorage(),
+) {
+  const harness = loadDashboardHarness();
+  const panel = new FakeEventTarget();
+  const visibilityTarget = new FakeEventTarget();
+  const announcements: string[] = [];
+  const applied: Rect[] = [];
+  let layout = structuredClone(initial);
+  let editMode = true;
+  const controller = harness.installKeyboardLayoutTransactions({
+    entries: [{ panel, id: "panel", name: "Cache" }],
+    storage,
+    getLayout: () => layout,
+    setLayout: (next) => {
+      layout = next;
+    },
+    applyPanelRect: (_panel, rect) => applied.push({ ...rect }),
+    announce: (message) => announcements.push(message),
+    isEditMode: () => editMode,
+    visibilityTarget,
+  });
+  return {
+    panel,
+    visibilityTarget,
+    announcements,
+    applied,
+    storage,
+    controller,
+    layout: () => layout,
+    setEditMode: (enabled: boolean) => {
+      editMode = enabled;
+    },
+  };
 }
 
 describe("dashboard layout geometry", () => {
@@ -181,7 +266,7 @@ describe("dashboard layout geometry", () => {
   it("loads layout v3 atomically through the shared geometry module", () => {
     assert.match(
       dashboardSource,
-      /import \{ migrateV2Layout, normalizeV3Layout \} from "\.\/observability-layout\.js";/,
+      /import \{[\s\S]*?migrateV2Layout,[\s\S]*?movePanel,[\s\S]*?normalizeV3Layout,[\s\S]*?resizePanel,[\s\S]*?\} from "\.\/observability-layout\.js";/,
     );
     assert.match(dashboardSource, /sdl-observability-panel-layout-v3/);
     assert.match(dashboardSource, /sdl-observability-panel-layout-v2/);
@@ -522,5 +607,105 @@ describe("dashboard layout geometry", () => {
     } finally {
       delete (globalThis as { localStorage?: unknown }).localStorage;
     }
+  });
+
+
+  it("previews held arrow moves and commits once after the final key is released", () => {
+    const fixture = makeKeyboardFixture();
+
+    const first = fixture.panel.dispatch("keydown", { key: "ArrowRight" });
+    const repeat = fixture.panel.dispatch("keydown", { key: "ArrowRight", repeat: true });
+    fixture.panel.dispatch("keydown", { key: "ArrowDown" });
+
+    assert.equal(first.defaultPrevented, true);
+    assert.equal(repeat.defaultPrevented, true);
+    assert.deepEqual(fixture.layout().panel, { col: 3, row: 2, cols: 4, rows: 2 });
+    assert.equal(fixture.storage.calls.length, 0);
+    assert.deepEqual(fixture.announcements, []);
+
+    const firstRelease = fixture.panel.dispatch("keyup", { key: "ArrowRight" });
+    assert.equal(firstRelease.defaultPrevented, true);
+    assert.equal(fixture.storage.calls.length, 0);
+    const finalRelease = fixture.panel.dispatch("keyup", { key: "ArrowDown" });
+    assert.equal(finalRelease.defaultPrevented, true);
+
+    assert.deepEqual(fixture.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
+    assert.deepEqual(fixture.announcements, [
+      "Cache, column 3, row 2, width 4, height 2",
+    ]);
+
+    fixture.panel.dispatch("keydown", { key: "ArrowLeft" });
+    fixture.panel.dispatch("keyup", { key: "ArrowLeft" });
+    fixture.panel.dispatch("keydown", { key: "ArrowUp" });
+    fixture.panel.dispatch("keyup", { key: "ArrowUp" });
+    assert.deepEqual(fixture.layout().panel, { col: 2, row: 1, cols: 4, rows: 2 });
+  });
+
+  it("resizes one cell with Shift and keeps the last valid collision-free preview", () => {
+    const fixture = makeKeyboardFixture({
+      panel: { col: 1, row: 1, cols: 4, rows: 2 },
+      blocker: { col: 6, row: 1, cols: 4, rows: 2 },
+    });
+
+    fixture.panel.dispatch("keydown", { key: "ArrowRight" });
+    fixture.panel.dispatch("keydown", { key: "ArrowRight", repeat: true });
+    assert.deepEqual(fixture.layout().panel, { col: 2, row: 1, cols: 4, rows: 2 });
+    fixture.panel.dispatch("keyup", { key: "ArrowRight" });
+
+    fixture.panel.dispatch("keydown", { key: "ArrowDown", shiftKey: true });
+    assert.deepEqual(fixture.layout().panel, { col: 2, row: 1, cols: 4, rows: 3 });
+    fixture.panel.dispatch("keyup", { key: "ArrowDown", shiftKey: true });
+    assert.equal(fixture.storage.calls.length, 2);
+  });
+
+  it("prevents Arrow scrolling only in edit mode and skips no-op commits", () => {
+    const fixture = makeKeyboardFixture();
+    fixture.setEditMode(false);
+    const inactive = fixture.panel.dispatch("keydown", { key: "ArrowLeft" });
+    assert.equal(inactive.defaultPrevented, false);
+    assert.deepEqual(fixture.layout().panel, { col: 1, row: 1, cols: 4, rows: 2 });
+
+    fixture.setEditMode(true);
+    const clamped = fixture.panel.dispatch("keydown", { key: "ArrowLeft" });
+    fixture.panel.dispatch("keyup", { key: "ArrowLeft" });
+    assert.equal(clamped.defaultPrevented, true);
+    assert.deepEqual(fixture.storage.calls, []);
+    assert.deepEqual(fixture.announcements, []);
+  });
+
+  it("cancels the active transaction identically on Escape, blur, visibility loss, or edit exit", () => {
+    for (const cancel of ["escape", "blur", "visibility", "edit-exit"] as const) {
+      const fixture = makeKeyboardFixture();
+      fixture.panel.dispatch("keydown", { key: "ArrowRight" });
+      assert.equal(fixture.layout().panel.col, 2);
+
+      if (cancel === "escape") fixture.panel.dispatch("keydown", { key: "Escape" });
+      if (cancel === "blur") fixture.panel.dispatch("blur");
+      if (cancel === "visibility") {
+        fixture.visibilityTarget.visibilityState = "hidden";
+        fixture.visibilityTarget.dispatch("visibilitychange");
+      }
+      if (cancel === "edit-exit") fixture.controller.cancel();
+
+      assert.deepEqual({ ...fixture.layout().panel }, { col: 1, row: 1, cols: 4, rows: 2 });
+      fixture.panel.dispatch("keyup", { key: "ArrowRight" });
+      assert.deepEqual(fixture.storage.calls, [], cancel);
+      assert.deepEqual(fixture.announcements, [], cancel);
+    }
+    assert.match(dashboardSource, /if \(!enabled\) cancelKeyboardTransaction\(\);/);
+  });
+
+  it("rolls back safely and reports failure when browser persistence is denied", () => {
+    const storage = makeStorage({}, {
+      operation: "set",
+      key: "sdl-observability-panel-layout-v3",
+    });
+    const fixture = makeKeyboardFixture(undefined, storage);
+    fixture.panel.dispatch("keydown", { key: "ArrowRight" });
+
+    assert.doesNotThrow(() => fixture.panel.dispatch("keyup", { key: "ArrowRight" }));
+    assert.deepEqual({ ...fixture.layout().panel }, { col: 1, row: 1, cols: 4, rows: 2 });
+    assert.deepEqual(fixture.announcements, ["Panel layout update failed."]);
+    assert.equal(fixture.panel.focusCount, 1);
   });
 });

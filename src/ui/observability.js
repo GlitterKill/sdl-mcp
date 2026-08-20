@@ -2,7 +2,12 @@
 // Vanilla ES module — no bundler. Pulls live data via SSE with REST fallback.
 
 import { buildToolOutputViewModel } from "./observability-tool-output.js";
-import { migrateV2Layout, normalizeV3Layout } from "./observability-layout.js";
+import {
+  migrateV2Layout,
+  movePanel,
+  normalizeV3Layout,
+  resizePanel,
+} from "./observability-layout.js";
 
 const state = {
   repoId: "sdl-mcp",
@@ -1057,6 +1062,106 @@ function resetDashboardLayout(storage, current, defaults, apply, announce) {
   }
 }
 
+function installKeyboardLayoutTransactions({
+  entries,
+  storage,
+  getLayout,
+  setLayout,
+  applyPanelRect,
+  announce,
+  isEditMode,
+  visibilityTarget,
+}) {
+  let active = null;
+
+  const sameRect = (left, right) =>
+    left.col === right.col &&
+    left.row === right.row &&
+    left.cols === right.cols &&
+    left.rows === right.rows;
+
+  const restoreOrigin = (transaction) => {
+    const restored = { ...getLayout(), [transaction.id]: transaction.origin };
+    setLayout(restored);
+    applyPanelRect(transaction.panel, transaction.origin);
+  };
+
+  const cancel = () => {
+    if (!active) return;
+    const cancelled = active;
+    active = null;
+    cancelled.held.clear();
+    restoreOrigin(cancelled);
+  };
+
+  const commit = () => {
+    const completed = active;
+    active = null;
+    completed.held.clear();
+    const rect = getLayout()[completed.id];
+    if (sameRect(rect, completed.origin)) return;
+    try {
+      storage.setItem(LAYOUT_V3_KEY, JSON.stringify(getLayout()));
+      announce(
+        `${completed.name}, column ${rect.col}, row ${rect.row}, width ${rect.cols}, height ${rect.rows}`,
+      );
+    } catch {
+      restoreOrigin(completed);
+      announce("Panel layout update failed.");
+      completed.panel.focus();
+    }
+  };
+
+  const arrowDelta = (key) => {
+    if (key === "ArrowLeft") return [-1, 0];
+    if (key === "ArrowRight") return [1, 0];
+    if (key === "ArrowUp") return [0, -1];
+    if (key === "ArrowDown") return [0, 1];
+    return null;
+  };
+
+  for (const entry of entries) {
+    entry.panel.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && active) {
+        event.preventDefault();
+        cancel();
+        return;
+      }
+      const delta = arrowDelta(event.key);
+      if (!delta || !isEditMode()) return;
+      event.preventDefault();
+      if (active && active.panel !== entry.panel) cancel();
+      if (!active) {
+        active = {
+          ...entry,
+          origin: { ...getLayout()[entry.id] },
+          held: new Set(),
+        };
+      }
+      active.held.add(event.key);
+      const next = event.shiftKey
+        ? resizePanel(getLayout(), entry.id, delta[0], delta[1])
+        : movePanel(getLayout(), entry.id, delta[0], delta[1]);
+      setLayout(next);
+      applyPanelRect(entry.panel, next[entry.id]);
+    });
+
+    entry.panel.addEventListener("keyup", (event) => {
+      const delta = arrowDelta(event.key);
+      if (!delta || !isEditMode() || active?.panel !== entry.panel) return;
+      event.preventDefault();
+      if (!active.held.delete(event.key) || active.held.size !== 0) return;
+      commit();
+    });
+    entry.panel.addEventListener("blur", cancel);
+  }
+
+  visibilityTarget.addEventListener("visibilitychange", () => {
+    if (visibilityTarget.visibilityState !== "visible") cancel();
+  });
+  return { cancel };
+}
+
 function initDashboardLayoutEditor() {
   const grid = document.querySelector("#dashboard.dashboard-grid");
   const layoutEditBtn = document.querySelector("#layoutEditBtn");
@@ -1069,6 +1174,7 @@ function initDashboardLayoutEditor() {
   const mobile = window.matchMedia("(max-width: 720px)");
   const defaults = migrateV2Layout({}, panelIds);
   let layout = loadDashboardLayout(panelIds, localStorage);
+  let cancelKeyboardTransaction = () => {};
 
   const applyPanelRect = (panel, rect) => {
     panel.style.setProperty("--panel-col", String(rect.col));
@@ -1079,6 +1185,7 @@ function initDashboardLayoutEditor() {
 
   const setEditMode = (requested) => {
     const enabled = requested && !mobile.matches;
+    if (!enabled) cancelKeyboardTransaction();
     grid.dataset.layoutEdit = String(enabled);
     layoutEditBtn.setAttribute("aria-pressed", String(enabled));
     for (const panel of panels) {
@@ -1114,6 +1221,7 @@ function initDashboardLayoutEditor() {
 
   mobile.addEventListener("change", () => setEditMode(false));
 
+  const keyboardEntries = [];
   for (const panel of panels) {
     try {
       const heading = panel.querySelector(":scope > .panel-head h2");
@@ -1124,6 +1232,7 @@ function initDashboardLayoutEditor() {
       panel.setAttribute("aria-labelledby", heading.id);
       panel.setAttribute("aria-describedby", "layoutInstructions");
       applyPanelRect(panel, layout[panel.dataset.panel]);
+      keyboardEntries.push({ panel, id: panel.dataset.panel, name: panelName });
 
       const resizeGrip = document.createElement("button");
       resizeGrip.type = "button";
@@ -1137,6 +1246,21 @@ function initDashboardLayoutEditor() {
       panel.removeAttribute("tabindex");
     }
   }
+
+  ({ cancel: cancelKeyboardTransaction } = installKeyboardLayoutTransactions({
+    entries: keyboardEntries,
+    storage: localStorage,
+    getLayout: () => layout,
+    setLayout: (next) => {
+      layout = next;
+    },
+    applyPanelRect,
+    announce: (message) => {
+      if (layoutStatus) layoutStatus.textContent = message;
+    },
+    isEditMode: () => grid.dataset.layoutEdit === "true",
+    visibilityTarget: document,
+  }));
 
   setEditMode(false);
 }
