@@ -190,6 +190,32 @@ function normalizationCandidateName(
   return `${logicalName}.normalize.${hash.digest("hex").slice(0, 32)}`;
 }
 
+async function writeEvidenceDeletionDuplicate(
+  directory: string,
+  index: number,
+): Promise<{
+  readonly targetPath: string;
+  readonly deleteName: string;
+  readonly deletePath: string;
+  readonly snapshot: Awaited<ReturnType<typeof fileSnapshot>>;
+}> {
+  const timestamp = (1_700_000_100_000 + index).toString(36).padStart(11, "0");
+  const nonce = (0xe0 + index).toString(16).padStart(32, "0");
+  const targetName =
+    `sdl-observability-lifetime.evidence.v1.validated-supported.lock.${timestamp}.${nonce}.json`;
+  const targetPath = join(directory, targetName);
+  const deleteName = `.sdl-observability-lifetime.delete.${targetName}`;
+  const deletePath = join(directory, deleteName);
+  await writeFile(targetPath, lockRecord(95_000 + index));
+  await link(targetPath, deletePath);
+  return {
+    targetPath,
+    deleteName,
+    deletePath,
+    snapshot: await fileSnapshot(deletePath),
+  };
+}
+
 async function assertMissing(path: string): Promise<void> {
   await assert.rejects(lstat(path), { code: "ENOENT" });
 }
@@ -2578,6 +2604,141 @@ describe("lifetime persistence lock", () => {
     assert.deepEqual(await auxiliaryFiles(directory), []);
     assert.equal((await evidenceFiles(directory)).length, 8);
     assert.equal(await releaseLifetimeLease(result.lease), true);
+  });
+
+  it("retires an exact committed evidence deletion duplicate", async () => {
+    const directory = await temporaryDirectory();
+    const duplicate = await writeEvidenceDeletionDuplicate(directory, 0);
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(result);
+    assert.equal((await lstat(duplicate.targetPath)).isFile(), true);
+    await assertMissing(duplicate.deletePath);
+    assert.equal(await releaseLifetimeLease(result.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
+  it("recovers evidence deletion retirement interrupted after alias restoration", async () => {
+    const directory = await temporaryDirectory();
+    const duplicate = await writeEvidenceDeletionDuplicate(directory, 1);
+    const candidatePath = join(
+      directory,
+      normalizationCandidateName(
+        duplicate.deleteName,
+        duplicate.deleteName,
+        duplicate.snapshot,
+      ),
+    );
+    let corruptCandidateRead = true;
+    let interrupted = false;
+
+    const first = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          const handle = await open(...args);
+          if (!corruptCandidateRead || String(args[0]) !== candidatePath) return handle;
+          corruptCandidateRead = false;
+          return new Proxy(handle, {
+            get(target, property, receiver) {
+              if (property === "readFile") {
+                return async () => {
+                  const content = await target.readFile();
+                  const changed = Buffer.from(content);
+                  changed[0] ^= 1;
+                  return changed;
+                };
+              }
+              const value = Reflect.get(target, property, receiver) as unknown;
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+        },
+        unlink: async (...args: Parameters<typeof unlink>) => {
+          if (!interrupted && String(args[0]) === candidatePath) {
+            interrupted = true;
+            throw Object.assign(new Error("evidence candidate unlink interrupted"), { code: "EIO" });
+          }
+          return unlink(...args);
+        },
+      },
+    });
+    assert.equal(first.mode, "readOnly");
+    assert.equal(interrupted, true);
+    assert.equal((await lstat(duplicate.deletePath, { bigint: true })).ino,
+      (await lstat(candidatePath, { bigint: true })).ino);
+
+    let successor: Awaited<ReturnType<typeof acquireLifetimeLease>> | undefined;
+    for (let startup = 0; startup < 3; startup++) {
+      successor = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+      });
+      if (successor.mode === "writer") break;
+    }
+    assert.notEqual(successor, undefined);
+    assertWriter(successor);
+    assert.equal((await lstat(duplicate.targetPath)).isFile(), true);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
+  it("preserves mismatched or alternate-exhausted evidence deletion duplicates", async () => {
+    for (const state of ["mismatch", "exhausted"] as const) {
+      const directory = await temporaryDirectory();
+      const duplicate = await writeEvidenceDeletionDuplicate(
+        directory,
+        state === "mismatch" ? 2 : 3,
+      );
+      if (state === "mismatch") {
+        await unlink(duplicate.deletePath);
+        await writeFile(duplicate.deletePath, lockRecord(96_000));
+      } else {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const candidatePath = join(
+            directory,
+            normalizationCandidateName(
+              duplicate.deleteName,
+              duplicate.deleteName,
+              duplicate.snapshot,
+              attempt,
+            ),
+          );
+          await link(duplicate.deletePath, candidatePath);
+        }
+      }
+      const before = await auxiliaryContents(directory);
+
+      const result = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+      });
+      assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" }, state);
+      assert.deepEqual(await auxiliaryContents(directory), before, state);
+    }
+  });
+
+  it("budgets exact evidence deletion duplicate retirement as two mutations", async () => {
+    const directory = await temporaryDirectory();
+    const duplicates = await Promise.all(
+      Array.from({ length: 17 }, (_, index) =>
+        writeEvidenceDeletionDuplicate(directory, index + 10)),
+    );
+
+    const first = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assert.equal(first.mode, "readOnly");
+    assert.equal((await auxiliaryFiles(directory)).length, 1);
+    for (const duplicate of duplicates.slice(0, 16)) await assertMissing(duplicate.deletePath);
+    assert.equal((await lstat(duplicates[16]!.deletePath)).isFile(), true);
+
+    const successor = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
   });
 
   it("retains recoverable claim metadata when exact claim cleanup is blocked", async () => {

@@ -862,10 +862,26 @@ async function restoreEvidenceDeletion(
   directory: string,
   entry: AuxiliaryEntry,
   fileSystem: LifetimeFileSystem,
+  retirementCandidate?: string,
 ): Promise<boolean> {
   const targetName = entry.logicalName.slice(DELETE_AUXILIARY_PREFIX.length);
   const target = directChildPath(directory, resolve(directory, targetName), "Evidence restore");
-  if (!await pathAbsent(target, fileSystem)) return false;
+  try {
+    const existing = await readLifetimeSource(target, fileSystem, MAX_EVIDENCE_SOURCE_BYTES);
+    if (!sameLifetimeSource(existing.snapshot, entry.snapshot) || !retirementCandidate) {
+      return false;
+    }
+    if (!await pathAbsent(retirementCandidate, fileSystem)) return false;
+    return removeExactLifetimeSource(
+      entry.path,
+      entry.snapshot,
+      retirementCandidate,
+      fileSystem,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if (retirementCandidate) return false;
+  }
   try {
     await fileSystem.rename(entry.path, target);
   } catch (error) {
@@ -973,6 +989,25 @@ async function recoverStrandedAuxiliaries(
     return "invalid";
   }
 
+  // A surviving final evidence link means eviction committed before cleanup.
+  // Classify every target before planning so mismatch cannot follow mutation.
+  const evidenceDeletionActions = new Map<string, "restore" | "retire">();
+  for (const entry of entries) {
+    if (entry.kind !== "evidence-delete" || evidenceDeletionActions.has(entry.logicalName)) {
+      continue;
+    }
+    const targetName = entry.logicalName.slice(DELETE_AUXILIARY_PREFIX.length);
+    const target = directChildPath(directory, resolve(directory, targetName), "Evidence restore");
+    try {
+      const existing = await readLifetimeSource(target, fileSystem, MAX_EVIDENCE_SOURCE_BYTES);
+      if (!sameLifetimeSource(existing.snapshot, entry.snapshot)) return "invalid";
+      evidenceDeletionActions.set(entry.logicalName, "retire");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "invalid";
+      evidenceDeletionActions.set(entry.logicalName, "restore");
+    }
+  }
+
   const recoveryEntries: AuxiliaryEntry[] = [];
   const aliasesByCanonical = new Map<AuxiliaryEntry, AuxiliaryEntry[]>();
   const normalizationByCanonical = new Map<AuxiliaryEntry, AuxiliaryEntry>();
@@ -1042,6 +1077,28 @@ async function recoverStrandedAuxiliaries(
   const entriesByName = new Map(entries.map((entry) => [entry.name, entry] as const));
   const plannedCandidates = new Set<string>();
   let invalidCandidatePlan = false;
+  const planRetirementCandidate = (entry: AuxiliaryEntry): string | undefined => {
+    for (let attempt = 0; attempt < MAX_NORMALIZE_CANDIDATES; attempt++) {
+      const candidate = normalizationCandidatePath(directory, entry, attempt);
+      const occupied = entriesByName.get(basename(candidate));
+      if (occupied) {
+        if (
+          occupied.logicalName !== entry.logicalName ||
+          occupied.nonce !== entry.nonce ||
+          !sameLifetimeSource(occupied.snapshot, entry.snapshot)
+        ) {
+          invalidCandidatePlan = true;
+          return undefined;
+        }
+        continue;
+      }
+      if (occupiedNames.has(basename(candidate)) || plannedCandidates.has(candidate)) continue;
+      plannedCandidates.add(candidate);
+      return candidate;
+    }
+    invalidCandidatePlan = true;
+    return undefined;
+  };
   const orderedGroups = [...groups.entries()].map(([key, group]) => {
     const oldest = Math.min(...group.entries.map((entry) => {
       if (entry.claim) return Date.parse(entry.claim.createdAt);
@@ -1053,39 +1110,30 @@ async function recoverStrandedAuxiliaries(
     }));
     const aliasPlans: Array<{ readonly alias: AuxiliaryEntry; readonly candidate: string }> = [];
     for (const alias of group.aliases) {
-      let selectedCandidate: string | undefined;
-      for (let attempt = 0; attempt < MAX_NORMALIZE_CANDIDATES; attempt++) {
-        const candidate = normalizationCandidatePath(directory, alias, attempt);
-        const occupied = entriesByName.get(basename(candidate));
-        if (occupied) {
-          if (
-            occupied.logicalName !== alias.logicalName ||
-            occupied.nonce !== alias.nonce ||
-            !sameLifetimeSource(occupied.snapshot, alias.snapshot)
-          ) {
-            invalidCandidatePlan = true;
-            break;
-          }
-          continue;
-        }
-        if (occupiedNames.has(basename(candidate)) || plannedCandidates.has(candidate)) continue;
-        plannedCandidates.add(candidate);
-        selectedCandidate = candidate;
-        break;
-      }
+      const selectedCandidate = planRetirementCandidate(alias);
       if (selectedCandidate) aliasPlans.push({ alias, candidate: selectedCandidate });
-      else invalidCandidatePlan = true;
+    }
+    const evidenceRetirementPlans = new Map<AuxiliaryEntry, string>();
+    for (const entry of group.entries) {
+      if (entry.kind !== "evidence-delete" ||
+        evidenceDeletionActions.get(entry.logicalName) !== "retire") continue;
+      const candidate = planRetirementCandidate(entry);
+      if (candidate) evidenceRetirementPlans.set(entry, candidate);
     }
     return {
       key,
       entries: group.entries,
       aliases: group.aliases,
       aliasPlans,
+      evidenceRetirementPlans,
       normalizations: group.normalizations,
       cost: group.normalizations.length +
         group.aliases.length * 2 +
         group.entries.reduce((cost, entry) =>
-          cost + (entry.kind === "evidence-delete" ? 1 : 2), 0),
+          cost + (entry.kind === "evidence-delete" &&
+              evidenceDeletionActions.get(entry.logicalName) === "restore"
+            ? 1
+            : 2), 0),
       oldest,
     };
   }).sort((left, right) => left.oldest - right.oldest || left.key.localeCompare(right.key));
@@ -1128,7 +1176,12 @@ async function recoverStrandedAuxiliaries(
         priority(left) - priority(right) || left.name.localeCompare(right.name));
       for (const entry of orderedEntries) {
         const recovered = entry.kind === "evidence-delete"
-          ? await restoreEvidenceDeletion(directory, entry, fileSystem)
+          ? await restoreEvidenceDeletion(
+              directory,
+              entry,
+              fileSystem,
+              group.evidenceRetirementPlans.get(entry),
+            )
           : await removeValidatedAuxiliary(entry, fileSystem);
         if (!recovered) return "busy";
       }
