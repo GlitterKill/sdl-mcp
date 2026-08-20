@@ -350,7 +350,8 @@ function lifetimeRouteError(res: ServerResponse, code: LifetimeRouteErrorCode): 
 }
 
 function requestedLifetimeRepoId(url: URL, rawUrl: string): string | null {
-  const rawQuery = rawUrl.split("?", 2)[1] ?? "";
+  const queryStart = rawUrl.indexOf("?");
+  const rawQuery = queryStart < 0 ? "" : rawUrl.slice(queryStart + 1);
   try {
     decodeURIComponent(rawQuery.replace(/\+/g, "%20"));
   } catch {
@@ -970,6 +971,10 @@ async function routeObservabilityApiRequest(
         persistenceState: "ready",
       });
     } catch {
+      if (!services.isRegisteredRepoId?.(request.repoId)) {
+        lifetimeRouteError(res, "repository_not_found");
+        return true;
+      }
       let state: LifetimeEnvelopeV1;
       try {
         state = await observabilityService.getLifetime(request.repoId);

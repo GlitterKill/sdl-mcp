@@ -204,6 +204,7 @@ test("lifetime GET validates one registered repoId and awaits a closed envelope"
       "/api/observability/lifetime?repoId=",
       "/api/observability/lifetime?repoId=%20",
       "/api/observability/lifetime?repoId=%",
+      "/api/observability/lifetime?repoId=repo-a?%",
       `/api/observability/lifetime?repoId=${"x".repeat(257)}`,
       "/api/observability/lifetime?repoId=repo-a&repoId=repo-a",
     ]) {
@@ -509,6 +510,46 @@ test("lifetime reset maps repository and persistence outcomes without uncertain 
       lastCheckpointAt: NOW,
       persistenceState: "ready",
     });
+  } finally {
+    await server.close();
+  }
+});
+
+test("lifetime reset reports deregistration that races its persistence call", async () => {
+  let registrationChecks = 0;
+  const server = await setupObservabilityDashboardSidecar(
+    0,
+    {
+      observabilityService: serviceDouble({
+        getLifetime: async (repoId) => withEvent(ready(repoId)),
+        resetLifetime: async () => {
+          throw new Error("repository state changed");
+        },
+      }),
+      isRegisteredRepoId: () => {
+        registrationChecks += 1;
+        return registrationChecks === 1;
+      },
+    },
+    { enabled: true, token: "test-token" },
+    async () => true,
+  );
+  try {
+    const response = await request(server, "/api/observability/lifetime/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repoId: "repo-a",
+        confirmation: "RESET REPOSITORY LIFETIME: repo-a",
+      }),
+    });
+    assert.equal(response.status, 404);
+    assertRouteError(
+      await body(response),
+      "repository_not_found",
+      "The repository was not found.",
+    );
+    assert.equal(registrationChecks, 2);
   } finally {
     await server.close();
   }
