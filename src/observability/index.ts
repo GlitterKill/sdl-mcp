@@ -84,6 +84,7 @@ export type {
 } from "./lifetime-types.js";
 export {
   LIFETIME_SCHEMA_VERSION,
+  LIFETIME_ROUTE_ERROR_CODES,
   MAX_REPOSITORIES,
   MAX_SAMPLE_INTERVAL_MS,
   MAX_STORE_BYTES,

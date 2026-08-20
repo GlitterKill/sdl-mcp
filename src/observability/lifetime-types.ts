@@ -294,19 +294,22 @@ export interface LifetimeResetSuccessV1 {
   persistenceState: "ready";
 }
 
-export type LifetimeRouteErrorCode =
-  | "invalid_query"
-  | "invalid_json"
-  | "invalid_body"
-  | "repository_not_found"
-  | "read_only"
-  | "lifetime_capacity_exceeded"
-  | "recovery_required"
-  | "body_too_large"
-  | "unsupported_media_type"
-  | "confirmation_mismatch"
-  | "persistence_failed"
-  | "persistence_indeterminate";
+export const LIFETIME_ROUTE_ERROR_CODES = [
+  "invalid_query",
+  "invalid_json",
+  "invalid_body",
+  "repository_not_found",
+  "read_only",
+  "lifetime_capacity_exceeded",
+  "recovery_required",
+  "body_too_large",
+  "unsupported_media_type",
+  "confirmation_mismatch",
+  "persistence_failed",
+  "persistence_indeterminate",
+] as const;
+
+export type LifetimeRouteErrorCode = (typeof LIFETIME_ROUTE_ERROR_CODES)[number];
 
 export interface LifetimeRouteErrorV1 {
   schemaVersion: typeof LIFETIME_SCHEMA_VERSION;
@@ -319,8 +322,35 @@ export interface LifetimeRouteErrorV1 {
 
 const CounterSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const FiniteTotalSchema = z.number().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const ISO_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+function isStrictIsoTimestamp(value: string): boolean {
+  const match = ISO_TIMESTAMP_PATTERN.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = match[7] === undefined ? 0 : Number(match[7]);
+  const offsetMinute = match[8] === undefined ? 0 : Number(match[8]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  return month >= 1 && month <= 12
+    && day >= 1 && day <= (daysInMonth[month - 1] ?? 0)
+    && hour <= 23
+    && minute <= 59
+    && second <= 59
+    && offsetHour <= 23
+    && offsetMinute <= 59;
+}
+
 const IsoTimestampSchema = z.string().max(64).refine(
-  (value) => Number.isFinite(Date.parse(value)) && /T/.test(value),
+  isStrictIsoTimestamp,
   "Expected an ISO timestamp",
 );
 const NullableIsoTimestampSchema = IsoTimestampSchema.nullable();
@@ -622,7 +652,15 @@ const LifetimeEnvelopeSchema = z.union([LifetimeReadySchema, LifetimeRecoverySch
 const ResetRequestSchema = z.object({
   repoId: RepoIdSchema,
   confirmation: z.string().min(1).max(RESET_CONFIRMATION_PREFIX.length + MAX_REPO_ID_LENGTH),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (value.confirmation !== `${RESET_CONFIRMATION_PREFIX}${value.repoId}`) {
+    context.addIssue({
+      code: "custom",
+      path: ["confirmation"],
+      message: "Confirmation does not match repository identifier",
+    });
+  }
+});
 
 export function repositoryStorageKey(repoId: string): string {
   const validatedRepoId = RepoIdSchema.parse(repoId);

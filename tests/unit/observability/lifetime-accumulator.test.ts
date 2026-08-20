@@ -8,6 +8,7 @@ import {
   MIN_SAMPLE_INTERVAL_MS,
   OVERFLOW_KEY,
   SECTION_IDS,
+  LIFETIME_ROUTE_ERROR_CODES,
   parseDurableLifetimeRoot,
   parseLifetimeEnvelope,
   parseResetRequest,
@@ -314,6 +315,22 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function repositoryMap(count: number) {
+  const entry = durableRootFixture.repositories[REPOSITORY_KEY];
+  assert.ok(entry);
+  return Object.fromEntries(Array.from({ length: count }, (_, index) => [
+    `sha256:${index.toString(16).padStart(64, "0")}`,
+    clone(entry),
+  ]));
+}
+
+function boundedCounterMap(count: number) {
+  return Object.fromEntries(Array.from({ length: count }, (_, index) => [
+    `k:key${index.toString().padStart(3, "0")}`,
+    index,
+  ]));
+}
+
 describe("lifetime observability contract", () => {
   it("exports the exact constants and fixed section order", () => {
     assert.deepEqual(SECTION_IDS, [
@@ -497,6 +514,51 @@ describe("lifetime observability contract", () => {
     ]);
     assert.deepEqual(Object.keys(error), ["schemaVersion", "error"]);
     assert.deepEqual(Object.keys(error.error), ["code", "message", "retryable"]);
+    assert.deepEqual(LIFETIME_ROUTE_ERROR_CODES, [
+      "invalid_query",
+      "invalid_json",
+      "invalid_body",
+      "repository_not_found",
+      "read_only",
+      "lifetime_capacity_exceeded",
+      "recovery_required",
+      "body_too_large",
+      "unsupported_media_type",
+      "confirmation_mismatch",
+      "persistence_failed",
+      "persistence_indeterminate",
+    ]);
+    const errors: LifetimeRouteErrorV1[] = [
+      "invalid_query",
+      "invalid_json",
+      "invalid_body",
+      "repository_not_found",
+      "read_only",
+      "lifetime_capacity_exceeded",
+      "recovery_required",
+      "body_too_large",
+      "unsupported_media_type",
+      "confirmation_mismatch",
+      "persistence_failed",
+      "persistence_indeterminate",
+    ].map((code) => ({
+      schemaVersion: 1,
+      error: { code, message: "fixed", retryable: code === "persistence_failed" },
+    }));
+    assert.deepEqual(errors.map(({ error: routeError }) => routeError.code), [
+      "invalid_query",
+      "invalid_json",
+      "invalid_body",
+      "repository_not_found",
+      "read_only",
+      "lifetime_capacity_exceeded",
+      "recovery_required",
+      "body_too_large",
+      "unsupported_media_type",
+      "confirmation_mismatch",
+      "persistence_failed",
+      "persistence_indeterminate",
+    ]);
   });
 
   it("enforces sample interval and discriminant bounds", () => {
@@ -522,6 +584,96 @@ describe("lifetime observability contract", () => {
       persistenceState: "recoveryRequired",
       recoveryReason: "diskFailure",
     }));
+
+    for (const persistenceState of [
+      "ready", "degraded", "readOnly", "capacityExceeded",
+    ] as const) {
+      assert.equal(
+        parseLifetimeEnvelope({ ...readyEnvelopeFixture, persistenceState }).persistenceState,
+        persistenceState,
+      );
+    }
+    for (const recoveryReason of [
+      "unknownSchema", "corruptCandidates", "indeterminatePublication",
+    ] as const) {
+      const parsed = parseLifetimeEnvelope({
+        schemaVersion: 1,
+        sampleIntervalMs: 1_000,
+        generatedAt: ISO,
+        repoId: "repo-alpha",
+        persistenceState: "recoveryRequired",
+        recoveryReason,
+      });
+      assert.equal(parsed.persistenceState, "recoveryRequired");
+      assert.equal(parsed.recoveryReason, recoveryReason);
+    }
+  });
+
+  it("enforces repository and dynamic-map cardinality boundaries independently", () => {
+    const repositories32 = parseDurableLifetimeRoot({
+      ...durableRootFixture,
+      repositories: repositoryMap(32),
+    });
+    assert.equal(Object.keys(repositories32.repositories).length, 32);
+    assert.throws(() => parseDurableLifetimeRoot({
+      ...durableRootFixture,
+      repositories: repositoryMap(33),
+    }));
+
+    const map32 = clone(durableRootFixture);
+    const map32Repository = map32.repositories[REPOSITORY_KEY];
+    assert.ok(map32Repository?.sections.retrieval);
+    map32Repository.sections.retrieval.byMode = boundedCounterMap(32);
+    assert.equal(Object.keys(parseDurableLifetimeRoot(map32)
+      .repositories[REPOSITORY_KEY]?.sections.retrieval?.byMode ?? {}).length, 32);
+
+    const map33 = clone(durableRootFixture);
+    const map33Repository = map33.repositories[REPOSITORY_KEY];
+    assert.ok(map33Repository?.sections.retrieval);
+    map33Repository.sections.retrieval.byMode = boundedCounterMap(33);
+    assert.throws(() => parseDurableLifetimeRoot(map33));
+  });
+
+  it("enforces independent perTool and byEncoder 128-key boundaries", () => {
+    for (const [field, acceptedCount, rejectedCount] of [
+      ["perTool", 128, 129],
+      ["byEncoder", 128, 129],
+    ] as const) {
+      const accepted = clone(durableRootFixture);
+      const acceptedRepository = accepted.repositories[REPOSITORY_KEY];
+      assert.ok(acceptedRepository?.sections.latency);
+      assert.ok(acceptedRepository.sections.packed);
+      if (field === "perTool") {
+        const value = acceptedRepository.sections.latency.perTool["k:a"];
+        assert.ok(value);
+        acceptedRepository.sections.latency.perTool = Object.fromEntries(
+          Object.keys(boundedCounterMap(acceptedCount)).map((key) => [key, clone(value)]),
+        );
+      } else {
+        const value = acceptedRepository.sections.packed.byEncoder["k:a"];
+        assert.ok(value);
+        acceptedRepository.sections.packed.byEncoder = Object.fromEntries(
+          Object.keys(boundedCounterMap(acceptedCount)).map((key) => [key, clone(value)]),
+        );
+      }
+      assert.doesNotThrow(() => parseDurableLifetimeRoot(accepted));
+
+      const rejected = clone(accepted);
+      const rejectedRepository = rejected.repositories[REPOSITORY_KEY];
+      assert.ok(rejectedRepository?.sections.latency);
+      assert.ok(rejectedRepository.sections.packed);
+      if (field === "perTool") {
+        const value = rejectedRepository.sections.latency.perTool["k:key000"];
+        assert.ok(value);
+        rejectedRepository.sections.latency.perTool["k:key128"] = clone(value);
+      } else {
+        const value = rejectedRepository.sections.packed.byEncoder["k:key000"];
+        assert.ok(value);
+        rejectedRepository.sections.packed.byEncoder["k:key128"] = clone(value);
+      }
+      assert.equal(rejectedCount, 129);
+      assert.throws(() => parseDurableLifetimeRoot(rejected));
+    }
   });
 
   it("rejects unknown keys recursively", () => {
@@ -555,6 +707,20 @@ describe("lifetime observability contract", () => {
       repository.sections.cache.lookupMs.sum = invalid;
       assert.throws(() => parseDurableLifetimeRoot(sampleValue));
     }
+
+    const maximum = clone(durableRootFixture);
+    const maximumRepository = maximum.repositories[REPOSITORY_KEY];
+    assert.ok(maximumRepository?.sections.cache);
+    maximum.generation = Number.MAX_SAFE_INTEGER;
+    maximumRepository.epoch = Number.MAX_SAFE_INTEGER;
+    maximumRepository.sessionCount = Number.MAX_SAFE_INTEGER;
+    maximumRepository.sections.cache.hits = Number.MAX_SAFE_INTEGER;
+    maximumRepository.sections.cache.lookupMs = {
+      count: Number.MAX_SAFE_INTEGER,
+      sum: Number.MAX_SAFE_INTEGER,
+      max: Number.MAX_SAFE_INTEGER,
+    };
+    assert.equal(parseDurableLifetimeRoot(maximum).generation, Number.MAX_SAFE_INTEGER);
   });
 
   it("rejects invalid timestamps, overlong strings, and malformed storage keys", () => {
@@ -566,9 +732,34 @@ describe("lifetime observability contract", () => {
       ...readyEnvelopeFixture,
       generatedAt: "2026-08-19",
     }));
+    for (const generatedAt of [
+      "2026-02-30T00:00:00Z",
+      "2026-08-19T24:00:00Z",
+      "2026-08-19T12:60:00Z",
+      "2026-08-19T12:34:60Z",
+      "2026-08-19T12:34:56+24:00",
+      "2026-08-19T12:34:56+01:60",
+      "2".repeat(65),
+    ]) {
+      assert.throws(() => parseLifetimeEnvelope({ ...readyEnvelopeFixture, generatedAt }));
+    }
+    for (const generatedAt of [
+      "2024-02-29T23:59:59Z",
+      "2026-08-19T12:34:56.789Z",
+      "2026-08-19T12:34:56+05:30",
+    ]) {
+      assert.equal(
+        parseLifetimeEnvelope({ ...readyEnvelopeFixture, generatedAt }).generatedAt,
+        generatedAt,
+      );
+    }
     assert.throws(() => parseResetRequest({
       repoId: "r".repeat(129),
       confirmation: "RESET",
+    }));
+    assert.throws(() => parseResetRequest({
+      repoId: "repo-alpha",
+      confirmation: "x".repeat(157),
     }));
     assert.throws(() => parseDurableLifetimeRoot({
       ...durableRootFixture,
@@ -591,13 +782,26 @@ describe("lifetime observability contract", () => {
     }
   });
 
-  it("hashes UTF-8 repository identifiers and parses reset shape without equality logic", () => {
+  it("hashes UTF-8 repository identifiers and enforces exact reset confirmation", () => {
     assert.equal(repositoryStorageKey("repo-alpha"), REPOSITORY_KEY);
     assert.throws(() => repositoryStorageKey(""));
     assert.deepEqual(
-      parseResetRequest({ repoId: "repo-alpha", confirmation: "not-yet-checked" }),
-      { repoId: "repo-alpha", confirmation: "not-yet-checked" },
+      parseResetRequest({
+        repoId: "repo-alpha",
+        confirmation: "RESET REPOSITORY LIFETIME: repo-alpha",
+      }),
+      {
+        repoId: "repo-alpha",
+        confirmation: "RESET REPOSITORY LIFETIME: repo-alpha",
+      },
     );
+    for (const confirmation of [
+      "RESET: repo-alpha",
+      "reset repository lifetime: repo-alpha",
+      "RESET REPOSITORY LIFETIME: repo-beta",
+    ]) {
+      assert.throws(() => parseResetRequest({ repoId: "repo-alpha", confirmation }));
+    }
     assert.throws(() => parseResetRequest({ repoId: "", confirmation: "RESET" }));
     assert.throws(() => parseResetRequest({ repoId: "repo-alpha", confirmation: 1 }));
   });
