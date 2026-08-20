@@ -153,6 +153,7 @@ const OBSERVABILITY_UI_PATHS = new Set([
   "/ui/observability",
   "/ui/observability.js",
   "/ui/observability-layout.js",
+  "/ui/observability-dashboard-model.js",
   "/ui/observability-tool-output.js",
   "/ui/observability.css",
   "/ui/viewer",
@@ -756,6 +757,10 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
     },
     "/ui/observability-layout.js": {
       file: "observability-layout.js",
+      type: "application/javascript; charset=utf-8",
+    },
+    "/ui/observability-dashboard-model.js": {
+      file: "observability-dashboard-model.js",
       type: "application/javascript; charset=utf-8",
     },
     "/ui/observability-tool-output.js": {
