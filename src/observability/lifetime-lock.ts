@@ -17,8 +17,10 @@ import {
   sameLifetimeIdentity,
   sameLifetimeSource,
   settleLifetimeClaim,
-  validateLifetimeDirectory,
+  validateLifetimeDirectoryBinding,
+  revalidateLifetimeDirectory,
   type LifetimeClaimOptions,
+  type LifetimeDirectoryBinding,
   type LifetimeFileSystem,
   type LifetimeFileSystemOverrides,
   type LifetimeSourceClaim,
@@ -30,6 +32,10 @@ const LOCK_SCHEMA_VERSION = 1;
 const MAX_LOCK_BYTES = 8 * 1024;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const NONCE = /^[0-9a-f]{32}$/;
+
+// This lease coordinates cooperating SDL processes inside one trusted, stable,
+// canonical directory hierarchy. It deliberately does not claim safety against
+// an out-of-protocol actor concurrently rewriting that trusted hierarchy.
 
 interface LifetimeLockRecord {
   readonly schemaVersion: 1;
@@ -43,9 +49,15 @@ interface StableLockRecord {
   readonly snapshot: LifetimeSourceSnapshot;
 }
 
+type StableLockRead =
+  | { readonly status: "valid"; readonly value: StableLockRecord }
+  | { readonly status: "missing" | "invalid" | "ioFailure" };
+
 export interface LifetimeWriterLease extends LifetimeLockRecord {
   readonly directory: string;
   readonly lockPath: string;
+  readonly directoryDev: string;
+  readonly directoryIno: string;
 }
 
 export type LifetimeLeaseResult =
@@ -161,6 +173,11 @@ async function postWriteIdentity(handle: FileHandle, content: string): Promise<L
   return contentSnapshot(stat, content);
 }
 
+async function invalidateUnownableCreatedFile(handle: FileHandle): Promise<void> {
+  await handle.truncate(0);
+  await handle.sync();
+}
+
 async function cleanupExactCreatedPath(
   path: string,
   expected: LifetimeSourceSnapshot | undefined,
@@ -250,13 +267,20 @@ async function cleanupCreatedWithWitness(
 async function readStableLock(
   lockPath: string,
   fileSystem: LifetimeFileSystem,
-): Promise<StableLockRecord | null> {
+): Promise<StableLockRead> {
   try {
     const source = await readLifetimeSource(lockPath, fileSystem, MAX_LOCK_BYTES);
     const record = parseLockRecord(source.content.toString("utf8"));
-    return record ? { record, snapshot: source.snapshot } : null;
-  } catch {
-    return null;
+    return record
+      ? { status: "valid", value: { record, snapshot: source.snapshot } }
+      : { status: "invalid" };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { status: "missing" };
+    if (code === "EACCES" || code === "EPERM" || code === "EIO") {
+      return { status: "ioFailure" };
+    }
+    return { status: "invalid" };
   }
 }
 
@@ -267,11 +291,17 @@ function leaseMatches(record: LifetimeLockRecord, lease: LifetimeWriterLease): b
 }
 
 function leaseFor(
-  directory: string,
+  binding: LifetimeDirectoryBinding,
   lockPath: string,
   record: LifetimeLockRecord,
 ): LifetimeWriterLease {
-  return { ...record, directory, lockPath };
+  return {
+    ...record,
+    directory: binding.directory,
+    lockPath,
+    directoryDev: binding.dev,
+    directoryIno: binding.ino,
+  };
 }
 
 async function validLeaseBoundary(
@@ -279,8 +309,10 @@ async function validLeaseBoundary(
   fileSystem: LifetimeFileSystem,
 ): Promise<boolean> {
   try {
-    const trusted = await validateLifetimeDirectory(lease.directory, fileSystem);
-    return isLifetimeDirectChild(trusted, lease.lockPath, LIFETIME_LOCK_FILENAME) &&
+    const binding = await validateLifetimeDirectoryBinding(lease.directory, fileSystem);
+    const trusted = binding.directory;
+    return binding.dev === lease.directoryDev && binding.ino === lease.directoryIno &&
+      isLifetimeDirectChild(trusted, lease.lockPath, LIFETIME_LOCK_FILENAME) &&
       (process.platform === "win32"
         ? resolve(lease.lockPath).toLowerCase() ===
           resolve(trusted, LIFETIME_LOCK_FILENAME).toLowerCase()
@@ -340,12 +372,13 @@ async function claimOwnedLock(
 }
 
 async function createWriterLock(
-  directory: string,
+  binding: LifetimeDirectoryBinding,
   lockPath: string,
   record: LifetimeLockRecord,
   fileSystem: LifetimeFileSystem,
   options: LifetimeClaimOptions,
 ): Promise<CreateResult> {
+  const directory = binding.directory;
   const anchorPath = resolve(
     directory,
     `.sdl-observability-lifetime.create.${record.nonce}`,
@@ -370,6 +403,7 @@ async function createWriterLock(
   let writer = false;
   try {
     try {
+      await revalidateLifetimeDirectory(binding, fileSystem);
       handle = await fileSystem.open(anchorPath, "wx", 0o600);
     } catch {
       return { status: "failure" };
@@ -379,12 +413,17 @@ async function createWriterLock(
     if (anchorPreWrite.ino === 0n) {
       await fileSystem.link(anchorPath, anchorWitnessPath);
       anchorWitness = true;
+      return { status: "failure" };
     }
     if (process.platform === "win32") await handle.chmod(0o600).catch(() => undefined);
     else await handle.chmod(0o600);
     await handle.writeFile(anchorContent, "utf8");
     await handle.sync();
     anchorIdentity = await postWriteIdentity(handle, anchorContent);
+    if (anchorIdentity.ino === "0") {
+      await invalidateUnownableCreatedFile(handle);
+      return { status: "failure" };
+    }
     await handle.close();
     handle = undefined;
     const anchor = await readLifetimeSource(anchorPath, fileSystem, MAX_LOCK_BYTES);
@@ -419,6 +458,7 @@ async function createWriterLock(
     }
 
     try {
+      await revalidateLifetimeDirectory(binding, fileSystem);
       handle = await fileSystem.open(lockPath, "wx", 0o600);
       lockCreated = true;
     } catch (error) {
@@ -431,6 +471,7 @@ async function createWriterLock(
     if (lockPreWrite.ino === 0n) {
       await fileSystem.link(lockPath, lockWitnessPath);
       lockWitness = true;
+      return { status: "failure" };
     }
     if (process.platform === "win32") {
       await handle.chmod(0o600).catch(() => undefined);
@@ -440,12 +481,17 @@ async function createWriterLock(
     await handle.writeFile(lockContent, "utf8");
     await handle.sync();
     lockIdentity = await postWriteIdentity(handle, lockContent);
+    if (lockIdentity.ino === "0") {
+      await invalidateUnownableCreatedFile(handle);
+      return { status: "failure" };
+    }
     await handle.close();
     handle = undefined;
     const stored = await readStableLock(lockPath, fileSystem);
-    const lease = leaseFor(directory, lockPath, record);
-    if (!stored || !sameLifetimeIdentity(stored.snapshot, lockIdentity) ||
-        !leaseMatches(stored.record, lease)) {
+    const lease = leaseFor(binding, lockPath, record);
+    if (stored.status !== "valid" ||
+        !sameLifetimeIdentity(stored.value.snapshot, lockIdentity) ||
+        !leaseMatches(stored.value.record, lease)) {
       return { status: "failure" };
     }
     if (lockWitness) {
@@ -516,15 +562,16 @@ export async function acquireLifetimeLease(
   options: LifetimeLockOptions = {},
 ): Promise<LifetimeLeaseResult> {
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
-  const trustedDirectory = resolve(directory);
+  let directoryBinding: LifetimeDirectoryBinding;
   try {
-    const directoryStat = await fileSystem.lstat(trustedDirectory, { bigint: true });
-    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
-      return readOnly("invalidLock");
-    }
-  } catch {
-    return readOnly("ioFailure");
+    directoryBinding = await validateLifetimeDirectoryBinding(directory, fileSystem);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return readOnly(code === "EACCES" || code === "EPERM" || code === "EIO"
+      ? "ioFailure"
+      : "invalidLock");
   }
+  const trustedDirectory = directoryBinding.directory;
 
   const pid = options.pid ?? process.pid;
   if (!Number.isSafeInteger(pid) || pid <= 0) return readOnly("ioFailure");
@@ -555,7 +602,7 @@ export async function acquireLifetimeLease(
   let initial: CreateResult;
   try {
     initial = await createWriterLock(
-      trustedDirectory,
+      directoryBinding,
       lockPath,
       record,
       fileSystem,
@@ -568,8 +615,11 @@ export async function acquireLifetimeLease(
   if (initial.status === "failure") return readOnly("ioFailure");
   if (initial.status === "contended") return readOnly("contended");
 
-  const existing = await readStableLock(lockPath, fileSystem);
-  if (!existing) return readOnly("invalidLock");
+  const existingRead = await readStableLock(lockPath, fileSystem);
+  if (existingRead.status !== "valid") {
+    return readOnly(existingRead.status === "ioFailure" ? "ioFailure" : "invalidLock");
+  }
+  const existing = existingRead.value;
   let alive: boolean;
   try {
     alive = options.isPidAlive
@@ -608,7 +658,7 @@ export async function acquireLifetimeLease(
   let retry: CreateResult;
   try {
     retry = await createWriterLock(
-      trustedDirectory,
+      directoryBinding,
       lockPath,
       record,
       fileSystem,
@@ -648,19 +698,29 @@ export async function refreshLifetimeLease(
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
   if (!await validLeaseBoundary(lease, fileSystem)) return false;
   const current = await readStableLock(lease.lockPath, fileSystem);
-  if (!current) return false;
-  const claim = await claimOwnedLock(lease, current, fileSystem);
+  if (current.status !== "valid") return false;
+  const claim = await claimOwnedLock(lease, current.value, fileSystem);
   if (!claim) return false;
   let handle: FileHandle | undefined;
   try {
+    await revalidateLifetimeDirectory(claim.directoryBinding, fileSystem);
+    const claimedSource = await readLifetimeSource(
+      claim.witnessPath,
+      fileSystem,
+      MAX_LOCK_BYTES,
+    );
+    const claimed = parseLockRecord(claimedSource.content.toString("utf8"));
+    if (!claimed || !leaseMatches(claimed, lease)) return false;
     handle = await fileSystem.open(
       claim.witnessPath,
       constants.O_RDWR |
         (constants.O_NOFOLLOW ?? 0) |
         (constants.O_NONBLOCK ?? 0),
     );
-    const claimed = parseLockRecord(await handle.readFile({ encoding: "utf8" }));
-    if (!claimed || !leaseMatches(claimed, lease)) return false;
+    const opened = await handle.stat({ bigint: true });
+    if (opened.ino === 0n || opened.dev.toString(10) !== claimedSource.snapshot.dev ||
+        opened.ino.toString(10) !== claimedSource.snapshot.ino ||
+        opened.size !== BigInt(claimedSource.snapshot.size)) return false;
     const refreshed: LifetimeLockRecord = {
       schemaVersion: 1,
       pid: claimed.pid,
@@ -674,7 +734,8 @@ export async function refreshLifetimeLease(
     const claimAfter = await readLifetimeSource(claim.witnessPath, fileSystem, MAX_LOCK_BYTES);
     const sourceAfter = await readLifetimeSource(lease.lockPath, fileSystem, MAX_LOCK_BYTES);
     const stored = parseLockRecord(sourceAfter.content.toString("utf8"));
-    return sameLifetimeSource(claimAfter.snapshot, sourceAfter.snapshot) &&
+    return sameLifetimeIdentity(claimAfter.snapshot, sourceAfter.snapshot) &&
+      sameLifetimeSource(claimAfter.snapshot, sourceAfter.snapshot) &&
       stored !== null &&
       leaseMatches(stored, lease) &&
       stored.createdAt === refreshed.createdAt;
@@ -694,8 +755,8 @@ export async function releaseLifetimeLease(
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
   if (!await validLeaseBoundary(lease, fileSystem)) return false;
   const current = await readStableLock(lease.lockPath, fileSystem);
-  if (!current) return false;
-  const claim = await claimOwnedLock(lease, current, fileSystem);
+  if (current.status !== "valid") return false;
+  const claim = await claimOwnedLock(lease, current.value, fileSystem);
   if (!claim) return false;
   const candidatePath = resolve(
     lease.directory,
@@ -712,6 +773,7 @@ export async function releaseLifetimeLease(
     const moved = await readLifetimeSource(candidatePath, fileSystem, MAX_LOCK_BYTES);
     const record = parseLockRecord(moved.content.toString("utf8"));
     if (!record || !leaseMatches(record, lease)) return false;
+    await revalidateLifetimeDirectory(claim.directoryBinding, fileSystem);
     await fileSystem.unlink(candidatePath);
     return true;
   } catch {

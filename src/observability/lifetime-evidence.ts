@@ -20,6 +20,10 @@ const HEX_128 = /^[0-9a-f]{32}$/;
 const SHA_256 = /^[0-9a-f]{64}$/;
 const DECIMAL_IDENTITY = /^(?:0|[1-9][0-9]*)$/;
 
+// Security boundary: the directory and its parent hierarchy are trusted to stay
+// stable, and all participating SDL processes use this protocol. Out-of-protocol
+// concurrent mutation inside that trusted hierarchy is intentionally fail-closed.
+
 export interface LifetimeEvidenceLabel {
   readonly kind: "lock" | "publication";
   readonly eligibility: "validated-supported" | "protected-unknown-newer";
@@ -30,6 +34,8 @@ export interface LifetimeFileSystem {
   readonly lstat: typeof nodeFs.lstat;
   readonly readFile: typeof nodeFs.readFile;
   readonly readdir: typeof nodeFs.readdir;
+  readonly opendir: typeof nodeFs.opendir;
+  readonly realpath: typeof nodeFs.realpath;
   readonly link: typeof nodeFs.link;
   readonly rename: typeof nodeFs.rename;
   readonly unlink: typeof nodeFs.unlink;
@@ -42,6 +48,12 @@ export interface LifetimeSourceSnapshot {
   readonly ino: string;
   readonly size: number;
   readonly sha256: string;
+}
+
+export interface LifetimeDirectoryBinding {
+  readonly directory: string;
+  readonly dev: string;
+  readonly ino: string;
 }
 
 interface LifetimeClaimRecord {
@@ -61,6 +73,7 @@ export interface LifetimeSourceClaim {
   readonly record: LifetimeClaimRecord;
   readonly metadataSnapshot: LifetimeSourceSnapshot;
   readonly sourceSnapshot: LifetimeSourceSnapshot;
+  readonly directoryBinding: LifetimeDirectoryBinding;
 }
 
 export interface LifetimeClaimOptions {
@@ -133,6 +146,8 @@ export function resolveLifetimeFileSystem(
     lstat: overrides.lstat ?? nodeFs.lstat,
     readFile: overrides.readFile ?? nodeFs.readFile,
     readdir: overrides.readdir ?? nodeFs.readdir,
+    opendir: overrides.opendir ?? nodeFs.opendir,
+    realpath: overrides.realpath ?? nodeFs.realpath,
     link: overrides.link ?? nodeFs.link,
     rename: overrides.rename ?? nodeFs.rename,
     unlink: overrides.unlink ?? nodeFs.unlink,
@@ -145,16 +160,43 @@ function samePath(left: string, right: string): boolean {
     : left === right;
 }
 
+export async function validateLifetimeDirectoryBinding(
+  directory: string,
+  fileSystem: LifetimeFileSystem,
+): Promise<LifetimeDirectoryBinding> {
+  const requested = resolve(directory);
+  const before = await fileSystem.lstat(requested, { bigint: true });
+  if (before.isSymbolicLink() || !before.isDirectory()) {
+    throw new Error("Lifetime directory must be a regular non-symlink directory");
+  }
+  const canonical = resolve(await fileSystem.realpath(requested));
+  if (!samePath(requested, canonical)) {
+    throw new Error("Lifetime directory hierarchy must be canonical and non-symlinked");
+  }
+  const after = await fileSystem.lstat(canonical, { bigint: true });
+  if (after.isSymbolicLink() || !after.isDirectory() ||
+      before.dev !== after.dev || before.ino !== after.ino || after.ino === 0n) {
+    throw new Error("Lifetime directory identity changed or is unavailable");
+  }
+  return { directory: canonical, dev: after.dev.toString(10), ino: after.ino.toString(10) };
+}
+
+export async function revalidateLifetimeDirectory(
+  binding: LifetimeDirectoryBinding,
+  fileSystem: LifetimeFileSystem,
+): Promise<void> {
+  const stat = await fileSystem.lstat(binding.directory, { bigint: true });
+  if (stat.isSymbolicLink() || !stat.isDirectory() || stat.ino === 0n ||
+      stat.dev.toString(10) !== binding.dev || stat.ino.toString(10) !== binding.ino) {
+    throw new Error("Lifetime directory identity changed");
+  }
+}
+
 export async function validateLifetimeDirectory(
   directory: string,
   fileSystem: LifetimeFileSystem,
 ): Promise<string> {
-  const trusted = resolve(directory);
-  const stat = await fileSystem.lstat(trusted, { bigint: true });
-  if (stat.isSymbolicLink() || !stat.isDirectory()) {
-    throw new Error("Lifetime directory must be a regular non-symlink directory");
-  }
-  return trusted;
+  return (await validateLifetimeDirectoryBinding(directory, fileSystem)).directory;
 }
 
 function directChildPath(directory: string, path: string, label: string): string {
@@ -206,9 +248,15 @@ export function sameLifetimeIdentity(
   left: LifetimeSourceSnapshot,
   right: LifetimeSourceSnapshot,
 ): boolean {
-  return left.ino !== "0" && right.ino !== "0"
-    ? left.dev === right.dev && left.ino === right.ino
-    : sameLifetimeSource(left, right);
+  return left.ino !== "0" && right.ino !== "0" &&
+    left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameDestructiveSource(
+  left: LifetimeSourceSnapshot,
+  right: LifetimeSourceSnapshot,
+): boolean {
+  return sameLifetimeIdentity(left, right) && sameLifetimeSource(left, right);
 }
 
 async function closeQuietly(handle: FileHandle | undefined): Promise<void> {
@@ -236,10 +284,26 @@ export async function readLifetimeSource(
     if (before.dev !== opened.dev || before.ino !== opened.ino || before.size !== opened.size) {
       throw new Error("Lifetime source changed while opening");
     }
-    const content = await handle.readFile();
+    const content = Buffer.allocUnsafe(maxBytes + 1);
+    let offset = 0;
+    while (offset <= maxBytes) {
+      const { bytesRead } = await handle.read(
+        content,
+        offset,
+        maxBytes + 1 - offset,
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+      if (offset > maxBytes) throw new Error("Lifetime source exceeds its size limit");
+    }
+    if (BigInt(offset) !== opened.size) {
+      throw new Error("Lifetime source changed while reading");
+    }
+    const boundedContent = content.subarray(0, offset);
     const afterOpen = await handle.stat({ bigint: true });
     const afterPath = await fileSystem.lstat(path, { bigint: true });
-    const snapshot = statSnapshot(opened, content);
+    const snapshot = statSnapshot(opened, boundedContent);
     if (
       afterOpen.dev !== opened.dev ||
       afterOpen.ino !== opened.ino ||
@@ -250,7 +314,7 @@ export async function readLifetimeSource(
     ) {
       throw new Error("Lifetime source changed while reading");
     }
-    return { content, snapshot };
+    return { content: boundedContent, snapshot };
   } finally {
     await closeQuietly(handle);
   }
@@ -432,6 +496,23 @@ async function pathAbsent(path: string, fileSystem: LifetimeFileSystem): Promise
   }
 }
 
+async function boundedDirectoryNames(
+  directory: string,
+  fileSystem: LifetimeFileSystem,
+  include: (name: string) => boolean,
+  maximum: number,
+): Promise<string[] | null> {
+  const opened = await fileSystem.opendir(directory, { encoding: "utf8" });
+  const names: string[] = [];
+  for await (const entry of opened) {
+    const name = String(entry.name);
+    if (!include(name)) continue;
+    names.push(name);
+    if (names.length > maximum) return null;
+  }
+  return names.sort();
+}
+
 async function fixedClaimStat(
   path: string,
   fileSystem: LifetimeFileSystem,
@@ -480,7 +561,7 @@ async function unlinkExact(
     const current = await readLifetimeSource(path, fileSystem, MAX_EVIDENCE_SOURCE_BYTES);
     const matches = identityOnly
       ? sameLifetimeIdentity(current.snapshot, expected)
-      : sameLifetimeSource(current.snapshot, expected);
+      : sameDestructiveSource(current.snapshot, expected);
     if (matches) await fileSystem.unlink(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -492,6 +573,10 @@ async function restoreMovedReplacement(
   sourcePath: string,
   fileSystem: LifetimeFileSystem,
 ): Promise<void> {
+  const movedBefore = await readLifetimeSource(movedPath, fileSystem);
+  if (movedBefore.snapshot.ino === "0") {
+    throw new Error("Moved lifetime source physical identity is unavailable");
+  }
   try {
     await fileSystem.link(movedPath, sourcePath);
   } catch (error) {
@@ -500,7 +585,7 @@ async function restoreMovedReplacement(
   }
   const moved = await readLifetimeSource(movedPath, fileSystem);
   const restored = await readLifetimeSource(sourcePath, fileSystem);
-  if (sameLifetimeSource(moved.snapshot, restored.snapshot)) {
+  if (sameDestructiveSource(moved.snapshot, restored.snapshot)) {
     await fileSystem.unlink(movedPath);
   }
 }
@@ -513,6 +598,16 @@ export async function removeExactLifetimeSource(
   identityOnly = false,
 ): Promise<boolean> {
   try {
+    const before = await readLifetimeSource(claimPath, fileSystem, MAX_CLAIM_BYTES);
+    const matchesBefore = identityOnly
+      ? sameLifetimeIdentity(before.snapshot, expected)
+      : sameDestructiveSource(before.snapshot, expected);
+    if (!matchesBefore) return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  try {
     await fileSystem.rename(claimPath, candidatePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
@@ -521,7 +616,7 @@ export async function removeExactLifetimeSource(
   const moved = await readLifetimeSource(candidatePath, fileSystem, MAX_CLAIM_BYTES);
   const matches = identityOnly
     ? sameLifetimeIdentity(moved.snapshot, expected)
-    : sameLifetimeSource(moved.snapshot, expected);
+    : sameDestructiveSource(moved.snapshot, expected);
   if (!matches) {
     await restoreMovedReplacement(candidatePath, claimPath, fileSystem);
     return false;
@@ -763,9 +858,13 @@ async function matchingInitialClaimCleanup(
   fileSystem: LifetimeFileSystem,
 ): Promise<boolean> {
   if (fixedStat.ino === 0n) return false;
-  const names = (await fileSystem.readdir(directory, { encoding: "utf8" }))
-    .filter((name) => CLAIM_CLEANUP_AUXILIARY.test(name))
-    .sort();
+  const names = await boundedDirectoryNames(
+    directory,
+    fileSystem,
+    (name) => CLAIM_CLEANUP_AUXILIARY.test(name),
+    MAX_LIFETIME_AUXILIARY_SCAN,
+  );
+  if (!names) return false;
   if (names.length > MAX_LIFETIME_AUXILIARY_SCAN) return false;
   for (const name of names) {
     const match = CLAIM_CLEANUP_AUXILIARY.exec(name);
@@ -900,17 +999,29 @@ async function recoverStrandedAuxiliaries(
   options: LifetimeClaimOptions,
   ignoredNames: ReadonlySet<string>,
 ): Promise<LifetimeClaimAvailability> {
-  const allNames = (await fileSystem.readdir(directory, { encoding: "utf8" }))
-    .filter((name) => name.startsWith(AUXILIARY_PREFIX) && !ignoredNames.has(name))
-    .sort();
+  const allNames = await boundedDirectoryNames(
+    directory,
+    fileSystem,
+    (name) => name.startsWith(AUXILIARY_PREFIX) && !ignoredNames.has(name),
+    MAX_LIFETIME_AUXILIARY_SCAN,
+  );
+  if (!allNames) return "invalid";
   if (allNames.length === 0) return "available";
-  if (allNames.length > MAX_LIFETIME_AUXILIARY_SCAN) return "invalid";
   const entries: AuxiliaryEntry[] = [];
   const logicalEntries = new Map<string, AuxiliaryEntry>();
   try {
     for (const name of allNames) {
       const path = directChildPath(directory, resolve(directory, name), "Lifetime auxiliary");
-      const source = await readLifetimeSource(path, fileSystem, MAX_EVIDENCE_SOURCE_BYTES);
+      const metadataOnly = CREATE_AUXILIARY.test(name) ||
+        CREATE_WITNESS_AUXILIARY.test(name) ||
+        CREATED_LOCK_AUXILIARY.test(name) ||
+        RECORD_AUXILIARY.test(name) || CLAIM_AUXILIARY.test(name);
+      const source = await readLifetimeSource(
+        path,
+        fileSystem,
+        metadataOnly ? MAX_CLAIM_BYTES : MAX_EVIDENCE_SOURCE_BYTES,
+      );
+      if (source.snapshot.ino === "0") return "invalid";
       const entry = classifyAuxiliary(directory, name, source);
       if (!entry) return "invalid";
       const existing = logicalEntries.get(entry.logicalName);
@@ -1223,6 +1334,7 @@ async function recoverExistingClaim(
     }
   }
   if (!fixed) return "invalid";
+  if (fixed.snapshot.ino === "0") return "invalid";
   const record = parseClaim(fixed.content);
   if (!record) return "invalid";
   const durableRecordPath = directChildPath(
@@ -1246,6 +1358,7 @@ async function recoverExistingClaim(
         : "invalid";
     }
   }
+  if (durableRecord.snapshot.ino === "0") return "invalid";
   if (!sameLifetimeSource(fixed.snapshot, durableRecord.snapshot)) {
     return "invalid";
   }
@@ -1440,8 +1553,13 @@ export async function claimLifetimeSource(
   waitForClaim: boolean,
   options: LifetimeClaimOptions = {},
 ): Promise<LifetimeSourceClaim> {
-  const trusted = await validateLifetimeDirectory(directory, fileSystem);
+  const directoryBinding = await validateLifetimeDirectoryBinding(directory, fileSystem);
+  const trusted = directoryBinding.directory;
   const source = directChildPath(trusted, sourcePath, "Lifetime claim source");
+  if (expected.ino === "0") {
+    throw claimError("unsupported", "Lifetime source physical identity is unavailable");
+  }
+  await revalidateLifetimeDirectory(directoryBinding, fileSystem);
   const own = await createClaimRecord(trusted, expected, fileSystem, options);
   const fixedPath = resolve(trusted, LIFETIME_CLAIM_FILENAME);
   const sourceWitnessPath = witnessPath(trusted, own.record.nonce);
@@ -1449,6 +1567,7 @@ export async function claimLifetimeSource(
   try {
     for (let attempt = 0; attempt < (waitForClaim ? CLAIM_WAIT_ATTEMPTS : 4); attempt++) {
       try {
+        await revalidateLifetimeDirectory(directoryBinding, fileSystem);
         await fileSystem.link(own.path, fixedPath);
         fixedAcquired = true;
       } catch (error) {
@@ -1473,6 +1592,7 @@ export async function claimLifetimeSource(
         throw claimError("mismatch", "Lifetime metadata claim changed");
       }
       try {
+        await revalidateLifetimeDirectory(directoryBinding, fileSystem);
         await fileSystem.link(source, sourceWitnessPath);
       } catch {
         throw claimError("mismatch", "Unable to witness lifetime claim source");
@@ -1494,6 +1614,7 @@ export async function claimLifetimeSource(
         record: own.record,
         metadataSnapshot: own.snapshot,
         sourceSnapshot: expected,
+        directoryBinding,
       };
     }
     throw claimError("busy", "Lifetime claim remained busy");
@@ -1507,6 +1628,7 @@ export async function claimLifetimeSource(
       record: own.record,
       metadataSnapshot: own.snapshot,
       sourceSnapshot: expected,
+      directoryBinding,
     };
     if (fixedAcquired) {
       await releaseLifetimeSourceClaim(partial, fileSystem).catch(() => undefined);
@@ -1521,12 +1643,14 @@ export async function releaseLifetimeSourceClaim(
   claim: LifetimeSourceClaim,
   fileSystem: LifetimeFileSystem,
 ): Promise<void> {
+  await revalidateLifetimeDirectory(claim.directoryBinding, fileSystem);
   await unlinkExact(claim.witnessPath, claim.sourceSnapshot, fileSystem, true);
   const cleanupPath = resolve(
     claim.directory,
     `.sdl-observability-lifetime.claim-cleanup.${claim.record.nonce}`,
   );
   let fixedStillOwnsRecord = true;
+  await revalidateLifetimeDirectory(claim.directoryBinding, fileSystem);
   if (await pathAbsent(cleanupPath, fileSystem)) {
     fixedStillOwnsRecord = !await removeExactLifetimeSource(
       claim.claimPath,
@@ -1544,6 +1668,7 @@ export async function releaseLifetimeSourceClaim(
     }
   }
   if (!fixedStillOwnsRecord) {
+    await revalidateLifetimeDirectory(claim.directoryBinding, fileSystem);
     await unlinkExact(claim.recordPath, claim.metadataSnapshot, fileSystem);
   }
 }
@@ -1554,9 +1679,12 @@ export async function moveClaimedLifetimeSource(
   targetPath: string,
   fileSystem: LifetimeFileSystem,
 ): Promise<boolean> {
+  await revalidateLifetimeDirectory(claim.directoryBinding, fileSystem);
+  const current = await readLifetimeSource(claim.sourcePath, fileSystem);
+  if (!sameDestructiveSource(current.snapshot, claim.sourceSnapshot)) return false;
   await fileSystem.rename(claim.sourcePath, targetPath);
   const moved = await readLifetimeSource(targetPath, fileSystem);
-  if (sameLifetimeSource(moved.snapshot, claim.sourceSnapshot)) return true;
+  if (sameDestructiveSource(moved.snapshot, claim.sourceSnapshot)) return true;
   await restoreMovedReplacement(targetPath, claim.sourcePath, fileSystem);
   return false;
 }
@@ -1588,7 +1716,13 @@ async function listEvidence(
   directory: string,
   fileSystem: LifetimeFileSystem,
 ): Promise<EvidenceEntry[]> {
-  const names = await fileSystem.readdir(directory, { encoding: "utf8" });
+  const names = await boundedDirectoryNames(
+    directory,
+    fileSystem,
+    (name) => name.startsWith(LIFETIME_EVIDENCE_PREFIX),
+    MAX_LIFETIME_EVIDENCE_FILES,
+  );
+  if (!names) throw new Error("Lifetime evidence scan exceeds its bounded limit");
   const evidence: EvidenceEntry[] = [];
   for (const name of names) {
     if (!name.startsWith(LIFETIME_EVIDENCE_PREFIX)) continue;
@@ -1625,16 +1759,17 @@ async function unusedPath(
 
 async function removeOldestEligible(
   evidence: readonly EvidenceEntry[],
-  directory: string,
+  binding: LifetimeDirectoryBinding,
   fileSystem: LifetimeFileSystem,
 ): Promise<void> {
+  const directory = binding.directory;
   const oldest = evidence
     .filter((entry) => entry.eligibility === "validated-supported")
     .sort((left, right) => left.timestamp - right.timestamp ||
       left.name.localeCompare(right.name))[0];
   if (!oldest) throw new Error("No eligible evidence file can be removed safely");
   const current = await readLifetimeSource(oldest.path, fileSystem);
-  if (!sameLifetimeSource(current.snapshot, oldest.snapshot)) {
+  if (!sameDestructiveSource(current.snapshot, oldest.snapshot)) {
     throw new Error("Eligible evidence changed before eviction");
   }
   const candidate = await unusedPath(
@@ -1642,12 +1777,14 @@ async function removeOldestEligible(
     `${DELETE_AUXILIARY_PREFIX}${oldest.name}`,
     fileSystem,
   );
+  await revalidateLifetimeDirectory(binding, fileSystem);
   await fileSystem.rename(oldest.path, candidate);
   const moved = await readLifetimeSource(candidate, fileSystem);
-  if (!sameLifetimeSource(moved.snapshot, oldest.snapshot)) {
+  if (!sameDestructiveSource(moved.snapshot, oldest.snapshot)) {
     await restoreMovedReplacement(candidate, oldest.path, fileSystem);
     throw new Error("Eligible evidence changed during eviction");
   }
+  await revalidateLifetimeDirectory(binding, fileSystem);
   await fileSystem.unlink(candidate);
 }
 
@@ -1659,13 +1796,29 @@ export async function rotateLifetimeEvidence(
   options: LifetimeEvidenceOptions = {},
 ): Promise<string> {
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
-  const trusted = await validateLifetimeDirectory(directory, fileSystem);
+  if (
+    !label || typeof label !== "object" ||
+    (label.kind !== "lock" && label.kind !== "publication") ||
+    (label.eligibility !== "validated-supported" &&
+      label.eligibility !== "protected-unknown-newer")
+  ) {
+    throw new Error("Invalid lifetime evidence label");
+  }
+  const binding = await validateLifetimeDirectoryBinding(directory, fileSystem);
+  const trusted = binding.directory;
   const source = directChildPath(trusted, sourcePath, "Evidence source");
-  if (basename(source).startsWith(LIFETIME_EVIDENCE_PREFIX)) {
-    throw new Error("Evidence source must not already be in the evidence namespace");
+  const sourceName = basename(source);
+  if (sourceName.startsWith(LIFETIME_EVIDENCE_PREFIX) ||
+      sourceName.startsWith(AUXILIARY_PREFIX) ||
+      sourceName === LIFETIME_CLAIM_FILENAME) {
+    throw new Error("Evidence source uses a reserved lifetime namespace");
   }
   const expected = options.expectedSource ??
     (await readLifetimeSource(source, fileSystem)).snapshot;
+  if (expected.ino === "0") {
+    throw claimError("unsupported", "Evidence source physical identity is unavailable");
+  }
+  await revalidateLifetimeDirectory(binding, fileSystem);
   const claim = await claimLifetimeSource(
     trusted,
     source,
@@ -1676,9 +1829,10 @@ export async function rotateLifetimeEvidence(
   );
   const randomBytes = options.randomBytes ?? nodeRandomBytes;
   try {
+    await revalidateLifetimeDirectory(binding, fileSystem);
     let evidence = await listEvidence(trusted, fileSystem);
     while (evidence.length >= MAX_LIFETIME_EVIDENCE_FILES) {
-      await removeOldestEligible(evidence, trusted, fileSystem);
+      await removeOldestEligible(evidence, binding, fileSystem);
       evidence = await listEvidence(trusted, fileSystem);
     }
     const timestamp = (options.now ?? (() => new Date()))().getTime();

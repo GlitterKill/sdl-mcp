@@ -8,7 +8,9 @@ import {
   mkdir,
   mkdtemp,
   open,
+  opendir,
   readFile,
+  realpath,
   readdir,
   rename,
   rm,
@@ -40,6 +42,7 @@ const ISO_1 = "2026-08-20T01:02:03.004Z";
 const ISO_2 = "2026-08-20T01:03:04.005Z";
 const temporaryDirectories: string[] = [];
 const children = new Set<ChildProcessWithoutNullStreams>();
+const WORKER_TIMEOUT_MS = 5_000;
 
 async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "sdl-lifetime-lock-"));
@@ -240,24 +243,48 @@ async function spawnWorker(directory: string, extraArguments: readonly string[] 
     if (waiter) waiter(message);
     else queue.push(message);
   });
-  const next = () => new Promise<Record<string, unknown>>((resolve, reject) => {
+  const next = (timeoutMs = WORKER_TIMEOUT_MS) => new Promise<Record<string, unknown>>((resolve, reject) => {
     const queued = queue.shift();
     if (queued) {
       resolve(queued);
       return;
     }
-    waiters.push(resolve);
-    child.once("error", reject);
-    child.once("exit", (code) => {
+    let timer: NodeJS.Timeout | undefined;
+    const finish = (message: Record<string, unknown>) => {
+      if (timer) clearTimeout(timer);
+      child.off("error", fail);
+      child.off("exit", onExit);
+      resolve(message);
+    };
+    const fail = (error: Error) => {
+      if (timer) clearTimeout(timer);
+      const index = waiters.indexOf(finish);
+      if (index >= 0) waiters.splice(index, 1);
+      child.kill();
+      reject(error);
+    };
+    const onExit = (code: number | null) => {
       if (code !== null && code !== 0) {
-        reject(new Error(`lock worker exited ${code}: ${child.stderr.read() ?? ""}`));
+        fail(new Error(`lock worker exited ${code}: ${child.stderr.read() ?? ""}`));
       }
-    });
+    };
+    waiters.push(finish);
+    child.once("error", fail);
+    child.once("exit", onExit);
+    timer = setTimeout(() => fail(new Error(`lock worker timed out after ${timeoutMs}ms`)), timeoutMs);
   });
   const send = (command: "state" | "release" | "exit") => child.stdin.write(`${command}\n`);
   const exited = new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`lock worker did not exit after ${WORKER_TIMEOUT_MS}ms`));
+    }, WORKER_TIMEOUT_MS);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.once("exit", (code) => {
+      clearTimeout(timer);
       children.delete(child);
       lines.close();
       if (code === 0 || child.killed) resolve();
@@ -284,7 +311,11 @@ async function crashClaimWorker(
 afterEach(async () => {
   for (const child of children) child.kill();
   await Promise.allSettled([...children].map((child) => new Promise<void>((resolve) => {
-    child.once("exit", () => resolve());
+    const timer = setTimeout(resolve, WORKER_TIMEOUT_MS);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
   })));
   children.clear();
   await Promise.all(temporaryDirectories.splice(0).map((directory) =>
@@ -292,6 +323,72 @@ afterEach(async () => {
 });
 
 describe("lifetime persistence lock", () => {
+  it("reads sources through a bounded loop and detects growth or shrink races", async () => {
+    const directory = await temporaryDirectory();
+    const growing = join(directory, "growing.json");
+    await writeFile(growing, "x");
+    let usedReadFile = false;
+    let largestRead = 0;
+    let grew = false;
+    const growingFileSystem = resolveLifetimeFileSystem({
+      open: async (...args: Parameters<typeof open>) => {
+        const handle = await open(...args);
+        if (String(args[0]) !== growing) return handle;
+        return new Proxy(handle, {
+          get(target, property, receiver) {
+            if (property === "readFile") {
+              return async () => {
+                usedReadFile = true;
+                return target.readFile();
+              };
+            }
+            if (property === "read") {
+              return async (buffer: Buffer, offset: number, length: number, position: number) => {
+                largestRead = Math.max(largestRead, length);
+                if (!grew) {
+                  grew = true;
+                  await writeFile(growing, "x".repeat(1024 * 1024));
+                }
+                return target.read(buffer, offset, length, position);
+              };
+            }
+            const value = Reflect.get(target, property, receiver) as unknown;
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      },
+    });
+    await assert.rejects(readLifetimeSource(growing, growingFileSystem, 1), /size limit|changed/);
+    assert.equal(usedReadFile, false);
+    assert.ok(largestRead <= 2, `bounded read requested ${largestRead} bytes`);
+
+    const shrinking = join(directory, "shrinking.json");
+    await writeFile(shrinking, "four");
+    let shrank = false;
+    const shrinkingFileSystem = resolveLifetimeFileSystem({
+      open: async (...args: Parameters<typeof open>) => {
+        const handle = await open(...args);
+        if (String(args[0]) !== shrinking) return handle;
+        return new Proxy(handle, {
+          get(target, property, receiver) {
+            if (property === "read") {
+              return async (buffer: Buffer, offset: number, length: number, position: number) => {
+                if (!shrank) {
+                  shrank = true;
+                  await writeFile(shrinking, "tw");
+                }
+                return target.read(buffer, offset, length, position);
+              };
+            }
+            const value = Reflect.get(target, property, receiver) as unknown;
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      },
+    });
+    await assert.rejects(readLifetimeSource(shrinking, shrinkingFileSystem, 8), /changed/);
+  });
+
   it("keeps file identities lossless above Number.MAX_SAFE_INTEGER", async () => {
     const directory = await temporaryDirectory();
     const source = join(directory, "high-identity-source.json");
@@ -436,7 +533,7 @@ describe("lifetime persistence lock", () => {
     assert.equal(await releaseLifetimeLease(result.lease), true);
   });
 
-  it("acquires and releases with inode-zero post-write content identity", async () => {
+  it("does not grant a writer lease when created-file identity is unavailable", async () => {
     const directory = await temporaryDirectory();
     const zero = { dev: 0n, ino: 0n };
     const fixture = identityFixtureFileSystem((path) => {
@@ -457,96 +554,98 @@ describe("lifetime persistence lock", () => {
       randomBytes: () => Buffer.alloc(16, 0x61),
       fileSystem: fixture,
     });
-    assertWriter(result);
-    assert.equal(await releaseLifetimeLease(result.lease, { fileSystem: fixture }), true);
-    assert.deepEqual(await auxiliaryFiles(directory), []);
+    assert.equal(result.mode, "readOnly");
+    await assertMissing(join(directory, LIFETIME_LOCK_FILENAME));
   });
 
-  it("cleans inode-zero create failures and preserves a validation replacement", async () => {
-    for (const stage of [
-      "anchor-write",
-      "lock-write",
-      "lock-sync",
-      "lock-validation-read",
-      "lock-validation-replacement",
-    ] as const) {
-      const directory = await temporaryDirectory();
-      const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
-      const replacementPath = join(directory, "inode-zero-replacement.json");
-      const replacement = lockRecord(8_888, "8".repeat(32), ISO_2);
-      if (stage === "lock-validation-replacement") {
-        await writeFile(replacementPath, replacement, { mode: 0o600 });
-      }
-      const zero = { dev: 0n, ino: 0n };
-      let stageReached = false;
-      let replaced = false;
-      const base = identityFixtureFileSystem((path) => {
-        const name = basename(path);
-        return name === LIFETIME_LOCK_FILENAME ||
-            name.startsWith(".sdl-observability-lifetime.create.") ||
-            name.startsWith(".sdl-observability-lifetime.create-source.") ||
-            name.startsWith(".sdl-observability-lifetime.create-lock.") ||
-            name.startsWith(".sdl-observability-lifetime.claim-source.")
-          ? zero
-          : undefined;
-      });
-      const result = await acquireLifetimeLease(directory, {
-        randomBytes: () => Buffer.alloc(16, stage.length),
-        fileSystem: {
-          ...base,
-          open: async (...args: Parameters<typeof open>) => {
-            const path = String(args[0]);
-            const name = basename(path);
-            const isAnchor = name.startsWith(".sdl-observability-lifetime.create.");
-            const isLockCreate = path === lockPath && args[1] === "wx";
-            if (
-              path === lockPath &&
-              typeof args[1] === "number" &&
-              !stageReached &&
-              (stage === "lock-validation-read" || stage === "lock-validation-replacement")
-            ) {
-              stageReached = true;
-              if (stage === "lock-validation-read") {
-                throw Object.assign(new Error("inode-zero validation read failed"), { code: "EIO" });
+  it("invalidates a post-write inode-zero lock before returning read-only", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const zero = { dev: 0n, ino: 0n };
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      randomBytes: () => Buffer.alloc(16, 0x62),
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          const handle = await open(...args);
+          if (String(args[0]) !== lockPath || args[1] !== "wx") return handle;
+          let statCalls = 0;
+          return new Proxy(handle, {
+            get(target, property, receiver) {
+              if (property === "stat") {
+                return async (...statArguments: Parameters<typeof target.stat>) => {
+                  statCalls++;
+                  const stat = await target.stat(...statArguments);
+                  return statCalls === 1 ? stat : identityStat(stat, zero);
+                };
               }
-              replaced = true;
-              await rename(replacementPath, lockPath);
-            }
-            const handle = await base.open(...args);
-            return new Proxy(handle, {
-              get(target, property) {
-                if (
-                  property === "writeFile" &&
-                  !stageReached &&
-                  ((stage === "anchor-write" && isAnchor) ||
-                    (stage === "lock-write" && isLockCreate))
-                ) {
-                  return async () => {
-                    stageReached = true;
-                    await target.writeFile("partial", "utf8");
-                    throw Object.assign(new Error("inode-zero partial write"), { code: "EIO" });
-                  };
-                }
-                if (property === "sync" && !stageReached && stage === "lock-sync" && isLockCreate) {
-                  return async () => {
-                    stageReached = true;
-                    throw Object.assign(new Error("inode-zero sync failed"), { code: "EIO" });
-                  };
-                }
-                const value = Reflect.get(target, property, target) as unknown;
-                return typeof value === "function" ? value.bind(target) : value;
-              },
-            });
-          },
+              const value = Reflect.get(target, property, receiver) as unknown;
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
         },
-      });
+      },
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "ioFailure" });
+    assert.equal((await readFile(lockPath)).length, 0);
+  });
 
-      assert.equal(stageReached, true, stage);
-      assert.deepEqual(result, { mode: "readOnly", reason: "ioFailure" }, stage);
-      if (replaced) assert.equal(await readFile(lockPath, "utf8"), replacement, stage);
-      else await assertMissing(lockPath);
-      assert.deepEqual(await auxiliaryFiles(directory), [], stage);
-    }
+  it("preserves a same-content inode-zero replacement during release", async () => {
+    const directory = await temporaryDirectory();
+    const acquired = await acquireLifetimeLease(directory, { pid: 4242 });
+    assertWriter(acquired);
+    const content = await readFile(acquired.lease.lockPath, "utf8");
+    await unlink(acquired.lease.lockPath);
+    await writeFile(acquired.lease.lockPath, content, { mode: 0o600 });
+    const zero = { dev: 0n, ino: 0n };
+    const fixture = identityFixtureFileSystem((path) =>
+      basename(path) === LIFETIME_LOCK_FILENAME ||
+        basename(path).startsWith(".sdl-observability-lifetime.")
+        ? zero
+        : undefined);
+
+    assert.equal(await releaseLifetimeLease(acquired.lease, { fileSystem: fixture }), false);
+    assert.equal(await readFile(acquired.lease.lockPath, "utf8"), content);
+  });
+
+  it("stops before writing an inode-zero create anchor and preserves its exact witness", async () => {
+    const directory = await temporaryDirectory();
+    const nonce = "65".repeat(16);
+    const zero = { dev: 0n, ino: 0n };
+    let wrote = false;
+    const base = identityFixtureFileSystem((path) =>
+      basename(path).includes(nonce) ? zero : undefined);
+    const result = await acquireLifetimeLease(directory, {
+      randomBytes: () => Buffer.from(nonce, "hex"),
+      fileSystem: {
+        ...base,
+        open: async (...args: Parameters<typeof open>) => {
+          const handle = await base.open(...args);
+          if (!basename(String(args[0])).startsWith(".sdl-observability-lifetime.create.")) {
+            return handle;
+          }
+          return new Proxy(handle, {
+            get(target, property, receiver) {
+              if (property === "writeFile") {
+                return async (...writeArguments: Parameters<typeof target.writeFile>) => {
+                  wrote = true;
+                  return target.writeFile(...writeArguments);
+                };
+              }
+              const value = Reflect.get(target, property, receiver) as unknown;
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+        },
+      },
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "ioFailure" });
+    assert.equal(wrote, false);
+    await assertMissing(join(directory, LIFETIME_LOCK_FILENAME));
+    assert.deepEqual(await auxiliaryFiles(directory), [
+      `.sdl-observability-lifetime.create-source.${nonce}`,
+      `.sdl-observability-lifetime.create.${nonce}`,
+    ]);
   });
 
   it("removes its exact created lock after write, sync, or validation failure", async () => {
@@ -881,12 +980,11 @@ describe("lifetime persistence lock", () => {
           corruptCandidateRead = false;
           return new Proxy(handle, {
             get(target, property, receiver) {
-              if (property === "readFile") {
-                return async () => {
-                  const content = await target.readFile();
-                  const changed = Buffer.from(content);
-                  changed[0] = changed[0] === 0x7b ? 0x5b : 0x7b;
-                  return changed;
+              if (property === "read") {
+                return async (buffer: Buffer, offset: number, length: number, position: number) => {
+                  const result = await target.read(buffer, offset, length, position);
+                  if (result.bytesRead > 0) buffer[offset] = buffer[offset] === 0x7b ? 0x5b : 0x7b;
+                  return result;
                 };
               }
               const value = Reflect.get(target, property, receiver) as unknown;
@@ -985,7 +1083,7 @@ describe("lifetime persistence lock", () => {
     assert.deepEqual(await auxiliaryFiles(directory), before);
   });
 
-  it("recovers an inode-zero lock witness interrupted after its cleanup rename", async () => {
+  it("preserves an inode-zero lock-witness cleanup path fail closed", async () => {
     const directory = await temporaryDirectory();
     const nonce = "73".repeat(16);
     const cleanupPath = join(
@@ -1019,10 +1117,10 @@ describe("lifetime persistence lock", () => {
         },
       },
     });
-    assertWriter(result);
-    assert.equal(interrupted, true);
-    assert.equal((await lstat(cleanupPath)).isFile(), true);
-    assert.equal(await releaseLifetimeLease(result.lease, { fileSystem: base }), true);
+    assert.deepEqual(result, { mode: "readOnly", reason: "ioFailure" });
+    assert.equal(interrupted, false);
+    const preserved = await auxiliaryFiles(directory);
+    assert.ok(preserved.length >= 2);
 
     const successor = await acquireLifetimeLease(directory, {
       pid: 4343,
@@ -1030,12 +1128,11 @@ describe("lifetime persistence lock", () => {
       isClaimantPidAlive: () => false,
       fileSystem: base,
     });
-    assertWriter(successor);
-    assert.equal(await releaseLifetimeLease(successor.lease, { fileSystem: base }), true);
-    assert.deepEqual(await auxiliaryFiles(directory), []);
+    assert.equal(successor.mode, "readOnly");
+    assert.deepEqual(await auxiliaryFiles(directory), preserved);
   });
 
-  it("recovers an inode-zero created lock interrupted before witness cleanup", async () => {
+  it("preserves an inode-zero created-lock cleanup path fail closed", async () => {
     const directory = await temporaryDirectory();
     const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
     const nonce = "77".repeat(16);
@@ -1078,9 +1175,10 @@ describe("lifetime persistence lock", () => {
       },
     });
     assert.deepEqual(result, { mode: "readOnly", reason: "ioFailure" });
-    assert.equal(cleanupInterrupted, true);
-    assert.equal((await lstat(witnessPath)).isFile(), true);
-    assert.equal((await lstat(cleanupPath)).isFile(), true);
+    assert.equal(validationFailed, false);
+    assert.equal(cleanupInterrupted, false);
+    const preserved = await auxiliaryFiles(directory);
+    assert.ok(preserved.length >= 2);
 
     const successor = await acquireLifetimeLease(directory, {
       pid: 4343,
@@ -1088,9 +1186,8 @@ describe("lifetime persistence lock", () => {
       isClaimantPidAlive: () => false,
       fileSystem: base,
     });
-    assertWriter(successor);
-    assert.equal(await releaseLifetimeLease(successor.lease, { fileSystem: base }), true);
-    assert.deepEqual(await auxiliaryFiles(directory), []);
+    assert.equal(successor.mode, "readOnly");
+    assert.deepEqual(await auxiliaryFiles(directory), preserved);
   });
 
   it("recovers a created lock interrupted after its cleanup rename", async () => {
@@ -1860,7 +1957,7 @@ describe("lifetime persistence lock", () => {
     assert.equal(await releaseLifetimeLease(result.lease), true);
   });
 
-  it("recovers an exact inode-zero create anchor witness pair", async () => {
+  it("preserves an exact inode-zero create anchor witness pair fail closed", async () => {
     const directory = await temporaryDirectory();
     const nonce = "6".repeat(32);
     const anchorPath = join(directory, `.sdl-observability-lifetime.create.${nonce}`);
@@ -1875,9 +1972,8 @@ describe("lifetime persistence lock", () => {
       isClaimantPidAlive: () => false,
       fileSystem: fixture,
     });
-    assertWriter(result);
-    assert.deepEqual(await auxiliaryFiles(directory), []);
-    assert.equal(await releaseLifetimeLease(result.lease), true);
+    assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" });
+    assert.deepEqual(await auxiliaryFiles(directory), [basename(witnessPath), basename(anchorPath)]);
   });
 
   it("recovers dead claim auxiliaries stranded after the fixed claim is removed", async () => {
@@ -2381,8 +2477,8 @@ describe("lifetime persistence lock", () => {
       isPidAlive: () => false,
       randomBytes: () => Buffer.alloc(16, 0xbb),
       fileSystem: {
-        readdir: async (...args: Parameters<typeof readdir>) => {
-          const result = await readdir(...args);
+        opendir: async (...args: Parameters<typeof opendir>) => {
+          const result = await opendir(...args);
           reclaimerCheckedAuxiliaries.resolve();
           return result;
         },
@@ -2643,12 +2739,11 @@ describe("lifetime persistence lock", () => {
           corruptCandidateRead = false;
           return new Proxy(handle, {
             get(target, property, receiver) {
-              if (property === "readFile") {
-                return async () => {
-                  const content = await target.readFile();
-                  const changed = Buffer.from(content);
-                  changed[0] ^= 1;
-                  return changed;
+              if (property === "read") {
+                return async (buffer: Buffer, offset: number, length: number, position: number) => {
+                  const result = await target.read(buffer, offset, length, position);
+                  if (result.bytesRead > 0) buffer[offset] ^= 1;
+                  return result;
                 };
               }
               const value = Reflect.get(target, property, receiver) as unknown;
@@ -2819,6 +2914,170 @@ describe("lifetime persistence lock", () => {
     assert.equal((await evidenceFiles(directory)).length, 8);
   });
 
+  it("validates evidence labels and reserved source names before mutation", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "runtime-label-source.json");
+    await writeFile(source, lockRecord(30_100));
+    const bogus = {
+      kind: "bogus",
+      eligibility: "validated-supported",
+    } as unknown as LifetimeEvidenceLabel;
+    await assert.rejects(rotateLifetimeEvidence(directory, source, bogus), /label/i);
+    assert.equal((await lstat(source)).isFile(), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+
+    const reserved = join(directory, `.sdl-observability-lifetime.create.${"ab".repeat(16)}`);
+    await writeFile(reserved, lockRecord(30_101));
+    await assert.rejects(
+      rotateLifetimeEvidence(directory, reserved, {
+        kind: "lock",
+        eligibility: "validated-supported",
+      }),
+      /reserved|source/i,
+    );
+    assert.equal((await lstat(reserved)).isFile(), true);
+  });
+
+  it("rejects inode-zero evidence replacement identity without moving either path", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "inode-zero-evidence.json");
+    const content = lockRecord(30_102);
+    await writeFile(source, content);
+    const zero = { dev: 0n, ino: 0n };
+    const fixture = identityFixtureFileSystem((path) =>
+      path === source || basename(path).startsWith(".sdl-observability-lifetime.")
+        ? zero
+        : undefined);
+    const fileSystem = resolveLifetimeFileSystem(fixture);
+    const expected = (await readLifetimeSource(source, fileSystem)).snapshot;
+    await unlink(source);
+    await writeFile(source, content);
+
+    await assert.rejects(
+      rotateLifetimeEvidence(
+        directory,
+        source,
+        { kind: "lock", eligibility: "validated-supported" },
+        { expectedSource: expected, fileSystem: fixture },
+      ),
+      /identity|mismatch|unsupported/i,
+    );
+    assert.equal(await readFile(source, "utf8"), content);
+    assert.deepEqual(await evidenceFiles(directory), []);
+  });
+
+  it("streams and bounds auxiliary and evidence directory scans", async () => {
+    const auxiliaryDirectory = await temporaryDirectory();
+    for (let index = 0; index < 257; index++) {
+      const nonce = index.toString(16).padStart(32, "0");
+      await writeFile(
+        join(auxiliaryDirectory, `.sdl-observability-lifetime.create.${nonce}`),
+        createAnchorRecord(999_999, nonce),
+      );
+    }
+    let auxiliaryEnumerated = 0;
+    let auxiliaryReads = 0;
+    const boundedAuxiliaryFs = {
+      open: async (...args: Parameters<typeof open>) => {
+        if (basename(String(args[0])).startsWith(".sdl-observability-lifetime.")) {
+          auxiliaryReads++;
+        }
+        return open(...args);
+      },
+      opendir: async (...args: Parameters<typeof opendir>) => {
+        const opened = await opendir(...args);
+        return {
+          async *[Symbol.asyncIterator]() {
+            for await (const entry of opened) {
+              auxiliaryEnumerated++;
+              assert.ok(auxiliaryEnumerated <= 257);
+              yield entry;
+            }
+          },
+        } as unknown as Awaited<ReturnType<typeof opendir>>;
+      },
+    };
+    const blocked = await acquireLifetimeLease(auxiliaryDirectory, {
+      isClaimantPidAlive: () => false,
+      fileSystem: boundedAuxiliaryFs,
+    });
+    assert.deepEqual(blocked, { mode: "readOnly", reason: "invalidLock" });
+    assert.equal(auxiliaryEnumerated, 257);
+    assert.equal(auxiliaryReads, 0);
+
+    const evidenceDirectory = await temporaryDirectory();
+    for (let index = 0; index < 9; index++) {
+      const timestamp = (1_700_000_000_000 + index).toString(36).padStart(11, "0");
+      const nonce = (index + 1).toString(16).padStart(32, "0");
+      await writeFile(
+        join(
+          evidenceDirectory,
+          `sdl-observability-lifetime.evidence.v1.validated-supported.lock.${timestamp}.${nonce}.json`,
+        ),
+        lockRecord(31_000 + index),
+      );
+    }
+    const source = join(evidenceDirectory, "bounded-evidence-source.json");
+    await writeFile(source, lockRecord(31_100));
+    let maximumEvidenceSeenInOnePass = 0;
+    let evidenceReads = 0;
+    const boundedEvidenceFs = {
+      open: async (...args: Parameters<typeof open>) => {
+        if (basename(String(args[0])).startsWith("sdl-observability-lifetime.evidence.")) {
+          evidenceReads++;
+        }
+        return open(...args);
+      },
+      opendir: async (...args: Parameters<typeof opendir>) => {
+        const opened = await opendir(...args);
+        return {
+          async *[Symbol.asyncIterator]() {
+            let seen = 0;
+            for await (const entry of opened) {
+              if (entry.name.startsWith("sdl-observability-lifetime.evidence.")) {
+                seen++;
+                maximumEvidenceSeenInOnePass = Math.max(maximumEvidenceSeenInOnePass, seen);
+                assert.ok(seen <= 9);
+              }
+              yield entry;
+            }
+          },
+        } as unknown as Awaited<ReturnType<typeof opendir>>;
+      },
+    };
+    const before = await evidenceFiles(evidenceDirectory);
+    await assert.rejects(
+      rotateLifetimeEvidence(
+        evidenceDirectory,
+        source,
+        { kind: "lock", eligibility: "validated-supported" },
+        { fileSystem: boundedEvidenceFs },
+      ),
+      /evidence|limit/i,
+    );
+    assert.ok(maximumEvidenceSeenInOnePass > 0);
+    assert.equal(evidenceReads, 0);
+    assert.deepEqual(await evidenceFiles(evidenceDirectory), before);
+    assert.equal((await lstat(source)).isFile(), true);
+  });
+
+  it("preserves inode-zero startup auxiliaries fail closed", async () => {
+    const directory = await temporaryDirectory();
+    const nonce = "ac".repeat(16);
+    const anchor = join(directory, `.sdl-observability-lifetime.create.${nonce}`);
+    const content = createAnchorRecord(999_999, nonce);
+    await writeFile(anchor, content);
+    const zero = { dev: 0n, ino: 0n };
+    const fixture = identityFixtureFileSystem((path) =>
+      basename(path).startsWith(".sdl-observability-lifetime.") ? zero : undefined);
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+      fileSystem: fixture,
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" });
+    assert.equal(await readFile(anchor, "utf8"), content);
+  });
+
   it("refuses malformed, oversized, and non-regular lock paths", async () => {
     for (const setup of [
       async (path: string) => writeFile(path, "not json"),
@@ -2829,6 +3088,32 @@ describe("lifetime persistence lock", () => {
       await setup(join(directory, LIFETIME_LOCK_FILENAME));
       const result = await acquireLifetimeLease(directory);
       assert.equal(result.mode, "readOnly");
+    }
+  });
+
+  it("distinguishes malformed locks from operational lock read failures", async () => {
+    const malformedDirectory = await temporaryDirectory();
+    await writeFile(join(malformedDirectory, LIFETIME_LOCK_FILENAME), "not json");
+    assert.deepEqual(await acquireLifetimeLease(malformedDirectory), {
+      mode: "readOnly",
+      reason: "invalidLock",
+    });
+
+    for (const code of ["EACCES", "EIO"] as const) {
+      const directory = await temporaryDirectory();
+      const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+      await writeFile(lockPath, lockRecord(4242));
+      const result = await acquireLifetimeLease(directory, {
+        fileSystem: {
+          open: async (...args: Parameters<typeof open>) => {
+            if (String(args[0]) === lockPath && typeof args[1] === "number") {
+              throw Object.assign(new Error(`lock read ${code}`), { code });
+            }
+            return open(...args);
+          },
+        },
+      });
+      assert.deepEqual(result, { mode: "readOnly", reason: "ioFailure" });
     }
   });
 
@@ -3043,6 +3328,54 @@ describe("lifetime persistence lock", () => {
     assert.equal(await releaseLifetimeLease(outside.lease), true);
   });
 
+  it("binds operations to one canonical stable trusted directory identity", async (t) => {
+    const realParent = await temporaryDirectory();
+    const realDirectory = join(realParent, "real", "child");
+    await mkdir(realDirectory, { recursive: true });
+    const aliasParent = join(realParent, "alias");
+    try {
+      await symlink(join(realParent, "real"), aliasParent, "junction");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") {
+        t.diagnostic("junction creation requires privileges; injected identity case still ran");
+      } else {
+        throw error;
+      }
+    }
+    try {
+      await lstat(aliasParent);
+      const viaAncestorAlias = await acquireLifetimeLease(join(aliasParent, "child"));
+      assert.deepEqual(viaAncestorAlias, { mode: "readOnly", reason: "invalidLock" });
+      await assert.rejects(lstat(join(realDirectory, LIFETIME_LOCK_FILENAME)), { code: "ENOENT" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    const source = join(realDirectory, "directory-identity-source.json");
+    await writeFile(source, lockRecord(32_000));
+    const first = { dev: 91n, ino: 92n };
+    const second = { dev: 91n, ino: 93n };
+    let directoryIdentityReads = 0;
+    const result = rotateLifetimeEvidence(
+      realDirectory,
+      source,
+      { kind: "lock", eligibility: "validated-supported" },
+      {
+        fileSystem: {
+          realpath,
+          lstat: async (...args: Parameters<typeof lstat>) => {
+            const stat = await lstat(...args);
+            if (String(args[0]) !== realDirectory) return stat;
+            directoryIdentityReads++;
+            return identityStat(stat, directoryIdentityReads <= 2 ? first : second);
+          },
+        },
+      },
+    );
+    await assert.rejects(result, /directory|identity|changed/i);
+    assert.equal((await lstat(source)).isFile(), true);
+  });
+
   it("keeps a running secondary read-only and lets only a new process acquire after release", async () => {
     const directory = await temporaryDirectory();
     const writer = await spawnWorker(directory);
@@ -3070,5 +3403,14 @@ describe("lifetime persistence lock", () => {
     await successor.exited;
     secondary.send("exit");
     await secondary.exited;
+  });
+
+  it("bounds child protocol waits and forcibly cleans up a stalled worker", async () => {
+    const directory = await temporaryDirectory();
+    const worker = await spawnWorker(directory);
+    assert.deepEqual(await worker.next(), { event: "acquired", mode: "writer" });
+    await assert.rejects(worker.next(25), /timed out/);
+    await worker.exited;
+    assert.equal(worker.child.killed, true);
   });
 });
