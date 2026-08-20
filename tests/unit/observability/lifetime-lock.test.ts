@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { constants } from "node:fs";
 import {
+  link,
   lstat,
   mkdir,
   mkdtemp,
   open,
   readFile,
   readdir,
+  rename,
   rm,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -205,6 +209,85 @@ describe("lifetime persistence lock", () => {
     assert.equal(JSON.parse(await readFile(join(directory, evidence[0]), "utf8")).pid, 999_999);
   });
 
+  it("returns read-only after the one stale-lock retry contends", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    let exclusiveCreates = 0;
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isPidAlive: () => false,
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          if (args[1] === "wx") {
+            exclusiveCreates++;
+            if (exclusiveCreates === 2) {
+              throw Object.assign(new Error("retry contended"), { code: "EEXIST" });
+            }
+            if (exclusiveCreates > 2) throw new Error("unexpected third exclusive create");
+          }
+          return open(...args);
+        },
+      },
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "contended" });
+    assert.equal(exclusiveCreates, 2);
+    assert.equal((await evidenceFiles(directory)).length, 1);
+  });
+
+  it("prevents a delayed stale reclaimer from moving a newly acquired live lock", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    const delayed = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let delayedOnce = false;
+    let claimAttempted = false;
+    const delayedFileSystem = {
+      link: async (source: string, target: string) => {
+        if (source === lockPath && !delayedOnce) {
+          delayedOnce = true;
+          claimAttempted = true;
+          delayed.resolve();
+          await resume.promise;
+        }
+        return link(source, target);
+      },
+      rename: async (source: string, target: string) => {
+        if (source === lockPath && !claimAttempted && !delayedOnce) {
+          delayedOnce = true;
+          delayed.resolve();
+          await resume.promise;
+        }
+        return rename(source, target);
+      },
+    };
+
+    const lateResultPromise = acquireLifetimeLease(directory, {
+      pid: 4343,
+      isPidAlive: () => false,
+      randomBytes: () => Buffer.alloc(16, 0xbb),
+      fileSystem: delayedFileSystem,
+    });
+    await delayed.promise;
+    const winner = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isPidAlive: () => false,
+      randomBytes: () => Buffer.alloc(16, 0xaa),
+    });
+    assertWriter(winner);
+    resume.resolve();
+    const lateResult = await lateResultPromise;
+    assert.deepEqual(lateResult, { mode: "readOnly", reason: "contended" });
+    assert.deepEqual(JSON.parse(await readFile(lockPath, "utf8")), {
+      schemaVersion: 1,
+      pid: winner.lease.pid,
+      createdAt: winner.lease.createdAt,
+      nonce: winner.lease.nonce,
+    });
+    assert.equal(await releaseLifetimeLease(winner.lease), true);
+  });
+
   it("treats a reused live PID as authoritative without evidence", async () => {
     const directory = await temporaryDirectory();
     await writeFile(join(directory, LIFETIME_LOCK_FILENAME), lockRecord(4242));
@@ -214,6 +297,26 @@ describe("lifetime persistence lock", () => {
     });
     assert.deepEqual(result, { mode: "readOnly", reason: "contended" });
     assert.deepEqual(await evidenceFiles(directory), []);
+  });
+
+  it("treats only ESRCH as dead and fails closed for EPERM or unknown PID errors", async () => {
+    for (const [code, expectedMode] of [
+      ["ESRCH", "writer"],
+      ["EPERM", "readOnly"],
+      ["EUNKNOWN", "readOnly"],
+    ] as const) {
+      const directory = await temporaryDirectory();
+      await writeFile(join(directory, LIFETIME_LOCK_FILENAME), lockRecord(777_777));
+      const result = await acquireLifetimeLease(directory, {
+        pid: 4242,
+        signalPid: () => {
+          throw Object.assign(new Error(code), { code });
+        },
+      });
+      assert.equal(result.mode, expectedMode, code);
+      if (result.mode === "writer") assert.equal(await releaseLifetimeLease(result.lease), true);
+      else assert.deepEqual(await evidenceFiles(directory), []);
+    }
   });
 
   it("caps shared lock/publication evidence at eight and protects unknown-newer evidence", async () => {
@@ -255,6 +358,102 @@ describe("lifetime persistence lock", () => {
     assert.equal((await evidenceFiles(directory)).length, 8);
     assert.equal((await lstat(paths[0])).isFile(), true, "unknown-newer evidence is preserved");
     await assert.rejects(lstat(paths[1]), { code: "ENOENT" });
+  });
+
+  it("serializes concurrent lock/publication evidence rotation at the shared cap", async () => {
+    const directory = await temporaryDirectory();
+    const paths: string[] = [];
+    for (let index = 0; index < 7; index++) {
+      const source = join(directory, `seed-${index}.json`);
+      await writeFile(source, lockRecord(40_000 + index));
+      paths.push(await rotateLifetimeEvidence(
+        directory,
+        source,
+        {
+          kind: index === 0 ? "publication" : "lock",
+          eligibility: index === 0
+            ? "protected-unknown-newer"
+            : "validated-supported",
+        },
+        {
+          now: () => new Date(1_700_000_002_000 + index),
+          randomBytes: () => Buffer.alloc(16, index),
+        },
+      ));
+    }
+    const sourceA = join(directory, "rotation-a.json");
+    const sourceB = join(directory, "rotation-b.json");
+    await writeFile(sourceA, lockRecord(50_001));
+    await writeFile(sourceB, lockRecord(50_002));
+    const aRenameReady = Promise.withResolvers<void>();
+    const secondAttempt = Promise.withResolvers<void>();
+
+    const rotationA = rotateLifetimeEvidence(
+      directory,
+      sourceA,
+      { kind: "lock", eligibility: "validated-supported" },
+      {
+        now: () => new Date(1_700_000_003_000),
+        randomBytes: () => Buffer.alloc(16, 0xaa),
+        fileSystem: {
+          link,
+          rename: async (source: string, target: string) => {
+            if (source === sourceA) {
+              aRenameReady.resolve();
+              await secondAttempt.promise;
+            }
+            return rename(source, target);
+          },
+        },
+      },
+    );
+    await aRenameReady.promise;
+    const rotationB = rotateLifetimeEvidence(
+      directory,
+      sourceB,
+      { kind: "publication", eligibility: "validated-supported" },
+      {
+        now: () => new Date(1_700_000_003_001),
+        randomBytes: () => Buffer.alloc(16, 0xbb),
+        fileSystem: {
+          link: async (source: string, target: string) => {
+            secondAttempt.resolve();
+            return link(source, target);
+          },
+          rename: async (source: string, target: string) => {
+            secondAttempt.resolve();
+            return rename(source, target);
+          },
+        },
+      },
+    );
+    await Promise.all([rotationA, rotationB]);
+
+    assert.equal((await evidenceFiles(directory)).length, 8);
+    assert.equal((await lstat(paths[0])).isFile(), true, "protected evidence remains");
+    await assert.rejects(lstat(paths[1]), { code: "ENOENT" });
+  });
+
+  it("fails closed when the filesystem cannot hard-link an evidence claim", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "unsupported-link.json");
+    await writeFile(source, lockRecord(60_001));
+    await assert.rejects(
+      rotateLifetimeEvidence(
+        directory,
+        source,
+        { kind: "lock", eligibility: "validated-supported" },
+        {
+          fileSystem: {
+            link: async () => {
+              throw Object.assign(new Error("hard links unavailable"), { code: "EPERM" });
+            },
+          },
+        },
+      ),
+      /claim|hard link/i,
+    );
+    assert.equal((await lstat(source)).isFile(), true);
   });
 
   it("fails closed when only protected evidence can make room", async () => {
@@ -348,6 +547,77 @@ describe("lifetime persistence lock", () => {
     assert.equal((await lstat(evidenceSource)).isFile(), true);
   });
 
+  it("preserves a replacement raced into the lock path during release", async () => {
+    const directory = await temporaryDirectory();
+    const result = await acquireLifetimeLease(directory, { pid: 4242 });
+    assertWriter(result);
+    const replacementPath = join(directory, "release-replacement.json");
+    const replacement = lockRecord(4343, "c".repeat(32), ISO_2);
+    await writeFile(replacementPath, replacement, { mode: 0o600 });
+    let replaced = false;
+    const replace = async () => {
+      if (replaced) return;
+      replaced = true;
+      await rename(replacementPath, result.lease.lockPath);
+    };
+
+    const released = await releaseLifetimeLease(result.lease, {
+      fileSystem: {
+        link,
+        rename: async (source: string, target: string) => {
+          if (source === result.lease.lockPath) await replace();
+          return rename(source, target);
+        },
+        unlink: async (path: string) => {
+          if (path === result.lease.lockPath) await replace();
+          return unlink(path);
+        },
+      },
+    });
+    assert.equal(released, false);
+    assert.equal(await readFile(result.lease.lockPath, "utf8"), replacement);
+  });
+
+  it("does not overwrite a replacement raced into the lock path during refresh", async () => {
+    const directory = await temporaryDirectory();
+    const result = await acquireLifetimeLease(directory, { pid: 4242 });
+    assertWriter(result);
+    const replacementPath = join(directory, "refresh-replacement.json");
+    const replacement = lockRecord(4343, "d".repeat(32), ISO_2);
+    await writeFile(replacementPath, replacement, { mode: 0o600 });
+    let replaced = false;
+
+    const refreshed = await refreshLifetimeLease(result.lease, {
+      now: () => new Date(ISO_2),
+      fileSystem: {
+        link,
+        open: async (...args: Parameters<typeof open>) => {
+          const handle = await open(...args);
+          if (typeof args[1] !== "number" || (args[1] & constants.O_RDWR) === 0) {
+            return handle;
+          }
+          return new Proxy(handle, {
+            get(target, property) {
+              if (property === "write") {
+                return async (...writeArgs: Parameters<typeof target.write>) => {
+                  if (!replaced) {
+                    replaced = true;
+                    await rename(replacementPath, result.lease.lockPath);
+                  }
+                  return target.write(...writeArgs);
+                };
+              }
+              const value = Reflect.get(target, property, target) as unknown;
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+        },
+      },
+    });
+    assert.equal(refreshed, false);
+    assert.equal(await readFile(result.lease.lockPath, "utf8"), replacement);
+  });
+
   it("keeps a running secondary read-only and lets only a new process acquire after release", async () => {
     const directory = await temporaryDirectory();
     const writer = await spawnWorker(directory);
@@ -358,8 +628,15 @@ describe("lifetime persistence lock", () => {
     writer.send("release");
     assert.deepEqual(await writer.next(), { event: "released", released: true });
     await writer.exited;
+    await assert.rejects(lstat(join(directory, LIFETIME_LOCK_FILENAME)), { code: "ENOENT" });
     secondary.send("state");
-    assert.deepEqual(await secondary.next(), { event: "state", mode: "readOnly" });
+    assert.deepEqual(await secondary.next(), {
+      event: "state",
+      mode: "readOnly",
+      lockExists: false,
+      claimExists: false,
+    });
+    await assert.rejects(lstat(join(directory, LIFETIME_LOCK_FILENAME)), { code: "ENOENT" });
 
     const successor = await spawnWorker(directory);
     assert.deepEqual(await successor.next(), { event: "acquired", mode: "writer" });

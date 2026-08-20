@@ -1,14 +1,23 @@
 import { randomBytes as nodeRandomBytes } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 
 import {
+  LIFETIME_CLAIM_FILENAME,
+  claimLifetimeSource,
+  lifetimeClaimErrorCode,
+  moveClaimedLifetimeSource,
+  readLifetimeSource,
+  releaseLifetimeSourceClaim,
   resolveLifetimeFileSystem,
   rotateLifetimeEvidence,
+  sameLifetimeSource,
   type LifetimeFileSystem,
   type LifetimeFileSystemOverrides,
+  type LifetimeSourceClaim,
+  type LifetimeSourceSnapshot,
 } from "./lifetime-evidence.js";
 
 export const LIFETIME_LOCK_FILENAME = "sdl-observability-lifetime.lock.json";
@@ -26,7 +35,7 @@ interface LifetimeLockRecord {
 
 interface StableLockRecord {
   readonly record: LifetimeLockRecord;
-  readonly identity: string;
+  readonly snapshot: LifetimeSourceSnapshot;
 }
 
 export interface LifetimeWriterLease extends LifetimeLockRecord {
@@ -45,22 +54,14 @@ export interface LifetimeLockOptions {
   readonly now?: () => Date;
   readonly pid?: number;
   readonly isPidAlive?: (pid: number) => boolean | Promise<boolean>;
+  readonly signalPid?: (pid: number, signal: 0) => void;
   readonly randomBytes?: (size: number) => Buffer;
   readonly fileSystem?: LifetimeFileSystemOverrides;
 }
 
 type CreateResult =
   | { readonly status: "writer"; readonly lease: LifetimeWriterLease }
-  | { readonly status: "exists" }
-  | { readonly status: "failure" };
-
-function identity(stat: Stats): string {
-  return `${stat.dev.toString()}:${stat.ino.toString()}`;
-}
-
-function isRegularLock(stat: Stats): boolean {
-  return stat.isFile() && !stat.isSymbolicLink() && stat.size <= MAX_LOCK_BYTES;
-}
+  | { readonly status: "exists" | "contended" | "failure" };
 
 function strictIso(date: Date): string {
   const value = date.toISOString();
@@ -116,38 +117,19 @@ async function readStableLock(
   lockPath: string,
   fileSystem: LifetimeFileSystem,
 ): Promise<StableLockRecord | null> {
-  const before = await fileSystem.lstat(lockPath);
-  if (!isRegularLock(before)) return null;
-  let handle: FileHandle | undefined;
   try {
-    handle = await fileSystem.open(
-      lockPath,
-      constants.O_RDONLY |
-        (constants.O_NOFOLLOW ?? 0) |
-        (constants.O_NONBLOCK ?? 0),
-    );
-    const opened = await handle.stat();
-    if (!isRegularLock(opened) || identity(opened) !== identity(before)) return null;
-    const raw = await handle.readFile({ encoding: "utf8" });
-    const afterOpen = await handle.stat();
-    const afterPath = await fileSystem.lstat(lockPath);
-    if (
-      !isRegularLock(afterOpen) ||
-      !isRegularLock(afterPath) ||
-      identity(afterOpen) !== identity(opened) ||
-      identity(afterPath) !== identity(opened) ||
-      afterOpen.size !== opened.size ||
-      afterPath.size !== opened.size
-    ) {
-      return null;
-    }
-    const record = parseLockRecord(raw);
-    return record ? { record, identity: identity(opened) } : null;
+    const source = await readLifetimeSource(lockPath, fileSystem, MAX_LOCK_BYTES);
+    const record = parseLockRecord(source.content.toString("utf8"));
+    return record ? { record, snapshot: source.snapshot } : null;
   } catch {
     return null;
-  } finally {
-    await closeQuietly(handle);
   }
+}
+
+function leaseMatches(record: LifetimeLockRecord, lease: LifetimeWriterLease): boolean {
+  return record.schemaVersion === lease.schemaVersion &&
+    record.pid === lease.pid &&
+    record.nonce === lease.nonce;
 }
 
 function leaseFor(
@@ -158,23 +140,48 @@ function leaseFor(
   return { ...record, directory, lockPath };
 }
 
-async function removeIfOwned(
-  lease: LifetimeWriterLease,
+function claimPath(directory: string): string {
+  return resolve(directory, LIFETIME_CLAIM_FILENAME);
+}
+
+async function claimExists(
+  directory: string,
   fileSystem: LifetimeFileSystem,
 ): Promise<boolean> {
-  const current = await readStableLock(lease.lockPath, fileSystem);
-  if (
-    !current ||
-    current.record.schemaVersion !== lease.schemaVersion ||
-    current.record.pid !== lease.pid ||
-    current.record.nonce !== lease.nonce
-  ) {
-    return false;
+  try {
+    await fileSystem.lstat(claimPath(directory));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    return true;
   }
-  const beforeDelete = await fileSystem.lstat(lease.lockPath);
-  if (!isRegularLock(beforeDelete) || identity(beforeDelete) !== current.identity) return false;
-  await fileSystem.unlink(lease.lockPath);
-  return true;
+}
+
+async function claimOwnedLock(
+  lease: LifetimeWriterLease,
+  current: StableLockRecord,
+  fileSystem: LifetimeFileSystem,
+): Promise<LifetimeSourceClaim | null> {
+  if (!leaseMatches(current.record, lease)) return null;
+  let claim: LifetimeSourceClaim;
+  try {
+    claim = await claimLifetimeSource(
+      lease.directory,
+      lease.lockPath,
+      current.snapshot,
+      fileSystem,
+      false,
+    );
+  } catch {
+    return null;
+  }
+  const claimed = await readLifetimeSource(claim.claimPath, fileSystem, MAX_LOCK_BYTES);
+  const record = parseLockRecord(claimed.content.toString("utf8"));
+  if (!record || !leaseMatches(record, lease)) {
+    await releaseLifetimeSourceClaim(claim, fileSystem);
+    return null;
+  }
+  return claim;
 }
 
 async function createWriterLock(
@@ -183,6 +190,7 @@ async function createWriterLock(
   record: LifetimeLockRecord,
   fileSystem: LifetimeFileSystem,
 ): Promise<CreateResult> {
+  if (await claimExists(directory, fileSystem)) return { status: "contended" };
   let handle: FileHandle | undefined;
   try {
     handle = await fileSystem.open(lockPath, "wx", 0o600);
@@ -204,29 +212,24 @@ async function createWriterLock(
     await handle.close();
     handle = undefined;
     const stored = await readStableLock(lockPath, fileSystem);
-    if (
-      !stored ||
-      stored.record.pid !== record.pid ||
-      stored.record.createdAt !== record.createdAt ||
-      stored.record.nonce !== record.nonce
-    ) {
-      await removeIfOwned(lease, fileSystem).catch(() => false);
-      return { status: "failure" };
-    }
+    if (!stored || !leaseMatches(stored.record, lease)) return { status: "failure" };
+    if (await claimExists(directory, fileSystem)) return { status: "contended" };
     return { status: "writer", lease };
   } catch {
     await closeQuietly(handle);
-    await removeIfOwned(lease, fileSystem).catch(() => false);
     return { status: "failure" };
   }
 }
 
-function defaultPidLiveness(pid: number): boolean {
+function defaultPidLiveness(
+  pid: number,
+  signalPid: (pid: number, signal: 0) => void,
+): boolean {
   try {
-    process.kill(pid, 0);
+    signalPid(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
   }
 }
 
@@ -252,17 +255,20 @@ export async function acquireLifetimeLease(
 
   const pid = options.pid ?? process.pid;
   if (!Number.isSafeInteger(pid) || pid <= 0) return readOnly("ioFailure");
-  let createdAt: string;
-  let nonce: string;
+  let record: LifetimeLockRecord;
   try {
-    createdAt = strictIso((options.now ?? (() => new Date()))());
     const nonceBytes = (options.randomBytes ?? nodeRandomBytes)(16);
     if (nonceBytes.length !== 16) return readOnly("ioFailure");
-    nonce = nonceBytes.toString("hex");
+    record = {
+      schemaVersion: 1,
+      pid,
+      createdAt: strictIso((options.now ?? (() => new Date()))()),
+      nonce: nonceBytes.toString("hex"),
+    };
   } catch {
     return readOnly("ioFailure");
   }
-  const record: LifetimeLockRecord = { schemaVersion: 1, pid, createdAt, nonce };
+
   const lockPath = resolve(trustedDirectory, LIFETIME_LOCK_FILENAME);
   const initial = await createWriterLock(
     trustedDirectory,
@@ -272,12 +278,18 @@ export async function acquireLifetimeLease(
   );
   if (initial.status === "writer") return { mode: "writer", lease: initial.lease };
   if (initial.status === "failure") return readOnly("ioFailure");
+  if (initial.status === "contended") return readOnly("contended");
 
   const existing = await readStableLock(lockPath, fileSystem);
   if (!existing) return readOnly("invalidLock");
   let alive: boolean;
   try {
-    alive = await (options.isPidAlive ?? defaultPidLiveness)(existing.record.pid);
+    alive = options.isPidAlive
+      ? await options.isPidAlive(existing.record.pid)
+      : defaultPidLiveness(
+          existing.record.pid,
+          options.signalPid ?? ((targetPid, signal) => process.kill(targetPid, signal)),
+        );
   } catch {
     return readOnly("ioFailure");
   }
@@ -292,11 +304,17 @@ export async function acquireLifetimeLease(
         now: options.now,
         randomBytes: options.randomBytes,
         fileSystem: options.fileSystem,
+        expectedSource: existing.snapshot,
+        waitForClaim: false,
       },
     );
-  } catch {
-    return readOnly("ioFailure");
+  } catch (error) {
+    const claimCode = lifetimeClaimErrorCode(error);
+    return readOnly(claimCode === "busy" || claimCode === "mismatch"
+      ? "contended"
+      : "ioFailure");
   }
+
   const retry = await createWriterLock(
     trustedDirectory,
     lockPath,
@@ -305,7 +323,9 @@ export async function acquireLifetimeLease(
   );
   return retry.status === "writer"
     ? { mode: "writer", lease: retry.lease }
-    : readOnly(retry.status === "exists" ? "contended" : "ioFailure");
+    : readOnly(retry.status === "exists" || retry.status === "contended"
+      ? "contended"
+      : "ioFailure");
 }
 
 async function writeAtStart(handle: FileHandle, content: string): Promise<void> {
@@ -324,63 +344,81 @@ async function writeAtStart(handle: FileHandle, content: string): Promise<void> 
   await handle.truncate(buffer.length);
 }
 
-/** Refresh ownership only through the descriptor that was revalidated. */
+/** Refresh only the hard-linked exact owner; replacements remain untouched. */
 export async function refreshLifetimeLease(
   lease: LifetimeWriterLease,
   options: Pick<LifetimeLockOptions, "now" | "fileSystem"> = {},
 ): Promise<boolean> {
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
+  const current = await readStableLock(lease.lockPath, fileSystem);
+  if (!current) return false;
+  const claim = await claimOwnedLock(lease, current, fileSystem);
+  if (!claim) return false;
   let handle: FileHandle | undefined;
   try {
-    const before = await fileSystem.lstat(lease.lockPath);
-    if (!isRegularLock(before)) return false;
     handle = await fileSystem.open(
-      lease.lockPath,
+      claim.claimPath,
       constants.O_RDWR |
         (constants.O_NOFOLLOW ?? 0) |
         (constants.O_NONBLOCK ?? 0),
     );
-    const opened = await handle.stat();
-    if (!isRegularLock(opened) || identity(opened) !== identity(before)) return false;
-    const current = parseLockRecord(await handle.readFile({ encoding: "utf8" }));
-    if (
-      !current ||
-      current.schemaVersion !== lease.schemaVersion ||
-      current.pid !== lease.pid ||
-      current.nonce !== lease.nonce
-    ) {
-      return false;
-    }
-    const beforeWrite = await fileSystem.lstat(lease.lockPath);
-    if (!isRegularLock(beforeWrite) || identity(beforeWrite) !== identity(opened)) return false;
+    const claimed = parseLockRecord(await handle.readFile({ encoding: "utf8" }));
+    if (!claimed || !leaseMatches(claimed, lease)) return false;
     const refreshed: LifetimeLockRecord = {
       schemaVersion: 1,
-      pid: current.pid,
+      pid: claimed.pid,
       createdAt: strictIso((options.now ?? (() => new Date()))()),
-      nonce: current.nonce,
+      nonce: claimed.nonce,
     };
     await writeAtStart(handle, serializeLock(refreshed));
     await handle.sync();
-    const afterWrite = await fileSystem.lstat(lease.lockPath);
-    return isRegularLock(afterWrite) && identity(afterWrite) === identity(opened);
+    await handle.close();
+    handle = undefined;
+    const claimAfter = await readLifetimeSource(claim.claimPath, fileSystem, MAX_LOCK_BYTES);
+    const sourceAfter = await readLifetimeSource(lease.lockPath, fileSystem, MAX_LOCK_BYTES);
+    const stored = parseLockRecord(sourceAfter.content.toString("utf8"));
+    return sameLifetimeSource(claimAfter.snapshot, sourceAfter.snapshot) &&
+      stored !== null &&
+      leaseMatches(stored, lease) &&
+      stored.createdAt === refreshed.createdAt;
   } catch {
     return false;
   } finally {
     await closeQuietly(handle);
+    await releaseLifetimeSourceClaim(claim, fileSystem).catch(() => undefined);
   }
 }
 
-/** Remove only the lock record still owned by this exact lease. */
+/** Rename and delete only the hard-linked exact owner entry. */
 export async function releaseLifetimeLease(
   lease: LifetimeWriterLease,
   options: Pick<LifetimeLockOptions, "fileSystem"> = {},
 ): Promise<boolean> {
+  const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
+  const current = await readStableLock(lease.lockPath, fileSystem);
+  if (!current) return false;
+  const claim = await claimOwnedLock(lease, current, fileSystem);
+  if (!claim) return false;
+  const candidatePath = resolve(
+    lease.directory,
+    `.sdl-observability-lifetime.release.${nodeRandomBytes(16).toString("hex")}`,
+  );
   try {
-    return await removeIfOwned(
-      lease,
-      resolveLifetimeFileSystem(options.fileSystem),
-    );
+    try {
+      await fileSystem.lstat(candidatePath);
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+    }
+    if (!await moveClaimedLifetimeSource(claim, candidatePath, fileSystem)) return false;
+    const moved = await readLifetimeSource(candidatePath, fileSystem, MAX_LOCK_BYTES);
+    const record = parseLockRecord(moved.content.toString("utf8"));
+    if (!record || !leaseMatches(record, lease)) return false;
+    await fileSystem.unlink(candidatePath);
+    return true;
   } catch {
     return false;
+  } finally {
+    await releaseLifetimeSourceClaim(claim, fileSystem).catch(() => undefined);
   }
 }
