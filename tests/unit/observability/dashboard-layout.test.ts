@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
@@ -123,6 +124,35 @@ describe("dashboard layout geometry", () => {
     assert.deepEqual(mixed.health, migrateV2Layout({}, ["health"]).health);
   });
 
+  it("falls back from unsafe v2 rows without stalling collision resolution", () => {
+    const script = `
+      import { migrateV2Layout } from "./dist/ui/observability-layout.js";
+      const ids = ["bottleneck", "health"];
+      const unsafe = { col: 1, row: 1e16, cols: 2, rows: 1 };
+      const actual = migrateV2Layout({ bottleneck: unsafe, health: unsafe }, ids);
+      const expected = migrateV2Layout({}, ids);
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) process.exit(2);
+    `;
+    const child = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: 1_000,
+    });
+    assert.equal(child.status, 0, child.error?.message ?? child.stderr);
+
+    const cliffRow = 5_003_999_585_967_218;
+    const cliff = { col: 1, row: cliffRow, cols: 2, rows: 1 };
+    const displaced = migrateV2Layout(
+      { bottleneck: cliff, health: cliff },
+      ["bottleneck", "health"],
+    );
+    assert.deepEqual(displaced, migrateV2Layout({}, ["bottleneck", "health"]));
+    for (const rect of Object.values(displaced)) {
+      assert.ok(Number.isSafeInteger(rect.row));
+      assert.ok(Number.isSafeInteger(rect.row + rect.rows - 1));
+    }
+  });
+
   it("clamps size before position and leaves downward rows unbounded", () => {
     const layout = { panel: { col: 21, row: 2, cols: 4, rows: 2 } };
     assert.deepEqual(resizePanel(layout, "panel", 100, 100).panel, {
@@ -168,6 +198,19 @@ describe("dashboard layout geometry", () => {
       a: { col: 1, row: 2, cols: 4, rows: 2 },
       b: { col: 5, row: 2, cols: 4, rows: 2 },
     });
+  });
+
+  it("rejects unsafe and overflowing movement or resize without mutation", () => {
+    const layout = { panel: { col: 1, row: 2, cols: 4, rows: 2 } };
+    assert.equal(movePanel(layout, "panel", Number.MAX_SAFE_INTEGER, 0), layout);
+    assert.equal(movePanel(layout, "panel", 0, Number.POSITIVE_INFINITY), layout);
+    assert.equal(resizePanel(layout, "panel", Number.MAX_SAFE_INTEGER, 0), layout);
+    assert.equal(resizePanel(layout, "panel", 0, Number.MAX_SAFE_INTEGER + 1), layout);
+
+    const unsafeLayout = { panel: { col: 1, row: 1e16, cols: 4, rows: 2 } };
+    assert.equal(movePanel(unsafeLayout, "panel", 0, 1), unsafeLayout);
+    assert.equal(resizePanel(unsafeLayout, "panel", 1, 0), unsafeLayout);
+    assert.deepEqual(layout, { panel: { col: 1, row: 2, cols: 4, rows: 2 } });
   });
 
   it("returns a complete valid migration without writing browser storage", () => {

@@ -28,14 +28,32 @@ const roundHalfUp = (value) => Math.sign(value) * Math.floor(Math.abs(value) + 0
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 function normalizeRect(rect) {
+  if (![rect.col, rect.row, rect.cols, rect.rows].every(Number.isSafeInteger)) return null;
   const cols = clamp(rect.cols, PANEL_BOUNDS.minCols, PANEL_BOUNDS.maxCols);
   const rows = clamp(rect.rows, PANEL_BOUNDS.minRows, PANEL_BOUNDS.maxRows);
-  return {
+  const normalized = {
     col: clamp(rect.col, 1, GRID.columns - cols + 1),
     row: Math.max(1, rect.row),
     cols,
     rows,
   };
+  return isLayoutRect(normalized) ? normalized : null;
+}
+
+function isLayoutRect(rect) {
+  return (
+    rect !== null &&
+    typeof rect === "object" &&
+    [rect.col, rect.row, rect.cols, rect.rows].every(Number.isSafeInteger) &&
+    rect.col >= 1 &&
+    rect.row >= 1 &&
+    rect.cols >= PANEL_BOUNDS.minCols &&
+    rect.cols <= PANEL_BOUNDS.maxCols &&
+    rect.rows >= PANEL_BOUNDS.minRows &&
+    rect.rows <= PANEL_BOUNDS.maxRows &&
+    rect.col + rect.cols - 1 <= GRID.columns &&
+    Number.isSafeInteger(rect.row + rect.rows - 1)
+  );
 }
 
 function overlaps(a, b) {
@@ -53,14 +71,31 @@ function collides(layout, candidate, excludedId) {
   );
 }
 
+function placeBelow(layout, rect) {
+  if (!isLayoutRect(rect)) return null;
+  const candidate = { ...rect };
+  while (collides(layout, candidate)) {
+    const nextRow = candidate.row + 1;
+    if (
+      !Number.isSafeInteger(nextRow) ||
+      nextRow === candidate.row ||
+      !Number.isSafeInteger(nextRow + candidate.rows - 1)
+    ) {
+      return null;
+    }
+    candidate.row = nextRow;
+  }
+  return candidate;
+}
+
 function isV2Rect(rect) {
   return (
     rect !== null &&
     typeof rect === "object" &&
-    Number.isInteger(rect.col) &&
-    Number.isInteger(rect.row) &&
-    Number.isInteger(rect.cols) &&
-    Number.isInteger(rect.rows) &&
+    Number.isSafeInteger(rect.col) &&
+    Number.isSafeInteger(rect.row) &&
+    Number.isSafeInteger(rect.cols) &&
+    Number.isSafeInteger(rect.rows) &&
     rect.col >= 1 &&
     rect.col <= 12 &&
     rect.cols >= 2 &&
@@ -76,14 +111,22 @@ function migrateRect(rect) {
   // v2 used 112px tracks with 14px gaps; v3 advances 70px per row (56 + 14).
   const oldTopPx = (rect.row - 1) * 126;
   const oldHeightPx = (rect.rows * 112) + ((rect.rows - 1) * 14);
+  const newCol = (2 * rect.col) - 1;
+  const newCols = 2 * rect.cols;
   const newRow = roundHalfUp(oldTopPx / 70) + 1;
+  const newRows = roundHalfUp((oldHeightPx + 14) / 70);
+  const newTopPx = (newRow - 1) * 70;
+  if (
+    ![oldTopPx, oldHeightPx, newCol, newCols, newRow, newRows, newTopPx]
+      .every(Number.isSafeInteger)
+  ) return null;
   const migrated = normalizeRect({
-    col: (2 * rect.col) - 1,
+    col: newCol,
     row: newRow,
-    cols: 2 * rect.cols,
-    rows: roundHalfUp((oldHeightPx + 14) / 70),
+    cols: newCols,
+    rows: newRows,
   });
-  return Math.abs(oldTopPx - ((newRow - 1) * 70)) <= 35 ? migrated : null;
+  return migrated && Math.abs(oldTopPx - newTopPx) <= 35 ? migrated : null;
 }
 
 export function migrateV2Layout(saved, panelIds) {
@@ -96,9 +139,7 @@ export function migrateV2Layout(saved, panelIds) {
     const savedRect = source[id];
     const fallback = DEFAULT_LAYOUT[id] ?? { col: 1, row: 1, cols: 4, rows: 2 };
     const migrated = isV2Rect(savedRect) ? migrateRect(savedRect) : null;
-    const candidate = { ...(migrated ?? fallback) };
-    while (collides(layout, candidate)) candidate.row += 1;
-    layout[id] = candidate;
+    layout[id] = placeBelow(layout, migrated) ?? placeBelow(layout, fallback) ?? { ...fallback };
   }
 
   return layout;
@@ -106,18 +147,28 @@ export function migrateV2Layout(saved, panelIds) {
 
 export function movePanel(layout, id, dx, dy) {
   const current = layout[id];
-  if (!current || !Number.isInteger(dx) || !Number.isInteger(dy)) return layout;
+  if (
+    !isLayoutRect(current) ||
+    !Object.values(layout).every(isLayoutRect) ||
+    !Number.isSafeInteger(dx) ||
+    !Number.isSafeInteger(dy)
+  ) return layout;
   const candidate = normalizeRect({ ...current, col: current.col + dx, row: current.row + dy });
-  return collides(layout, candidate, id) ? layout : { ...layout, [id]: candidate };
+  return !candidate || collides(layout, candidate, id) ? layout : { ...layout, [id]: candidate };
 }
 
 export function resizePanel(layout, id, dw, dh) {
   const current = layout[id];
-  if (!current || !Number.isInteger(dw) || !Number.isInteger(dh)) return layout;
+  if (
+    !isLayoutRect(current) ||
+    !Object.values(layout).every(isLayoutRect) ||
+    !Number.isSafeInteger(dw) ||
+    !Number.isSafeInteger(dh)
+  ) return layout;
   const candidate = normalizeRect({
     ...current,
     cols: current.cols + dw,
     rows: current.rows + dh,
   });
-  return collides(layout, candidate, id) ? layout : { ...layout, [id]: candidate };
+  return !candidate || collides(layout, candidate, id) ? layout : { ...layout, [id]: candidate };
 }
