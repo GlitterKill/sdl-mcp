@@ -69,6 +69,8 @@ type CreateResult =
   | { readonly status: "writer"; readonly lease: LifetimeWriterLease }
   | { readonly status: "exists" | "contended" | "failure" };
 
+type CleanupOutcome = "removed" | "restored" | "uncertain";
+
 function strictIso(date: Date): string {
   const value = date.toISOString();
   if (!ISO_TIMESTAMP.test(value)) throw new Error("Invalid lifetime lock timestamp");
@@ -164,39 +166,84 @@ async function cleanupExactCreatedPath(
   expected: LifetimeSourceSnapshot | undefined,
   candidate: string,
   fileSystem: LifetimeFileSystem,
-): Promise<void> {
-  if (!expected) return;
+): Promise<CleanupOutcome> {
+  if (!expected) {
+    try {
+      await fileSystem.lstat(path, { bigint: true });
+      return "uncertain";
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "uncertain";
+    }
+    try {
+      await fileSystem.lstat(candidate, { bigint: true });
+      return "uncertain";
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ENOENT" ? "removed" : "uncertain";
+    }
+  }
   try {
     await fileSystem.lstat(candidate, { bigint: true });
-    return;
+    return "uncertain";
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "uncertain";
   }
-  await removeExactLifetimeSource(path, expected, candidate, fileSystem, true)
-    .catch(() => false);
+  try {
+    if (await removeExactLifetimeSource(path, expected, candidate, fileSystem, true)) {
+      return "removed";
+    }
+  } catch {
+    // The rename may already have happened. Inspect both names before deciding
+    // whether the anchor may safely be retired.
+  }
+  try {
+    const current = await readLifetimeSource(path, fileSystem, MAX_LOCK_BYTES);
+    return sameLifetimeIdentity(current.snapshot, expected) ? "restored" : "uncertain";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "uncertain";
+  }
+  try {
+    await fileSystem.lstat(candidate, { bigint: true });
+    return "uncertain";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "removed" : "uncertain";
+  }
 }
 
 async function cleanupCreatedWithWitness(
   path: string,
   witnessPath: string,
   fileSystem: LifetimeFileSystem,
-): Promise<void> {
+): Promise<CleanupOutcome> {
   try {
     const witness = await readLifetimeSource(witnessPath, fileSystem, MAX_LOCK_BYTES);
-    await cleanupExactCreatedPath(
+    const created = await cleanupExactCreatedPath(
       path,
       witness.snapshot,
       `${witnessPath}.cleanup-next`,
       fileSystem,
     );
-    await removeExactLifetimeSource(
+    if (created !== "removed") {
+      try {
+        const current = await readLifetimeSource(path, fileSystem, MAX_LOCK_BYTES);
+        if (sameLifetimeIdentity(current.snapshot, witness.snapshot)) return created;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "uncertain";
+      }
+      try {
+        await fileSystem.lstat(`${witnessPath}.cleanup-next`, { bigint: true });
+        return "uncertain";
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "uncertain";
+      }
+    }
+    return cleanupExactCreatedPath(
       witnessPath,
       witness.snapshot,
       `${witnessPath}.cleanup-next`,
       fileSystem,
     );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  } catch {
+    return "uncertain";
   }
 }
 
@@ -318,6 +365,7 @@ async function createWriterLock(
   let anchorWitness = false;
   let claim: LifetimeSourceClaim | undefined;
   let lockIdentity: LifetimeSourceSnapshot | undefined;
+  let lockCreated = false;
   let lockWitness = false;
   let writer = false;
   try {
@@ -347,12 +395,13 @@ async function createWriterLock(
       return { status: "failure" };
     }
     if (anchorWitness) {
-      if (!await removeExactLifetimeSource(
+      const outcome = await cleanupExactCreatedPath(
         anchorWitnessPath,
         anchorIdentity,
         `${anchorWitnessPath}.cleanup-next`,
         fileSystem,
-      )) return { status: "failure" };
+      );
+      if (outcome !== "removed") return { status: "failure" };
       anchorWitness = false;
     }
     try {
@@ -371,6 +420,7 @@ async function createWriterLock(
 
     try {
       handle = await fileSystem.open(lockPath, "wx", 0o600);
+      lockCreated = true;
     } catch (error) {
       return (error as NodeJS.ErrnoException).code === "EEXIST"
         ? { status: "exists" }
@@ -399,13 +449,13 @@ async function createWriterLock(
       return { status: "failure" };
     }
     if (lockWitness) {
-      if (!await removeExactLifetimeSource(
+      const outcome = await cleanupExactCreatedPath(
         lockWitnessPath,
         lockIdentity,
         `${lockWitnessPath}.cleanup-next`,
         fileSystem,
-      )) return { status: "failure" };
-      lockWitness = false;
+      );
+      if (outcome === "removed") lockWitness = false;
     }
     writer = true;
     return { status: "writer", lease };
@@ -413,13 +463,34 @@ async function createWriterLock(
     return { status: "failure" };
   } finally {
     await closeQuietly(handle);
+    let dependenciesRemoved = !lockWitness;
     if (!writer) {
-      if (lockWitness) await cleanupCreatedWithWitness(lockPath, lockWitnessPath, fileSystem);
-      else await cleanupExactCreatedPath(lockPath, lockIdentity, lockWitnessPath, fileSystem);
+      if (lockCreated) {
+        const lockCleanup = lockWitness
+          ? await cleanupCreatedWithWitness(lockPath, lockWitnessPath, fileSystem)
+          : await cleanupExactCreatedPath(lockPath, lockIdentity, lockWitnessPath, fileSystem);
+        dependenciesRemoved = lockCleanup === "removed";
+      } else {
+        dependenciesRemoved = true;
+      }
     }
-    if (claim) await releaseLifetimeSourceClaim(claim, fileSystem).catch(() => undefined);
-    if (anchorWitness) await cleanupCreatedWithWitness(anchorPath, anchorWitnessPath, fileSystem);
-    else await cleanupExactCreatedPath(anchorPath, anchorIdentity, anchorWitnessPath, fileSystem);
+    let claimReleased = true;
+    if (claim) {
+      claimReleased = await releaseLifetimeSourceClaim(claim, fileSystem)
+        .then(() => true, () => false);
+    }
+    if (dependenciesRemoved && claimReleased) {
+      if (anchorWitness) {
+        await cleanupCreatedWithWitness(anchorPath, anchorWitnessPath, fileSystem);
+      } else {
+        await cleanupExactCreatedPath(
+          anchorPath,
+          anchorIdentity,
+          `${anchorPath}.cleanup`,
+          fileSystem,
+        );
+      }
+    }
   }
 }
 

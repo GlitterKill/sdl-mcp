@@ -430,6 +430,25 @@ async function pathAbsent(path: string, fileSystem: LifetimeFileSystem): Promise
   }
 }
 
+async function fixedClaimStat(
+  path: string,
+  fileSystem: LifetimeFileSystem,
+): Promise<BigIntStats | "absent" | "invalid"> {
+  for (let attempt = 0; attempt < CLAIM_RACE_RECHECK_ATTEMPTS; attempt++) {
+    try {
+      const stat = await fileSystem.lstat(path, { bigint: true });
+      regularFile(stat, "Lifetime claim", MAX_CLAIM_BYTES);
+      return stat;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return "absent";
+      if (code !== "EPERM" && code !== "EACCES") return "invalid";
+      if (attempt + 1 < CLAIM_RACE_RECHECK_ATTEMPTS) await waitOneMillisecond();
+    }
+  }
+  return "invalid";
+}
+
 async function writeClosedFile(
   path: string,
   content: string,
@@ -804,14 +823,20 @@ async function recoverStrandedAuxiliaries(
   if (allNames.length === 0) return "available";
   if (allNames.length > MAX_LIFETIME_AUXILIARY_SCAN) return "invalid";
   const entries: AuxiliaryEntry[] = [];
-  const logicalNames = new Set<string>();
+  const logicalEntries = new Map<string, AuxiliaryEntry>();
   try {
     for (const name of allNames) {
       const path = directChildPath(directory, resolve(directory, name), "Lifetime auxiliary");
       const source = await readLifetimeSource(path, fileSystem, MAX_EVIDENCE_SOURCE_BYTES);
       const entry = classifyAuxiliary(directory, name, source);
-      if (!entry || logicalNames.has(entry.logicalName)) return "invalid";
-      logicalNames.add(entry.logicalName);
+      if (!entry) return "invalid";
+      const existing = logicalEntries.get(entry.logicalName);
+      if (existing && (
+        existing.kind !== entry.kind ||
+        existing.nonce !== entry.nonce ||
+        !sameLifetimeSource(existing.snapshot, entry.snapshot)
+      )) return "invalid";
+      logicalEntries.set(entry.logicalName, entry);
       entries.push(entry);
     }
   } catch (error) {
@@ -962,13 +987,10 @@ async function recoverExistingClaim(
   options: LifetimeClaimOptions,
 ): Promise<ExistingClaimOutcome> {
   const fixedPath = resolve(directory, LIFETIME_CLAIM_FILENAME);
-  let fixedStat: BigIntStats;
-  try {
-    fixedStat = await fileSystem.lstat(fixedPath, { bigint: true });
-    regularFile(fixedStat, "Lifetime claim", MAX_CLAIM_BYTES);
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "raced" : "invalid";
-  }
+  const fixedState = await fixedClaimStat(fixedPath, fileSystem);
+  if (fixedState === "absent") return "raced";
+  if (fixedState === "invalid") return "invalid";
+  const fixedStat = fixedState;
   let fixed: Awaited<ReturnType<typeof readLifetimeSource>> | undefined;
   for (let attempt = 0; attempt < CLAIM_RACE_RECHECK_ATTEMPTS; attempt++) {
     try {
@@ -1126,7 +1148,12 @@ export async function settleLifetimeClaim(
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
   const trusted = await validateLifetimeDirectory(directory, fileSystem);
   for (let attempt = 0; attempt < (waitForLive ? CLAIM_WAIT_ATTEMPTS : 4); attempt++) {
-    if (await pathAbsent(resolve(trusted, LIFETIME_CLAIM_FILENAME), fileSystem)) {
+    const fixedState = await fixedClaimStat(
+      resolve(trusted, LIFETIME_CLAIM_FILENAME),
+      fileSystem,
+    );
+    if (fixedState === "invalid") return "invalid";
+    if (fixedState === "absent") {
       const auxiliary = await recoverStrandedAuxiliaries(
         trusted,
         fileSystem,

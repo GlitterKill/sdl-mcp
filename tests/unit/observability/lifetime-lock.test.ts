@@ -602,6 +602,201 @@ describe("lifetime persistence lock", () => {
     }
   });
 
+  it("recovers an ordinary create anchor interrupted after its cleanup rename", async () => {
+    const directory = await temporaryDirectory();
+    const nonce = "71".repeat(16);
+    const cleanupPath = join(
+      directory,
+      `.sdl-observability-lifetime.create.${nonce}.cleanup`,
+    );
+    let interrupted = false;
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      randomBytes: () => Buffer.from(nonce, "hex"),
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          if (!interrupted && String(args[0]) === cleanupPath) {
+            interrupted = true;
+            throw Object.assign(new Error("anchor cleanup interrupted"), { code: "EIO" });
+          }
+          return open(...args);
+        },
+      },
+    });
+    assertWriter(result);
+    assert.equal(interrupted, true);
+    assert.equal((await lstat(cleanupPath)).isFile(), true);
+    assert.equal(
+      (await auxiliaryFiles(directory)).some((name) => name.includes("create-source")),
+      false,
+    );
+    assert.equal(await releaseLifetimeLease(result.lease), true);
+
+    const successor = await acquireLifetimeLease(directory, {
+      pid: 4343,
+      randomBytes: () => Buffer.alloc(16, 0x72),
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
+  it("recovers an inode-zero lock witness interrupted after its cleanup rename", async () => {
+    const directory = await temporaryDirectory();
+    const nonce = "73".repeat(16);
+    const cleanupPath = join(
+      directory,
+      `.sdl-observability-lifetime.create-lock.${nonce}.cleanup-next`,
+    );
+    const zero = { dev: 0n, ino: 0n };
+    const base = identityFixtureFileSystem((path) => {
+      const name = basename(path);
+      return name === LIFETIME_LOCK_FILENAME ||
+          name.startsWith(".sdl-observability-lifetime.create.") ||
+          name.startsWith(".sdl-observability-lifetime.create-source.") ||
+          name.startsWith(".sdl-observability-lifetime.create-lock.") ||
+          name.startsWith(".sdl-observability-lifetime.claim-source.") ||
+          name.startsWith(".sdl-observability-lifetime.release.")
+        ? zero
+        : undefined;
+    });
+    let interrupted = false;
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      randomBytes: () => Buffer.from(nonce, "hex"),
+      fileSystem: {
+        ...base,
+        open: async (...args: Parameters<typeof open>) => {
+          if (!interrupted && String(args[0]) === cleanupPath) {
+            interrupted = true;
+            throw Object.assign(new Error("lock witness cleanup interrupted"), { code: "EIO" });
+          }
+          return base.open(...args);
+        },
+      },
+    });
+    assertWriter(result);
+    assert.equal(interrupted, true);
+    assert.equal((await lstat(cleanupPath)).isFile(), true);
+    assert.equal(await releaseLifetimeLease(result.lease, { fileSystem: base }), true);
+
+    const successor = await acquireLifetimeLease(directory, {
+      pid: 4343,
+      randomBytes: () => Buffer.alloc(16, 0x74),
+      isClaimantPidAlive: () => false,
+      fileSystem: base,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease, { fileSystem: base }), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
+  it("recovers an inode-zero created lock interrupted before witness cleanup", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const nonce = "77".repeat(16);
+    const witnessPath = join(
+      directory,
+      `.sdl-observability-lifetime.create-lock.${nonce}`,
+    );
+    const cleanupPath = `${witnessPath}.cleanup-next`;
+    const zero = { dev: 0n, ino: 0n };
+    const base = identityFixtureFileSystem((path) => {
+      const name = basename(path);
+      return name === LIFETIME_LOCK_FILENAME ||
+          name.startsWith(".sdl-observability-lifetime.create.") ||
+          name.startsWith(".sdl-observability-lifetime.create-source.") ||
+          name.startsWith(".sdl-observability-lifetime.create-lock.") ||
+          name.startsWith(".sdl-observability-lifetime.claim-source.") ||
+          name.startsWith(".sdl-observability-lifetime.release.")
+        ? zero
+        : undefined;
+    });
+    let validationFailed = false;
+    let cleanupInterrupted = false;
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      randomBytes: () => Buffer.from(nonce, "hex"),
+      fileSystem: {
+        ...base,
+        open: async (...args: Parameters<typeof open>) => {
+          const path = String(args[0]);
+          if (!validationFailed && path === lockPath && typeof args[1] === "number") {
+            validationFailed = true;
+            throw Object.assign(new Error("inode-zero validation failed"), { code: "EIO" });
+          }
+          if (validationFailed && !cleanupInterrupted && path === cleanupPath) {
+            cleanupInterrupted = true;
+            throw Object.assign(new Error("created lock cleanup interrupted"), { code: "EIO" });
+          }
+          return base.open(...args);
+        },
+      },
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "ioFailure" });
+    assert.equal(cleanupInterrupted, true);
+    assert.equal((await lstat(witnessPath)).isFile(), true);
+    assert.equal((await lstat(cleanupPath)).isFile(), true);
+
+    const successor = await acquireLifetimeLease(directory, {
+      pid: 4343,
+      randomBytes: () => Buffer.alloc(16, 0x78),
+      isClaimantPidAlive: () => false,
+      fileSystem: base,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease, { fileSystem: base }), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
+  it("recovers a created lock interrupted after its cleanup rename", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const nonce = "75".repeat(16);
+    const candidatePath = join(
+      directory,
+      `.sdl-observability-lifetime.create-lock.${nonce}`,
+    );
+    let validationFailed = false;
+    let cleanupInterrupted = false;
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      randomBytes: () => Buffer.from(nonce, "hex"),
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          const path = String(args[0]);
+          if (!validationFailed && path === lockPath && typeof args[1] === "number") {
+            validationFailed = true;
+            throw Object.assign(new Error("lock validation failed"), { code: "EIO" });
+          }
+          if (!cleanupInterrupted && path === candidatePath) {
+            cleanupInterrupted = true;
+            throw Object.assign(new Error("created lock cleanup interrupted"), { code: "EIO" });
+          }
+          return open(...args);
+        },
+      },
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "ioFailure" });
+    assert.equal(validationFailed, true);
+    assert.equal(cleanupInterrupted, true);
+    assert.equal((await lstat(candidatePath)).isFile(), true);
+    assert.equal(
+      (await auxiliaryFiles(directory)).some((name) => name === `.sdl-observability-lifetime.create.${nonce}`),
+      true,
+    );
+
+    const successor = await acquireLifetimeLease(directory, {
+      pid: 4343,
+      randomBytes: () => Buffer.alloc(16, 0x76),
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
   it("refreshes only the current owner after a successful checkpoint", async () => {
     const directory = await temporaryDirectory();
     const result = await acquireLifetimeLease(directory, {
@@ -831,6 +1026,88 @@ describe("lifetime persistence lock", () => {
     assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" });
     assert.ok(fixedOpens >= 2 && fixedOpens <= 16, `bounded opens: ${fixedOpens}`);
     assert.deepEqual(await auxiliaryFiles(directory), before);
+  });
+
+  it("retries fixed-claim lstat denial during an exact cleanup rename", async () => {
+    for (const boundary of ["absence", "recovery"] as const) {
+      for (const code of ["EPERM", "EACCES"] as const) {
+        const directory = await temporaryDirectory();
+        const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+        const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+        await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+        await crashClaimWorker(directory, lockPath, "claim-before-move");
+        const recordName = (await readdir(directory)).find((name) =>
+          name.startsWith(".sdl-observability-lifetime.claim-record."));
+        assert.ok(recordName);
+        const nonce = recordName.slice(
+          ".sdl-observability-lifetime.claim-record.".length,
+          -".json".length,
+        );
+        const cleanupPath = join(
+          directory,
+          `.sdl-observability-lifetime.claim-cleanup.${nonce}`,
+        );
+        let fixedLstats = 0;
+        let raced = false;
+
+        const result = await acquireLifetimeLease(directory, {
+          pid: 4242,
+          isPidAlive: () => false,
+          isClaimantPidAlive: () => false,
+          fileSystem: {
+            lstat: async (...args: Parameters<typeof lstat>) => {
+              if (String(args[0]) === fixedPath) {
+                fixedLstats++;
+                const target = boundary === "absence" ? 1 : 2;
+                if (!raced && fixedLstats === target) {
+                  raced = true;
+                  await rename(fixedPath, cleanupPath);
+                  throw Object.assign(new Error(`${boundary} lstat ${code}`), { code });
+                }
+              }
+              return lstat(...args);
+            },
+          },
+        });
+        assert.equal(raced, true, `${boundary}:${code}`);
+        assertWriter(result);
+        assert.equal(await releaseLifetimeLease(result.lease), true);
+      }
+    }
+  });
+
+  it("fails closed after bounded fixed-claim lstat denial", async () => {
+    for (const boundary of ["absence", "recovery"] as const) {
+      const directory = await temporaryDirectory();
+      const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+      const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+      await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+      await crashClaimWorker(directory, lockPath, "claim-before-move");
+      const before = await auxiliaryFiles(directory);
+      let fixedLstats = 0;
+
+      const result = await acquireLifetimeLease(directory, {
+        pid: 4242,
+        isPidAlive: () => false,
+        isClaimantPidAlive: () => false,
+        fileSystem: {
+          lstat: async (...args: Parameters<typeof lstat>) => {
+            if (String(args[0]) === fixedPath) {
+              fixedLstats++;
+              if (boundary === "absence" || fixedLstats > 1) {
+                throw Object.assign(new Error(`${boundary} lstat remains inaccessible`), {
+                  code: boundary === "absence" ? "EPERM" : "EACCES",
+                });
+              }
+            }
+            return lstat(...args);
+          },
+        },
+      });
+      assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" }, boundary);
+      assert.ok(fixedLstats >= 2 && fixedLstats <= 16, `${boundary}:${fixedLstats}`);
+      assert.deepEqual(await auxiliaryFiles(directory), before);
+    }
   });
 
   it("rechecks a claim when a raced witness open reports EPERM", async () => {
