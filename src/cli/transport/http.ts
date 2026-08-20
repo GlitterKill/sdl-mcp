@@ -49,9 +49,17 @@ import { SessionManager } from "../../mcp/session-manager.js";
 import { createRuntimeIdentity } from "../../util/runtime-identity.js";
 import type {
   BeamExplainStore,
+  LifetimeEnvelopeV1,
+  LifetimeRouteErrorCode,
+  LifetimeRouteErrorV1,
   ObservabilityService,
   ObservabilitySnapshot,
   TimeseriesWindow,
+} from "../../observability/index.js";
+import {
+  LIFETIME_SCHEMA_VERSION,
+  parseResetRequest,
+  repositoryStorageKey,
 } from "../../observability/index.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -126,6 +134,7 @@ export type HttpTransportServices = {
   sessionManager?: SessionManager;
   symbolGetCard?: typeof handleSymbolGetCard;
   observabilityService?: ObservabilityService | null;
+  isRegisteredRepoId?: (repoId: string) => boolean;
   beamExplainStore?: BeamExplainStore | null;
   observabilitySseHeartbeatMs?: number;
   observabilitySseMaxStreamMs?: number;
@@ -308,6 +317,109 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
 }
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_LIFETIME_RESET_BODY_BYTES = 4 * 1024;
+
+const LIFETIME_ROUTE_ERRORS: Record<LifetimeRouteErrorCode, {
+  status: number;
+  message: string;
+  retryable: boolean;
+}> = {
+  invalid_query: { status: 400, message: "The repoId query parameter is invalid.", retryable: false },
+  invalid_json: { status: 400, message: "The request body must contain valid JSON.", retryable: false },
+  invalid_body: { status: 400, message: "The request body is invalid.", retryable: false },
+  repository_not_found: { status: 404, message: "The repository was not found.", retryable: false },
+  read_only: { status: 409, message: "Repository lifetime is read-only.", retryable: false },
+  lifetime_capacity_exceeded: { status: 409, message: "Repository lifetime capacity is exceeded.", retryable: false },
+  recovery_required: { status: 409, message: "Repository lifetime recovery is required.", retryable: false },
+  body_too_large: { status: 413, message: "The request body exceeds 4096 bytes.", retryable: false },
+  unsupported_media_type: { status: 415, message: "Content-Type must be application/json.", retryable: false },
+  confirmation_mismatch: { status: 422, message: "The reset confirmation does not match.", retryable: false },
+  persistence_failed: { status: 503, message: "Repository lifetime persistence failed.", retryable: true },
+  persistence_indeterminate: { status: 503, message: "Repository lifetime persistence is indeterminate.", retryable: false },
+};
+
+function lifetimeRouteError(res: ServerResponse, code: LifetimeRouteErrorCode): void {
+  const detail = LIFETIME_ROUTE_ERRORS[code];
+  const payload: LifetimeRouteErrorV1 = {
+    schemaVersion: LIFETIME_SCHEMA_VERSION,
+    error: code === "persistence_failed"
+      ? { code, message: detail.message, retryable: true }
+      : { code, message: detail.message, retryable: false },
+  };
+  json(res, detail.status, payload);
+}
+
+function requestedLifetimeRepoId(url: URL): string | null {
+  const values = url.searchParams.getAll("repoId");
+  if (values.length !== 1) return null;
+  const repoId = values[0]?.trim() ?? "";
+  if (!repoId || repoId === "_global") return null;
+  try {
+    repositoryStorageKey(repoId);
+    return repoId;
+  } catch {
+    return null;
+  }
+}
+
+type LifetimeJsonRead =
+  | { ok: true; value: unknown }
+  | { ok: false; code: "body_too_large" | "invalid_json" };
+
+async function readLifetimeResetJson(req: IncomingMessage): Promise<LifetimeJsonRead> {
+  const contentLength = req.headers["content-length"];
+  if (
+    typeof contentLength === "string"
+    && /^\d+$/.test(contentLength)
+    && Number(contentLength) > MAX_LIFETIME_RESET_BODY_BYTES
+  ) {
+    req.resume();
+    return { ok: false, code: "body_too_large" };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_LIFETIME_RESET_BODY_BYTES) {
+      req.resume();
+      return { ok: false, code: "body_too_large" };
+    }
+    chunks.push(buffer);
+  }
+  try {
+    return {
+      ok: true,
+      value: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+    };
+  } catch {
+    return { ok: false, code: "invalid_json" };
+  }
+}
+
+function isClosedResetBody(value: unknown): value is { repoId: string; confirmation: string } {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 2 || !keys.includes("repoId") || !keys.includes("confirmation")) return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.repoId !== "string" || typeof record.confirmation !== "string") return false;
+  try {
+    repositoryStorageKey(record.repoId);
+    return record.repoId !== "_global";
+  } catch {
+    return false;
+  }
+}
+
+function hasLifetimeHistory(value: LifetimeEnvelopeV1): boolean {
+  return value.persistenceState !== "recoveryRequired" && (
+    value.resetAt !== null
+    || value.lastCheckpointAt !== null
+    || value.sessionCount > 0
+    || Object.values(value.sections).some((section) => section !== null)
+  );
+}
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Uint8Array[] = [];
@@ -755,6 +867,114 @@ async function routeObservabilityApiRequest(
   const sseMaxStreamMs = services.observabilitySseMaxStreamMs ?? 3_600_000;
 
   if (
+    req.method === "GET"
+    && pathname === "/api/observability/lifetime"
+  ) {
+    if (!observabilityService) {
+      json(res, 503, { error: "observability_disabled" });
+      return true;
+    }
+    const repoId = requestedLifetimeRepoId(url);
+    if (repoId === null) {
+      lifetimeRouteError(res, "invalid_query");
+      return true;
+    }
+    if (!services.isRegisteredRepoId?.(repoId)) {
+      lifetimeRouteError(res, "repository_not_found");
+      return true;
+    }
+    json(res, 200, await observabilityService.getLifetime(repoId));
+    return true;
+  }
+
+  if (
+    req.method === "POST"
+    && pathname === "/api/observability/lifetime/reset"
+  ) {
+    if (!observabilityService) {
+      json(res, 503, { error: "observability_disabled" });
+      return true;
+    }
+    if (req.headers["content-type"] !== "application/json") {
+      lifetimeRouteError(res, "unsupported_media_type");
+      return true;
+    }
+    const read = await readLifetimeResetJson(req);
+    if (!read.ok) {
+      lifetimeRouteError(res, read.code);
+      return true;
+    }
+    if (!isClosedResetBody(read.value)) {
+      lifetimeRouteError(res, "invalid_body");
+      return true;
+    }
+    const expectedConfirmation = `RESET REPOSITORY LIFETIME: ${read.value.repoId}`;
+    if (read.value.confirmation !== expectedConfirmation) {
+      lifetimeRouteError(res, "confirmation_mismatch");
+      return true;
+    }
+    const request = parseResetRequest(read.value);
+    if (!services.isRegisteredRepoId?.(request.repoId)) {
+      lifetimeRouteError(res, "repository_not_found");
+      return true;
+    }
+
+    const current = await observabilityService.getLifetime(request.repoId);
+    if (current.persistenceState === "recoveryRequired") {
+      lifetimeRouteError(res, "recovery_required");
+      return true;
+    }
+    if (current.persistenceState === "capacityExceeded") {
+      lifetimeRouteError(res, "lifetime_capacity_exceeded");
+      return true;
+    }
+    if (!hasLifetimeHistory(current)) {
+      lifetimeRouteError(res, "repository_not_found");
+      return true;
+    }
+    if (current.persistenceState === "readOnly") {
+      lifetimeRouteError(res, "read_only");
+      return true;
+    }
+
+    try {
+      const reset = await observabilityService.resetLifetime(request.repoId);
+      if (reset.persistenceState === "degraded") {
+        lifetimeRouteError(res, "persistence_failed");
+        return true;
+      }
+      if (reset.resetAt === null || reset.lastCheckpointAt === null) {
+        lifetimeRouteError(res, "persistence_failed");
+        return true;
+      }
+      json(res, 200, {
+        schemaVersion: LIFETIME_SCHEMA_VERSION,
+        repoId: request.repoId,
+        epoch: reset.epoch,
+        resetAt: reset.resetAt,
+        lastCheckpointAt: reset.lastCheckpointAt,
+        persistenceState: "ready",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/indeterminate/i.test(message)) {
+        lifetimeRouteError(res, "persistence_indeterminate");
+      } else if (/read-only/i.test(message)) {
+        lifetimeRouteError(res, "read_only");
+      } else if (/capacity exceeded/i.test(message)) {
+        lifetimeRouteError(res, "lifetime_capacity_exceeded");
+      } else if (/recovery required/i.test(message)) {
+        lifetimeRouteError(res, "recovery_required");
+      } else if (/not registered/i.test(message)) {
+        lifetimeRouteError(res, "repository_not_found");
+      } else {
+        lifetimeRouteError(res, "persistence_failed");
+      }
+    }
+    return true;
+  }
+
+  if (
     req.method === "GET" &&
     pathname === "/api/observability/snapshot"
   ) {
@@ -937,6 +1157,7 @@ async function routeObservabilityApiRequest(
     let unsubscribe: (() => void) | null = null;
     let heartbeatTimer: NodeJS.Timeout | null = null;
     let maxStreamTimer: NodeJS.Timeout | null = null;
+    let snapshotDelivery = Promise.resolve();
 
     const sendEvent = (event: string, data: unknown): boolean => {
       if (closed || res.destroyed) return false;
@@ -976,54 +1197,56 @@ async function routeObservabilityApiRequest(
       }
     };
 
-    req.on("close", cleanup);
-
-    maxStreamTimer = setTimeout(() => {
+    const endStream = (): void => {
       cleanup();
       try {
         res.end();
       } catch {
         /* best-effort */
       }
+    };
+
+    const enqueueSnapshot = (snapshot: ObservabilitySnapshot): void => {
+      snapshotDelivery = snapshotDelivery.then(async () => {
+        if (!sendEvent("snapshot", snapshot)) throw new Error("snapshot write failed");
+        const lifetime = await observabilityService.getLifetime(repoId);
+        if (!sendEvent("lifetime", lifetime)) throw new Error("lifetime write failed");
+      }).catch((err) => {
+        logger.warn("Observability SSE snapshot pair failed", { error: err });
+        endStream();
+      });
+    };
+
+    req.on("close", cleanup);
+
+    maxStreamTimer = setTimeout(() => {
+      endStream();
     }, sseMaxStreamMs);
     maxStreamTimer.unref();
 
     try {
-      const initial = observabilityService.getSnapshot(repoId);
-      if (!sendEvent("snapshot", initial)) {
-        cleanup();
-        res.end();
-        return true;
-      }
+      enqueueSnapshot(observabilityService.getSnapshot(repoId));
+      // Subscribe before awaiting lifetime refresh so a tick cannot fall into
+      // the initial snapshot/lifetime delivery window.
+      unsubscribe = observabilityService.onSnapshot(
+        (snap: ObservabilitySnapshot) => {
+          if (snap.repoId === repoId) enqueueSnapshot(snap);
+        },
+      );
+      await snapshotDelivery;
     } catch (err) {
-      logger.warn("Observability SSE initial snapshot failed", {
+      logger.warn("Observability SSE initial snapshot pair failed", {
         error: err,
       });
+      endStream();
+      return true;
     }
-
-    unsubscribe = observabilityService.onSnapshot(
-      (snap: ObservabilitySnapshot) => {
-        if (snap.repoId !== repoId) return;
-        if (!sendEvent("snapshot", snap)) {
-          cleanup();
-          try {
-            res.end();
-          } catch {
-            /* best-effort */
-          }
-        }
-      },
-    );
+    if (closed) return true;
 
     heartbeatTimer = setInterval(() => {
-      if (!sendEvent("heartbeat", { t: Date.now() })) {
-        cleanup();
-        try {
-          res.end();
-        } catch {
-          /* best-effort */
-        }
-      }
+      snapshotDelivery = snapshotDelivery.then(() => {
+        if (!sendEvent("heartbeat", { t: Date.now() })) endStream();
+      });
     }, sseHeartbeatMs);
     heartbeatTimer.unref();
 

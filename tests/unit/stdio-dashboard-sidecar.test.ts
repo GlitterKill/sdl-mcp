@@ -310,6 +310,8 @@ test("stdio observability dashboard sidecar serves only observability routes", a
     const snapshotBody = await readJson(snapshot);
     assert.equal(snapshotBody.repoId, "test-repo");
     assert.deepEqual(snapshotBody.toolOutput, EXPECTED_TOOL_OUTPUT);
+    assert.equal("lifetime" in snapshotBody, false);
+    assert.equal("freshness" in snapshotBody, false);
     const snapshotJson = JSON.stringify(snapshotBody);
     for (const forbidden of [
       "request-secret",
