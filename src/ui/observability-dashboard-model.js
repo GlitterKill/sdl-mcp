@@ -416,6 +416,303 @@ function validAge(value) {
   return Number.isFinite(value) && value >= 0;
 }
 
+const SECTION_IDS = [
+  "cache", "retrieval", "beam", "delta", "indexing", "tokenEfficiency",
+  "predictiveContext", "health", "latency", "pool", "scip", "packed",
+  "ppr", "auditBuffer", "postIndex", "toolOutput", "resources",
+];
+const DYNAMIC_KEY = /^(?:__other__|k:[A-Za-z0-9._:-]{1,64})$/;
+const RECOVERY_REASONS = new Set([
+  "unknownSchema", "corruptCandidates", "indeterminatePublication",
+]);
+const READY_STATES = new Set(["ready", "degraded", "readOnly", "capacityExceeded"]);
+
+// The browser cannot import the server's Zod graph, so this guard mirrors the
+// closed LifetimeEnvelopeV1 wire shape before any value reaches presentation.
+function plainRecord(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function exactRecord(value, validators) {
+  if (!plainRecord(value)) return false;
+  const keys = Object.keys(validators);
+  if (Object.keys(value).length !== keys.length) return false;
+  return keys.every(
+    (key) => Object.hasOwn(value, key) && validators[key](value[key]),
+  );
+}
+
+const counter = (value) => Number.isSafeInteger(value) && value >= 0;
+const finiteTotal = (value) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+const nullableTimestamp = (value) => value === null || timestamp(value) !== null;
+const isNull = (value) => value === null;
+
+function boundedMap(value, maximumKeys, validateValue) {
+  if (!plainRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (
+    keys.length > maximumKeys + 1 ||
+    keys.filter((key) => key !== "__other__").length > maximumKeys
+  ) return false;
+  return keys.every(
+    (key) => DYNAMIC_KEY.test(key) && validateValue(value[key]),
+  );
+}
+
+const counterMap = (value) => boundedMap(value, 32, counter);
+const sampleTotal = (value) => exactRecord(value, {
+  count: counter,
+  sum: finiteTotal,
+  max: finiteTotal,
+});
+const sampleMap = (value) => boundedMap(value, 32, sampleTotal);
+
+const cacheSection = (value) => exactRecord(value, {
+  hits: counter,
+  misses: counter,
+  lookupMs: sampleTotal,
+  perSource: (map) => boundedMap(map, 32, (entry) => exactRecord(entry, {
+    hits: counter,
+    misses: counter,
+    lookupMs: sampleTotal,
+  })),
+});
+const retrievalSection = (value) => exactRecord(value, {
+  calls: counter,
+  emptyResults: counter,
+  latencyMs: sampleTotal,
+  byMode: counterMap,
+  byType: counterMap,
+  candidatesBySource: counterMap,
+  phaseLatencyMs: sampleMap,
+});
+const beamSection = (value) => exactRecord(value, {
+  builds: counter,
+  buildMs: sampleTotal,
+  accepted: counter,
+  evicted: counter,
+  rejected: counter,
+  frontierMax: sampleTotal,
+  retainedHandlesPeak: counter,
+});
+const deltaSection = (value) => exactRecord(value, {
+  computations: counter,
+  blastRadiusMs: sampleTotal,
+  dbRoundTrips: sampleTotal,
+  pathExplanationMs: sampleTotal,
+  fallbackPathQueries: counter,
+});
+const indexingSection = (value) => exactRecord(value, {
+  events: counter,
+  pass1Ms: sampleTotal,
+  pass2Ms: sampleTotal,
+  failures: counter,
+  phaseCounts: counterMap,
+  languageMs: sampleMap,
+  engineDispatch: counterMap,
+  derivedLagMs: sampleTotal,
+});
+const compressionSource = (value) => exactRecord(value, {
+  events: counter,
+  realizedEvents: counter,
+  estimatedTokensAvoided: counter,
+  originalTokens: counter,
+  returnedTokens: counter,
+  savedTokens: counter,
+  opportunities: counter,
+  hits: counter,
+  storedBytes: counter,
+});
+const tokenSection = (value) => exactRecord(value, {
+  calls: counter,
+  usedTokens: counter,
+  savedTokens: counter,
+  compressionBySource: (map) => boundedMap(map, 32, compressionSource),
+});
+const predictiveStrategy = (value) => exactRecord(value, {
+  samples: counter,
+  hits: counter,
+  wasted: counter,
+  accepted: counter,
+  suppressed: counter,
+  latencyReductionMs: sampleTotal,
+});
+const predictiveSection = (value) => exactRecord(value, {
+  outcomeSamples: counter,
+  hitOutcomes: counter,
+  wasteOutcomes: counter,
+  accepted: counter,
+  suppressed: counter,
+  latencyReductionMs: sampleTotal,
+  byStrategy: (map) => boundedMap(map, 32, predictiveStrategy),
+});
+const healthSection = (value) => exactRecord(value, {
+  watcherErrors: counter,
+  watcherRestarts: counter,
+  watchmanWarnings: counter,
+  watchmanRecrawls: counter,
+  watchmanFreshInstances: counter,
+});
+const countSampleErrors = (value) => exactRecord(value, {
+  calls: counter,
+  errors: counter,
+  durationMs: sampleTotal,
+});
+const latencySection = (value) => exactRecord(value, {
+  calls: counter,
+  errors: counter,
+  durationMs: sampleTotal,
+  perTool: (map) => boundedMap(map, 128, countSampleErrors),
+});
+const scipSection = (value) => exactRecord(value, {
+  ingests: counter,
+  successes: counter,
+  failures: counter,
+  edgesCreated: counter,
+  edgesUpgraded: counter,
+  ingestMs: sampleTotal,
+});
+const packedEncoder = (value) => exactRecord(value, {
+  decisions: counter,
+  packed: counter,
+  fallback: counter,
+  packedBytes: counter,
+  baselineBytes: counter,
+  packedTokens: counter,
+  baselineTokens: counter,
+});
+const packedSection = (value) => exactRecord(value, {
+  decisions: counter,
+  packed: counter,
+  fallback: counter,
+  packedBytes: counter,
+  baselineBytes: counter,
+  packedTokens: counter,
+  baselineTokens: counter,
+  axisHits: counterMap,
+  byEncoder: (map) => boundedMap(map, 128, packedEncoder),
+});
+const pprSection = (value) => exactRecord(value, {
+  runs: counter,
+  native: counter,
+  javascript: counter,
+  fallback: counter,
+  computeMs: sampleTotal,
+  touched: sampleTotal,
+  seeds: sampleTotal,
+});
+const postIndexSection = (value) => exactRecord(value, {
+  sessions: counter,
+  durationMs: sampleTotal,
+  timeouts: counter,
+});
+const toolOutputCounters = {
+  calls: counter,
+  errors: counter,
+  rawBytes: counter,
+  projectedBytes: counter,
+  rawTokens: counter,
+  projectedTokens: counter,
+  removedFields: counter,
+  handled: counter,
+  truncated: counter,
+  recoveryEmitted: counter,
+  invalidRecovery: counter,
+  projectedBytesMax: counter,
+  projectedTokensMax: counter,
+  detailCounts: counterMap,
+  profileCounts: counterMap,
+};
+const toolOutputCounterRecord = (value) => exactRecord(value, toolOutputCounters);
+const toolOutputSection = (value) => exactRecord(value, {
+  ...toolOutputCounters,
+  perTool: (map) => boundedMap(map, 128, toolOutputCounterRecord),
+});
+
+const sectionValidators = {
+  cache: cacheSection,
+  retrieval: retrievalSection,
+  beam: beamSection,
+  delta: deltaSection,
+  indexing: indexingSection,
+  tokenEfficiency: tokenSection,
+  predictiveContext: predictiveSection,
+  health: healthSection,
+  latency: latencySection,
+  pool: isNull,
+  scip: scipSection,
+  packed: packedSection,
+  ppr: pprSection,
+  auditBuffer: isNull,
+  postIndex: postIndexSection,
+  toolOutput: toolOutputSection,
+  resources: isNull,
+};
+
+function lifetimeSections(value) {
+  if (!plainRecord(value) || Object.keys(value).length !== SECTION_IDS.length) return false;
+  return SECTION_IDS.every((section) => {
+    if (!Object.hasOwn(value, section)) return false;
+    const sectionValue = value[section];
+    return sectionValue === null || sectionValidators[section](sectionValue);
+  });
+}
+
+const freshnessValidators = Object.fromEntries(
+  SECTION_IDS.map((section) => [section, nullableTimestamp]),
+);
+const freshness = (value) => exactRecord(value, freshnessValidators);
+const processPeaks = (value) => exactRecord(value, {
+  cpuPct: finiteTotal,
+  rssMb: finiteTotal,
+  heapUsedMb: finiteTotal,
+  heapTotalMb: finiteTotal,
+  eventLoopLagMs: finiteTotal,
+});
+
+function validReadyEnvelope(value) {
+  if (!exactRecord(value, {
+    schemaVersion: (field) => field === 1,
+    sampleIntervalMs: validInterval,
+    generatedAt: (field) => timestamp(field) !== null,
+    repoId: (field) => typeof field === "string" && field.length >= 1 && field.length <= 128,
+    epoch: counter,
+    resetAt: nullableTimestamp,
+    lastCheckpointAt: nullableTimestamp,
+    persistenceState: (field) => READY_STATES.has(field),
+    sessionCount: counter,
+    saturated: (field) => typeof field === "boolean",
+    sections: lifetimeSections,
+    freshness,
+    processPeaks: (field) => field === null || processPeaks(field),
+  })) return false;
+  if (value.persistenceState !== "capacityExceeded") return true;
+  return value.epoch === 0 && value.sessionCount === 0 && value.resetAt === null
+    && value.lastCheckpointAt === null && value.saturated === false
+    && SECTION_IDS.every((section) => value.sections[section] === null);
+}
+
+function validRecoveryEnvelope(value) {
+  return exactRecord(value, {
+    schemaVersion: (field) => field === 1,
+    sampleIntervalMs: validInterval,
+    generatedAt: (field) => timestamp(field) !== null,
+    repoId: (field) => typeof field === "string" && field.length >= 1 && field.length <= 128,
+    persistenceState: (field) => field === "recoveryRequired",
+    recoveryReason: (field) => RECOVERY_REASONS.has(field),
+  });
+}
+
+function validLifetimeEnvelope(value) {
+  if (!plainRecord(value)) return false;
+  return value.persistenceState === "recoveryRequired"
+    ? validRecoveryEnvelope(value)
+    : validReadyEnvelope(value);
+}
+
 export function sessionPanelState(input) {
   // Receipt timestamps share performance.now()'s monotonic clock. Server ISO
   // timestamps are compared only with other timestamps from server payloads.
@@ -463,6 +760,9 @@ function presentation(state, sections, processPeaks, checkpointAgeMs, warning) {
 
 export function lifetimePresentation(envelope, transportAgeMs) {
   if (envelope === null || envelope === undefined) {
+    return presentation("UNAVAILABLE", null, null, null, "Lifetime metrics are unavailable.");
+  }
+  if (!validLifetimeEnvelope(envelope)) {
     return presentation("UNAVAILABLE", null, null, null, "Lifetime metrics are unavailable.");
   }
 

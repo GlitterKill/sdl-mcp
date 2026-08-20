@@ -17,25 +17,29 @@ import {
   Aggregator,
   DEFAULT_AGGREGATOR_OPTIONS,
 } from "../../../dist/observability/aggregator.js";
+import { emptyLifetimeSections } from "../../../dist/observability/lifetime-accumulator.js";
 import { SECTION_IDS } from "../../../dist/observability/lifetime-types.js";
 
 const TYPES_PATH = "src/observability/types.ts";
 const GENERATED_AT = "2026-08-20T12:01:00.000Z";
 const LAST_EVENT_AT = "2026-08-20T12:00:00.000Z";
 
-function snapshotTypeLeaves(): string[] {
-  const program = ts.createProgram([TYPES_PATH], {
+const COMPILER_OPTIONS = {
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext,
     strict: true,
     target: ts.ScriptTarget.ES2024,
-  });
+} as const;
+
+function interfaceTypeLeaves(
+  program: ts.Program,
+  source: ts.SourceFile,
+  interfaceName: string,
+): string[] {
   const checker = program.getTypeChecker();
-  const source = program.getSourceFile(TYPES_PATH);
-  assert.ok(source);
   const declaration = source.statements.find(
     (statement): statement is ts.InterfaceDeclaration =>
-      ts.isInterfaceDeclaration(statement) && statement.name.text === "ObservabilitySnapshot",
+      ts.isInterfaceDeclaration(statement) && statement.name.text === interfaceName,
   );
   assert.ok(declaration);
   const symbol = checker.getSymbolAtLocation(declaration.name);
@@ -57,6 +61,10 @@ function snapshotTypeLeaves(): string[] {
       (type.isUnion() && type.types.every((member) => (member.flags & primitiveFlags) !== 0))
     ) {
       leaves.push(path);
+      return;
+    }
+    if (type.isUnion()) {
+      for (const member of type.types) visit(member, path);
       return;
     }
     if (checker.isArrayType(type) || checker.isTupleType(type)) {
@@ -82,7 +90,37 @@ function snapshotTypeLeaves(): string[] {
     const location = property.valueDeclaration ?? property.declarations?.[0] ?? declaration;
     visit(checker.getTypeOfSymbolAtLocation(property, location), property.name);
   }
-  return leaves;
+  return [...new Set(leaves)];
+}
+
+function snapshotTypeLeaves(): string[] {
+  const program = ts.createProgram([TYPES_PATH], COMPILER_OPTIONS);
+  const source = program.getSourceFile(TYPES_PATH);
+  assert.ok(source);
+  return interfaceTypeLeaves(program, source, "ObservabilitySnapshot");
+}
+
+function syntheticTypeLeaves(sourceText: string, interfaceName: string): string[] {
+  const fileName = "synthetic-dashboard-model.ts";
+  const source = ts.createSourceFile(
+    fileName,
+    sourceText,
+    COMPILER_OPTIONS.target,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const defaultHost = ts.createCompilerHost(COMPILER_OPTIONS);
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    fileExists: (path) => path === fileName || defaultHost.fileExists(path),
+    readFile: (path) => path === fileName ? sourceText : defaultHost.readFile(path),
+    getSourceFile: (path, languageVersion, onError, shouldCreateNewSourceFile) =>
+      path === fileName
+        ? source
+        : defaultHost.getSourceFile(path, languageVersion, onError, shouldCreateNewSourceFile),
+  };
+  const program = ts.createProgram([fileName], COMPILER_OPTIONS, host);
+  return interfaceTypeLeaves(program, source, interfaceName);
 }
 
 const DYNAMIC_RECORD_PATHS = new Set([
@@ -302,21 +340,47 @@ function runtimeLeaves(value: unknown): string[] {
 }
 
 function readyEnvelope(persistenceState = "ready") {
+  const sections = emptyLifetimeSections();
+  sections.cache = {
+    hits: 3,
+    misses: 1,
+    lookupMs: { count: 4, sum: 10, max: 4 },
+    perSource: {},
+  };
+  const capacityExceeded = persistenceState === "capacityExceeded";
   return {
     schemaVersion: 1,
     sampleIntervalMs: 2_000,
     generatedAt: GENERATED_AT,
     repoId: "repo-a",
-    epoch: 1,
+    epoch: capacityExceeded ? 0 : 1,
     resetAt: null,
-    lastCheckpointAt: "2026-08-20T12:00:30.000Z",
+    lastCheckpointAt: capacityExceeded ? null : "2026-08-20T12:00:30.000Z",
     persistenceState,
-    sessionCount: 2,
+    sessionCount: capacityExceeded ? 0 : 2,
     saturated: false,
-    sections: { cache: { hits: 3 } },
-    freshness: { cache: LAST_EVENT_AT },
-    processPeaks: { cpuPct: 50 },
+    sections: capacityExceeded ? emptyLifetimeSections() : sections,
+    freshness: Object.fromEntries(
+      SECTION_IDS.map((section) => [section, section === "cache" ? LAST_EVENT_AT : null]),
+    ),
+    processPeaks: {
+      cpuPct: 50,
+      rssMb: 100,
+      heapUsedMb: 40,
+      heapTotalMb: 80,
+      eventLoopLagMs: 3,
+    },
   };
+}
+
+function assertUnavailable(envelope: unknown, transportAgeMs = 0): void {
+  assert.deepEqual(lifetimePresentation(envelope, transportAgeMs), {
+    state: "UNAVAILABLE",
+    sections: null,
+    processPeaks: null,
+    checkpointAgeMs: null,
+    warning: "Lifetime metrics are unavailable.",
+  });
 }
 
 test("disposition map covers the compiler and runtime snapshot contracts", () => {
@@ -334,6 +398,24 @@ test("disposition map covers the compiler and runtime snapshot contracts", () =>
   }
   assert.ok(Object.isFrozen(METRIC_DISPOSITIONS));
   assert.equal(sourceLeaves.length, 273);
+});
+
+test("compiler oracle includes every discriminated object-union branch once", () => {
+  assert.deepEqual(
+    syntheticTypeLeaves(`
+      interface SyntheticSnapshot {
+        payload:
+          | { kind: "left"; common: number; leftOnly: { value: string } }
+          | { kind: "right"; common: number; rightOnly: boolean };
+      }
+    `, "SyntheticSnapshot"),
+    [
+      "payload.kind",
+      "payload.common",
+      "payload.leftOnly.value",
+      "payload.rightOnly",
+    ],
+  );
 });
 
 test("timeseries destinations and row builders have stable immutable order", () => {
@@ -478,22 +560,22 @@ test("session state fails closed for hostile time values", () => {
 test("lifetime presentation applies precedence and value withholding", () => {
   const current = lifetimePresentation(readyEnvelope(), 0);
   assert.equal(current.state, "CURRENT");
-  assert.deepEqual(current.sections, { cache: { hits: 3 } });
+  assert.equal(current.sections.cache.hits, 3);
   assert.equal(current.checkpointAgeMs, 30_000);
 
   const readOnly = lifetimePresentation(readyEnvelope("readOnly"), 0);
   assert.equal(readOnly.state, "READ ONLY");
-  assert.deepEqual(readOnly.sections, { cache: { hits: 3 } });
+  assert.equal(readOnly.sections.cache.hits, 3);
 
   const capacity = lifetimePresentation(readyEnvelope("capacityExceeded"), 0);
   assert.equal(capacity.state, "CAPACITY EXCEEDED");
   assert.equal(capacity.sections, null);
-  assert.deepEqual(capacity.processPeaks, { cpuPct: 50 });
+  assert.equal(capacity.processPeaks.cpuPct, 50);
   assert.match(capacity.warning ?? "", /per-directory/i);
 
   const degraded = lifetimePresentation(readyEnvelope("degraded"), 0);
   assert.equal(degraded.state, "DEGRADED");
-  assert.deepEqual(degraded.sections, { cache: { hits: 3 } });
+  assert.equal(degraded.sections.cache.hits, 3);
   assert.match(degraded.warning ?? "", /checkpoint/i);
 
   const recoveryEnvelope = {
@@ -521,6 +603,52 @@ test("lifetime presentation applies precedence and value withholding", () => {
   assert.equal(lifetimePresentation(readyEnvelope(), Number.NaN).state, "STALE");
   assert.ok(Object.isFrozen(current));
   assert.ok(Object.isFrozen(current.sections));
+});
+
+test("lifetime presentation rejects malformed envelopes before precedence", () => {
+  const ready = readyEnvelope();
+  const invalid = [
+    [],
+    new Date(GENERATED_AT),
+    { ...ready, schemaVersion: 2 },
+    { ...ready, extra: true },
+    { ...ready, repoId: "" },
+    { ...ready, generatedAt: "hostile" },
+    { ...ready, epoch: -1 },
+    { ...ready, sessionCount: "1" },
+    { ...ready, saturated: 0 },
+    { ...ready, resetAt: "hostile" },
+    { ...ready, lastCheckpointAt: "hostile" },
+    { ...ready, sections: "hostile" },
+    {
+      ...ready,
+      sections: { ...ready.sections, cache: { ...ready.sections.cache, hits: -1 } },
+    },
+    { ...ready, freshness: "hostile" },
+    { ...ready, freshness: { ...ready.freshness, cache: "hostile" } },
+    { ...ready, processPeaks: { cpuPct: 1 } },
+    { ...ready, processPeaks: { ...ready.processPeaks, rssMb: -1 } },
+    { ...ready, persistenceState: "unknown" },
+    {
+      schemaVersion: 1,
+      sampleIntervalMs: 2_000,
+      generatedAt: GENERATED_AT,
+      repoId: "repo-a",
+      persistenceState: "recoveryRequired",
+      recoveryReason: "unknown",
+    },
+    {
+      schemaVersion: 1,
+      sampleIntervalMs: 2_000,
+      generatedAt: GENERATED_AT,
+      repoId: "repo-a",
+      persistenceState: "recoveryRequired",
+      recoveryReason: "corruptCandidates",
+      sections: ready.sections,
+    },
+  ];
+  for (const envelope of invalid) assertUnavailable(envelope);
+  assertUnavailable({ ...ready, persistenceState: "unknown" }, 10_001);
 });
 
 test("older-server lifetime absence makes every section freshness unavailable", () => {
