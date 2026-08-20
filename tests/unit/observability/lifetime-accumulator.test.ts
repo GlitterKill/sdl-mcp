@@ -1622,6 +1622,28 @@ describe("bounded lifetime accumulator", () => {
     assert.equal(Object.keys(root.repositories).length, MAX_REPOSITORIES);
   });
 
+  it("rejects invalid new repositories before changing the store root", () => {
+    const root: DurableLifetimeRoot = {
+      schemaVersion: 1,
+      generation: 0,
+      updatedAt: ISO,
+      processPeaks: null,
+      repositories: {},
+    };
+    const invalidEpoch = emptyRepositoryLifetime();
+    invalidEpoch.epoch = Number.POSITIVE_INFINITY;
+    assert.throws(() => admitRepository(root, "invalid-epoch", invalidEpoch));
+    assert.deepEqual(root.repositories, {});
+
+    const invalidNested = clone(
+      parseDurableLifetimeRoot(durableRootFixture).repositories[REPOSITORY_KEY],
+    );
+    assert.ok(invalidNested?.sections.retrieval);
+    invalidNested.sections.retrieval.byMode["k:a"] = -1;
+    assert.throws(() => admitRepository(root, "invalid-nested", invalidNested));
+    assert.deepEqual(root.repositories, {});
+  });
+
   it("resets one repository epoch and counts a writer session once", () => {
     const original = emptyRepositoryLifetime();
     const counted = incrementSessionCount(original);

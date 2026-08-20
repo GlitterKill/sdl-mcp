@@ -538,6 +538,7 @@ export function admitRepository(
   repoId: string,
   repository: DurableLifetimeRepository,
 ): RepositoryAdmission {
+  const validatedRepository = validateRepositoryLifetime(repository);
   const storageKey = repositoryStorageKey(repoId);
   const existing = root.repositories[storageKey];
   if (existing === undefined && Object.keys(root.repositories).length >= MAX_REPOSITORIES) {
@@ -551,8 +552,8 @@ export function admitRepository(
   }
 
   const nextRepository = existing === undefined
-    ? structuredClone(repository)
-    : mergeRepositoryLifetime(existing, repository);
+    ? validatedRepository
+    : mergeRepositoryLifetime(existing, validatedRepository);
   const repositories = orderedRecord({ ...root.repositories, [storageKey]: nextRepository });
   const candidate: DurableLifetimeRoot = {
     schemaVersion: root.schemaVersion,
