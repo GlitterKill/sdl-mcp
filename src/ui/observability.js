@@ -3,7 +3,9 @@
 
 import { buildToolOutputViewModel } from "./observability-tool-output.js";
 import {
+  lifetimePresentation,
   METRIC_DISPOSITIONS,
+  sessionPanelState as deriveSessionPanelState,
   TIMESERIES_PANEL_MAP,
 } from "./observability-dashboard-model.js";
 import {
@@ -22,8 +24,271 @@ const state = {
   reconnectTimer: null,
   lastSnapshot: null,
 };
+let dashboardClient = null;
 
 const els = {};
+
+const DEFAULT_SAMPLE_INTERVAL_MS = 2_000;
+
+export function clampDashboardSampleInterval(value) {
+  return Number.isFinite(value)
+    ? Math.max(250, Math.min(60_000, Math.round(value)))
+    : DEFAULT_SAMPLE_INTERVAL_MS;
+}
+
+export function createDashboardClient(options) {
+  const now = options.now ?? (() => performance.now());
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const setIntervalFn = options.setIntervalFn ?? setInterval;
+  const clearIntervalFn = options.clearIntervalFn ?? clearInterval;
+  const applyClientSnapshot = options.applySnapshot ?? (() => {});
+  const applyClientLifetime = options.applyLifetime ?? (() => {});
+  const applyClientTimeseries = options.applyTimeseries ?? (() => {});
+  const onChange = options.onChange ?? (() => {});
+  const onError = options.onError ?? (() => {});
+  let fallbackTimer = null;
+  let value = {
+    repoId: "",
+    snapshot: null,
+    lifetime: null,
+    sessionReceivedAtMs: Number.NEGATIVE_INFINITY,
+    lifetimeReceivedAtMs: Number.NEGATIVE_INFINITY,
+    sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS,
+    streamConnected: false,
+  };
+
+  const notify = () => onChange(api.view());
+  const replace = (next) => {
+    value = next;
+    notify();
+  };
+  const getUrl = (path, extra = "") =>
+    `${path}?repoId=${encodeURIComponent(value.repoId)}${extra}`;
+  const requestJson = async (url, init = {}) => {
+    const response = await fetchImpl(url, {
+      ...init,
+      headers: { ...options.buildHeaders(), ...init.headers },
+    });
+    let json = null;
+    try {
+      json = await response.json();
+    } catch {
+      if (response.ok) throw new Error("Invalid JSON response");
+    }
+    return { response, json };
+  };
+
+  const lifetimeIsCurrentFor = (snapshot, lifetime) =>
+    deriveSessionPanelState({
+      sessionRepoId: snapshot.repoId,
+      lifetimeRepoId: lifetime.repoId,
+      monotonicNowMs: 0,
+      sessionReceivedAtMs: 0,
+      lifetimeReceivedAtMs: 0,
+      sessionGeneratedAt: snapshot.generatedAt,
+      lifetimeGeneratedAt: lifetime.generatedAt,
+      freshnessAvailable: true,
+      sectionPresent: false,
+      lastEventAt: null,
+      sampleIntervalMs: lifetime.sampleIntervalMs,
+    }) !== "FRESHNESS UNAVAILABLE";
+
+  const acceptSnapshot = (snapshot) => {
+    if (
+      !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) ||
+      snapshot.repoId !== value.repoId || typeof snapshot.generatedAt !== "string"
+    ) return false;
+    const discardLifetime = value.lifetime && !lifetimeIsCurrentFor(snapshot, value.lifetime);
+    replace({
+      ...value,
+      snapshot,
+      sessionReceivedAtMs: now(),
+      ...(discardLifetime && {
+        lifetime: null,
+        lifetimeReceivedAtMs: Number.NEGATIVE_INFINITY,
+      }),
+    });
+    applyClientSnapshot(snapshot);
+    if (discardLifetime) applyClientLifetime(lifetimePresentation(null, 0), null);
+    return true;
+  };
+
+  const acceptLifetime = (lifetime) => {
+    const presentation = lifetimePresentation(lifetime, 0);
+    if (presentation.state === "UNAVAILABLE" || lifetime.repoId !== value.repoId) return false;
+    if (value.snapshot && !lifetimeIsCurrentFor(value.snapshot, lifetime)) return false;
+    const interval = clampDashboardSampleInterval(lifetime.sampleIntervalMs);
+    replace({
+      ...value,
+      lifetime,
+      lifetimeReceivedAtMs: now(),
+      sampleIntervalMs: interval,
+    });
+    applyClientLifetime(presentation, lifetime);
+    if (!value.streamConnected && fallbackTimer !== null) restartFallback();
+    return true;
+  };
+
+  const fetchSnapshot = async () => {
+    try {
+      const { response, json } = await requestJson(getUrl("/api/observability/snapshot"));
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return acceptSnapshot(json);
+    } catch (error) {
+      onError("snapshot", error);
+      notify();
+      return false;
+    }
+  };
+
+  const fetchLifetime = async () => {
+    try {
+      const { response, json } = await requestJson(getUrl("/api/observability/lifetime"));
+      if (response.status === 404) {
+        replace({
+          ...value,
+          lifetime: null,
+          lifetimeReceivedAtMs: Number.NEGATIVE_INFINITY,
+          sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS,
+        });
+        applyClientLifetime(lifetimePresentation(null, 0), null);
+        return false;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return acceptLifetime(json);
+    } catch (error) {
+      onError("lifetime", error);
+      notify();
+      return false;
+    }
+  };
+
+  const fetchTimeseries = async (windowName = "15m") => {
+    try {
+      const { response, json } = await requestJson(
+        getUrl("/api/observability/timeseries", `&window=${encodeURIComponent(windowName)}`),
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      applyClientTimeseries(json);
+      return true;
+    } catch (error) {
+      onError("timeseries", error);
+      return false;
+    }
+  };
+
+  const poll = async () => {
+    await Promise.allSettled([fetchSnapshot(), fetchLifetime(), fetchTimeseries("15m")]);
+    notify();
+  };
+  const stopFallback = () => {
+    if (fallbackTimer !== null) clearIntervalFn(fallbackTimer);
+    fallbackTimer = null;
+  };
+  const restartFallback = () => {
+    stopFallback();
+    if (!value.streamConnected) fallbackTimer = setIntervalFn(poll, value.sampleIntervalMs);
+  };
+
+  const api = {
+    getState: () => ({ ...value }),
+    switchRepo(repoId) {
+      stopFallback();
+      value = {
+        repoId,
+        snapshot: null,
+        lifetime: null,
+        sessionReceivedAtMs: Number.NEGATIVE_INFINITY,
+        lifetimeReceivedAtMs: Number.NEGATIVE_INFINITY,
+        sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS,
+        streamConnected: false,
+      };
+      applyClientLifetime(lifetimePresentation(null, 0), null);
+      notify();
+    },
+    acceptSnapshot,
+    acceptLifetime,
+    fetchSnapshot,
+    fetchLifetime,
+    fetchTimeseries,
+    hydrate: () => Promise.allSettled([
+      fetchSnapshot(), fetchLifetime(), fetchTimeseries("15m"),
+    ]),
+    setStreamConnected(connected) {
+      value = { ...value, streamConnected: connected };
+      if (connected) stopFallback();
+      else if (fallbackTimer === null) restartFallback();
+      notify();
+    },
+    handleSseEvent(event) {
+      if (event?.event !== "snapshot" && event?.event !== "lifetime") return false;
+      try {
+        const payload = JSON.parse(event.data);
+        return event.event === "snapshot"
+          ? acceptSnapshot(payload)
+          : acceptLifetime(payload);
+      } catch (error) {
+        onError(event.event, error);
+        return false;
+      }
+    },
+    view() {
+      const currentNow = now();
+      return {
+        snapshotAgeMs: Number.isFinite(value.sessionReceivedAtMs)
+          ? Math.max(0, currentNow - value.sessionReceivedAtMs)
+          : null,
+        lifetime: lifetimePresentation(
+          value.lifetime,
+          Number.isFinite(value.lifetimeReceivedAtMs)
+            ? Math.max(0, currentNow - value.lifetimeReceivedAtMs)
+            : Number.POSITIVE_INFINITY,
+        ),
+      };
+    },
+    sectionState(section) {
+      return deriveSessionPanelState({
+        sessionRepoId: value.snapshot?.repoId ?? value.repoId,
+        lifetimeRepoId: value.lifetime?.repoId ?? null,
+        monotonicNowMs: now(),
+        sessionReceivedAtMs: value.sessionReceivedAtMs,
+        lifetimeReceivedAtMs: value.lifetimeReceivedAtMs,
+        sessionGeneratedAt: value.snapshot?.generatedAt ?? null,
+        lifetimeGeneratedAt: value.lifetime?.generatedAt ?? null,
+        freshnessAvailable: value.lifetime?.persistenceState !== "recoveryRequired"
+          && value.lifetime?.freshness !== undefined,
+        sectionPresent: section === "postIndex"
+          ? value.snapshot?.postIndexSession != null
+          : value.snapshot?.[section] != null,
+        lastEventAt: value.lifetime?.freshness?.[section] ?? null,
+        sampleIntervalMs: value.sampleIntervalMs,
+      });
+    },
+    async resetLifetime({ control, confirmReset }) {
+      try {
+        if (value.lifetime?.persistenceState === "recoveryRequired") return false;
+        if (!confirmReset(value.repoId)) return false;
+        const { response, json } = await requestJson("/api/observability/lifetime/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repoId: value.repoId,
+            confirmation: `RESET REPOSITORY LIFETIME: ${value.repoId}`,
+          }),
+        });
+        if (!response.ok) throw new Error(json?.error?.code ?? `HTTP ${response.status}`);
+        await fetchLifetime();
+        return true;
+      } catch (error) {
+        onError("reset", error);
+        return false;
+      } finally {
+        control?.focus?.();
+      }
+    },
+  };
+  return api;
+}
 
 function $(sel, root = document) {
   return root.querySelector(sel);
@@ -1208,6 +1473,195 @@ function applySnapshot(snap) {
   }
 }
 
+const PANEL_SECTIONS = Object.freeze({
+  cache: ["cache"],
+  predictiveContext: ["predictiveContext"],
+  retrieval: ["retrieval"],
+  beam: ["beam"],
+  delta: ["delta"],
+  indexing: ["indexing"],
+  tokenEfficiency: ["tokenEfficiency", "packed"],
+  health: ["health"],
+  latency: ["latency"],
+  ppr: ["ppr"],
+  scip: ["scip"],
+  toolVolume: ["latency"],
+  toolOutput: ["toolOutput"],
+  postIndex: ["postIndex", "auditBuffer"],
+  resources: ["pool", "resources"],
+});
+
+const average = (sample) => sample?.count ? sample.sum / sample.count : 0;
+const percentage = (part, total) => total ? (part / total) * 100 : 0;
+
+function lifetimeDisplayValues(presentation) {
+  const section = presentation.sections ?? {};
+  const cache = section.cache;
+  const predictive = section.predictiveContext;
+  const retrieval = section.retrieval;
+  const beam = section.beam;
+  const delta = section.delta;
+  const indexing = section.indexing;
+  const token = section.tokenEfficiency;
+  const packed = section.packed;
+  const health = section.health;
+  const latency = section.latency;
+  const ppr = section.ppr;
+  const scip = section.scip;
+  const output = section.toolOutput;
+  const postIndex = section.postIndex;
+  return {
+    cache: cache && {
+      totalHits: cache.hits,
+      totalMisses: cache.misses,
+      avgLookupLatencyMs: average(cache.lookupMs),
+    },
+    predictiveContext: predictive && {
+      outcomeSamples: predictive.outcomeSamples,
+      hitRatePct: percentage(predictive.hitOutcomes, predictive.outcomeSamples),
+      wasteRatePct: percentage(predictive.wasteOutcomes, predictive.outcomeSamples),
+      acceptedPrefetch: predictive.accepted,
+      suppressedPrefetch: predictive.suppressed,
+      avgLatencyReductionMs: average(predictive.latencyReductionMs),
+    },
+    retrieval: retrieval && {
+      avgLatencyMs: average(retrieval.latencyMs),
+      emptyResultCount: retrieval.emptyResults,
+    },
+    beam: beam && {
+      avgBuildMs: average(beam.buildMs),
+      retainedHandlesPeak: beam.retainedHandlesPeak,
+      avgAccepted: beam.builds ? beam.accepted / beam.builds : 0,
+      avgEvicted: beam.builds ? beam.evicted / beam.builds : 0,
+      avgRejected: beam.builds ? beam.rejected / beam.builds : 0,
+      avgFrontierMaxSize: average(beam.frontierMax),
+    },
+    delta: delta && {
+      avgBlastRadiusLatencyMs: average(delta.blastRadiusMs),
+      avgDbRoundTripsPerChangedSymbol: average(delta.dbRoundTrips),
+      avgPathExplanationLatencyMs: average(delta.pathExplanationMs),
+      fallbackPathQueryCount: delta.fallbackPathQueries,
+    },
+    indexing: indexing && {
+      totalEvents: indexing.events,
+      avgPass1Ms: average(indexing.pass1Ms),
+      avgPass2Ms: average(indexing.pass2Ms),
+      failures: indexing.failures,
+      derivedStateLagMs: average(indexing.derivedLagMs),
+    },
+    tokenEfficiency: {
+      ...(token && {
+        totalUsed: token.usedTokens,
+        totalSaved: token.savedTokens,
+        avgPerCall: token.calls ? token.usedTokens / token.calls : 0,
+      }),
+      ...(packed && {
+        packedAdoptionPct: percentage(packed.packed, packed.decisions),
+        packedTokensSaved: Math.max(0, packed.baselineTokens - packed.packedTokens),
+        packedBytesSaved: Math.max(0, packed.baselineBytes - packed.packedBytes),
+      }),
+    },
+    health: health && {
+      watcherErrors: health.watcherErrors,
+      watcherRestartCount: health.watcherRestarts,
+      watcherWatchmanWarningCount: health.watchmanWarnings,
+      watcherWatchmanRecrawlCount: health.watchmanRecrawls,
+      watcherWatchmanFreshInstanceCount: health.watchmanFreshInstances,
+    },
+    latency: latency && { avgMs: average(latency.durationMs), maxMs: latency.durationMs.max },
+    ppr: ppr && {
+      avgComputeMs: average(ppr.computeMs),
+      avgSeedCount: average(ppr.seeds),
+      avgTouched: average(ppr.touched),
+      nativeRatio: percentage(ppr.native, ppr.runs),
+    },
+    scip: scip && {
+      totalIngests: scip.ingests,
+      successCount: scip.successes,
+      failureCount: scip.failures,
+      avgIngestMs: average(scip.ingestMs),
+      totalEdgesCreated: scip.edgesCreated,
+      totalEdgesUpgraded: scip.edgesUpgraded,
+    },
+    toolVolume: latency && { totalCalls: latency.calls },
+    toolOutput: output && {
+      calls: output.calls,
+      errors: output.errors,
+      handled: output.handled,
+      truncated: output.truncated,
+      detail: Object.entries(output.detailCounts).map(([key, count]) => `${key}:${count}`).join(" · "),
+      recovery: output.recoveryEmitted,
+    },
+    postIndex: postIndex && {
+      totalSessions: postIndex.sessions,
+      avgDurationMs: average(postIndex.durationMs),
+      maxDurationMs: postIndex.durationMs.max,
+      timeoutCount: postIndex.timeouts,
+    },
+    resources: presentation.processPeaks && {
+      "processPeaks.cpuPct": presentation.processPeaks.cpuPct,
+      "processPeaks.rssMb": presentation.processPeaks.rssMb,
+      "processPeaks.heapUsedMb": presentation.processPeaks.heapUsedMb,
+      "processPeaks.heapTotalMb": presentation.processPeaks.heapTotalMb,
+      "processPeaks.eventLoopLagMs": presentation.processPeaks.eventLoopLagMs,
+    },
+  };
+}
+
+function formatLifetimeValue(field, value) {
+  if (field.includes("Pct") || field === "nativeRatio") return fmtPct(value);
+  if (field.toLowerCase().includes("ms")) return fmtMs(value);
+  if (field === "packedBytesSaved") return fmtBytes(value);
+  return typeof value === "number" ? fmtNum(value) : value;
+}
+
+function applyLifetime(presentation) {
+  const values = lifetimeDisplayValues(presentation);
+  for (const panel of document.querySelectorAll("[data-panel]")) {
+    const panelValues = values[panel.dataset.panel] ?? null;
+    for (const output of panel.querySelectorAll("[data-lifetime-field]")) {
+      const field = output.dataset.lifetimeField;
+      setText(output, panelValues && Object.hasOwn(panelValues, field)
+        ? formatLifetimeValue(field, panelValues[field])
+        : null);
+    }
+  }
+}
+
+function fmtAge(ms) {
+  if (!Number.isFinite(ms)) return "—";
+  return ms < 1_000 ? `${Math.round(ms)}ms` : `${(ms / 1_000).toFixed(1)}s`;
+}
+
+function renderClientView(view) {
+  setText(els.snapshotAge, fmtAge(view.snapshotAgeMs));
+  setText(els.checkpointAge, fmtAge(view.lifetime.checkpointAgeMs));
+  setText(els.persistenceState, view.lifetime.state);
+  if (els.lifetimeWarning) {
+    els.lifetimeWarning.textContent = view.lifetime.warning ?? "";
+    els.lifetimeWarning.hidden = !view.lifetime.warning;
+  }
+  if (els.lifetimeResetBtn) {
+    els.lifetimeResetBtn.disabled = view.lifetime.state === "RECOVERY REQUIRED";
+  }
+  if (!dashboardClient) return;
+  const clientState = dashboardClient.getState();
+  const staleAfter = Math.max(clientState.sampleIntervalMs * 3, 10_000);
+  if (!clientState.streamConnected && view.snapshotAgeMs > staleAfter) {
+    setStatus("error", "STALE");
+  }
+  for (const [panelName, sections] of Object.entries(PANEL_SECTIONS)) {
+    const panel = document.querySelector(`[data-panel="${panelName}"]`);
+    const host = panel?.querySelector(":scope > .panel-head .section-states");
+    if (!host) continue;
+    for (const badge of host.children) {
+      const sectionState = dashboardClient.sectionState(badge.dataset.section);
+      badge.dataset.state = sectionState;
+      badge.textContent = `${badge.dataset.section} ${sectionState}`;
+    }
+  }
+}
+
 // -------- Networking --------
 function buildHeaders() {
   const h = { Accept: "application/json" };
@@ -1215,16 +1669,20 @@ function buildHeaders() {
   return h;
 }
 
-async function fetchSnapshot() {
-  const url = `/api/observability/snapshot?repoId=${encodeURIComponent(state.repoId)}`;
-  try {
-    const resp = await fetch(url, { headers: buildHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const json = await resp.json();
-    applySnapshot(json);
-  } catch (err) {
-    console.warn("[observability] fetchSnapshot failed:", err);
-  }
+function createRuntimeDashboardClient() {
+  return createDashboardClient({
+    buildHeaders,
+    applySnapshot,
+    applyLifetime,
+    applyTimeseries,
+    onChange: renderClientView,
+    onError: (area, error) => {
+      console.warn(`[observability] ${area} request failed:`, error);
+      if (area === "reset" && els.lifetimeResetStatus) {
+        els.lifetimeResetStatus.textContent = `Repository lifetime reset failed: ${error?.message ?? "request failed"}.`;
+      }
+    },
+  });
 }
 
 async function connectStream() {
@@ -1249,6 +1707,7 @@ async function connectStream() {
       throw new Error(`SSE failed: HTTP ${resp.status}`);
     }
     setStatus("connected", "LIVE");
+    dashboardClient.setStreamConnected(true);
     state.reconnectAttempt = 0;
     await consumeSse(resp.body);
     // stream ended naturally — schedule reconnect
@@ -1297,13 +1756,8 @@ function parseSseEvent(raw) {
 }
 
 function handleSseEvent(evt) {
-  if (evt.event === "snapshot") {
-    try {
-      const snap = JSON.parse(evt.data);
-      applySnapshot(snap);
-    } catch (err) {
-      console.warn("[observability] bad snapshot payload:", err);
-    }
+  if (evt.event === "snapshot" || evt.event === "lifetime") {
+    dashboardClient.handleSseEvent(evt);
   } else if (evt.event === "heartbeat") {
     // keep-alive only
   } else if (evt.event === "error") {
@@ -1312,6 +1766,7 @@ function handleSseEvent(evt) {
 }
 
 function scheduleReconnect() {
+  dashboardClient.setStreamConnected(false);
   state.reconnectAttempt += 1;
   const delay = Math.min(30000, 1000 * Math.pow(2, state.reconnectAttempt - 1));
   setStatus("disconnected", `RETRY ${Math.round(delay / 1000)}s`);
@@ -1413,6 +1868,12 @@ function bind() {
   els.repoInput = $("#repoInput");
   els.tokenInput = $("#tokenInput");
   els.connectBtn = $("#connectBtn");
+  els.lifetimeResetBtn = $("#lifetimeResetBtn");
+  els.lifetimeResetStatus = $("#lifetimeResetStatus");
+  els.snapshotAge = $("#snapshotAge");
+  els.checkpointAge = $("#checkpointAge");
+  els.persistenceState = $("#persistenceState");
+  els.lifetimeWarning = $("#lifetimeWarning");
   els.systemToggleBtn = $("#systemToggleBtn");
   els.dashboard = $("#dashboard");
   els.beamForm = $("#beamExplainForm");
@@ -1429,9 +1890,39 @@ function bind() {
       if (state.token)
         localStorage.setItem("sdl-mcp-observability-token", state.token);
       state.reconnectAttempt = 0;
-      fetchSnapshot();
+      dashboardClient.switchRepo(state.repoId);
+      dashboardClient.setStreamConnected(false);
+      dashboardClient.hydrate();
       connectStream();
     });
+  }
+
+  if (els.lifetimeResetBtn) {
+    els.lifetimeResetBtn.addEventListener("click", async () => {
+      const repoId = state.repoId;
+      const reset = await dashboardClient.resetLifetime({
+        control: els.lifetimeResetBtn,
+        confirmReset: () => window.confirm(`Reset repository lifetime metrics for "${repoId}"?`),
+      });
+      if (els.lifetimeResetStatus && reset) {
+        els.lifetimeResetStatus.textContent = `Repository lifetime reset for ${repoId}.`;
+      }
+    });
+  }
+
+  for (const [panelName, sections] of Object.entries(PANEL_SECTIONS)) {
+    const head = document.querySelector(`[data-panel="${panelName}"] > .panel-head`);
+    if (!head) continue;
+    const host = document.createElement("span");
+    host.className = "section-states";
+    for (const section of sections) {
+      const badge = document.createElement("span");
+      badge.className = "section-state";
+      badge.dataset.section = section;
+      badge.textContent = `${section} FRESHNESS UNAVAILABLE`;
+      host.append(badge);
+    }
+    head.append(host);
   }
 
   if (els.systemToggleBtn) {
@@ -1471,10 +1962,12 @@ function bind() {
 function init() {
   readUrlParams();
   bind();
+  dashboardClient = createRuntimeDashboardClient();
+  dashboardClient.switchRepo(state.repoId);
   initDashboardLayoutEditor();
   setStatus("idle", "IDLE");
-  // initial best-effort hydration; harmless if endpoints don't exist yet
-  fetchSnapshot();
+  dashboardClient.setStreamConnected(false);
+  dashboardClient.hydrate();
   connectStream();
 }
 

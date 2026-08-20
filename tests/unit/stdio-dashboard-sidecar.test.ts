@@ -271,6 +271,12 @@ test("stdio observability dashboard sidecar serves only observability routes", a
     assert.match(htmlBody, /id="layoutEditBtn"[^>]+aria-pressed="false"/);
     assert.match(htmlBody, /id="layoutResetBtn"/);
     assert.match(htmlBody, /id="layoutStatus"[^>]+aria-live="polite"/);
+    assert.match(htmlBody, /id="snapshotAge"/);
+    assert.match(htmlBody, /id="checkpointAge"/);
+    assert.match(htmlBody, /id="persistenceState"/);
+    assert.match(htmlBody, /id="lifetimeWarning"[^>]+aria-live="assertive"/);
+    assert.match(htmlBody, /id="lifetimeResetBtn"/);
+    assert.match(htmlBody, /id="lifetimeResetStatus"[^>]+aria-live="polite"/);
     assert.doesNotMatch(htmlBody, /class="kv-(?:row|key|val)"/);
     assert.match(htmlBody, /class="stat-cell"[\s\S]*?class="stat-label"[\s\S]*?class="stat-values"/);
     assert.match(htmlBody, />SESSION</);
@@ -348,6 +354,9 @@ test("stdio observability dashboard sidecar serves only observability routes", a
       "Latency by tool and phase", "Tool calls and errors", "Compression by source",
       "Packed wire encoders", "Tool output health",
     ]) assert.match(jsBody, new RegExp(`caption:\\s*"${caption}"`));
+    assert.match(jsBody, /createDashboardClient/);
+    assert.match(jsBody, /\/api\/observability\/lifetime\/reset/);
+    assert.match(jsBody, /RESET REPOSITORY LIFETIME: /);
 
     const toolOutputJs = await fetch(
       `${baseUrl}/ui/observability-tool-output.js`,

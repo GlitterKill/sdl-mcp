@@ -1079,3 +1079,220 @@ test("compiler source remains the field oracle", () => {
   assert.match(readFileSync(TYPES_PATH, "utf8"), /export interface ObservabilitySnapshot/);
   assert.equal(snapshotTypeLeaves().length, 273);
 });
+
+test("dashboard client keeps session and lifetime receipt clocks independent", async () => {
+  const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { readyState: "loading", addEventListener() {} },
+  });
+  try {
+    const dashboard = await import("../../../dist/ui/observability.js");
+    const createClient = dashboard.createDashboardClient as Function;
+    assert.equal(typeof createClient, "function");
+    let now = 100;
+    const applied: string[] = [];
+    const client = createClient({
+      now: () => now,
+      fetchImpl: async () => new Response(null, { status: 500 }),
+      buildHeaders: () => ({ Authorization: "Bearer secret" }),
+      applySnapshot: () => applied.push("snapshot"),
+      applyLifetime: () => applied.push("lifetime"),
+      applyTimeseries: () => {},
+    });
+    client.switchRepo("repo-a");
+    assert.equal(client.handleSseEvent({
+      event: "snapshot",
+      data: JSON.stringify({ repoId: "repo-a", generatedAt: GENERATED_AT }),
+    }), true);
+    assert.deepEqual(client.getState(), {
+      repoId: "repo-a",
+      snapshot: { repoId: "repo-a", generatedAt: GENERATED_AT },
+      lifetime: null,
+      sessionReceivedAtMs: 100,
+      lifetimeReceivedAtMs: Number.NEGATIVE_INFINITY,
+      sampleIntervalMs: 2_000,
+      streamConnected: false,
+    });
+
+    now = 200;
+    assert.equal(client.handleSseEvent({
+      event: "lifetime",
+      data: JSON.stringify({
+        ...readyEnvelope(),
+        generatedAt: "2026-08-20T12:00:59.999999999Z",
+      }),
+    }), false, "older lifetime freshness is discarded");
+    assert.equal(client.getState().lifetimeReceivedAtMs, Number.NEGATIVE_INFINITY);
+    assert.equal(client.handleSseEvent({
+      event: "lifetime",
+      data: JSON.stringify(readyEnvelope()),
+    }), true);
+    assert.equal(client.getState().sessionReceivedAtMs, 100);
+    assert.equal(client.getState().lifetimeReceivedAtMs, 200);
+
+    now = 300;
+    assert.equal(client.handleSseEvent({
+      event: "snapshot",
+      data: JSON.stringify({ repoId: "repo-a", generatedAt: GENERATED_AT }),
+    }), true);
+    assert.equal(client.getState().sessionReceivedAtMs, 300);
+    assert.equal(client.getState().lifetimeReceivedAtMs, 200);
+    assert.equal(client.handleSseEvent({ event: "future", data: "{}" }), false);
+    await client.fetchSnapshot();
+    await client.fetchLifetime();
+    assert.equal(client.getState().sessionReceivedAtMs, 300, "failed snapshot does not refresh age");
+    assert.equal(client.getState().lifetimeReceivedAtMs, 200, "failed lifetime does not refresh age");
+
+    now = 400;
+    client.acceptSnapshot({
+      repoId: "repo-a",
+      generatedAt: "2026-08-20T12:01:00.000000001Z",
+    });
+    assert.equal(client.getState().lifetime, null, "newer snapshots discard older freshness");
+    assert.equal(client.getState().lifetimeReceivedAtMs, Number.NEGATIVE_INFINITY);
+
+    client.switchRepo("repo-b");
+    const switched = client.getState();
+    assert.equal(switched.snapshot, null);
+    assert.equal(switched.lifetime, null);
+    assert.equal(switched.sessionReceivedAtMs, Number.NEGATIVE_INFINITY);
+    assert.equal(switched.lifetimeReceivedAtMs, Number.NEGATIVE_INFINITY);
+    assert.deepEqual(applied, [
+      "lifetime", "snapshot", "lifetime", "snapshot", "snapshot", "lifetime", "lifetime",
+    ], "repo switches clear rendered lifetime values");
+  } finally {
+    if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("dashboard client uses one authenticated REST fallback and handles older servers", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const createClient = dashboard.createDashboardClient as Function;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  let interval: (() => Promise<void>) | null = null;
+  let intervalMs = 0;
+  const client = createClient({
+    now: () => 500,
+    buildHeaders: () => ({ Accept: "application/json", Authorization: "Bearer secret" }),
+    fetchImpl: async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes("/snapshot")) {
+        return Response.json({ repoId: "repo-a", generatedAt: GENERATED_AT });
+      }
+      if (url.includes("/lifetime?")) return new Response(null, { status: 404 });
+      return Response.json({ window: "15m", series: {} });
+    },
+    setIntervalFn: (callback: () => Promise<void>, delay: number) => {
+      interval = callback;
+      intervalMs = delay;
+      return 7;
+    },
+    clearIntervalFn: () => {},
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  await client.hydrate();
+  assert.equal(client.getState().sessionReceivedAtMs, 500);
+  assert.equal(client.getState().lifetime, null);
+  assert.equal(client.getState().lifetimeReceivedAtMs, Number.NEGATIVE_INFINITY);
+  assert.equal(client.view().lifetime.state, "UNAVAILABLE");
+  assert.equal(client.sectionState("cache"), "FRESHNESS UNAVAILABLE");
+  client.setStreamConnected(false);
+  assert.equal(intervalMs, 2_000);
+  assert.ok(interval);
+  const before = calls.length;
+  await interval?.();
+  assert.equal(calls.length, before + 3, "one timer polls snapshot, lifetime, and 15m series");
+  assert.ok(calls.every(({ init }) => (
+    init.headers as Record<string, string>
+  ).Authorization === "Bearer secret"));
+  assert.ok(calls.some(({ url }) => url.includes("window=15m")));
+  assert.equal(dashboard.clampDashboardSampleInterval(100), 250);
+  assert.equal(dashboard.clampDashboardSampleInterval(60_001), 60_000);
+  assert.equal(dashboard.clampDashboardSampleInterval(Number.NaN), 2_000);
+});
+
+test("dashboard lifetime reset is exact, recovery-safe, and rehydrates before focus returns", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const createClient = dashboard.createDashboardClient as Function;
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  let nextLifetime = readyEnvelope();
+  const control = { focusCount: 0, focus() { this.focusCount += 1; } };
+  const client = createClient({
+    now: () => 1_000,
+    buildHeaders: () => ({ Accept: "application/json", Authorization: "Bearer secret" }),
+    fetchImpl: async (url: string, init: RequestInit) => {
+      requests.push({ url, init });
+      if (url.endsWith("/reset")) {
+        return Response.json({
+          schemaVersion: 1, repoId: "repo-a", epoch: 2,
+          resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
+          persistenceState: "ready",
+        });
+      }
+      return Response.json(nextLifetime);
+    },
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  client.acceptLifetime({
+    schemaVersion: 1,
+    sampleIntervalMs: 2_000,
+    generatedAt: GENERATED_AT,
+    repoId: "repo-a",
+    persistenceState: "recoveryRequired",
+    recoveryReason: "corruptCandidates",
+  });
+  assert.equal(await client.resetLifetime({ control, confirmReset: () => true }), false);
+  assert.equal(requests.length, 0, "recovery never sends reset");
+  assert.equal(control.focusCount, 1);
+
+  client.switchRepo("repo-a");
+  client.acceptLifetime(readyEnvelope());
+  assert.equal(await client.resetLifetime({ control, confirmReset: () => false }), false);
+  assert.equal(requests.length, 0);
+  nextLifetime = { ...readyEnvelope(), epoch: 2 };
+  assert.equal(await client.resetLifetime({ control, confirmReset: () => true }), true);
+  assert.equal(requests.length, 2, "POST is followed immediately by lifetime GET");
+  assert.equal(requests[0].url, "/api/observability/lifetime/reset");
+  assert.equal(requests[0].init.method, "POST");
+  assert.equal(requests[0].init.body, JSON.stringify({
+    repoId: "repo-a",
+    confirmation: "RESET REPOSITORY LIFETIME: repo-a",
+  }));
+  assert.equal((requests[0].init.headers as Record<string, string>).Authorization, "Bearer secret");
+  assert.equal((requests[0].init.headers as Record<string, string>)["Content-Type"], "application/json");
+  assert.equal(client.getState().lifetime.epoch, 2, "narrow reset body is never stored");
+  assert.equal(control.focusCount, 3);
+});
+
+test("dashboard lifetime reset exposes a fixed server error and preserves state", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const errors: Array<{ area: string; message: string }> = [];
+  const control = { focused: false, focus() { this.focused = true; } };
+  const lifetime = readyEnvelope();
+  const client = dashboard.createDashboardClient({
+    now: () => 1_000,
+    buildHeaders: () => ({ Authorization: "Bearer secret" }),
+    fetchImpl: async () => Response.json(
+      { schemaVersion: 1, error: { code: "persistence_failed", message: "Checkpoint failed.", retryable: true } },
+      { status: 503 },
+    ),
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+    onError: (area: string, error: Error) => errors.push({ area, message: error.message }),
+  });
+  client.switchRepo("repo-a");
+  client.acceptLifetime(lifetime);
+  assert.equal(await client.resetLifetime({ control, confirmReset: () => true }), false);
+  assert.deepEqual(errors, [{ area: "reset", message: "persistence_failed" }]);
+  assert.equal(client.getState().lifetime, lifetime);
+  assert.equal(control.focused, true);
+});

@@ -26,6 +26,9 @@
           <input id="tokenInput" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false" />
         </label>
         <button id="connectBtn" type="button" class="btn">CONNECT</button>
+        <button id="lifetimeResetBtn" type="button" class="btn btn-danger">
+          RESET LIFETIME
+        </button>
         <button id="systemToggleBtn" type="button" class="btn btn-ghost" aria-pressed="false">
           SYSTEM STATS
         </button>
@@ -52,6 +55,7 @@
       mode to cancel an active change.
     </p>
     <div id="layoutStatus" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    <div id="lifetimeResetStatus" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
     <main id="dashboard" class="grid dashboard-grid" data-system-visible="false">
       <section class="dashboard-hero" aria-labelledby="dashboardTitle">
@@ -62,10 +66,11 @@
         <div class="hero-meta" aria-label="Dashboard focus">
           <span>REPO <output data-dashboard-field="repoId">—</output></span>
           <span>SESSION <output data-dashboard-field="generatedAt">—</output></span>
-          <span>Retrieval</span>
-          <span>Indexing</span>
-          <span>Token flow</span>
+          <span>SNAPSHOT AGE <output id="snapshotAge">—</output></span>
+          <span>CHECKPOINT AGE <output id="checkpointAge">—</output></span>
+          <span>LIFETIME <output id="persistenceState">UNAVAILABLE</output></span>
         </div>
+        <p id="lifetimeWarning" class="lifetime-warning" aria-live="assertive" hidden></p>
       </section>
       <section class="panel panel-bottleneck panel-wide" data-panel="bottleneck" aria-label="Bottleneck">
         <header class="panel-head">
