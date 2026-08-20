@@ -291,8 +291,12 @@ export class ObservabilityService implements ObservabilityTap {
     if (this.stopPromise !== null) return this.stopPromise;
     const starting = this.startPromise;
     this.startPromise = null;
-    this.stopPromise = this.stopInternal(starting);
-    return this.stopPromise;
+    const stopping = this.stopInternal(starting);
+    const settled = stopping.finally(() => {
+      if (this.stopPromise === settled) this.stopPromise = null;
+    });
+    this.stopPromise = settled;
+    return settled;
   }
 
   private async stopInternal(starting: Promise<void> | null): Promise<void> {

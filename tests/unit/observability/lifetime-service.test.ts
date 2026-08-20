@@ -856,6 +856,31 @@ describe("ObservabilityService lifetime integration", () => {
     assert.equal(h.store.closed, 2);
   });
 
+  it("starts on the first call after the caller observes a failed stop", async () => {
+    const h = harness();
+    let opens = 0;
+    const service = new ObservabilityService(CONFIG, {
+      ...h.options,
+      openLifetimeStore: async () => {
+        opens += 1;
+        return h.store;
+      },
+    });
+    h.store.onClose = async () => { throw new Error("close failed once"); };
+    await service.start();
+    assert.equal(opens, 1);
+    const stopping = service.stop();
+    assert.strictEqual(service.stop(), stopping);
+    await assert.rejects(stopping, /close failed once/);
+
+    h.store.onClose = null;
+    await service.start();
+    assert.equal(opens, 2);
+    assert.equal(h.timers.filter((timer) => !timer.cleared).length, 2);
+    await service.stop();
+    assert.equal(h.store.closed, 2);
+  });
+
   it("shares a successful concurrent stop and starts a fresh stop lifecycle after restart", async () => {
     const h = harness();
     let releaseClose!: () => void;
