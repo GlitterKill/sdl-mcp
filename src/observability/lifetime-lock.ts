@@ -136,14 +136,27 @@ async function closeQuietly(handle: FileHandle | undefined): Promise<void> {
   await handle?.close().catch(() => undefined);
 }
 
-function identitySnapshot(stat: BigIntStats): LifetimeSourceSnapshot {
+function contentSnapshot(stat: BigIntStats, content: string): LifetimeSourceSnapshot {
   if (stat.size > BigInt(MAX_LOCK_BYTES)) throw new Error("Lifetime file exceeds its size limit");
   return {
     dev: stat.dev.toString(10),
     ino: stat.ino.toString(10),
     size: Number(stat.size),
-    sha256: createHash("sha256").update("").digest("hex"),
+    sha256: createHash("sha256").update(content).digest("hex"),
   };
+}
+
+function preWriteIdentity(stat: BigIntStats): LifetimeSourceSnapshot | undefined {
+  const snapshot = contentSnapshot(stat, "");
+  return snapshot.ino === "0" ? undefined : snapshot;
+}
+
+async function postWriteIdentity(handle: FileHandle, content: string): Promise<LifetimeSourceSnapshot> {
+  const stat = await handle.stat({ bigint: true });
+  if (stat.size !== BigInt(Buffer.byteLength(content, "utf8"))) {
+    throw new Error("Lifetime file size changed after write");
+  }
+  return contentSnapshot(stat, content);
 }
 
 async function cleanupExactCreatedPath(
@@ -161,6 +174,30 @@ async function cleanupExactCreatedPath(
   }
   await removeExactLifetimeSource(path, expected, candidate, fileSystem, true)
     .catch(() => false);
+}
+
+async function cleanupCreatedWithWitness(
+  path: string,
+  witnessPath: string,
+  fileSystem: LifetimeFileSystem,
+): Promise<void> {
+  try {
+    const witness = await readLifetimeSource(witnessPath, fileSystem, MAX_LOCK_BYTES);
+    await cleanupExactCreatedPath(
+      path,
+      witness.snapshot,
+      `${witnessPath}.cleanup-next`,
+      fileSystem,
+    );
+    await removeExactLifetimeSource(
+      witnessPath,
+      witness.snapshot,
+      `${witnessPath}.cleanup-next`,
+      fileSystem,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
 }
 
 async function readStableLock(
@@ -267,10 +304,21 @@ async function createWriterLock(
     `.sdl-observability-lifetime.create.${record.nonce}`,
   );
   const anchorContent = serializeCreateAnchor(record);
+  const anchorWitnessPath = resolve(
+    directory,
+    `.sdl-observability-lifetime.create-source.${record.nonce}`,
+  );
+  const lockContent = serializeLock(record);
+  const lockWitnessPath = resolve(
+    directory,
+    `.sdl-observability-lifetime.create-lock.${record.nonce}`,
+  );
   let handle: FileHandle | undefined;
   let anchorIdentity: LifetimeSourceSnapshot | undefined;
+  let anchorWitness = false;
   let claim: LifetimeSourceClaim | undefined;
   let lockIdentity: LifetimeSourceSnapshot | undefined;
+  let lockWitness = false;
   let writer = false;
   try {
     try {
@@ -278,11 +326,17 @@ async function createWriterLock(
     } catch {
       return { status: "failure" };
     }
-    anchorIdentity = identitySnapshot(await handle.stat({ bigint: true }));
+    const anchorPreWrite = await handle.stat({ bigint: true });
+    anchorIdentity = preWriteIdentity(anchorPreWrite);
+    if (anchorPreWrite.ino === 0n) {
+      await fileSystem.link(anchorPath, anchorWitnessPath);
+      anchorWitness = true;
+    }
     if (process.platform === "win32") await handle.chmod(0o600).catch(() => undefined);
     else await handle.chmod(0o600);
     await handle.writeFile(anchorContent, "utf8");
     await handle.sync();
+    anchorIdentity = await postWriteIdentity(handle, anchorContent);
     await handle.close();
     handle = undefined;
     const anchor = await readLifetimeSource(anchorPath, fileSystem, MAX_LOCK_BYTES);
@@ -291,6 +345,15 @@ async function createWriterLock(
       anchor.content.toString("utf8") !== anchorContent
     ) {
       return { status: "failure" };
+    }
+    if (anchorWitness) {
+      if (!await removeExactLifetimeSource(
+        anchorWitnessPath,
+        anchorIdentity,
+        `${anchorWitnessPath}.cleanup-next`,
+        fileSystem,
+      )) return { status: "failure" };
+      anchorWitness = false;
     }
     try {
       claim = await claimLifetimeSource(
@@ -313,14 +376,20 @@ async function createWriterLock(
         ? { status: "exists" }
         : { status: "failure" };
     }
-    lockIdentity = identitySnapshot(await handle.stat({ bigint: true }));
+    const lockPreWrite = await handle.stat({ bigint: true });
+    lockIdentity = preWriteIdentity(lockPreWrite);
+    if (lockPreWrite.ino === 0n) {
+      await fileSystem.link(lockPath, lockWitnessPath);
+      lockWitness = true;
+    }
     if (process.platform === "win32") {
       await handle.chmod(0o600).catch(() => undefined);
     } else {
       await handle.chmod(0o600);
     }
-    await handle.writeFile(serializeLock(record), "utf8");
+    await handle.writeFile(lockContent, "utf8");
     await handle.sync();
+    lockIdentity = await postWriteIdentity(handle, lockContent);
     await handle.close();
     handle = undefined;
     const stored = await readStableLock(lockPath, fileSystem);
@@ -329,6 +398,15 @@ async function createWriterLock(
         !leaseMatches(stored.record, lease)) {
       return { status: "failure" };
     }
+    if (lockWitness) {
+      if (!await removeExactLifetimeSource(
+        lockWitnessPath,
+        lockIdentity,
+        `${lockWitnessPath}.cleanup-next`,
+        fileSystem,
+      )) return { status: "failure" };
+      lockWitness = false;
+    }
     writer = true;
     return { status: "writer", lease };
   } catch {
@@ -336,20 +414,12 @@ async function createWriterLock(
   } finally {
     await closeQuietly(handle);
     if (!writer) {
-      await cleanupExactCreatedPath(
-        lockPath,
-        lockIdentity,
-        resolve(directory, `.sdl-observability-lifetime.create-lock.${record.nonce}`),
-        fileSystem,
-      );
+      if (lockWitness) await cleanupCreatedWithWitness(lockPath, lockWitnessPath, fileSystem);
+      else await cleanupExactCreatedPath(lockPath, lockIdentity, lockWitnessPath, fileSystem);
     }
     if (claim) await releaseLifetimeSourceClaim(claim, fileSystem).catch(() => undefined);
-    await cleanupExactCreatedPath(
-      anchorPath,
-      anchorIdentity,
-      `${anchorPath}.cleanup`,
-      fileSystem,
-    );
+    if (anchorWitness) await cleanupCreatedWithWitness(anchorPath, anchorWitnessPath, fileSystem);
+    else await cleanupExactCreatedPath(anchorPath, anchorIdentity, anchorWitnessPath, fileSystem);
   }
 }
 

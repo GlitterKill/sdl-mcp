@@ -104,7 +104,7 @@ interface AuxiliaryEntry {
   readonly simple: SimpleAuxiliaryRecord | null;
   readonly create: CreateAuxiliaryRecord | null;
   readonly nonce: string | null;
-  readonly kind: "create" | "created-lock" | "record" | "witness" |
+  readonly kind: "create" | "create-witness" | "created-lock" | "record" | "witness" |
     "claim-artifact" | "moved-source" | "evidence-delete";
 }
 
@@ -114,10 +114,12 @@ export type LifetimeClaimAvailability = "available" | "busy" | "invalid";
 const EVIDENCE_NAME = /^sdl-observability-lifetime\.evidence\.v1\.(validated-supported|protected-unknown-newer)\.(lock|publication)\.([0-9a-z]{11})\.([0-9a-f]{32})\.json$/;
 const AUXILIARY_PREFIX = ".sdl-observability-lifetime.";
 const CREATE_AUXILIARY = /^\.sdl-observability-lifetime\.create\.([0-9a-f]{32})$/;
+const CREATE_WITNESS_AUXILIARY = /^\.sdl-observability-lifetime\.create-source\.([0-9a-f]{32})$/;
 const CREATED_LOCK_AUXILIARY = /^\.sdl-observability-lifetime\.create-lock\.([0-9a-f]{32})$/;
 const RECORD_AUXILIARY = /^\.sdl-observability-lifetime\.claim-record\.([0-9a-f]{32})\.json$/;
 const WITNESS_AUXILIARY = /^\.sdl-observability-lifetime\.claim-source\.([0-9a-f]{32})$/;
 const CLAIM_AUXILIARY = /^\.sdl-observability-lifetime\.claim-(?:cleanup|recovery-witness|recovery-moved)\.([0-9a-f]{32})$/;
+const CLAIM_CLEANUP_AUXILIARY = /^\.sdl-observability-lifetime\.claim-cleanup\.([0-9a-f]{32})$/;
 const MOVED_SOURCE_AUXILIARY = /^\.sdl-observability-lifetime\.(?:release|aux-delete)\.([0-9a-f]{32})$/;
 const DELETE_AUXILIARY_PREFIX = ".sdl-observability-lifetime.delete.";
 
@@ -557,6 +559,20 @@ function classifyAuxiliary(
     };
   }
   const record = RECORD_AUXILIARY.exec(logicalName);
+  const createWitness = CREATE_WITNESS_AUXILIARY.exec(logicalName);
+  if (createWitness) {
+    return {
+      name,
+      logicalName,
+      path: resolve(directory, name),
+      snapshot: source.snapshot,
+      claim: null,
+      simple: null,
+      create: null,
+      nonce: createWitness[1] ?? null,
+      kind: "create-witness",
+    };
+  }
   const createdLock = CREATED_LOCK_AUXILIARY.exec(logicalName);
   if (createdLock) {
     const simple = parseSimpleAuxiliary(source.content);
@@ -694,6 +710,42 @@ async function matchingClaimCleanup(
   }
 }
 
+async function matchingInitialClaimCleanup(
+  directory: string,
+  fixedStat: BigIntStats,
+  fileSystem: LifetimeFileSystem,
+): Promise<boolean> {
+  if (fixedStat.ino === 0n) return false;
+  const names = (await fileSystem.readdir(directory, { encoding: "utf8" }))
+    .filter((name) => CLAIM_CLEANUP_AUXILIARY.test(name))
+    .sort();
+  if (names.length > MAX_LIFETIME_AUXILIARY_SCAN) return false;
+  for (const name of names) {
+    const match = CLAIM_CLEANUP_AUXILIARY.exec(name);
+    const nonce = match?.[1];
+    if (!nonce) continue;
+    try {
+      const cleanup = await readLifetimeSource(resolve(directory, name), fileSystem, MAX_CLAIM_BYTES);
+      const cleanupRecord = parseClaim(cleanup.content);
+      if (!cleanupRecord || cleanupRecord.nonce !== nonce) continue;
+      const durable = await readLifetimeSource(recordPath(directory, nonce), fileSystem, MAX_CLAIM_BYTES);
+      const durableRecord = parseClaim(durable.content);
+      if (
+        durableRecord &&
+        sameClaimRecord(cleanupRecord, durableRecord) &&
+        sameLifetimeSource(cleanup.snapshot, durable.snapshot) &&
+        cleanup.snapshot.dev === fixedStat.dev.toString(10) &&
+        cleanup.snapshot.ino === fixedStat.ino.toString(10)
+      ) {
+        return true;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return false;
+}
+
 function sameSimpleRecord(left: SimpleAuxiliaryRecord, right: SimpleAuxiliaryRecord): boolean {
   return left.schemaVersion === right.schemaVersion &&
     left.pid === right.pid &&
@@ -796,6 +848,11 @@ async function recoverStrandedAuxiliaries(
         return "invalid";
       }
     }
+    if (entry.kind === "create-witness") {
+      const anchor = entries.find((candidate) =>
+        candidate.kind === "create" && candidate.nonce === entry.nonce);
+      if (!anchor || !sameLifetimeIdentity(anchor.snapshot, entry.snapshot)) return "invalid";
+    }
     if (entry.kind === "created-lock") {
       const anchor = entries.find((candidate) =>
         candidate.kind === "create" && candidate.nonce === entry.nonce);
@@ -836,7 +893,7 @@ async function recoverStrandedAuxiliaries(
       key = `evidence:${entry.logicalName}`;
     } else if (entry.kind === "create") {
       key = sourceGroupKey(entry.snapshot);
-    } else if (entry.kind === "created-lock") {
+    } else if (entry.kind === "create-witness" || entry.kind === "created-lock") {
       const anchor = entry.nonce ? createByNonce.get(entry.nonce) : undefined;
       if (!anchor) return "invalid";
       key = sourceGroupKey(anchor.snapshot);
@@ -875,7 +932,8 @@ async function recoverStrandedAuxiliaries(
   if (selectedGroups.length === 0) return "invalid";
 
   const priority = (entry: AuxiliaryEntry) =>
-    entry.kind === "witness" || entry.kind === "moved-source" ||
+    entry.kind === "witness" || entry.kind === "create-witness" ||
+      entry.kind === "moved-source" ||
       entry.kind === "created-lock" ? 0
       : entry.kind === "record" ? 2
         : 1;
@@ -904,14 +962,32 @@ async function recoverExistingClaim(
   options: LifetimeClaimOptions,
 ): Promise<ExistingClaimOutcome> {
   const fixedPath = resolve(directory, LIFETIME_CLAIM_FILENAME);
-  let fixed: Awaited<ReturnType<typeof readLifetimeSource>>;
+  let fixedStat: BigIntStats;
   try {
-    fixed = await readLifetimeSource(fixedPath, fileSystem, MAX_CLAIM_BYTES);
+    fixedStat = await fileSystem.lstat(fixedPath, { bigint: true });
+    regularFile(fixedStat, "Lifetime claim", MAX_CLAIM_BYTES);
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT"
-      ? "raced"
-      : "invalid";
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "raced" : "invalid";
   }
+  let fixed: Awaited<ReturnType<typeof readLifetimeSource>> | undefined;
+  for (let attempt = 0; attempt < CLAIM_RACE_RECHECK_ATTEMPTS; attempt++) {
+    try {
+      fixed = await readLifetimeSource(fixedPath, fileSystem, MAX_CLAIM_BYTES);
+      break;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return "raced";
+      if (code !== "EPERM" && code !== "EACCES") return "invalid";
+      try {
+        if (await pathAbsent(fixedPath, fileSystem) ||
+            await matchingInitialClaimCleanup(directory, fixedStat, fileSystem)) return "raced";
+      } catch (recheckError) {
+        if ((recheckError as NodeJS.ErrnoException).code === "ENOENT") return "raced";
+      }
+      if (attempt + 1 < CLAIM_RACE_RECHECK_ATTEMPTS) await waitOneMillisecond();
+    }
+  }
+  if (!fixed) return "invalid";
   const record = parseClaim(fixed.content);
   if (!record) return "invalid";
   const durableRecordPath = directChildPath(
