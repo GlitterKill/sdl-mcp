@@ -1406,6 +1406,86 @@ describe("lifetime persistence lock", () => {
     assert.equal(await releaseLifetimeLease(result.lease), true);
   });
 
+  it("recovers large claimed-source and moved-source crash artifacts", async () => {
+    for (const [index, shape] of [
+      [0, "witness"],
+      [1, "witness-cleanup"],
+      [2, "moved"],
+      [3, "moved-cleanup"],
+    ] as const) {
+      const directory = await temporaryDirectory();
+      const nonce = (0xd0 + index).toString(16).padStart(32, "0");
+      const source = join(directory, `large-crash-source-${index}.bin`);
+      await writeFile(source, Buffer.alloc(20 * 1024, index + 1));
+      const snapshot = await fileSnapshot(source);
+      const recordPath = join(
+        directory,
+        `.sdl-observability-lifetime.claim-record.${nonce}.json`,
+      );
+      const logicalName = shape.startsWith("witness")
+        ? `.sdl-observability-lifetime.claim-source.${nonce}`
+        : `.sdl-observability-lifetime.aux-delete.${nonce}`;
+      const artifactPath = join(
+        directory,
+        `${logicalName}${shape.endsWith("cleanup") ? ".cleanup" : ""}`,
+      );
+      await writeFile(recordPath, claimRecord(999_999, nonce, snapshot));
+      if (shape.startsWith("witness")) await link(source, artifactPath);
+      else await rename(source, artifactPath);
+
+      const result = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+      });
+      assertWriter(result);
+      await assertMissing(recordPath);
+      await assertMissing(artifactPath);
+      assert.equal(await releaseLifetimeLease(result.lease), true);
+    }
+  });
+
+  it("rejects source-content crash artifacts above two MiB without mutation", async () => {
+    for (const [index, shape] of [[0, "witness"], [1, "moved-cleanup"]] as const) {
+      const directory = await temporaryDirectory();
+      const nonce = (0xe8 + index).toString(16).padStart(32, "0");
+      const source = join(directory, `oversized-crash-source-${index}.bin`);
+      await writeFile(source, Buffer.alloc(2 * 1024 * 1024 + 1, index + 1));
+      const snapshot = await fileSnapshot(source);
+      const recordPath = join(
+        directory,
+        `.sdl-observability-lifetime.claim-record.${nonce}.json`,
+      );
+      const logicalName = shape === "witness"
+        ? `.sdl-observability-lifetime.claim-source.${nonce}`
+        : `.sdl-observability-lifetime.aux-delete.${nonce}`;
+      const artifactPath = join(
+        directory,
+        `${logicalName}${shape.endsWith("cleanup") ? ".cleanup" : ""}`,
+      );
+      await writeFile(recordPath, claimRecord(999_999, nonce, snapshot));
+      if (shape === "witness") await link(source, artifactPath);
+      else await rename(source, artifactPath);
+      const beforeNames = await auxiliaryFiles(directory);
+      const beforeRecord = await readFile(recordPath, "utf8");
+      const beforeArtifact = await fileSnapshot(artifactPath);
+      let artifactOpened = false;
+
+      const result = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+        fileSystem: {
+          open: async (...args: Parameters<typeof open>) => {
+            if (String(args[0]) === artifactPath) artifactOpened = true;
+            return open(...args);
+          },
+        },
+      });
+      assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" }, shape);
+      assert.equal(artifactOpened, false, shape);
+      assert.deepEqual(await auxiliaryFiles(directory), beforeNames, shape);
+      assert.equal(await readFile(recordPath, "utf8"), beforeRecord, shape);
+      assert.deepEqual(await fileSnapshot(artifactPath), beforeArtifact, shape);
+    }
+  });
+
   it("recovers exact fixed and claim-cleanup aliases across two startups", async () => {
     const directory = await temporaryDirectory();
     const lockPath = join(directory, LIFETIME_LOCK_FILENAME);

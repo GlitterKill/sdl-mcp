@@ -133,6 +133,7 @@ const WITNESS_AUXILIARY = /^\.sdl-observability-lifetime\.claim-source\.([0-9a-f
 const CLAIM_AUXILIARY = /^\.sdl-observability-lifetime\.claim-(?:cleanup|recovery-witness|recovery-moved)\.([0-9a-f]{32})$/;
 const CLAIM_CLEANUP_AUXILIARY = /^\.sdl-observability-lifetime\.claim-cleanup\.([0-9a-f]{32})$/;
 const MOVED_SOURCE_AUXILIARY = /^\.sdl-observability-lifetime\.(?:release|aux-delete)\.([0-9a-f]{32})$/;
+const AUX_DELETE_AUXILIARY = /^\.sdl-observability-lifetime\.aux-delete\.([0-9a-f]{32})$/;
 const DELETE_AUXILIARY_PREFIX = ".sdl-observability-lifetime.delete.";
 const NORMALIZE_AUXILIARY_SUFFIX = /\.normalize\.[0-9a-f]{32}$/;
 
@@ -592,9 +593,10 @@ export async function removeExactLifetimeSource(
   candidatePath: string,
   fileSystem: LifetimeFileSystem,
   identityOnly = false,
+  maxBytes = MAX_CLAIM_BYTES,
 ): Promise<boolean> {
   try {
-    const before = await readLifetimeSource(claimPath, fileSystem, MAX_CLAIM_BYTES);
+    const before = await readLifetimeSource(claimPath, fileSystem, maxBytes);
     const matchesBefore = identityOnly
       ? sameLifetimeIdentity(before.snapshot, expected)
       : sameDestructiveSource(before.snapshot, expected);
@@ -609,7 +611,7 @@ export async function removeExactLifetimeSource(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
-  const moved = await readLifetimeSource(candidatePath, fileSystem, MAX_CLAIM_BYTES);
+  const moved = await readLifetimeSource(candidatePath, fileSystem, maxBytes);
   const matches = identityOnly
     ? sameLifetimeIdentity(moved.snapshot, expected)
     : sameDestructiveSource(moved.snapshot, expected);
@@ -666,7 +668,9 @@ function logicalAuxiliaryName(name: string): string {
 
 function auxiliaryReadLimit(name: string): number {
   const logicalName = logicalAuxiliaryName(name);
-  return logicalName.startsWith(DELETE_AUXILIARY_PREFIX)
+  return WITNESS_AUXILIARY.test(logicalName) ||
+      AUX_DELETE_AUXILIARY.test(logicalName) ||
+      logicalName.startsWith(DELETE_AUXILIARY_PREFIX)
     ? MAX_EVIDENCE_SOURCE_BYTES
     : MAX_CLAIM_BYTES;
 }
@@ -931,7 +935,14 @@ async function removeValidatedAuxiliary(
     `${entry.logicalName}${nextSuffix}`,
   );
   if (!await pathAbsent(candidate, fileSystem)) return false;
-  return removeExactLifetimeSource(entry.path, entry.snapshot, candidate, fileSystem);
+  return removeExactLifetimeSource(
+    entry.path,
+    entry.snapshot,
+    candidate,
+    fileSystem,
+    false,
+    auxiliaryReadLimit(entry.name),
+  );
 }
 
 function normalizationCandidatePath(
@@ -992,6 +1003,8 @@ async function restoreEvidenceDeletion(
       entry.snapshot,
       retirementCandidate,
       fileSystem,
+      false,
+      MAX_EVIDENCE_SOURCE_BYTES,
     );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
