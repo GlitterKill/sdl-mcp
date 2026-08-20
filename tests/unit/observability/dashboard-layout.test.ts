@@ -69,14 +69,21 @@ describe("dashboard layout geometry", () => {
     );
     assert.match(html, /<button[^>]+id="layoutResetBtn"[^>]*>\s*RESET LAYOUT\s*<\/button>/);
     assert.match(html, /id="layoutInstructions"/);
+    assert.match(html, /arrow keys to move it one grid cell/i);
+    assert.match(html, /hold Shift and use the arrow keys to resize it one grid cell/i);
+    assert.match(html, /drag a panel\s+header to move it/i);
+    assert.match(html, /bottom-right resize handle/i);
+    assert.match(html, /Press Escape[\s\S]*?leave\s+edit\s+mode[\s\S]*?cancel/i);
     assert.match(html, /id="layoutStatus"[^>]+aria-live="polite"[^>]+aria-atomic="true"/);
 
     assert.match(dashboardSource, /setAttribute\("aria-labelledby", heading\.id\)/);
     assert.match(dashboardSource, /setAttribute\("aria-describedby", "layoutInstructions"\)/);
     assert.match(dashboardSource, /panel\.tabIndex = 0/);
     assert.match(dashboardSource, /panel\.removeAttribute\("tabindex"\)/);
-    assert.match(dashboardSource, /window\.confirm\("Reset dashboard panel layout\?"\)/);
-    assert.match(dashboardSource, /layoutResetBtn\.focus\(\)/);
+    assert.match(
+      dashboardSource,
+      /layoutResetBtn\.addEventListener\("click", \(\) => \{\s*try \{\s*if \(!window\.confirm\("Reset dashboard panel layout\?"\)\) return;[\s\S]*?\} finally \{\s*layoutResetBtn\.focus\(\);/,
+    );
   });
 
   it("uses a real accessible resize handle and hides editing in the mobile stack", () => {
@@ -104,6 +111,38 @@ describe("dashboard layout geometry", () => {
       /catch \{[\s\S]*?return defaults;[\s\S]*?\}/,
     );
     assert.match(dashboardSource, /for \(const panel of panels\) \{[\s\S]*?try \{/);
+  });
+
+  it("validates collisions that do not involve the first panel", () => {
+    const layout = migrateV2Layout({}, panelIds);
+    const laterCollision = {
+      ...layout,
+      latency: { ...layout.health },
+    };
+    assert.notEqual(movePanel(laterCollision, panelIds[0], 0, 0), laterCollision);
+    assert.equal(
+      panelIds.every((id) => movePanel(laterCollision, id, 0, 0) !== laterCollision),
+      false,
+    );
+    assert.match(
+      dashboardSource,
+      /return panelIds\.length > 0 && panelIds\.every\(\(id\) => movePanel\(candidate, id, 0, 0\) !== candidate\);/,
+    );
+  });
+
+  it("leaves invalid v3 untouched and reset removes only v3", () => {
+    assert.match(
+      dashboardSource,
+      /if \(savedV3 !== null\) \{[\s\S]*?return isCompleteLayout\(parsed, panelIds\) \? parsed : defaults;[\s\S]*?catch \{\s*return defaults;\s*\}/,
+    );
+    assert.match(
+      dashboardSource,
+      /layout = defaults;[\s\S]*?localStorage\.removeItem\(LAYOUT_V3_KEY\)/,
+    );
+    assert.doesNotMatch(
+      dashboardSource,
+      /layoutResetBtn\.addEventListener[\s\S]*?localStorage\.setItem\(LAYOUT_V3_KEY/,
+    );
   });
 
   it("registers the same complete panel set in HTML, JavaScript defaults, and CSS", () => {

@@ -1015,8 +1015,8 @@ function isCompleteLayout(candidate, panelIds) {
   ) {
     return false;
   }
-  // A no-op move delegates rectangle bounds and collision validation to the shared engine.
-  return panelIds.length > 0 && movePanel(candidate, panelIds[0], 0, 0) !== candidate;
+  // No-op moves delegate every rectangle and pairwise collision check to the shared engine.
+  return panelIds.length > 0 && panelIds.every((id) => movePanel(candidate, id, 0, 0) !== candidate);
 }
 
 function loadDashboardLayout(panelIds) {
@@ -1025,7 +1025,7 @@ function loadDashboardLayout(panelIds) {
   if (savedV3 !== null) {
     try {
       const parsed = JSON.parse(savedV3);
-      if (isCompleteLayout(parsed, panelIds)) return parsed;
+      return isCompleteLayout(parsed, panelIds) ? parsed : defaults;
     } catch {
       return defaults;
     }
@@ -1081,11 +1081,11 @@ function initDashboardLayoutEditor() {
   });
 
   layoutResetBtn.addEventListener("click", () => {
-    if (!window.confirm("Reset dashboard panel layout?")) return;
     try {
+      if (!window.confirm("Reset dashboard panel layout?")) return;
       layout = defaults;
       for (const panel of panels) applyPanelRect(panel, layout[panel.dataset.panel]);
-      localStorage.setItem(LAYOUT_V3_KEY, JSON.stringify(layout));
+      localStorage.removeItem(LAYOUT_V3_KEY);
       if (layoutStatus) layoutStatus.textContent = "Panel layout reset.";
     } finally {
       layoutResetBtn.focus();
