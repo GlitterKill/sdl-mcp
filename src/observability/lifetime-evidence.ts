@@ -10,6 +10,7 @@ export const LIFETIME_EVIDENCE_PREFIX = "sdl-observability-lifetime.evidence.";
 export const LIFETIME_CLAIM_FILENAME = "sdl-observability-lifetime.claim";
 const MAX_EVIDENCE_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_CLAIM_BYTES = 16 * 1024;
+const MAX_LIFETIME_AUXILIARIES = 32;
 const CLAIM_WAIT_ATTEMPTS = 1_000;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const HEX_128 = /^[0-9a-f]{32}$/;
@@ -79,10 +80,30 @@ interface EvidenceEntry {
   readonly snapshot: LifetimeSourceSnapshot;
 }
 
+interface AuxiliaryEntry {
+  readonly name: string;
+  readonly logicalName: string;
+  readonly path: string;
+  readonly snapshot: LifetimeSourceSnapshot;
+  readonly claim: LifetimeClaimRecord | null;
+  readonly simple: { readonly pid: number; readonly nonce: string } | null;
+  readonly nonce: string | null;
+  readonly kind: "create" | "created-lock" | "record" | "witness" |
+    "claim-artifact" | "moved-source" | "evidence-delete";
+}
+
 type ExistingClaimOutcome = "recovered" | "raced" | "live" | "invalid";
 export type LifetimeClaimAvailability = "available" | "busy" | "invalid";
 
 const EVIDENCE_NAME = /^sdl-observability-lifetime\.evidence\.v1\.(validated-supported|protected-unknown-newer)\.(lock|publication)\.([0-9a-z]{11})\.([0-9a-f]{32})\.json$/;
+const AUXILIARY_PREFIX = ".sdl-observability-lifetime.";
+const CREATE_AUXILIARY = /^\.sdl-observability-lifetime\.create\.([0-9a-f]{32})$/;
+const CREATED_LOCK_AUXILIARY = /^\.sdl-observability-lifetime\.create-lock\.([0-9a-f]{32})$/;
+const RECORD_AUXILIARY = /^\.sdl-observability-lifetime\.claim-record\.([0-9a-f]{32})\.json$/;
+const WITNESS_AUXILIARY = /^\.sdl-observability-lifetime\.claim-source\.([0-9a-f]{32})$/;
+const CLAIM_AUXILIARY = /^\.sdl-observability-lifetime\.claim-(?:cleanup|recovery-witness|recovery-moved)\.([0-9a-f]{32})$/;
+const MOVED_SOURCE_AUXILIARY = /^\.sdl-observability-lifetime\.(?:release|aux-delete)\.([0-9a-f]{32})$/;
+const DELETE_AUXILIARY_PREFIX = ".sdl-observability-lifetime.delete.";
 
 export function resolveLifetimeFileSystem(
   overrides: LifetimeFileSystemOverrides = {},
@@ -161,7 +182,7 @@ export function sameLifetimeSource(
   return identityMatches && left.size === right.size && left.sha256 === right.sha256;
 }
 
-function sameLifetimeIdentity(
+export function sameLifetimeIdentity(
   left: LifetimeSourceSnapshot,
   right: LifetimeSourceSnapshot,
 ): boolean {
@@ -291,6 +312,33 @@ function parseClaim(content: Buffer): LifetimeClaimRecord | null {
   }
 }
 
+function parseSimpleAuxiliary(
+  content: Buffer,
+): { readonly pid: number; readonly nonce: string } | null {
+  try {
+    const parsed: unknown = JSON.parse(content.toString("utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const value = parsed as Record<string, unknown>;
+    if (
+      JSON.stringify(Object.keys(value)) !==
+        JSON.stringify(["schemaVersion", "pid", "createdAt", "nonce"]) ||
+      value.schemaVersion !== 1 ||
+      !Number.isSafeInteger(value.pid) ||
+      Number(value.pid) <= 0 ||
+      typeof value.createdAt !== "string" ||
+      !ISO_TIMESTAMP.test(value.createdAt) ||
+      new Date(value.createdAt).toISOString() !== value.createdAt ||
+      typeof value.nonce !== "string" ||
+      !HEX_128.test(value.nonce)
+    ) {
+      return null;
+    }
+    return { pid: Number(value.pid), nonce: value.nonce };
+  } catch {
+    return null;
+  }
+}
+
 function claimError(code: "busy" | "mismatch" | "unsupported", message: string): Error {
   return Object.assign(new Error(message), { lifetimeClaimCode: code });
 }
@@ -373,11 +421,12 @@ async function restoreMovedReplacement(
   }
 }
 
-async function removeFixedClaim(
+export async function removeExactLifetimeSource(
   claimPath: string,
   expected: LifetimeSourceSnapshot,
   candidatePath: string,
   fileSystem: LifetimeFileSystem,
+  identityOnly = false,
 ): Promise<boolean> {
   try {
     await fileSystem.rename(claimPath, candidatePath);
@@ -386,7 +435,10 @@ async function removeFixedClaim(
     throw error;
   }
   const moved = await readLifetimeSource(candidatePath, fileSystem, MAX_CLAIM_BYTES);
-  if (!sameLifetimeSource(moved.snapshot, expected)) {
+  const matches = identityOnly
+    ? sameLifetimeIdentity(moved.snapshot, expected)
+    : sameLifetimeSource(moved.snapshot, expected);
+  if (!matches) {
     await restoreMovedReplacement(candidatePath, claimPath, fileSystem);
     return false;
   }
@@ -417,6 +469,244 @@ async function claimantAlive(
   );
 }
 
+function classifyAuxiliary(
+  directory: string,
+  name: string,
+  source: Awaited<ReturnType<typeof readLifetimeSource>>,
+): AuxiliaryEntry | null {
+  const logicalName = name.endsWith(".cleanup-next")
+    ? name.slice(0, -".cleanup-next".length)
+    : name.endsWith(".cleanup")
+      ? name.slice(0, -".cleanup".length)
+      : name;
+  const create = CREATE_AUXILIARY.exec(logicalName);
+  if (create) {
+    const simple = parseSimpleAuxiliary(source.content);
+    if (!simple || simple.nonce !== create[1]) return null;
+    return {
+      name,
+      logicalName,
+      path: resolve(directory, name),
+      snapshot: source.snapshot,
+      claim: null,
+      simple,
+      nonce: simple.nonce,
+      kind: "create",
+    };
+  }
+  const record = RECORD_AUXILIARY.exec(logicalName);
+  const createdLock = CREATED_LOCK_AUXILIARY.exec(logicalName);
+  if (createdLock) {
+    const simple = parseSimpleAuxiliary(source.content);
+    if (!simple || simple.nonce !== createdLock[1]) return null;
+    return {
+      name,
+      logicalName,
+      path: resolve(directory, name),
+      snapshot: source.snapshot,
+      claim: null,
+      simple,
+      nonce: simple.nonce,
+      kind: "created-lock",
+    };
+  }
+  if (record) {
+    const claim = parseClaim(source.content);
+    if (!claim || claim.nonce !== record[1]) return null;
+    return {
+      name,
+      logicalName,
+      path: resolve(directory, name),
+      snapshot: source.snapshot,
+      claim,
+      simple: null,
+      nonce: claim.nonce,
+      kind: "record",
+    };
+  }
+  const witness = WITNESS_AUXILIARY.exec(logicalName);
+  if (witness) {
+    return {
+      name,
+      logicalName,
+      path: resolve(directory, name),
+      snapshot: source.snapshot,
+      claim: null,
+      simple: null,
+      nonce: witness[1] ?? null,
+      kind: "witness",
+    };
+  }
+  if (CLAIM_AUXILIARY.test(logicalName)) {
+    const claim = parseClaim(source.content);
+    if (!claim) return null;
+    return {
+      name,
+      logicalName,
+      path: resolve(directory, name),
+      snapshot: source.snapshot,
+      claim,
+      simple: null,
+      nonce: claim.nonce,
+      kind: "claim-artifact",
+    };
+  }
+  const moved = MOVED_SOURCE_AUXILIARY.exec(logicalName);
+  if (moved) {
+    return {
+      name,
+      logicalName,
+      path: resolve(directory, name),
+      snapshot: source.snapshot,
+      claim: null,
+      simple: null,
+      nonce: moved[1] ?? null,
+      kind: "moved-source",
+    };
+  }
+  if (logicalName.startsWith(DELETE_AUXILIARY_PREFIX)) {
+    const evidenceName = logicalName.slice(DELETE_AUXILIARY_PREFIX.length);
+    const evidence = EVIDENCE_NAME.exec(evidenceName);
+    if (!evidence || evidence[1] !== "validated-supported") return null;
+    return {
+      name,
+      logicalName,
+      path: resolve(directory, name),
+      snapshot: source.snapshot,
+      claim: null,
+      simple: null,
+      nonce: null,
+      kind: "evidence-delete",
+    };
+  }
+  return null;
+}
+
+function sameClaimRecord(left: LifetimeClaimRecord, right: LifetimeClaimRecord): boolean {
+  return left.schemaVersion === right.schemaVersion &&
+    left.pid === right.pid &&
+    left.createdAt === right.createdAt &&
+    left.nonce === right.nonce &&
+    sameLifetimeSource(left.source, right.source);
+}
+
+async function removeValidatedAuxiliary(
+  entry: AuxiliaryEntry,
+  fileSystem: LifetimeFileSystem,
+): Promise<boolean> {
+  const nextSuffix = entry.name.endsWith(".cleanup") ? ".cleanup-next" : ".cleanup";
+  const candidate = resolve(
+    dirname(entry.path),
+    `${entry.logicalName}${nextSuffix}`,
+  );
+  if (!await pathAbsent(candidate, fileSystem)) return false;
+  return removeExactLifetimeSource(entry.path, entry.snapshot, candidate, fileSystem);
+}
+
+async function restoreEvidenceDeletion(
+  directory: string,
+  entry: AuxiliaryEntry,
+  fileSystem: LifetimeFileSystem,
+): Promise<boolean> {
+  const targetName = entry.logicalName.slice(DELETE_AUXILIARY_PREFIX.length);
+  const target = directChildPath(directory, resolve(directory, targetName), "Evidence restore");
+  if (!await pathAbsent(target, fileSystem)) return false;
+  try {
+    await fileSystem.rename(entry.path, target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  const restored = await readLifetimeSource(target, fileSystem);
+  if (sameLifetimeSource(restored.snapshot, entry.snapshot)) return true;
+  await restoreMovedReplacement(target, entry.path, fileSystem);
+  return false;
+}
+
+async function recoverStrandedAuxiliaries(
+  directory: string,
+  fileSystem: LifetimeFileSystem,
+  options: LifetimeClaimOptions,
+  ignoredNames: ReadonlySet<string>,
+): Promise<LifetimeClaimAvailability> {
+  const allNames = (await fileSystem.readdir(directory, { encoding: "utf8" }))
+    .filter((name) => name.startsWith(AUXILIARY_PREFIX) && !ignoredNames.has(name))
+    .sort();
+  if (allNames.length === 0) return "available";
+  const overCap = allNames.length > MAX_LIFETIME_AUXILIARIES;
+  const names = allNames.slice(0, MAX_LIFETIME_AUXILIARIES);
+  const entries: AuxiliaryEntry[] = [];
+  const logicalNames = new Set<string>();
+  try {
+    for (const name of names) {
+      const path = directChildPath(directory, resolve(directory, name), "Lifetime auxiliary");
+      const source = await readLifetimeSource(path, fileSystem, MAX_EVIDENCE_SOURCE_BYTES);
+      const entry = classifyAuxiliary(directory, name, source);
+      if (!entry || logicalNames.has(entry.logicalName)) return "invalid";
+      logicalNames.add(entry.logicalName);
+      entries.push(entry);
+    }
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "busy" : "invalid";
+  }
+
+  const claims = new Map<string, LifetimeClaimRecord>();
+  for (const entry of entries) {
+    if (!entry.claim) continue;
+    const existing = claims.get(entry.claim.nonce);
+    if (existing && !sameClaimRecord(existing, entry.claim)) return "invalid";
+    claims.set(entry.claim.nonce, entry.claim);
+  }
+  for (const entry of entries) {
+    if (entry.kind === "witness" || entry.kind === "moved-source") {
+      const claim = entry.nonce ? claims.get(entry.nonce) : undefined;
+      if (!claim || !sameLifetimeIdentity(entry.snapshot, claim.source)) return "invalid";
+    }
+    if (entry.kind === "create") {
+      const referringClaim = [...claims.values()].find((claim) =>
+        sameLifetimeIdentity(entry.snapshot, claim.source));
+      if (referringClaim && referringClaim.pid !== entry.simple?.pid) return "invalid";
+    }
+    if (entry.kind === "created-lock") {
+      const anchor = entries.find((candidate) =>
+        candidate.kind === "create" && candidate.nonce === entry.nonce);
+      if (!anchor) return "invalid";
+    }
+  }
+
+  const pids = new Set<number>();
+  for (const entry of entries) {
+    if (entry.claim) pids.add(entry.claim.pid);
+    if (entry.kind === "create" && entry.simple) pids.add(entry.simple.pid);
+  }
+  try {
+    for (const pid of pids) {
+      if (await claimantAlive(pid, options)) return "busy";
+    }
+  } catch {
+    return "invalid";
+  }
+
+  const ordered = [...entries].sort((left, right) => {
+    const priority = (entry: AuxiliaryEntry) =>
+      entry.kind === "witness" || entry.kind === "moved-source" ? 0
+        : entry.kind === "record" ? 2
+          : 1;
+    return priority(left) - priority(right) || left.name.localeCompare(right.name);
+  });
+  try {
+    for (const entry of ordered) {
+      const recovered = entry.kind === "evidence-delete"
+        ? await restoreEvidenceDeletion(directory, entry, fileSystem)
+        : await removeValidatedAuxiliary(entry, fileSystem);
+      if (!recovered) return "busy";
+    }
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "busy" : "invalid";
+  }
+  return overCap ? "busy" : "available";
+}
+
 async function recoverExistingClaim(
   directory: string,
   fileSystem: LifetimeFileSystem,
@@ -440,7 +730,12 @@ async function recoverExistingClaim(
   try {
     durableRecord = await readLifetimeSource(durableRecordPath, fileSystem, MAX_CLAIM_BYTES);
   } catch {
-    return "invalid";
+    try {
+      const current = await readLifetimeSource(fixedPath, fileSystem, MAX_CLAIM_BYTES);
+      return sameLifetimeSource(current.snapshot, fixed.snapshot) ? "invalid" : "raced";
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ENOENT" ? "raced" : "invalid";
+    }
   }
   if (!sameLifetimeSource(fixed.snapshot, durableRecord.snapshot)) return "invalid";
 
@@ -485,15 +780,15 @@ async function recoverExistingClaim(
     );
     recoveryWitnessSnapshot = recoveryWitness.snapshot;
     if (!sameLifetimeSource(recoveryWitness.snapshot, fixed.snapshot)) return "raced";
-    const removed = await removeFixedClaim(
+    const removed = await removeExactLifetimeSource(
       fixedPath,
       recoveryWitness.snapshot,
       recoveryMovedPath,
       fileSystem,
     );
     if (!removed) return "raced";
-    if (witness) await unlinkExact(durableWitnessPath, witness.snapshot, fileSystem, true);
-    await unlinkExact(durableRecordPath, durableRecord.snapshot, fileSystem);
+    // The durable record and witness authenticate any source moved before the
+    // claimant crashed. The bounded no-fixed-claim sweep removes them together.
     return "recovered";
   } finally {
     if (recoveryWitnessSnapshot) {
@@ -511,12 +806,21 @@ export async function settleLifetimeClaim(
   directory: string,
   options: LifetimeClaimOptions = {},
   waitForLive = false,
+  ignoredAuxiliaryNames: ReadonlySet<string> = new Set(),
 ): Promise<LifetimeClaimAvailability> {
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
   const trusted = await validateLifetimeDirectory(directory, fileSystem);
   for (let attempt = 0; attempt < (waitForLive ? CLAIM_WAIT_ATTEMPTS : 4); attempt++) {
     if (await pathAbsent(resolve(trusted, LIFETIME_CLAIM_FILENAME), fileSystem)) {
-      return "available";
+      const auxiliary = await recoverStrandedAuxiliaries(
+        trusted,
+        fileSystem,
+        options,
+        ignoredAuxiliaryNames,
+      );
+      if (auxiliary !== "busy" || !waitForLive) return auxiliary;
+      await waitOneMillisecond();
+      continue;
     }
     const outcome = await recoverExistingClaim(trusted, fileSystem, options);
     if (outcome === "invalid") return "invalid";
@@ -589,6 +893,7 @@ export async function claimLifetimeSource(
           trusted,
           { ...options, fileSystem },
           waitForClaim,
+          new Set([basename(own.path), basename(source)]),
         );
         if (availability === "invalid") {
           throw claimError("unsupported", "Lifetime claim metadata is ambiguous");
@@ -657,7 +962,7 @@ export async function releaseLifetimeSourceClaim(
   );
   let fixedStillOwnsRecord = true;
   if (await pathAbsent(cleanupPath, fileSystem)) {
-    fixedStillOwnsRecord = !await removeFixedClaim(
+    fixedStillOwnsRecord = !await removeExactLifetimeSource(
       claim.claimPath,
       claim.metadataSnapshot,
       cleanupPath,
@@ -755,7 +1060,6 @@ async function unusedPath(
 async function removeOldestEligible(
   evidence: readonly EvidenceEntry[],
   directory: string,
-  randomBytes: (size: number) => Buffer,
   fileSystem: LifetimeFileSystem,
 ): Promise<void> {
   const oldest = evidence
@@ -769,7 +1073,7 @@ async function removeOldestEligible(
   }
   const candidate = await unusedPath(
     directory,
-    `.sdl-observability-lifetime.delete.${randomBytes(16).toString("hex")}`,
+    `${DELETE_AUXILIARY_PREFIX}${oldest.name}`,
     fileSystem,
   );
   await fileSystem.rename(oldest.path, candidate);
@@ -808,7 +1112,7 @@ export async function rotateLifetimeEvidence(
   try {
     let evidence = await listEvidence(trusted, fileSystem);
     while (evidence.length >= MAX_LIFETIME_EVIDENCE_FILES) {
-      await removeOldestEligible(evidence, trusted, randomBytes, fileSystem);
+      await removeOldestEligible(evidence, trusted, fileSystem);
       evidence = await listEvidence(trusted, fileSystem);
     }
     const timestamp = (options.now ?? (() => new Date()))().getTime();
