@@ -49,8 +49,9 @@ function assertValidLayout(layout: Layout): void {
     assert.ok(Number.isInteger(rect.row));
     assert.ok(Number.isInteger(rect.cols));
     assert.ok(Number.isInteger(rect.rows));
-    assert.ok(rect.col >= 1 && rect.col + rect.cols - 1 <= GRID.columns);
+    assert.ok(rect.col >= 1 && rect.col + rect.cols <= GRID.columns + 1);
     assert.ok(rect.row >= 1);
+    assert.ok(Number.isSafeInteger(rect.row + rect.rows));
     assert.ok(rect.cols >= PANEL_BOUNDS.minCols && rect.cols <= PANEL_BOUNDS.maxCols);
     assert.ok(rect.rows >= PANEL_BOUNDS.minRows && rect.rows <= PANEL_BOUNDS.maxRows);
     for (const priorId of panelIds.slice(0, index)) {
@@ -149,7 +150,7 @@ describe("dashboard layout geometry", () => {
     assert.deepEqual(displaced, migrateV2Layout({}, ["bottleneck", "health"]));
     for (const rect of Object.values(displaced)) {
       assert.ok(Number.isSafeInteger(rect.row));
-      assert.ok(Number.isSafeInteger(rect.row + rect.rows - 1));
+      assert.ok(Number.isSafeInteger(rect.row + rect.rows));
     }
   });
 
@@ -210,6 +211,11 @@ describe("dashboard layout geometry", () => {
     const unsafeLayout = { panel: { col: 1, row: 1e16, cols: 4, rows: 2 } };
     assert.equal(movePanel(unsafeLayout, "panel", 0, 1), unsafeLayout);
     assert.equal(resizePanel(unsafeLayout, "panel", 1, 0), unsafeLayout);
+
+    const nearLimitLayout = {
+      panel: { col: 1, row: Number.MAX_SAFE_INTEGER - 1, cols: 4, rows: 2 },
+    };
+    assert.equal(movePanel(nearLimitLayout, "panel", 0, 1), nearLimitLayout);
     assert.deepEqual(layout, { panel: { col: 1, row: 2, cols: 4, rows: 2 } });
   });
 

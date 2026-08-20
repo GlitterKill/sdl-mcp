@@ -26,6 +26,7 @@ const DEFAULT_LAYOUT = Object.freeze({
 
 const roundHalfUp = (value) => Math.sign(value) * Math.floor(Math.abs(value) + 0.5);
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const hasSafeExclusiveEnd = (start, size) => start <= Number.MAX_SAFE_INTEGER - size;
 
 function normalizeRect(rect) {
   if (![rect.col, rect.row, rect.cols, rect.rows].every(Number.isSafeInteger)) return null;
@@ -51,8 +52,9 @@ function isLayoutRect(rect) {
     rect.cols <= PANEL_BOUNDS.maxCols &&
     rect.rows >= PANEL_BOUNDS.minRows &&
     rect.rows <= PANEL_BOUNDS.maxRows &&
-    rect.col + rect.cols - 1 <= GRID.columns &&
-    Number.isSafeInteger(rect.row + rect.rows - 1)
+    hasSafeExclusiveEnd(rect.col, rect.cols) &&
+    rect.col + rect.cols <= GRID.columns + 1 &&
+    hasSafeExclusiveEnd(rect.row, rect.rows)
   );
 }
 
@@ -75,15 +77,8 @@ function placeBelow(layout, rect) {
   if (!isLayoutRect(rect)) return null;
   const candidate = { ...rect };
   while (collides(layout, candidate)) {
-    const nextRow = candidate.row + 1;
-    if (
-      !Number.isSafeInteger(nextRow) ||
-      nextRow === candidate.row ||
-      !Number.isSafeInteger(nextRow + candidate.rows - 1)
-    ) {
-      return null;
-    }
-    candidate.row = nextRow;
+    if (candidate.row >= Number.MAX_SAFE_INTEGER - candidate.rows) return null;
+    candidate.row += 1;
   }
   return candidate;
 }
@@ -103,7 +98,7 @@ function isV2Rect(rect) {
     rect.row >= 1 &&
     rect.rows >= 1 &&
     rect.rows <= 4 &&
-    rect.col + rect.cols - 1 <= 12
+    rect.col + rect.cols <= 13
   );
 }
 
