@@ -929,26 +929,19 @@ async function recoverStrandedAuxiliaries(
     return "invalid";
   }
 
-  let recoveryEntries = entries;
-  let retiredAliases = 0;
+  const recoveryEntries: AuxiliaryEntry[] = [];
+  const aliasesByCanonical = new Map<AuxiliaryEntry, AuxiliaryEntry[]>();
   const aliasesByLogicalName = Map.groupBy(entries, (entry) => entry.logicalName);
-  try {
-    for (const aliases of aliasesByLogicalName.values()) {
-      if (aliases.length < 2) continue;
-      const canonical = aliases.find((entry) => entry.name === entry.logicalName) ??
-        [...aliases].sort((left, right) => left.name.localeCompare(right.name))[0];
-      if (!canonical) return "invalid";
-      for (const alias of aliases) {
-        if (alias === canonical) continue;
-        if (retiredAliases >= MAX_LIFETIME_AUXILIARIES) return "busy";
-        if (!await removeValidatedAuxiliary(alias, fileSystem)) return "busy";
-        retiredAliases++;
-      }
-      recoveryEntries = recoveryEntries.filter((entry) =>
-        entry === canonical || entry.logicalName !== canonical.logicalName);
-    }
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "busy" : "invalid";
+  for (const aliases of aliasesByLogicalName.values()) {
+    const canonical = aliases.find((entry) => entry.name === entry.logicalName) ??
+      [...aliases].sort((left, right) => left.name.localeCompare(right.name))[0];
+    if (!canonical) return "invalid";
+    recoveryEntries.push(canonical);
+    aliasesByCanonical.set(
+      canonical,
+      aliases.filter((entry) => entry !== canonical)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    );
   }
 
   const createByNonce = new Map(
@@ -956,7 +949,10 @@ async function recoverStrandedAuxiliaries(
       .filter((entry) => entry.kind === "create" && entry.nonce)
       .map((entry) => [entry.nonce as string, entry] as const),
   );
-  const groups = new Map<string, AuxiliaryEntry[]>();
+  const groups = new Map<string, {
+    readonly entries: AuxiliaryEntry[];
+    readonly aliases: AuxiliaryEntry[];
+  }>();
   for (const entry of recoveryEntries) {
     let key: string;
     if (entry.kind === "evidence-delete") {
@@ -972,13 +968,14 @@ async function recoverStrandedAuxiliaries(
       if (!claim) return "invalid";
       key = sourceGroupKey(claim.source);
     }
-    const group = groups.get(key) ?? [];
-    group.push(entry);
+    const group = groups.get(key) ?? { entries: [], aliases: [] };
+    group.entries.push(entry);
+    group.aliases.push(...(aliasesByCanonical.get(entry) ?? []));
     groups.set(key, group);
   }
 
-  const orderedGroups = [...groups.entries()].map(([key, groupEntries]) => {
-    const oldest = Math.min(...groupEntries.map((entry) => {
+  const orderedGroups = [...groups.entries()].map(([key, group]) => {
+    const oldest = Math.min(...group.entries.map((entry) => {
       if (entry.claim) return Date.parse(entry.claim.createdAt);
       if (entry.create) return Date.parse(entry.create.createdAt);
       if (entry.simple) return Date.parse(entry.simple.createdAt);
@@ -986,21 +983,26 @@ async function recoverStrandedAuxiliaries(
       const match = EVIDENCE_NAME.exec(evidenceName);
       return match?.[3] ? Number.parseInt(match[3], 36) : Number.MAX_SAFE_INTEGER;
     }));
-    return { key, entries: groupEntries, oldest };
+    return {
+      key,
+      entries: group.entries,
+      aliases: group.aliases,
+      cost: group.entries.length + group.aliases.length,
+      oldest,
+    };
   }).sort((left, right) => left.oldest - right.oldest || left.key.localeCompare(right.key));
 
-  if (orderedGroups.some((group) => group.entries.length > MAX_LIFETIME_AUXILIARIES)) {
+  if (orderedGroups.some((group) => group.cost > MAX_LIFETIME_AUXILIARIES)) {
     return "invalid";
   }
   const selectedGroups: typeof orderedGroups = [];
   let selectedCount = 0;
-  const remainingBudget = MAX_LIFETIME_AUXILIARIES - retiredAliases;
   for (const group of orderedGroups) {
-    if (selectedCount + group.entries.length > remainingBudget) break;
+    if (selectedCount + group.cost > MAX_LIFETIME_AUXILIARIES) break;
     selectedGroups.push(group);
-    selectedCount += group.entries.length;
+    selectedCount += group.cost;
   }
-  if (selectedGroups.length === 0) return retiredAliases > 0 ? "busy" : "invalid";
+  if (selectedGroups.length === 0) return "invalid";
 
   const priority = (entry: AuxiliaryEntry) =>
     entry.kind === "witness" || entry.kind === "create-witness" ||
@@ -1010,6 +1012,9 @@ async function recoverStrandedAuxiliaries(
         : 1;
   try {
     for (const group of selectedGroups) {
+      for (const alias of group.aliases) {
+        if (!await removeValidatedAuxiliary(alias, fileSystem)) return "busy";
+      }
       const orderedEntries = [...group.entries].sort((left, right) =>
         priority(left) - priority(right) || left.name.localeCompare(right.name));
       for (const entry of orderedEntries) {

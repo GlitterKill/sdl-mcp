@@ -154,6 +154,11 @@ async function auxiliaryFiles(directory: string): Promise<string[]> {
     .sort();
 }
 
+async function auxiliaryContents(directory: string): Promise<Record<string, string>> {
+  return Object.fromEntries(await Promise.all((await auxiliaryFiles(directory)).map(async (name) =>
+    [name, (await readFile(join(directory, name))).toString("base64")] as const)));
+}
+
 async function assertMissing(path: string): Promise<void> {
   await assert.rejects(lstat(path), { code: "ENOENT" });
 }
@@ -1756,6 +1761,88 @@ describe("lifetime persistence lock", () => {
     });
     assert.equal(result.mode, "readOnly");
     assert.deepEqual(await auxiliaryFiles(directory), before);
+  });
+
+  it("does not retire an exact alias before rejecting an unrelated oversized group", async () => {
+    const directory = await temporaryDirectory();
+    const aliasNonce = "81".repeat(16);
+    const anchorPath = join(
+      directory,
+      `.sdl-observability-lifetime.create.${aliasNonce}`,
+    );
+    await writeFile(anchorPath, createAnchorRecord(999_999, aliasNonce, 999_999, ISO_2));
+    await link(anchorPath, `${anchorPath}.cleanup`);
+
+    const source = join(directory, "combined-oversized-source.json");
+    await writeFile(source, lockRecord(91_100));
+    const snapshot = await fileSnapshot(source);
+    for (let index = 0; index < 17; index++) {
+      const nonce = (index + 200).toString(16).padStart(32, "0");
+      await writeFile(
+        join(directory, `.sdl-observability-lifetime.claim-record.${nonce}.json`),
+        claimRecord(999_999, nonce, snapshot, ISO_1),
+      );
+      await link(source, join(directory, `.sdl-observability-lifetime.claim-source.${nonce}`));
+    }
+    const before = await auxiliaryContents(directory);
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" });
+    assert.deepEqual(await auxiliaryContents(directory), before);
+  });
+
+  it("does not retire a newer alias group ahead of an older selected group", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "older-budget-source.json");
+    await writeFile(source, lockRecord(91_200));
+    const snapshot = await fileSnapshot(source);
+    let firstRecord = "";
+    let firstNonce = "";
+    for (let index = 0; index < 15; index++) {
+      const nonce = (index + 300).toString(16).padStart(32, "0");
+      const content = claimRecord(999_999, nonce, snapshot, ISO_1);
+      if (index === 0) {
+        firstNonce = nonce;
+        firstRecord = content;
+      }
+      await writeFile(
+        join(directory, `.sdl-observability-lifetime.claim-record.${nonce}.json`),
+        content,
+      );
+      await link(source, join(directory, `.sdl-observability-lifetime.claim-source.${nonce}`));
+    }
+    await writeFile(
+      join(directory, `.sdl-observability-lifetime.claim-cleanup.${firstNonce}`),
+      firstRecord,
+    );
+
+    const aliasNonce = "82".repeat(16);
+    const anchorPath = join(
+      directory,
+      `.sdl-observability-lifetime.create.${aliasNonce}`,
+    );
+    const cleanupPath = `${anchorPath}.cleanup`;
+    await writeFile(anchorPath, createAnchorRecord(999_999, aliasNonce, 999_999, ISO_2));
+    await link(anchorPath, cleanupPath);
+    const aliasBefore = {
+      [basename(anchorPath)]: (await readFile(anchorPath)).toString("base64"),
+      [basename(cleanupPath)]: (await readFile(cleanupPath)).toString("base64"),
+    };
+
+    const first = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assert.equal(first.mode, "readOnly");
+    assert.deepEqual(await auxiliaryContents(directory), aliasBefore);
+
+    const successor = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
   });
 
   it("preserves create-lock candidates whose bound metadata disagrees", async () => {
