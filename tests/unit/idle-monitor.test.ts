@@ -5,6 +5,55 @@ import { OverlayStore } from "../../dist/live-index/overlay-store.js";
 import { IdleMonitor } from "../../dist/live-index/idle-monitor.js";
 
 describe("IdleMonitor", () => {
+  it("stops new scans and waits for an accepted checkpoint", async () => {
+    const store = new OverlayStore();
+    store.upsertDraft({
+      repoId: "quiet-repo",
+      eventType: "save",
+      filePath: "src/quiet.ts",
+      content: "export const quiet = true;",
+      language: "typescript",
+      version: 1,
+      dirty: false,
+      timestamp: "2026-03-07T12:00:00.000Z",
+    });
+    let releaseCheckpoint!: () => void;
+    const checkpoint = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    let checkpointEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      checkpointEntered = resolve;
+    });
+    let checkpoints = 0;
+    const monitor = new IdleMonitor({
+      overlayStore: store,
+      quietPeriodMs: 0,
+      now: () => Date.parse("2026-03-07T12:05:30.000Z"),
+      checkpointRepo: async (request) => {
+        checkpoints += 1;
+        checkpointEntered();
+        await checkpoint;
+        return { repoId: request.repoId, requested: true, pending: false };
+      },
+    });
+
+    const scan = monitor.scanOnce();
+    await entered;
+    let stopped = false;
+    const stopping = Promise.resolve(monitor.stop()).then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(stopped, false);
+    assert.deepEqual(await monitor.scanOnce(), []);
+
+    releaseCheckpoint();
+    await Promise.all([scan, stopping]);
+    assert.equal(checkpoints, 1);
+    await monitor.stop();
+  });
+
   it("checkpoints repos that are quiet and have clean overlay entries", async () => {
     const store = new OverlayStore();
     store.upsertDraft({

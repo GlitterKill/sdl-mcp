@@ -385,8 +385,8 @@ describe("serve.ts shutdown wiring", () => {
       "utf8",
     );
     const initIndex = source.indexOf("await initGraphDb(");
-    const cleanupIndex = source.indexOf(
-      'shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork)',
+    const cleanupIndex = source.lastIndexOf(
+      "registerServeFinalCleanups(shutdownMgr",
     );
     const signalsIndex = source.indexOf("shutdownMgr.registerSignals()");
     const stdinIndex = source.indexOf("shutdownMgr.monitorStdin()");
@@ -407,8 +407,8 @@ describe("serve.ts shutdown wiring", () => {
     const verifierCleanup = source.indexOf(
       'shutdownMgr.addCleanup("graphIntegrityVerifier"',
     );
-    const dbCleanup = source.indexOf(
-      'shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork)',
+    const dbCleanup = source.lastIndexOf(
+      "registerServeFinalCleanups(shutdownMgr",
     );
 
     assert.ok(verifierCleanup >= 0, "serve.ts should register verifier cleanup");

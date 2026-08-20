@@ -16,6 +16,140 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("InMemoryLiveIndexCoordinator", () => {
+  it("closes admission and drains an accepted debounced parse", async () => {
+    const coordinator = new InMemoryLiveIndexCoordinator({
+      debounceMs: 0,
+      sweepIntervalMs: 0,
+    });
+    const parseEntered = deferred();
+    const releaseParse = deferred();
+    const internals = coordinator as unknown as {
+      loadRepoRoot: (repoId: string) => Promise<string>;
+    };
+    internals.loadRepoRoot = async () => {
+      parseEntered.resolve();
+      await releaseParse.promise;
+      return process.cwd();
+    };
+
+    const accepted = await coordinator.pushBufferUpdate({
+      repoId: "closing-repo",
+      eventType: "change",
+      filePath: "src/example.ts",
+      content: "export const value = 1;",
+      language: "typescript",
+      version: 1,
+      dirty: true,
+      timestamp: "2026-03-07T12:00:00.000Z",
+    });
+    assert.equal(accepted.accepted, true);
+    await parseEntered.promise;
+
+    let closed = false;
+    const closing = coordinator.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(closed, false);
+    const late = await coordinator.pushBufferUpdate({
+      repoId: "closing-repo",
+      eventType: "change",
+      filePath: "src/late.ts",
+      content: "export const late = true;",
+      language: "typescript",
+      version: 1,
+      dirty: true,
+      timestamp: "2026-03-07T12:00:01.000Z",
+    });
+    assert.deepEqual(late, {
+      accepted: false,
+      repoId: "closing-repo",
+      overlayVersion: 1,
+      parseScheduled: false,
+      checkpointScheduled: false,
+      warnings: ["Live indexing stopped."],
+    });
+
+    releaseParse.resolve();
+    await closing;
+    await coordinator.close();
+  });
+
+  it("waits for an accepted sweep before closing", async () => {
+    const coordinator = new InMemoryLiveIndexCoordinator({
+      sweepIntervalMs: 1,
+    });
+    coordinator.getOverlayStore().upsertDraft({
+      repoId: "sweep-close-repo",
+      eventType: "save",
+      filePath: "src/example.ts",
+      content: "export const value = 1;",
+      language: "typescript",
+      version: 1,
+      dirty: false,
+      timestamp: "2026-03-07T12:00:00.000Z",
+    });
+    const sweepEntered = deferred();
+    const releaseSweep = deferred();
+    const internals = coordinator as unknown as {
+      checkpointService: {
+        checkpointRepo: (input: { repoId: string }) => Promise<unknown>;
+      };
+    };
+    internals.checkpointService.checkpointRepo = async () => {
+      sweepEntered.resolve();
+      await releaseSweep.promise;
+      return {};
+    };
+    await sweepEntered.promise;
+
+    let closed = false;
+    const closing = coordinator.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(closed, false);
+
+    releaseSweep.resolve();
+    await closing;
+  });
+
+  it("waits for an accepted checkpoint before closing", async () => {
+    const coordinator = new InMemoryLiveIndexCoordinator({
+      sweepIntervalMs: 0,
+    });
+    const checkpointEntered = deferred();
+    const releaseCheckpoint = deferred();
+    const internals = coordinator as unknown as {
+      checkpointService: {
+        checkpointRepo: (input: { repoId: string }) => Promise<unknown>;
+      };
+    };
+    internals.checkpointService.checkpointRepo = async () => {
+      checkpointEntered.resolve();
+      await releaseCheckpoint.promise;
+      return {
+        repoId: "checkpoint-close-repo",
+        requested: true,
+        pending: false,
+      };
+    };
+    const checkpoint = coordinator.checkpointRepo({
+      repoId: "checkpoint-close-repo",
+    });
+    await checkpointEntered.promise;
+
+    let closed = false;
+    const closing = coordinator.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(closed, false);
+
+    releaseCheckpoint.resolve();
+    await Promise.all([checkpoint, closing]);
+  });
+
   it("returns the static no-work checkpoint response when disabled", async () => {
     const coordinator = new InMemoryLiveIndexCoordinator({ enabled: false });
 

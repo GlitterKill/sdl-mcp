@@ -26,6 +26,10 @@ import {
 } from "../../dist/mcp/dispatch-limiter.js";
 import { withIndexingGate } from "../../dist/mcp/indexing-gate.js";
 import {
+  configureDefaultLiveIndexCoordinator,
+  getDefaultLiveIndexCoordinator,
+} from "../../dist/live-index/coordinator.js";
+import {
   closeLadybugDbAfterDrainingWork,
   drainLadybugWork,
 } from "../../dist/startup/graceful-database-shutdown.js";
@@ -57,6 +61,48 @@ afterEach(async () => {
 });
 
 describe("graceful database shutdown", () => {
+  it("drains accepted default live-index work", async () => {
+    await configureDefaultLiveIndexCoordinator({
+      debounceMs: 0,
+      sweepIntervalMs: 0,
+    });
+    const coordinator = getDefaultLiveIndexCoordinator();
+    const parseEntered = deferred();
+    const releaseParse = deferred();
+    const internals = coordinator as unknown as {
+      loadRepoRoot: (repoId: string) => Promise<string>;
+    };
+    internals.loadRepoRoot = async () => {
+      parseEntered.resolve();
+      await releaseParse.promise;
+      return process.cwd();
+    };
+    await coordinator.pushBufferUpdate({
+      repoId: "shutdown-live-index",
+      eventType: "change",
+      filePath: "src/example.ts",
+      content: "export const value = 1;",
+      language: "typescript",
+      version: 1,
+      dirty: true,
+      timestamp: "2026-03-07T12:00:00.000Z",
+    });
+    await parseEntered.promise;
+
+    let drainSettled = false;
+    const draining = drainLadybugWork({
+      dispatchTimeoutMs: 2_000,
+      pollMs: 0,
+    }).then(() => {
+      drainSettled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(drainSettled, false);
+
+    releaseParse.resolve();
+    await draining;
+  });
+
   it("drains accepted work without closing the database and is repeatable", async () => {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-work-drain-"));
     await initLadybugDb(graphDbPath);
@@ -311,13 +357,18 @@ describe("graceful database shutdown", () => {
   });
 
   it("wires both long-lived entrypoints through the drained close boundary", () => {
-    for (const relativePath of ["src/main.ts", "src/cli/commands/serve.ts"]) {
-      const source = readFileSync(join(process.cwd(), relativePath), "utf8");
-      assert.match(
-        source,
-        /addCleanup\("graphIntegrityVerifier",[\s\S]*addCleanup\("db", closeLadybugDbAfterDrainingWork\)/,
-        relativePath,
-      );
-    }
+    const main = readFileSync(join(process.cwd(), "src/main.ts"), "utf8");
+    assert.match(
+      main,
+      /addCleanup\("graphIntegrityVerifier",[\s\S]*addCleanup\("db", closeLadybugDbAfterDrainingWork\)/,
+    );
+    const serve = readFileSync(
+      join(process.cwd(), "src/cli/commands/serve.ts"),
+      "utf8",
+    );
+    assert.match(
+      serve,
+      /addCleanup\("graphIntegrityVerifier",[\s\S]*registerServeFinalCleanups\(shutdownMgr/,
+    );
   });
 });

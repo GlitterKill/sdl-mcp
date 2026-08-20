@@ -300,48 +300,51 @@ export class ObservabilityService implements ObservabilityTap {
   }
 
   private async stopInternal(starting: Promise<void> | null): Promise<void> {
-    if (starting !== null) await starting;
-    if (this.sampleTimer !== null) {
-      this.options.clearScheduledInterval(this.sampleTimer);
-      this.sampleTimer = null;
-    }
-    if (this.checkpointTimer !== null) {
-      this.options.clearScheduledInterval(this.checkpointTimer);
-      this.checkpointTimer = null;
-    }
-    if (this.eventLoopHistogram !== null) {
-      try {
-        this.eventLoopHistogram.disable();
-      } catch (err) {
-        this.logWarn("eventLoopHistogram.disable failed", err);
-      }
-      this.eventLoopHistogram = null;
-    }
-    this.prevCpuUsage = null;
-    const store = this.lifetimeStore;
     try {
-      if (store !== null) {
-        await this.queueLifetimeOperation(async () => {
-          let boundary: PublicationBoundary | null = null;
-          try {
-            boundary = this.lifetimeWriter && !this.lifetimeFrozen
-              ? this.capturePublicationBoundary()
-              : null;
-            const snapshot = boundary === null
-              ? undefined
-              : this.buildLifetimeCandidate(this.nowIso(), boundary);
-            await store.close(snapshot);
-            if (snapshot !== undefined && boundary !== null) {
-              this.acceptCommittedLifetime(snapshot, boundary);
-            }
-          } catch (error) {
-            if (boundary !== null) this.restorePublicationBoundary(boundary);
-            throw error;
-          }
-        });
-      }
+      if (starting !== null) await starting;
     } finally {
-      this.lifetimeStore = null;
+      if (this.sampleTimer !== null) {
+        this.options.clearScheduledInterval(this.sampleTimer);
+        this.sampleTimer = null;
+      }
+      if (this.checkpointTimer !== null) {
+        this.options.clearScheduledInterval(this.checkpointTimer);
+        this.checkpointTimer = null;
+      }
+      if (this.eventLoopHistogram !== null) {
+        try {
+          this.eventLoopHistogram.disable();
+        } catch (err) {
+          this.logWarn("eventLoopHistogram.disable failed", err);
+        }
+        this.eventLoopHistogram = null;
+      }
+      this.prevCpuUsage = null;
+      const store = this.lifetimeStore;
+      try {
+        if (store !== null) {
+          await this.queueLifetimeOperation(async () => {
+            let boundary: PublicationBoundary | null = null;
+            try {
+              boundary = this.lifetimeWriter && !this.lifetimeFrozen
+                ? this.capturePublicationBoundary()
+                : null;
+              const snapshot = boundary === null
+                ? undefined
+                : this.buildLifetimeCandidate(this.nowIso(), boundary);
+              await store.close(snapshot);
+              if (snapshot !== undefined && boundary !== null) {
+                this.acceptCommittedLifetime(snapshot, boundary);
+              }
+            } catch (error) {
+              if (boundary !== null) this.restorePublicationBoundary(boundary);
+              throw error;
+            }
+          });
+        }
+      } finally {
+        this.lifetimeStore = null;
+      }
     }
   }
 

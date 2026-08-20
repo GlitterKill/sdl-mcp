@@ -44,6 +44,9 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   private readonly parseScheduler;
   private readonly repoRootCache = new Map<string, string>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private sweepPromise: Promise<void> | null = null;
+  private accepting = true;
+  private readonly activeOperations = new Set<Promise<unknown>>();
 
   private static readonly DEFAULT_SWEEP_INTERVAL_MS = 30_000;
   private static readonly STALE_DIRTY_DRAFT_MS = 120_000;
@@ -123,7 +126,17 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
       InMemoryLiveIndexCoordinator.DEFAULT_SWEEP_INTERVAL_MS;
     if (this.enabled && sweepMs > 0) {
       this.sweepTimer = setInterval(() => {
-        void this.sweepOverlay();
+        if (this.sweepPromise !== null) return;
+        const sweep = this.sweepOverlay()
+          .catch((error) => {
+            logger.warn("Live-index sweep failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          })
+          .finally(() => {
+            if (this.sweepPromise === sweep) this.sweepPromise = null;
+          });
+        this.sweepPromise = sweep;
       }, sweepMs);
       this.sweepTimer.unref();
     }
@@ -132,8 +145,20 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   async pushBufferUpdate(
     input: BufferUpdateInput,
   ): Promise<BufferUpdateResult> {
-    return withRepoMutation(input.repoId, ({ epoch }) =>
-      this.pushBufferUpdateActive(input, epoch),
+    if (!this.accepting) {
+      return {
+        accepted: false,
+        repoId: input.repoId,
+        overlayVersion: input.version,
+        parseScheduled: false,
+        checkpointScheduled: false,
+        warnings: ["Live indexing stopped."],
+      };
+    }
+    return this.trackOperation(
+      withRepoMutation(input.repoId, ({ epoch }) =>
+        this.pushBufferUpdateActive(input, epoch),
+      ),
     );
   }
 
@@ -314,8 +339,16 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   }
 
   async checkpointRepo(input: CheckpointRequest): Promise<CheckpointResult> {
-    return withRepoMutation(input.repoId, () =>
-      this.checkpointRepoActive(input),
+    if (!this.accepting) {
+      return {
+        repoId: input.repoId,
+        requested: false,
+        pending: false,
+        message: "No checkpoint-eligible buffers were pending.",
+      };
+    }
+    return this.trackOperation(
+      withRepoMutation(input.repoId, () => this.checkpointRepoActive(input)),
     );
   }
 
@@ -393,6 +426,23 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   async waitForIdle(): Promise<void> {
     await this.parseScheduler.waitForIdle();
     await this.reconcileWorker.waitForIdle();
+  }
+
+  async close(): Promise<void> {
+    this.accepting = false;
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+    await this.sweepPromise;
+    await Promise.allSettled(this.activeOperations);
+    await this.waitForIdle();
+  }
+
+  private trackOperation<T>(operation: Promise<T>): Promise<T> {
+    const tracked = operation.finally(() => this.activeOperations.delete(tracked));
+    this.activeOperations.add(tracked);
+    return tracked;
   }
 
   private async sweepOverlay(): Promise<void> {
@@ -505,6 +555,10 @@ export function getDefaultOverlayStore(): OverlayStore {
 
 export async function waitForDefaultLiveIndexIdle(): Promise<void> {
   await defaultLiveIndexCoordinator.waitForIdle();
+}
+
+export async function closeDefaultLiveIndexCoordinator(): Promise<void> {
+  await defaultLiveIndexCoordinator.close();
 }
 
 export function resetDefaultLiveIndexCoordinator(): void {

@@ -92,6 +92,49 @@ async function stopGraphIntegrityVerifier(): Promise<void> {
   await stopGraphIntegrityVerifierRecovery();
 }
 
+export async function activateObservabilityAfterStart(
+  starting: Promise<void>,
+  shutdown: Pick<ShutdownManager, "isShuttingDown" | "shutdownComplete">,
+  activate: () => void,
+): Promise<boolean> {
+  await starting;
+  if (shutdown.isShuttingDown) {
+    await shutdown.shutdownComplete;
+    return false;
+  }
+  activate();
+  return true;
+}
+
+export function registerServeFinalCleanups(
+  shutdownMgr: Pick<ShutdownManager, "addCleanup">,
+  cleanup: {
+    drainWork: () => Promise<void>;
+    stopObservability: () => Promise<void>;
+    closeDatabase: () => Promise<void>;
+  },
+): void {
+  let workDrained = false;
+  const drainWork = async (): Promise<void> => {
+    await cleanup.drainWork();
+    workDrained = true;
+  };
+  shutdownMgr.addCleanup("workDrain", drainWork);
+  shutdownMgr.addCleanup("observability", async () => {
+    if (workDrained) await cleanup.stopObservability();
+  });
+  shutdownMgr.addCleanup("db", async () => {
+    try {
+      if (!workDrained) {
+        await drainWork();
+        await cleanup.stopObservability();
+      }
+    } finally {
+      await cleanup.closeDatabase();
+    }
+  });
+}
+
 export async function runStoragePreflightForReadiness(
   readiness: StartupReadiness,
   expectedWatchers: number,
@@ -236,9 +279,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   };
   const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
   shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
-  shutdownMgr.addCleanup("idleMonitor", () => {
-    idleMonitor?.stop();
-  });
+  shutdownMgr.addCleanup("idleMonitor", () => idleMonitor?.stop());
   shutdownMgr.addCleanup("walMaintenance", () => {
     walMaintenance?.stop();
   });
@@ -276,9 +317,11 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     }
   });
   shutdownMgr.addCleanup("graphIntegrityVerifier", stopGraphIntegrityVerifier);
-  shutdownMgr.addCleanup("workDrain", drainLadybugWork);
-  shutdownMgr.addCleanup("observability", stopObservability);
-  shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork);
+  registerServeFinalCleanups(shutdownMgr, {
+    drainWork: drainLadybugWork,
+    stopObservability,
+    closeDatabase: closeLadybugDbAfterDrainingWork,
+  });
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
   if (options.transport === "stdio") {
@@ -588,15 +631,22 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       lifetimeDirectory: dirname(graphDbPath),
       isRegisteredRepoId,
     });
-    await observabilityService.start();
-    installObservabilityTap(observabilityService);
-    startRuntimeProbes(observabilityConfig);
-    beamExplainStore = new BeamExplainStore({
-      capacity: observabilityConfig.beamExplainCapacity,
-      maxEntriesPerSlice: observabilityConfig.beamExplainEntriesPerSlice,
-    });
-    setBeamExplainStore(beamExplainStore);
-    observabilityService.setBeamExplainStore(beamExplainStore);
+    const service = observabilityService;
+    const activated = await activateObservabilityAfterStart(
+      service.start(),
+      shutdownMgr,
+      () => {
+        installObservabilityTap(service);
+        startRuntimeProbes(observabilityConfig);
+        beamExplainStore = new BeamExplainStore({
+          capacity: observabilityConfig.beamExplainCapacity,
+          maxEntriesPerSlice: observabilityConfig.beamExplainEntriesPerSlice,
+        });
+        setBeamExplainStore(beamExplainStore);
+        service.setBeamExplainStore(beamExplainStore);
+      },
+    );
+    if (!activated) return;
   }
 
   const httpPort = options.port ?? 3000;

@@ -834,6 +834,20 @@ describe("ObservabilityService lifetime integration", () => {
     resetObservabilityTap();
   });
 
+  it("closes an opened store when sampler setup fails", async () => {
+    const h = harness();
+    const service = new ObservabilityService(CONFIG, {
+      ...h.options,
+      scheduleInterval: () => {
+        throw new Error("sampler setup failed");
+      },
+    });
+
+    await assert.rejects(service.start(), /sampler setup failed/);
+    await assert.rejects(service.stop(), /sampler setup failed/);
+    assert.equal(h.store.closed, 1);
+  });
+
   it("keeps a pending checkpoint visible and restores or commits its boundary exactly once", async () => {
     for (const outcomeKind of ["notPublished", "committed"] as const) {
       const h = harness();

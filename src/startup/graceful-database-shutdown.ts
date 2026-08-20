@@ -1,5 +1,6 @@
 import { closeLadybugDb } from "../db/ladybug.js";
 import { shutdownDerivedRefreshQueue } from "../indexer/derived-refresh-queue.js";
+import { closeDefaultLiveIndexCoordinator } from "../live-index/coordinator.js";
 import { waitForToolDispatchIdle } from "../mcp/dispatch-limiter.js";
 import { waitForIndexingIdle } from "../mcp/indexing-gate.js";
 
@@ -28,6 +29,7 @@ export async function drainLadybugWork(
       `Timed out after ${dispatchTimeoutMs}ms waiting for tool dispatch before LadybugDB close`,
     );
   }
+  await closeDefaultLiveIndexCoordinator();
   const indexingIdle = await waitForIndexingIdle({
     timeoutMs: dispatchTimeoutMs,
     pollMs: options.pollMs,

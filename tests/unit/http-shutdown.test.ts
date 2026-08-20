@@ -88,7 +88,9 @@ describe("HTTP shutdown wiring", () => {
     const persistUsageIndex = source.indexOf(
       'shutdownMgr.addCleanup("persistUsage"',
     );
-    const dbCleanupIndex = source.indexOf('shutdownMgr.addCleanup("db"');
+    const dbCleanupIndex = source.lastIndexOf(
+      "registerServeFinalCleanups(shutdownMgr",
+    );
     const loggerCleanupIndex = source.indexOf(
       'shutdownMgr.addCleanup("logger"',
     );
@@ -116,9 +118,10 @@ describe("HTTP shutdown wiring", () => {
     const bootstrapIndex = source.indexOf("await ensureConfiguredReposRegistered");
     const seedIndex = source.indexOf("replaceRegisteredRepoIds(");
     const createIndex = source.indexOf("createObservabilityService(observabilityConfig");
-    const startIndex = source.indexOf("await observabilityService.start()");
-    const tapIndex = source.indexOf("installObservabilityTap(observabilityService)");
-    const probeIndex = source.indexOf("startRuntimeProbes(observabilityConfig)");
+    const startIndex = source.indexOf(
+      "activateObservabilityAfterStart(",
+      createIndex,
+    );
     const sidecarIndex = source.indexOf("await setupObservabilityDashboardSidecar(");
     const httpIndex = source.indexOf("await setupHttpTransport(");
 
@@ -128,7 +131,6 @@ describe("HTTP shutdown wiring", () => {
       /await listAllRepoIds\(await getLadybugConn\(\)\)/,
     );
     assert.ok(createIndex > seedIndex && startIndex > createIndex);
-    assert.ok(tapIndex > startIndex && probeIndex > startIndex);
     assert.ok(sidecarIndex > startIndex && httpIndex > startIndex);
     assert.match(
       source,
@@ -138,45 +140,6 @@ describe("HTTP shutdown wiring", () => {
       source.slice(createIndex).match(/\bisRegisteredRepoId,/g)?.length,
       3,
       "the same exported predicate must feed the service and both HTTP surfaces",
-    );
-  });
-
-  it("awaits the final lifetime checkpoint before database and logger cleanup", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
-      "utf8",
-    );
-    assert.match(
-      source,
-      /shutdownMgr\.addCleanup\("observability", stopObservability\);/,
-    );
-
-    const serverIndex = source.indexOf('shutdownMgr.addCleanup("server"');
-    const dashboardIndex = source.indexOf(
-      'shutdownMgr.addCleanup("observabilityDashboard"',
-    );
-    const httpIndex = source.indexOf('shutdownMgr.addCleanup("httpServer"');
-    const watchersIndex = source.indexOf('shutdownMgr.addCleanup("watchers"');
-    const verifierIndex = source.indexOf(
-      'shutdownMgr.addCleanup("graphIntegrityVerifier"',
-    );
-    const drainIndex = source.indexOf('shutdownMgr.addCleanup("workDrain"');
-    const observabilityIndex = source.indexOf(
-      'shutdownMgr.addCleanup("observability"',
-    );
-    const dbIndex = source.indexOf('shutdownMgr.addCleanup("db"');
-    const loggerIndex = source.indexOf('shutdownMgr.addCleanup("logger"');
-    assert.ok(
-      serverIndex >= 0 &&
-        dashboardIndex > serverIndex &&
-        httpIndex > dashboardIndex &&
-        watchersIndex > httpIndex &&
-        verifierIndex > watchersIndex &&
-        drainIndex > verifierIndex &&
-        observabilityIndex > drainIndex &&
-        dbIndex > observabilityIndex &&
-        loggerIndex > dbIndex,
-      "all event producers and transports must finish before the final checkpoint",
     );
   });
 

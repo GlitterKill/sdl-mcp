@@ -19,6 +19,8 @@ export class IdleMonitor {
   private readonly now: () => number;
   private timer: NodeJS.Timeout | null = null;
   private scanning = false;
+  private stopped = false;
+  private scanComplete: Promise<void> | null = null;
 
   constructor(private readonly options: IdleMonitorOptions) {
     this.intervalMs =
@@ -33,6 +35,7 @@ export class IdleMonitor {
       return;
     }
 
+    this.stopped = false;
     this.timer = setInterval(() => {
       this.scanOnce().catch((error) => {
         logger.error(`[IdleMonitor] Scan failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -41,19 +44,24 @@ export class IdleMonitor {
     this.timer.unref();
   }
 
-  stop(): void {
-    if (!this.timer) {
-      return;
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
     }
-    clearInterval(this.timer);
-    this.timer = null;
+    await this.scanComplete;
   }
 
   async scanOnce(): Promise<string[]> {
-    if (this.scanning) {
+    if (this.stopped || this.scanning) {
       return [];
     }
     this.scanning = true;
+    let resolveScan!: () => void;
+    this.scanComplete = new Promise<void>((resolve) => {
+      resolveScan = resolve;
+    });
 
     try {
       const triggered: string[] = [];
@@ -88,6 +96,8 @@ export class IdleMonitor {
       return triggered;
     } finally {
       this.scanning = false;
+      this.scanComplete = null;
+      resolveScan();
     }
   }
 }
