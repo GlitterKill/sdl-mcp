@@ -101,6 +101,8 @@ type FakeEvent = {
   key?: string;
   shiftKey?: boolean;
   repeat?: boolean;
+  target: unknown;
+  currentTarget: unknown;
   defaultPrevented: boolean;
   preventDefault(): void;
 };
@@ -119,6 +121,8 @@ class FakeEventTarget {
   dispatch(type: string, init: Omit<Partial<FakeEvent>, "preventDefault"> = {}): FakeEvent {
     const event: FakeEvent = {
       ...init,
+      target: init.target ?? this,
+      currentTarget: this,
       defaultPrevented: false,
       preventDefault() {
         this.defaultPrevented = true;
@@ -671,6 +675,29 @@ describe("dashboard layout geometry", () => {
     assert.equal(clamped.defaultPrevented, true);
     assert.deepEqual(fixture.storage.calls, []);
     assert.deepEqual(fixture.announcements, []);
+  });
+
+  it("leaves bubbled child controls native while panel-owned keyup completes the transaction", () => {
+    const fixture = makeKeyboardFixture();
+    const childInput = new FakeEventTarget();
+    const childArrow = fixture.panel.dispatch("keydown", {
+      key: "ArrowRight",
+      target: childInput,
+    });
+
+    assert.equal(childArrow.defaultPrevented, false);
+    assert.deepEqual(fixture.layout().panel, { col: 1, row: 1, cols: 4, rows: 2 });
+    assert.deepEqual(fixture.storage.calls, []);
+
+    const panelArrow = fixture.panel.dispatch("keydown", { key: "ArrowRight" });
+    assert.equal(panelArrow.defaultPrevented, true);
+    assert.deepEqual(fixture.layout().panel, { col: 2, row: 1, cols: 4, rows: 2 });
+    const bubbledRelease = fixture.panel.dispatch("keyup", {
+      key: "ArrowRight",
+      target: childInput,
+    });
+    assert.equal(bubbledRelease.defaultPrevented, true);
+    assert.deepEqual(fixture.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
   });
 
   it("cancels the active transaction identically on Escape, blur, visibility loss, or edit exit", () => {

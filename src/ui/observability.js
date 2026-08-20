@@ -1122,6 +1122,7 @@ function installKeyboardLayoutTransactions({
 
   for (const entry of entries) {
     entry.panel.addEventListener("keydown", (event) => {
+      if (event.target !== event.currentTarget) return;
       if (event.key === "Escape" && active) {
         event.preventDefault();
         cancel();
