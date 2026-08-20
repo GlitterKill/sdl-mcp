@@ -1067,6 +1067,256 @@ function maximalSections(): DurableLifetimeSections {
   return filled;
 }
 
+type UnknownMap = Record<string, unknown>;
+
+const DYNAMIC_BUILD_ORDER = [
+  ...DYNAMIC_MAP_LOCATIONS.filter((location) =>
+    location !== "toolOutput.perTool"
+    && !location.startsWith("toolOutput.perTool.")),
+  "toolOutput.perTool.detailCounts",
+  "toolOutput.perTool.profileCounts",
+  "toolOutput.perTool",
+] as const;
+
+function isUnknownMap(value: unknown): value is UnknownMap {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function mapContainer(
+  root: DurableLifetimeRoot,
+  repositoryKey: string,
+  location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+): { container: UnknownMap; field: string } {
+  const repository = root.repositories[repositoryKey];
+  assert.ok(repository);
+  const [sectionName, field, nestedField] = location.split(".");
+  const sections = repository.sections as unknown as UnknownMap;
+  const section = sections[sectionName];
+  assert.ok(isUnknownMap(section));
+  if (nestedField === undefined) return { container: section, field };
+
+  const perTool = section[field];
+  assert.ok(isUnknownMap(perTool));
+  const toolKey = Object.keys(perTool).filter((key) => key !== OVERFLOW_KEY).sort()[0];
+  assert.ok(toolKey);
+  const tool = perTool[toolKey];
+  assert.ok(isUnknownMap(tool));
+  return { container: tool, field: nestedField };
+}
+
+function dynamicMapAt(
+  root: DurableLifetimeRoot,
+  repositoryKey: string,
+  location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+): UnknownMap {
+  const { container, field } = mapContainer(root, repositoryKey, location);
+  const map = container[field];
+  assert.ok(isUnknownMap(map));
+  return map;
+}
+
+function replaceDynamicMap(
+  root: DurableLifetimeRoot,
+  repositoryKey: string,
+  location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+  map: Readonly<UnknownMap>,
+): DurableLifetimeRoot {
+  const { container, field } = mapContainer(root, repositoryKey, location);
+  container[field] = structuredClone(map);
+  return root;
+}
+
+function firstMapValue(
+  root: DurableLifetimeRoot,
+  repositoryKey: string,
+  location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+): unknown {
+  const map = dynamicMapAt(root, repositoryKey, location);
+  const key = Object.keys(map).filter((candidate) => candidate !== OVERFLOW_KEY).sort()[0]
+    ?? Object.keys(map)[0];
+  assert.ok(key);
+  return structuredClone(map[key]);
+}
+
+function mergeAdmissionValue(a: unknown, b: unknown) {
+  return typeof a === "number" && typeof b === "number"
+    ? mergeCounter(a, b)
+    : { value: structuredClone(b), saturated: false };
+}
+
+function admitAtLocation(
+  root: DurableLifetimeRoot,
+  repositoryKey: string,
+  location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
+  rawIdentifier: string,
+  incoming: unknown,
+) {
+  return admitDynamicMapEntry(
+    root,
+    dynamicMapAt(root, repositoryKey, location),
+    rawIdentifier,
+    incoming,
+    {
+      location,
+      merge: mergeAdmissionValue,
+      replaceMap: (candidateRoot, map) =>
+        replaceDynamicMap(candidateRoot, repositoryKey, location, map),
+    },
+  );
+}
+
+function maximalRootFixture(): { root: DurableLifetimeRoot; repositoryKey: string } {
+  const timestamp = "9999-12-31T23:59:59.999999999+23:59";
+  const repositoryKey = repositoryStorageKey("maximal");
+  return {
+    repositoryKey,
+    root: {
+      schemaVersion: 1,
+      generation: Number.MAX_SAFE_INTEGER,
+      updatedAt: timestamp,
+      processPeaks: {
+        cpuPct: Number.MAX_SAFE_INTEGER,
+        rssMb: Number.MAX_SAFE_INTEGER,
+        heapUsedMb: Number.MAX_SAFE_INTEGER,
+        heapTotalMb: Number.MAX_SAFE_INTEGER,
+        eventLoopLagMs: Number.MAX_SAFE_INTEGER,
+      },
+      repositories: {
+        [repositoryKey]: {
+          epoch: Number.MAX_SAFE_INTEGER,
+          resetAt: timestamp,
+          lastCheckpointAt: timestamp,
+          sessionCount: Number.MAX_SAFE_INTEGER,
+          saturated: false,
+          sections: maximalSections(),
+        },
+      },
+    },
+  };
+}
+
+function buildDynamicRoot(realKeyOffset: number, includeOverflow: boolean) {
+  const fixture = maximalRootFixture();
+  let root = fixture.root;
+  for (const location of DYNAMIC_BUILD_ORDER) {
+    const template = firstMapValue(root, fixture.repositoryKey, location);
+    root = replaceDynamicMap(structuredClone(root), fixture.repositoryKey, location, {});
+    const count = dynamicMapLimit(location) - realKeyOffset;
+    for (let index = 0; index < count; index += 1) {
+      const admission = admitAtLocation(
+        root,
+        fixture.repositoryKey,
+        location,
+        maxCanonicalKey(index),
+        template,
+      );
+      assert.equal(admission.status, "admitted");
+      root = admission.root;
+    }
+    if (includeOverflow) {
+      const overflow = admitAtLocation(root, fixture.repositoryKey, location, "invalid key", template);
+      assert.equal(overflow.status, "overflow");
+      root = overflow.root;
+    }
+  }
+  return { root, repositoryKey: fixture.repositoryKey };
+}
+
+function emptyDynamicMaps(repository: DurableLifetimeRepository): DurableLifetimeRepository {
+  const emptied = structuredClone(repository);
+  assert.ok(emptied.sections.cache);
+  assert.ok(emptied.sections.retrieval);
+  assert.ok(emptied.sections.indexing);
+  assert.ok(emptied.sections.tokenEfficiency);
+  assert.ok(emptied.sections.predictiveContext);
+  assert.ok(emptied.sections.latency);
+  assert.ok(emptied.sections.packed);
+  assert.ok(emptied.sections.toolOutput);
+  emptied.sections.cache.perSource = {};
+  emptied.sections.retrieval.byMode = {};
+  emptied.sections.retrieval.byType = {};
+  emptied.sections.retrieval.candidatesBySource = {};
+  emptied.sections.retrieval.phaseLatencyMs = {};
+  emptied.sections.indexing.phaseCounts = {};
+  emptied.sections.indexing.languageMs = {};
+  emptied.sections.indexing.engineDispatch = {};
+  emptied.sections.tokenEfficiency.compressionBySource = {};
+  emptied.sections.predictiveContext.byStrategy = {};
+  emptied.sections.latency.perTool = {};
+  emptied.sections.packed.axisHits = {};
+  emptied.sections.packed.byEncoder = {};
+  emptied.sections.toolOutput.detailCounts = {};
+  emptied.sections.toolOutput.profileCounts = {};
+  emptied.sections.toolOutput.perTool = {};
+  return emptied;
+}
+
+function nearLimitDynamicRoot() {
+  const target = buildDynamicRoot(1, false);
+  const maximal = buildDynamicRoot(0, true);
+  const maximalRepository = maximal.root.repositories[maximal.repositoryKey];
+  assert.ok(maximalRepository);
+
+  const paddingRepoId = "padding";
+  const paddingKey = repositoryStorageKey(paddingRepoId);
+  const padding = admitRepository(
+    target.root,
+    paddingRepoId,
+    emptyDynamicMaps(maximalRepository),
+  );
+  assert.equal(padding.admitted, true);
+  let root = padding.root;
+
+  for (let index = 0; index < MAX_REPOSITORIES - 2; index += 1) {
+    const admission = admitRepository(root, `full-padding-${index}`, maximalRepository);
+    if (!admission.admitted) break;
+    root = admission.root;
+  }
+
+  const paddingOrder = [
+    "toolOutput.perTool",
+    "latency.perTool",
+    "packed.byEncoder",
+    "cache.perSource",
+    "tokenEfficiency.compressionBySource",
+    "predictiveContext.byStrategy",
+    "retrieval.phaseLatencyMs",
+    "indexing.languageMs",
+  ] as const;
+  for (const location of paddingOrder) {
+    const template = firstMapValue(maximal.root, maximal.repositoryKey, location);
+    for (let index = 0; index < dynamicMapLimit(location); index += 1) {
+      const admission = admitAtLocation(root, paddingKey, location, maxCanonicalKey(index), template);
+      if (admission.status === "capacityRejected") break;
+      root = admission.root;
+    }
+  }
+
+  const counterLocations = [
+    "retrieval.byMode",
+    "retrieval.byType",
+    "retrieval.candidatesBySource",
+    "indexing.phaseCounts",
+    "indexing.engineDispatch",
+    "packed.axisHits",
+    "toolOutput.detailCounts",
+    "toolOutput.profileCounts",
+  ] as const;
+  for (const location of counterLocations) {
+    for (let index = 0; index < dynamicMapLimit(location); index += 1) {
+      const admission = admitAtLocation(root, paddingKey, location, maxCanonicalKey(index), 1);
+      if (admission.status === "capacityRejected") break;
+      root = admission.root;
+    }
+    const overflow = admitAtLocation(root, paddingKey, location, "invalid key", 1);
+    if (overflow.status === "capacityRejected") {
+      return { ...target, root };
+    }
+    root = overflow.root;
+  }
+  throw new Error("Unable to construct a root close enough to the lifetime byte limit");
+}
+
 describe("bounded lifetime accumulator", () => {
   it("adds counters and samples without averaging averages", () => {
     assert.equal(saturatingAdd(4, 7), 11);
@@ -1095,6 +1345,31 @@ describe("bounded lifetime accumulator", () => {
         },
         saturated: true,
       },
+    );
+  });
+
+  it("fails closed on invalid counter and sample operands", () => {
+    for (const invalidCounter of [0.5, -1, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) {
+      assert.throws(() => saturatingAdd(invalidCounter, 1));
+      assert.throws(() => mergeCounter(invalidCounter, 1));
+      assert.throws(() => mergeSample(
+        { count: invalidCounter, sum: 1, max: 1 },
+        { count: 1, sum: 1, max: 1 },
+      ));
+    }
+    for (const invalidTotal of [-1, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) {
+      assert.throws(() => mergeSample(
+        { count: 1, sum: invalidTotal, max: 1 },
+        { count: 1, sum: 1, max: 1 },
+      ));
+      assert.throws(() => mergeSample(
+        { count: 1, sum: 1, max: invalidTotal },
+        { count: 1, sum: 1, max: 1 },
+      ));
+    }
+    assert.deepEqual(
+      mergeSample({ count: 1, sum: 0.5, max: 0.5 }, { count: 1, sum: 0.25, max: 1.25 }),
+      { count: 2, sum: 0.75, max: 1.25 },
     );
   });
 
@@ -1147,11 +1422,16 @@ describe("bounded lifetime accumulator", () => {
     }
     for (const invalid of ["", "has space", "slash/name", "x".repeat(65), OVERFLOW_KEY]) {
       assert.equal(canonicalDynamicKey(invalid), OVERFLOW_KEY);
-      const result = admitDynamicMapEntry({}, invalid, 1, {
-        location: "retrieval.byMode",
-        merge: mergeCounter,
-      });
+      const root = replaceDynamicMap(
+        parseDurableLifetimeRoot(durableRootFixture),
+        REPOSITORY_KEY,
+        "retrieval.byMode",
+        {},
+      );
+      const result = admitAtLocation(root, REPOSITORY_KEY, "retrieval.byMode", invalid, 1);
       assert.deepEqual(Object.keys(result.map), [OVERFLOW_KEY]);
+      assert.equal(result.status, "overflow");
+      assert.ok(result.reservedBytes <= MAX_STORE_BYTES);
       if (invalid !== OVERFLOW_KEY) assert.equal(Object.hasOwn(result.map, invalid), false);
     }
   });
@@ -1160,21 +1440,29 @@ describe("bounded lifetime accumulator", () => {
     for (const location of DYNAMIC_MAP_LOCATIONS) {
       const limit = dynamicMapLimit(location);
       assert.equal(limit, location.endsWith("perTool") || location === "packed.byEncoder" ? 128 : 32);
-      let map: Record<string, number> = {};
+      let root = parseDurableLifetimeRoot(durableRootFixture);
+      const template = firstMapValue(root, REPOSITORY_KEY, location);
+      root = replaceDynamicMap(structuredClone(root), REPOSITORY_KEY, location, {});
       for (let index = limit - 1; index >= 0; index -= 1) {
-        map = admitDynamicMapEntry(map, `key${index.toString().padStart(3, "0")}`, 1, {
+        const admission = admitAtLocation(
+          root,
+          REPOSITORY_KEY,
           location,
-          merge: mergeCounter,
-        }).map;
+          `key${index.toString().padStart(3, "0")}`,
+          template,
+        );
+        assert.equal(admission.status, "admitted");
+        root = admission.root;
       }
+      const map = dynamicMapAt(root, REPOSITORY_KEY, location);
       assert.equal(Object.keys(map).length, limit);
-      const overflowed = admitDynamicMapEntry(map, "beyond-cap", 2, {
-        location,
-        merge: mergeCounter,
-      });
+      const overflowed = admitAtLocation(root, REPOSITORY_KEY, location, "beyond-cap", template);
       assert.equal(overflowed.admitted, false);
       assert.equal(overflowed.storageKey, OVERFLOW_KEY);
-      assert.equal(overflowed.map[OVERFLOW_KEY], 2);
+      assert.equal(overflowed.status, "overflow");
+      assert.ok(overflowed.reservedBytes <= MAX_STORE_BYTES);
+      assert.ok(Buffer.byteLength(JSON.stringify(overflowed.root)) <= MAX_STORE_BYTES);
+      assert.deepEqual(overflowed.map[OVERFLOW_KEY], template);
       assert.deepEqual(Object.keys(overflowed.map), [...Object.keys(overflowed.map)].sort());
     }
   });
@@ -1197,34 +1485,43 @@ describe("bounded lifetime accumulator", () => {
 
   it("keeps 128 perTool and byEncoder keys before overflowing key 129", () => {
     for (const location of ["latency.perTool", "toolOutput.perTool", "packed.byEncoder"] as const) {
-      let map: Record<string, number> = {};
+      let root = parseDurableLifetimeRoot(durableRootFixture);
+      const template = firstMapValue(root, REPOSITORY_KEY, location);
+      root = replaceDynamicMap(structuredClone(root), REPOSITORY_KEY, location, {});
       for (let index = 0; index < 128; index += 1) {
-        map = admitDynamicMapEntry(map, `key${index.toString().padStart(3, "0")}`, 1, {
+        const admission = admitAtLocation(
+          root,
+          REPOSITORY_KEY,
           location,
-          merge: mergeCounter,
-        }).map;
+          `key${index.toString().padStart(3, "0")}`,
+          template,
+        );
+        assert.equal(admission.status, "admitted");
+        root = admission.root;
       }
+      const map = dynamicMapAt(root, REPOSITORY_KEY, location);
       assert.equal(Object.keys(map).filter((key) => key !== OVERFLOW_KEY).length, 128);
-      const next = admitDynamicMapEntry(map, "key128", 1, {
-        location,
-        merge: mergeCounter,
-      });
+      const next = admitAtLocation(root, REPOSITORY_KEY, location, "key128", template);
       assert.equal(next.storageKey, OVERFLOW_KEY);
+      assert.equal(next.status, "overflow");
       assert.equal(Object.keys(next.map).length, 129);
     }
   });
 
-  it("rejects a byte-unreserved dynamic key without mutating the source map", () => {
-    const map = { [OVERFLOW_KEY]: 3 };
-    const result = admitDynamicMapEntry(map, "new-key", 4, {
-      location: "retrieval.byMode",
-      merge: mergeCounter,
-      reserve: () => false,
-    });
-    assert.equal(result.admitted, false);
-    assert.equal(result.storageKey, OVERFLOW_KEY);
-    assert.deepEqual(result.map, { [OVERFLOW_KEY]: 7 });
-    assert.deepEqual(map, { [OVERFLOW_KEY]: 3 });
+  it("requires root-backed reservation when creating the first overflow slot", () => {
+    const root = parseDurableLifetimeRoot(durableRootFixture);
+    const withoutOverflow = replaceDynamicMap(
+      structuredClone(root),
+      REPOSITORY_KEY,
+      "retrieval.byMode",
+      {},
+    );
+    const result = admitAtLocation(withoutOverflow, REPOSITORY_KEY, "retrieval.byMode", "bad key", 4);
+    assert.equal(result.status, "overflow");
+    assert.deepEqual(result.map, { [OVERFLOW_KEY]: 4 });
+    assert.notEqual(result.root, withoutOverflow);
+    assert.deepEqual(dynamicMapAt(withoutOverflow, REPOSITORY_KEY, "retrieval.byMode"), {});
+    assert.ok(result.reservedBytes <= MAX_STORE_BYTES);
   });
 
   it("admits 32 repositories and rejects repository 33 without mutation", () => {
@@ -1272,31 +1569,20 @@ describe("bounded lifetime accumulator", () => {
       ),
       { cpuPct: 10, rssMb: 120, heapUsedMb: 30, heapTotalMb: 70, eventLoopLagMs: 4 },
     );
+    for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) {
+      assert.throws(() => mergeProcessPeaks(
+        { cpuPct: invalid, rssMb: 1, heapUsedMb: 1, heapTotalMb: 1, eventLoopLagMs: 1 },
+        null,
+      ));
+      assert.throws(() => mergeProcessPeaks(
+        null,
+        { cpuPct: 1, rssMb: 1, heapUsedMb: 1, heapTotalMb: invalid, eventLoopLagMs: 1 },
+      ));
+    }
   });
 
-  it("keeps maximal reserved and actual durable roots below 2 MiB", () => {
-    const timestamp = "9999-12-31T23:59:59.999999999+23:59";
-    const repository: DurableLifetimeRepository = {
-      epoch: Number.MAX_SAFE_INTEGER,
-      resetAt: timestamp,
-      lastCheckpointAt: timestamp,
-      sessionCount: Number.MAX_SAFE_INTEGER,
-      saturated: false,
-      sections: maximalSections(),
-    };
-    const root: DurableLifetimeRoot = {
-      schemaVersion: 1,
-      generation: Number.MAX_SAFE_INTEGER,
-      updatedAt: timestamp,
-      processPeaks: {
-        cpuPct: Number.MAX_SAFE_INTEGER,
-        rssMb: Number.MAX_SAFE_INTEGER,
-        heapUsedMb: Number.MAX_SAFE_INTEGER,
-        heapTotalMb: Number.MAX_SAFE_INTEGER,
-        eventLoopLagMs: Number.MAX_SAFE_INTEGER,
-      },
-      repositories: { [repositoryStorageKey("maximal")]: repository },
-    };
+  it("builds every maximal dynamic map through root-backed admissions below 2 MiB", () => {
+    const { root } = buildDynamicRoot(0, true);
     const normalized = parseDurableLifetimeRoot(root);
     const actualBytes = Buffer.byteLength(JSON.stringify(normalized));
     const reservedBytes = reservedSerializedBytes(normalized);
@@ -1306,6 +1592,8 @@ describe("bounded lifetime accumulator", () => {
     assert.equal(JSON.stringify(normalized).includes("p50"), false);
     assert.equal(JSON.stringify(normalized).includes("percentile"), false);
 
+    const repository = Object.values(normalized.repositories)[0];
+    assert.ok(repository);
     let admittedRoot = normalized;
     let rejection: ReturnType<typeof admitRepository> | undefined;
     for (let index = 1; index < MAX_REPOSITORIES; index += 1) {
@@ -1319,5 +1607,47 @@ describe("bounded lifetime accumulator", () => {
     assert.ok(rejection);
     assert.equal(rejection.reason, "storeBytes");
     assert.equal(rejection.root, admittedRoot);
+  });
+
+  it("rejects every new real or overflow key at the byte limit without mutation", () => {
+    const nearLimit = nearLimitDynamicRoot();
+    const reservedBytes = reservedSerializedBytes(nearLimit.root);
+    const actualBytes = Buffer.byteLength(JSON.stringify(nearLimit.root));
+    assert.ok(reservedBytes <= MAX_STORE_BYTES);
+    assert.ok(actualBytes <= MAX_STORE_BYTES);
+
+    for (const location of DYNAMIC_MAP_LOCATIONS) {
+      const beforeMap = structuredClone(
+        dynamicMapAt(nearLimit.root, nearLimit.repositoryKey, location),
+      );
+      const template = firstMapValue(nearLimit.root, nearLimit.repositoryKey, location);
+      const real = admitAtLocation(
+        nearLimit.root,
+        nearLimit.repositoryKey,
+        location,
+        maxCanonicalKey(dynamicMapLimit(location) - 1),
+        template,
+      );
+      assert.equal(real.status, "capacityRejected", `${location} real key`);
+      assert.equal(real.reason, "storeBytes");
+      assert.equal(real.root, nearLimit.root);
+      assert.deepEqual(real.map, beforeMap);
+
+      const overflow = admitAtLocation(
+        nearLimit.root,
+        nearLimit.repositoryKey,
+        location,
+        "invalid key",
+        template,
+      );
+      assert.equal(overflow.status, "capacityRejected", `${location} overflow key`);
+      assert.equal(overflow.reason, "storeBytes");
+      assert.equal(overflow.root, nearLimit.root);
+      assert.deepEqual(overflow.map, beforeMap);
+      assert.deepEqual(
+        dynamicMapAt(nearLimit.root, nearLimit.repositoryKey, location),
+        beforeMap,
+      );
+    }
   });
 });

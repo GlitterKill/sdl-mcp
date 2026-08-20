@@ -68,9 +68,13 @@ export interface SaturatingResult<T> {
 }
 
 export interface DynamicMapAdmission<T> {
+  root: DurableLifetimeRoot;
   map: Record<string, T>;
   storageKey: string;
   admitted: boolean;
+  status: "admitted" | "overflow" | "capacityRejected";
+  reason: "storeBytes" | null;
+  reservedBytes: number;
   saturated: boolean;
 }
 
@@ -82,19 +86,32 @@ export interface RepositoryAdmission {
   reservedBytes: number;
 }
 
-function validateAddend(value: number): void {
+function validateSafeValue(value: number): void {
   if (!Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) {
     throw new RangeError("Lifetime totals must be finite non-negative safe values");
   }
 }
 
-export function saturatingAddWithSaturation(a: number, b: number): SaturatingResult<number> {
-  validateAddend(a);
-  validateAddend(b);
+function validateCounter(value: number): void {
+  validateSafeValue(value);
+  if (!Number.isSafeInteger(value)) {
+    throw new RangeError("Lifetime counters must be non-negative safe integers");
+  }
+}
+
+function addSafeValues(a: number, b: number): SaturatingResult<number> {
+  validateSafeValue(a);
+  validateSafeValue(b);
   if (a > Number.MAX_SAFE_INTEGER - b) {
     return { value: Number.MAX_SAFE_INTEGER, saturated: true };
   }
   return { value: a + b, saturated: false };
+}
+
+export function saturatingAddWithSaturation(a: number, b: number): SaturatingResult<number> {
+  validateCounter(a);
+  validateCounter(b);
+  return addSafeValues(a, b);
 }
 
 export function saturatingAdd(a: number, b: number): number {
@@ -109,8 +126,14 @@ export function mergeSampleWithSaturation(
   a: SampleTotal,
   b: SampleTotal,
 ): SaturatingResult<SampleTotal> {
+  validateCounter(a.count);
+  validateCounter(b.count);
+  validateSafeValue(a.sum);
+  validateSafeValue(b.sum);
+  validateSafeValue(a.max);
+  validateSafeValue(b.max);
   const count = saturatingAddWithSaturation(a.count, b.count);
-  const sum = saturatingAddWithSaturation(a.sum, b.sum);
+  const sum = addSafeValues(a.sum, b.sum);
   return {
     value: { count: count.value, sum: sum.value, max: Math.max(a.max, b.max) },
     saturated: count.saturated || sum.saturated,
@@ -146,19 +169,23 @@ export function normalizeDynamicMap<T>(value: Readonly<Record<string, T>>): Reco
 }
 
 export function admitDynamicMapEntry<T>(
+  root: DurableLifetimeRoot,
   current: Readonly<Record<string, T>>,
   rawIdentifier: string,
   incoming: T,
   options: {
     location: DynamicMapLocation;
     merge: (a: T, b: T) => SaturatingResult<T>;
-    reserve?: (candidate: Readonly<Record<string, T>>) => boolean;
+    replaceMap: (
+      candidateRoot: DurableLifetimeRoot,
+      candidateMap: Readonly<Record<string, T>>,
+    ) => DurableLifetimeRoot;
   },
 ): DynamicMapAdmission<T> {
   const requestedKey = canonicalDynamicKey(rawIdentifier);
   const realKeyCount = Object.keys(current).filter((key) => key !== OVERFLOW_KEY).length;
   const isNewRealKey = requestedKey !== OVERFLOW_KEY && !Object.hasOwn(current, requestedKey);
-  let storageKey = isNewRealKey && realKeyCount >= dynamicMapLimit(options.location)
+  const storageKey = isNewRealKey && realKeyCount >= dynamicMapLimit(options.location)
     ? OVERFLOW_KEY
     : requestedKey;
 
@@ -176,23 +203,32 @@ export function admitDynamicMapEntry<T>(
     return { value: normalizeDynamicMap(next), saturated };
   };
 
-  let merged = mergeAt(storageKey);
-  if (
-    storageKey !== OVERFLOW_KEY
-    && isNewRealKey
-    && options.reserve !== undefined
-    && !options.reserve(merged.value)
-  ) {
-    // The overflow slot is reserved by the containing accumulator, so byte rejection
-    // changes only the destination key and never discards an accepted metric.
-    storageKey = OVERFLOW_KEY;
-    merged = mergeAt(storageKey);
+  const merged = mergeAt(storageKey);
+  const candidateRoot = options.replaceMap(structuredClone(root), merged.value);
+  const reservedBytes = reservedSerializedBytes(candidateRoot);
+  // Only a new storage key grows the durable shape, so reject it against the
+  // prospective root before exposing either the candidate map or root.
+  if (!Object.hasOwn(current, storageKey) && reservedBytes > MAX_STORE_BYTES) {
+    return {
+      root,
+      map: normalizeDynamicMap(current),
+      storageKey,
+      admitted: false,
+      status: "capacityRejected",
+      reason: "storeBytes",
+      reservedBytes,
+      saturated: false,
+    };
   }
 
   return {
+    root: candidateRoot,
     map: merged.value,
     storageKey,
     admitted: storageKey !== OVERFLOW_KEY,
+    status: storageKey === OVERFLOW_KEY ? "overflow" : "admitted",
+    reason: null,
+    reservedBytes,
     saturated: merged.saturated,
   };
 }
@@ -222,9 +258,11 @@ function mergeUnknown(
   if (right === null) return { value: structuredClone(left), saturated: false };
   if (isSample(left) && isSample(right)) return mergeSampleWithSaturation(left, right);
   if (typeof left === "number" && typeof right === "number") {
+    validateCounter(left);
+    validateCounter(right);
     return MAXIMUM_FIELDS.has(fieldName)
       ? { value: Math.max(left, right), saturated: false }
-      : saturatingAddWithSaturation(left, right);
+      : mergeCounter(left, right);
   }
   if (!isRecord(left) || !isRecord(right)) {
     return { value: structuredClone(right), saturated: false };
@@ -391,6 +429,14 @@ export function mergeProcessPeaks(
   baseline: ProcessPeaks | null,
   current: ProcessPeaks | null,
 ): ProcessPeaks | null {
+  for (const peaks of [baseline, current]) {
+    if (peaks === null) continue;
+    validateSafeValue(peaks.cpuPct);
+    validateSafeValue(peaks.rssMb);
+    validateSafeValue(peaks.heapUsedMb);
+    validateSafeValue(peaks.heapTotalMb);
+    validateSafeValue(peaks.eventLoopLagMs);
+  }
   if (baseline === null) return current === null ? null : structuredClone(current);
   if (current === null) return structuredClone(baseline);
   return {
