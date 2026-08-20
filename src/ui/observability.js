@@ -438,7 +438,7 @@ function renderCompressionTable(panel, layers) {
       storedBytes: layers?.totalStoredBytes,
     },
     ...Object.entries(layers?.bySource || {}).map(([source, metric]) => ({ kind: "source", name: source, ...metric })),
-    ...Object.entries(layers?.byTool || {}).map(([tool, metric]) => ({ kind: "tool", name: tool, ...metric })),
+    ...Object.entries(layers?.byTool || {}).map(([tool, metric]) => ({ kind: "tool", name: metric.tool ?? tool, ...metric })),
   ];
   renderNativeTable(host, {
     caption: "Compression by source",
@@ -467,13 +467,14 @@ function renderEncoderTable(panel, packed) {
   const names = new Set([...Object.keys(counts), ...Object.keys(packed?.byEncoder || {})]);
   const rows = [...names].sort().map((encoder) => {
     const metric = packed?.byEncoder?.[encoder] || {};
-    return { encoder, decisions: counts[encoder] ?? metric.totalDecisions, ...metric };
+    return { encoder, perEncoderCount: counts[encoder], ...metric };
   });
   renderNativeTable(host, {
     caption: "Packed wire encoders",
     columns: [
       { key: "encoder", label: "Encoder" },
-      { key: "decisions", label: "Decisions", format: fmtNum },
+      { key: "perEncoderCount", label: "Per-encoder count", format: fmtNum },
+      { key: "totalDecisions", label: "Total decisions", format: fmtNum },
       { key: "packedCount", label: "Packed", format: fmtNum },
       { key: "fallbackCount", label: "Fallback", format: fmtNum },
       { key: "packedAdoptionPct", label: "Adoption", format: fmtPct },
@@ -774,57 +775,35 @@ function renderToolOutputTable(panel, toolOutput) {
 }
 
 const metricRenderers = Object.create(null);
-const metricConsumerContracts = new WeakMap();
 
-function metricValue(value, parts) {
-  if (parts.length === 0) return value;
-  const [part, ...rest] = parts;
-  if (!part.endsWith("[]")) return metricValue(value?.[part], rest);
-  const collection = value?.[part.slice(0, -2)];
-  const entries = Array.isArray(collection)
-    ? collection.map((item) => [null, item])
-    : Object.entries(collection || {});
-  return entries.flatMap(([key, item]) => {
-    if (
-      key !== null && rest.length === 1 &&
-      (rest[0] === "source" || rest[0] === "tool") &&
-      item?.[rest[0]] === undefined
-    ) return [key];
-    const result = metricValue(item, rest);
-    return Array.isArray(result) ? result : [result];
-  });
-}
-
-function registerMetricConsumer(path, sink, renderer) {
+function registerMetricConsumer(path, renderer) {
   if (Object.hasOwn(metricRenderers, path)) throw new Error(`Duplicate metric consumer: ${path}`);
-  const pathParts = path.split(".");
-  const consumer = function consumeMetric(snapshot, rendered = new Set(), observe) {
-    const value = metricValue(snapshot, pathParts);
-    observe?.(Object.freeze({ path, value, sink }));
+  metricRenderers[path] = function consumeMetric(snapshot, rendered = new Set()) {
     if (rendered.has(renderer)) return;
     rendered.add(renderer);
-    renderer(snapshot, value);
+    renderer(snapshot);
   };
-  metricConsumerContracts.set(consumer, Object.freeze({ path, sink }));
-  metricRenderers[path] = consumer;
 }
 
 function registerScalarConsumer(path, panelName, field, format = String) {
-  registerMetricConsumer(path, `${panelName}.${field}`, function renderScalarMetric(_snapshot, value) {
+  const parts = path.split(".");
+  registerMetricConsumer(path, function renderScalarMetric(snapshot) {
     const panel = document.querySelector(`[data-panel="${panelName}"]`);
     if (!panel) return;
+    const value = parts.reduce((current, part) => current?.[part], snapshot);
     setVal(panel, field, format(value));
   });
 }
 
 function registerDashboardConsumer(path, field) {
-  registerMetricConsumer(path, `bottleneck.dashboard.${field}`, function renderDashboardMetric(_snapshot, value) {
+  registerMetricConsumer(path, function renderDashboardMetric(snapshot) {
+    const value = snapshot?.[path];
     setText(document.querySelector(`[data-dashboard-field="${field}"]`), value);
   });
 }
 
-function registerGroupedConsumers(paths, sink, renderer) {
-  for (const path of paths) registerMetricConsumer(path, sink, renderer);
+function registerGroupedConsumers(paths, renderer) {
+  for (const path of paths) registerMetricConsumer(path, renderer);
 }
 
 registerDashboardConsumer("generatedAt", "generatedAt");
@@ -836,7 +815,7 @@ registerGroupedConsumers([
   "bottleneck.topSignals[].value",
   "bottleneck.topSignals[].unit",
   "bottleneck.topSignals[].weight",
-], "bottleneck.summary", (snapshot) => updateBottleneck(snapshot.bottleneck));
+], (snapshot) => updateBottleneck(snapshot.bottleneck));
 
 registerScalarConsumer("cache.overallHitRatePct", "cache", "hitRate", (value) => fmtPct(value, 1));
 registerScalarConsumer("cache.totalHits", "cache", "totalHits", fmtNum);
@@ -847,7 +826,7 @@ registerGroupedConsumers([
   "cache.perSource[].misses",
   "cache.perSource[].hitRatePct",
   "cache.perSource[].avgLatencyMs",
-], "cache.perSource", (snapshot) => updateCache(snapshot.cache));
+], (snapshot) => updateCache(snapshot.cache));
 registerScalarConsumer("cache.avgLookupLatencyMs", "cache", "avgLookupLatencyMs", fmtMs);
 
 registerScalarConsumer("retrieval.totalRetrievals", "retrieval", "totalRetrievals", fmtNum);
@@ -861,7 +840,7 @@ registerGroupedConsumers([
   "retrieval.phaseLatencyMs[].p95Ms",
   "retrieval.phaseLatencyMs[].maxMs",
   "retrieval.byRetrievalType[]",
-], "retrieval.details", (snapshot) => updateRetrieval(snapshot.retrieval));
+], (snapshot) => updateRetrieval(snapshot.retrieval));
 registerScalarConsumer("retrieval.emptyResultCount", "retrieval", "emptyResultCount", fmtNum);
 
 registerScalarConsumer("beam.totalSliceBuilds", "beam", "totalSliceBuilds", fmtNum);
@@ -891,7 +870,7 @@ registerGroupedConsumers([
   "indexing.perLanguageAvgMs[]",
   "indexing.engineDispatch.rust",
   "indexing.engineDispatch.ts",
-], "indexing.details", (snapshot) => updateIndexing(snapshot.indexing));
+], (snapshot) => updateIndexing(snapshot.indexing));
 registerScalarConsumer("indexing.failures", "indexing", "failures", fmtNum);
 registerScalarConsumer("indexing.derivedStateLagMs", "indexing", "derivedStateLagMs", fmtMs);
 
@@ -958,7 +937,7 @@ registerGroupedConsumers([
   "packed.byEncoder[].packedTokensTotal",
   "packed.byEncoder[].tokensSaved",
   "packed.byEncoder[].tokensSavedRatio",
-], "tokenEfficiency.tables", (snapshot) => updateTokenEfficiency(snapshot.tokenEfficiency, snapshot.packed));
+], (snapshot) => updateTokenEfficiency(snapshot.tokenEfficiency, snapshot.packed));
 
 registerScalarConsumer("predictiveContext.policyMode", "predictiveContext", "policyMode", (value) => (value || "disabled").toUpperCase());
 registerScalarConsumer("predictiveContext.outcomeSamples", "predictiveContext", "outcomeSamples", fmtNum);
@@ -976,7 +955,7 @@ registerGroupedConsumers([
   "predictiveContext.topStrategies[].wasteRatePct",
   "predictiveContext.topStrategies[].score",
   "predictiveContext.topStrategies[].suppressed",
-], "predictiveContext.topStrategies", (snapshot) => updatePredictiveContext(snapshot.predictiveContext));
+], (snapshot) => updatePredictiveContext(snapshot.predictiveContext));
 
 registerScalarConsumer("health.score", "health", "score", (value) => fmtNum(value, 0));
 const renderHealthMetrics = (snapshot) => updateHealth(snapshot.health);
@@ -986,7 +965,7 @@ registerGroupedConsumers([
   "health.components.errorRate",
   "health.components.edgeQuality",
   "health.components.callResolution",
-], "health.components", renderHealthMetrics);
+], renderHealthMetrics);
 registerScalarConsumer("health.watcherRunning", "health", "watcherRunning", (value) => value ? "ON" : "OFF");
 registerScalarConsumer("health.watcherProvider", "health", "watcherProvider", (value) => value || "—");
 registerScalarConsumer("health.watcherConfiguredProvider", "health", "watcherConfiguredProvider", (value) => value || "—");
@@ -1002,7 +981,7 @@ registerGroupedConsumers([
   "health.watcherWatchmanWatchRoot",
   "health.watcherWatchmanRelativePath",
   "health.watcherWatchmanLastClock",
-], "health.watchman", renderHealthMetrics);
+], renderHealthMetrics);
 registerScalarConsumer("health.watcherWatchmanRecrawlCount", "health", "watcherWatchmanRecrawlCount", fmtNum);
 registerScalarConsumer("health.watcherWatchmanFreshInstanceCount", "health", "watcherWatchmanFreshInstanceCount", fmtNum);
 
@@ -1020,7 +999,7 @@ registerGroupedConsumers([
   "latency.perTool[].phases[].avgMs",
   "latency.perTool[].phases[].p95Ms",
   "latency.perTool[].phases[].maxMs",
-], "latency.perTool", (snapshot) => updateLatency(snapshot.latency));
+], (snapshot) => updateLatency(snapshot.latency));
 
 registerScalarConsumer("scip.totalIngests", "scip", "totalIngests", fmtNum);
 registerScalarConsumer("scip.successCount", "scip", "successCount", fmtNum);
@@ -1035,7 +1014,7 @@ registerGroupedConsumers([
   "ppr.nativeCount",
   "ppr.jsCount",
   "ppr.fallbackCount",
-], "ppr.dispatchMix", (snapshot) => updatePpr(snapshot.ppr));
+], (snapshot) => updatePpr(snapshot.ppr));
 registerScalarConsumer("ppr.nativeRatio", "ppr", "nativeRatio", (value) => fmtPct(value * 100, 1));
 registerScalarConsumer("ppr.avgComputeMs", "ppr", "avgComputeMs", fmtMs);
 registerScalarConsumer("ppr.p95ComputeMs", "ppr", "p95ComputeMs", fmtMs);
@@ -1046,7 +1025,7 @@ registerScalarConsumer("toolVolume.totalCalls", "toolVolume", "totalCalls", fmtN
 registerGroupedConsumers([
   "toolVolume.perTool[]",
   "toolVolume.perToolErrors[]",
-], "toolVolume.perTool", (snapshot) => updateToolVolume(snapshot.toolVolume));
+], (snapshot) => updateToolVolume(snapshot.toolVolume));
 registerScalarConsumer("toolVolume.callsPerMinute", "toolVolume", "callsPerMinute", (value) => `${fmtNum(value, 1)}/min`);
 
 registerScalarConsumer("postIndexSession.totalSessions", "postIndex", "totalSessions", fmtNum);
@@ -1113,18 +1092,17 @@ registerGroupedConsumers([
   "toolOutput.perTool[].p50ProjectedTokens",
   "toolOutput.perTool[].p95ProjectedTokens",
   "toolOutput.perTool[].maxProjectedTokens",
-], "toolOutput.table", (snapshot) => updateToolOutput(snapshot.toolOutput));
+], (snapshot) => updateToolOutput(snapshot.toolOutput));
 
 export const METRIC_RENDERERS = Object.freeze({ ...metricRenderers });
 
-export function assertMetricRendererCoverage(dispositions, renderers) {
+export function assertMetricRendererCoverage(dispositions, renderers, verify) {
   const claimed = Object.entries(dispositions).filter(([, entry]) => entry.disposition !== "sessionOnly");
   for (const [path, entry] of claimed) {
-    const contract = metricConsumerContracts.get(renderers[path]);
-    if (
-      contract?.path !== path ||
-      !contract.sink.startsWith(`${entry.panel}.`)
-    ) throw new Error(`Missing or invalid metric consumer: ${path}`);
+    if (typeof renderers[path] !== "function") {
+      throw new Error(`Missing or invalid metric consumer: ${path}`);
+    }
+    verify?.(path, entry, renderers[path]);
   }
   for (const path of Object.keys(renderers)) {
     if (!Object.hasOwn(dispositions, path) || dispositions[path].disposition === "sessionOnly") {
@@ -1167,20 +1145,12 @@ function renderMappedSeries(points, destination, seriesName) {
 }
 
 const timeseriesRenderers = Object.create(null);
-const timeseriesRendererContracts = new WeakMap();
 
 function registerTimeseriesRenderer(series, panel, field) {
   const destination = Object.freeze({ panel, field });
-  const renderer = function renderTimeseries(points, observe) {
-    observe?.(Object.freeze({
-      series,
-      destination,
-      sink: `${panel}.${field}`,
-    }));
+  timeseriesRenderers[series] = function renderTimeseries(points) {
     renderMappedSeries(points, destination, series);
   };
-  timeseriesRendererContracts.set(renderer, Object.freeze({ series, destination }));
-  timeseriesRenderers[series] = renderer;
 }
 
 registerTimeseriesRenderer("cacheHitRate", "cache", "hitRateSpark");
@@ -1202,14 +1172,12 @@ registerTimeseriesRenderer("eventLoopLagMs", "resources", "eventLoopLagP95Ms");
 
 export const TIMESERIES_RENDERERS = Object.freeze({ ...timeseriesRenderers });
 
-export function assertTimeseriesRendererCoverage(destinations, renderers) {
+export function assertTimeseriesRendererCoverage(destinations, renderers, verify) {
   for (const [series, destination] of Object.entries(destinations)) {
-    const contract = timeseriesRendererContracts.get(renderers[series]);
-    if (
-      contract?.series !== series ||
-      contract.destination.panel !== destination.panel ||
-      contract.destination.field !== destination.field
-    ) throw new Error(`Missing or invalid timeseries consumer: ${series}`);
+    if (typeof renderers[series] !== "function") {
+      throw new Error(`Missing or invalid timeseries consumer: ${series}`);
+    }
+    verify?.(series, destination, renderers[series]);
   }
   for (const series of Object.keys(renderers)) {
     if (!Object.hasOwn(destinations, series)) throw new Error(`Unclaimed timeseries consumer: ${series}`);

@@ -452,6 +452,201 @@ test("timeseries destinations and row builders have stable immutable order", () 
   });
 });
 
+const SCALAR_DESTINATIONS = Object.fromEntries([
+  "generatedAt", "repoId",
+  "cache.overallHitRatePct", "cache.totalHits", "cache.totalMisses", "cache.avgLookupLatencyMs",
+  "retrieval.totalRetrievals", "retrieval.avgLatencyMs", "retrieval.p95LatencyMs", "retrieval.emptyResultCount",
+  "beam.totalSliceBuilds", "beam.avgBuildMs", "beam.p95BuildMs", "beam.avgAccepted", "beam.avgEvicted",
+  "beam.avgRejected", "beam.avgFrontierMaxSize", "beam.p95FrontierMaxSize", "beam.retainedExplainHandles",
+  "delta.totalBlastRadiusComputations", "delta.avgBlastRadiusLatencyMs", "delta.p95BlastRadiusLatencyMs",
+  "delta.avgDbRoundTripsPerChangedSymbol", "delta.avgPathExplanationLatencyMs", "delta.p95PathExplanationLatencyMs",
+  "delta.fallbackPathQueryCount", "indexing.totalEvents", "indexing.filesPerMinute", "indexing.avgPass1Ms",
+  "indexing.avgPass2Ms", "indexing.failures", "indexing.derivedStateLagMs", "tokenEfficiency.totalUsed",
+  "tokenEfficiency.totalSaved", "tokenEfficiency.savingsRatio", "tokenEfficiency.avgPerCall",
+  "predictiveContext.policyMode", "predictiveContext.outcomeSamples", "predictiveContext.suppressedPrefetch",
+  "predictiveContext.acceptedPrefetch", "predictiveContext.hitRatePct", "predictiveContext.wasteRatePct",
+  "predictiveContext.avgLatencyReductionMs", "health.score", "health.watcherRunning", "health.watcherProvider",
+  "health.watcherConfiguredProvider", "health.watcherFallbackReason", "health.watcherQueueDepth", "health.watcherStale",
+  "health.watcherErrors", "health.watcherRestartCount", "health.watcherWatchmanWarningCount",
+  "health.watcherWatchmanRecrawlCount", "health.watcherWatchmanFreshInstanceCount", "latency.avgMs", "latency.p50Ms",
+  "latency.p95Ms", "latency.p99Ms", "latency.maxMs", "scip.totalIngests", "scip.successCount",
+  "scip.failureCount", "scip.totalEdgesCreated", "scip.totalEdgesUpgraded", "scip.avgIngestMs", "scip.lastIngestAt",
+  "ppr.totalRuns", "ppr.nativeRatio", "ppr.avgComputeMs", "ppr.p95ComputeMs", "ppr.avgTouched", "ppr.avgSeedCount",
+  "toolVolume.totalCalls", "toolVolume.callsPerMinute", "postIndexSession.totalSessions",
+  "postIndexSession.avgDurationMs", "postIndexSession.p50DurationMs", "postIndexSession.p95DurationMs",
+  "postIndexSession.p99DurationMs", "postIndexSession.maxDurationMs", "postIndexSession.timeoutCount",
+  "postIndexSession.lastDurationMs", "postIndexSession.lastTimedOut", "postIndexSession.lastEndedAt",
+].map((path) => [path, path.split(".").at(-1)]));
+SCALAR_DESTINATIONS["cache.overallHitRatePct"] = "hitRate";
+
+class FakeDashboardElement {
+  readonly attributes = new Map<string, string>();
+  readonly children: FakeDashboardElement[] = [];
+  readonly fields = new Map<string, FakeDashboardElement>();
+  readonly style: Record<string, string | ((name: string, value: string) => void)> = {
+    setProperty: (name: string, value: string) => { this.style[name] = value; },
+  };
+  className = "";
+  dataset: Record<string, string> = {};
+  hidden = false;
+  innerHTML = "";
+  scope = "";
+  textContent = "";
+  classList = { add: (...names: string[]) => { this.className += ` ${names.join(" ")}`; } };
+
+  append(...children: FakeDashboardElement[]) { this.children.push(...children); }
+  replaceChildren(...children: FakeDashboardElement[]) {
+    this.children.splice(0, this.children.length, ...children);
+    this.innerHTML = "";
+    this.textContent = "";
+  }
+  setAttribute(name: string, value: string) { this.attributes.set(name, value); }
+  querySelector(selector: string): FakeDashboardElement | null {
+    const field = selector.match(/^\[data-field="(.+)"\]$/)?.[1];
+    if (field) {
+      if (!this.fields.has(field)) this.fields.set(field, new FakeDashboardElement());
+      return this.fields.get(field) ?? null;
+    }
+    const series = selector.match(/^\[data-series="(.+)"\]$/)?.[1];
+    const matches = (element: FakeDashboardElement) => series !== undefined
+      ? element.dataset.series === series
+      : selector === ".trend-bank" && element.className.split(/\s+/).includes("trend-bank");
+    for (const child of this.children) {
+      if (matches(child)) return child;
+      const nested = child.querySelector(selector);
+      if (nested) return nested;
+    }
+    if (series === undefined && selector !== ".trend-bank") {
+      if (!this.fields.has(selector)) this.fields.set(selector, new FakeDashboardElement());
+      return this.fields.get(selector) ?? null;
+    }
+    return null;
+  }
+  serialize(): string {
+    const fields = [...this.fields.entries()].sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, value]) => `${name}:${value.serialize()}`).join("|");
+    const children = this.children.map((child) => child.serialize()).join("|");
+    return JSON.stringify({
+      attributes: [...this.attributes.entries()].sort(), children, className: this.className,
+      dataset: this.dataset, fields, hidden: this.hidden, innerHTML: this.innerHTML,
+      scope: this.scope, style: this.style, textContent: this.textContent,
+    });
+  }
+}
+
+function installFakeDashboardDocument() {
+  const panels = new Map(
+    [...new Set(Object.values(METRIC_DISPOSITIONS).map(({ panel }) => panel))]
+      .map((panel) => [panel, new FakeDashboardElement()]),
+  );
+  const dashboardFields = new Map<string, FakeDashboardElement>();
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      readyState: "loading",
+      addEventListener() {},
+      createElement: () => new FakeDashboardElement(),
+      createElementNS: () => new FakeDashboardElement(),
+      querySelector(selector: string) {
+        const panel = selector.match(/^\[data-panel="(.+)"\]$/)?.[1];
+        if (panel) return panels.get(panel) ?? null;
+        const field = selector.match(/^\[data-dashboard-field="(.+)"\]$/)?.[1];
+        if (field) {
+          if (!dashboardFields.has(field)) dashboardFields.set(field, new FakeDashboardElement());
+          return dashboardFields.get(field) ?? null;
+        }
+        return null;
+      },
+    },
+  });
+  return { dashboardFields, panels };
+}
+
+function mutateClaimedPath(snapshot: Record<string, unknown>, path: string): void {
+  const parts = path.split(".");
+  let current: unknown = snapshot;
+  const changed = (value: unknown): unknown => typeof value === "number"
+    ? value + 91
+    : typeof value === "boolean"
+      ? !value
+      : typeof value === "string"
+        ? `${value}__sentinel`
+        : 91;
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    const last = index === parts.length - 1;
+    const collection = part.endsWith("[]");
+    const key = collection ? part.slice(0, -2) : part;
+    const record = current as Record<string, unknown>;
+    if (!collection) {
+      if (last) record[key] = changed(record[key]);
+      else current = record[key];
+      continue;
+    }
+    const values = record[key] as unknown[] | Record<string, unknown>;
+    if (Array.isArray(values)) {
+      if (last) values[0] = changed(values[0]);
+      else current = values[0];
+    } else {
+      const first = Object.keys(values)[0];
+      const identity = parts[index + 1];
+      const item = values[first] as Record<string, unknown>;
+      if (
+        index + 1 === parts.length - 1 &&
+        (identity === "source" || identity === "tool") &&
+        item?.[identity] === undefined
+      ) {
+        values[`${first}__sentinel`] = values[first];
+        delete values[first];
+        return;
+      }
+      if (last) values[first] = changed(values[first]);
+      else current = values[first];
+    }
+  }
+}
+
+function createMetricConsumerVerifier() {
+  const baselineSnapshot = structuredClone(runtimeSnapshot()) as unknown as Record<string, unknown>;
+  const indexing = baselineSnapshot.indexing as { engineDispatch: { rust: number } };
+  indexing.engineDispatch.rust = 1;
+  const ppr = baselineSnapshot.ppr as { jsCount: number };
+  ppr.jsCount = 1;
+  return function verifyMetricConsumer(
+    path: string,
+    disposition: (typeof METRIC_DISPOSITIONS)[string],
+    render: (snapshot: unknown, rendered: Set<unknown>) => void,
+  ): void {
+    const baselineDom = installFakeDashboardDocument();
+    render(structuredClone(baselineSnapshot), new Set());
+    const baselinePanel = baselineDom.panels.get(disposition.panel)?.serialize() ?? "";
+    const baselineDashboard = [...baselineDom.dashboardFields.entries()].map(([name, value]) => `${name}:${value.serialize()}`).join("|");
+
+    const mutatedSnapshot = structuredClone(baselineSnapshot);
+    mutateClaimedPath(mutatedSnapshot, path);
+    const mutatedDom = installFakeDashboardDocument();
+    render(mutatedSnapshot, new Set());
+    const mutatedPanel = mutatedDom.panels.get(disposition.panel)?.serialize() ?? "";
+    const mutatedDashboard = [...mutatedDom.dashboardFields.entries()].map(([name, value]) => `${name}:${value.serialize()}`).join("|");
+    if (`${mutatedPanel}|${mutatedDashboard}` === `${baselinePanel}|${baselineDashboard}`) {
+      assert.fail(`${path} produced no observable output change`);
+    }
+
+    const scalarField = SCALAR_DESTINATIONS[path];
+    if (scalarField) {
+      const baselineValue = path === "repoId" || path === "generatedAt"
+        ? baselineDom.dashboardFields.get(scalarField)?.textContent
+        : baselineDom.panels.get(disposition.panel)?.fields.get(scalarField)?.textContent;
+      const mutatedValue = path === "repoId" || path === "generatedAt"
+        ? mutatedDom.dashboardFields.get(scalarField)?.textContent
+        : mutatedDom.panels.get(disposition.panel)?.fields.get(scalarField)?.textContent;
+      if (mutatedValue === baselineValue) {
+        assert.fail(`${path} did not update ${disposition.panel}.${scalarField}`);
+      }
+    }
+  };
+}
+
 test("dashboard registers a consuming renderer for every rendered or derived metric", async () => {
   const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", {
@@ -462,7 +657,11 @@ test("dashboard registers a consuming renderer for every rendered or derived met
     const dashboard = await import("../../../dist/ui/observability.js");
     const registry = dashboard.METRIC_RENDERERS as Record<string, unknown> | undefined;
     const assertCoverage = dashboard.assertMetricRendererCoverage as
-      | ((dispositions: typeof METRIC_DISPOSITIONS, renderers: Record<string, unknown>) => void)
+      | ((
+        dispositions: typeof METRIC_DISPOSITIONS,
+        renderers: Record<string, unknown>,
+        verify?: ReturnType<typeof createMetricConsumerVerifier>,
+      ) => void)
       | undefined;
     assert.ok(registry);
     assert.equal(typeof assertCoverage, "function");
@@ -472,30 +671,12 @@ test("dashboard registers a consuming renderer for every rendered or derived met
     assert.deepEqual(Object.keys(registry).sort(), claimed.sort());
     for (const path of claimed) assert.equal(typeof registry[path], "function", path);
 
-    const sentinel = Object.freeze({ metric: "sentinel" });
-    const snapshotFor = (path: string): object => path.split(".").reverse().reduce<unknown>(
-      (value, part) => part.endsWith("[]")
-        ? { [part.slice(0, -2)]: [value] }
-        : { [part]: value },
-      sentinel,
-    ) as object;
-    for (const path of claimed) {
-      let receipt: { path: string; value: unknown; sink: string } | undefined;
-      const stop = new Error(`stop:${path}`);
-      assert.throws(
-        () => (registry[path] as Function)(snapshotFor(path), new Set(), (value: typeof receipt) => {
-          receipt = value;
-          throw stop;
-        }),
-        (error: unknown) => error === stop,
-        path,
-      );
-      assert.deepEqual(Object.keys(receipt ?? {}), ["path", "value", "sink"], path);
-      assert.equal(receipt?.path, path);
-      if (path.includes("[]")) assert.ok((receipt?.value as unknown[]).includes(sentinel), path);
-      else assert.equal(receipt?.value, sentinel, path);
-      assert.match(receipt?.sink ?? "", new RegExp(`^${METRIC_DISPOSITIONS[path].panel}(?:[.:]|$)`), path);
-    }
+    assertCoverage?.(METRIC_DISPOSITIONS, registry, createMetricConsumerVerifier());
+    const encoderDom = installFakeDashboardDocument();
+    (registry["packed.perEncoder[]"] as Function)(runtimeSnapshot(), new Set());
+    const encoderTable = encoderDom.panels.get("tokenEfficiency")?.fields.get("packedByEncoder")?.serialize() ?? "";
+    assert.match(encoderTable, /Per-encoder count/);
+    assert.match(encoderTable, /Total decisions/);
 
     const mutated = { ...registry };
     delete mutated["retrieval.p95LatencyMs"];
@@ -505,15 +686,25 @@ test("dashboard registers a consuming renderer for every rendered or derived met
     );
     const groupedPath = "latency.perTool[].phases[].maxMs";
     assert.throws(
-      () => assertCoverage?.(METRIC_DISPOSITIONS, { ...registry, [groupedPath]: () => {} }),
+      () => assertCoverage?.(METRIC_DISPOSITIONS, {
+        ...registry,
+        [groupedPath]: () => {},
+      }, createMetricConsumerVerifier()),
       new RegExp(groupedPath.replace(/[.[\]]/g, "\\$&")),
     );
     assert.throws(
       () => assertCoverage?.(METRIC_DISPOSITIONS, {
         ...registry,
-        [groupedPath]: registry["latency.perTool[].phases[].p95Ms"],
-      }),
+        [groupedPath]: registry["ppr.nativeCount"],
+      }, createMetricConsumerVerifier()),
       new RegExp(groupedPath.replace(/[.[\]]/g, "\\$&")),
+    );
+    assert.throws(
+      () => assertCoverage?.(METRIC_DISPOSITIONS, {
+        ...registry,
+        "retrieval.p95LatencyMs": registry["retrieval.avgLatencyMs"],
+      }, createMetricConsumerVerifier()),
+      /retrieval\.p95LatencyMs/,
     );
     assert.doesNotMatch(
       readFileSync("src/ui/observability.js", "utf8"),
@@ -535,85 +726,56 @@ test("dashboard consumes every existing 15-minute series without browser history
     const dashboard = await import("../../../dist/ui/observability.js");
     const consumers = dashboard.TIMESERIES_RENDERERS as Record<string, unknown> | undefined;
     const assertCoverage = dashboard.assertTimeseriesRendererCoverage as
-      | ((destinations: typeof TIMESERIES_PANEL_MAP, renderers: Record<string, unknown>) => void)
+      | ((
+        destinations: typeof TIMESERIES_PANEL_MAP,
+        renderers: Record<string, unknown>,
+        verify?: (series: string, destination: { panel: string; field: string }, render: (points: object[]) => void) => void,
+      ) => void)
       | undefined;
     assert.ok(consumers);
     assert.equal(typeof assertCoverage, "function");
     assert.deepEqual(Object.keys(consumers), Object.keys(TIMESERIES_PANEL_MAP));
     for (const [series, destination] of Object.entries(TIMESERIES_PANEL_MAP)) {
       assert.equal(typeof consumers[series], "function", `${series}:${destination.panel}.${destination.field}`);
-      let receipt: { series: string; destination: { panel: string; field: string }; sink: string } | undefined;
-      const stop = new Error(`stop:${series}`);
-      assert.throws(
-        () => (consumers[series] as Function)([], (value: typeof receipt) => {
-          receipt = value;
-          throw stop;
-        }),
-        (error: unknown) => error === stop,
-      );
-      assert.deepEqual(receipt, {
-        series,
-        destination,
-        sink: `${destination.panel}.${destination.field}`,
-      });
     }
-    assert.throws(
-      () => assertCoverage?.(TIMESERIES_PANEL_MAP, { ...consumers, p95LatencyMs: () => {} }),
-      /p95LatencyMs/,
-    );
-    assert.throws(
-      () => assertCoverage?.(TIMESERIES_PANEL_MAP, {
-        ...consumers,
-        p95LatencyMs: consumers.cacheHitRate,
-      }),
-      /p95LatencyMs/,
-    );
+    const missing = { ...consumers };
+    delete missing.p95LatencyMs;
+    assert.throws(() => assertCoverage?.(TIMESERIES_PANEL_MAP, missing), /p95LatencyMs/);
 
-    class FakeElement {
-      children: FakeElement[] = [];
-      className = "";
-      dataset: Record<string, string> = {};
-      innerHTML = "";
-      textContent = "";
-      classList = { add: (...names: string[]) => { this.className += ` ${names.join(" ")}`; } };
-      setAttribute() {}
-      append(...children: FakeElement[]) { this.children.push(...children); }
-      querySelector(selector: string): FakeElement | null {
-        const matches = (element: FakeElement) => selector === ".trend-bank"
-          ? element.className.split(/\s+/).includes("trend-bank")
-          : element.dataset.series === selector.match(/^\[data-series="(.+)"\]$/)?.[1];
-        for (const child of this.children) {
-          if (matches(child)) return child;
-          const nested = child.querySelector(selector);
-          if (nested) return nested;
+    const verifySeriesConsumer = (
+      series: string,
+      destination: { panel: string; field: string },
+      render: (points: object[]) => void,
+    ) => {
+        const { panels } = installFakeDashboardDocument();
+        render([{ t: 1, value: 1 }, { t: 2, value: 2 }]);
+        render([{ t: 1, value: 2 }, { t: 2, value: 3 }]);
+        const panel = panels.get(destination.panel);
+        if (!panel?.querySelector(`[data-series="${series}"]`)) {
+          assert.fail(`${series} did not render in ${destination.panel}.${destination.field}`);
         }
-        return null;
-      }
-    }
-    const panels = new Map(Object.values(TIMESERIES_PANEL_MAP).map(({ panel }) => [panel, new FakeElement()]));
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: {
-        readyState: "loading",
-        addEventListener() {},
-        createElement: () => new FakeElement(),
-        createElementNS: () => new FakeElement(),
-        querySelector(selector: string) {
-          return panels.get(selector.match(/^\[data-panel="(.+)"\]$/)?.[1] ?? "") ?? null;
-        },
-      },
-    });
-    for (const series of Object.keys(TIMESERIES_PANEL_MAP)) {
-      const render = consumers[series] as (points: object[]) => void;
-      render([{ t: 1, value: 1 }, { t: 2, value: 2 }]);
-      render([{ t: 1, value: 2 }, { t: 2, value: 3 }]);
-      const destination = TIMESERIES_PANEL_MAP[series];
-      const panel = panels.get(destination.panel);
-      assert.ok(panel?.querySelector(`[data-series="${series}"]`), series);
-      const matches = (element: FakeElement): number =>
-        (element.dataset.series === series ? 1 : 0) + element.children.reduce((sum, child) => sum + matches(child), 0);
-      assert.equal(matches(panel as FakeElement), 1, series);
-    }
+        assert.match(panel.serialize(), new RegExp(destination.field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+        const matches = (element: FakeDashboardElement): number =>
+          (element.dataset.series === series ? 1 : 0) + element.children.reduce((sum, child) => sum + matches(child), 0);
+        assert.equal(matches(panel), 1, `${series} must update idempotently`);
+    };
+    assertCoverage?.(TIMESERIES_PANEL_MAP, consumers, verifySeriesConsumer);
+    assert.throws(
+      () => assertCoverage?.(
+        TIMESERIES_PANEL_MAP,
+        { ...consumers, p95LatencyMs: () => {} },
+        verifySeriesConsumer,
+      ),
+      /p95LatencyMs/,
+    );
+    assert.throws(
+      () => assertCoverage?.(
+        TIMESERIES_PANEL_MAP,
+        { ...consumers, p95LatencyMs: consumers.cacheHitRate },
+        verifySeriesConsumer,
+      ),
+      /p95LatencyMs/,
+    );
     assert.doesNotMatch(readFileSync("src/ui/observability.js", "utf8"), /hitRateHistory/);
     assert.doesNotMatch(
       readFileSync("src/ui/observability.js", "utf8"),
