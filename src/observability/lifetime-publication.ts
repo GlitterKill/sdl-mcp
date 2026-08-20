@@ -14,6 +14,7 @@ import {
   resolveLifetimeFileSystem,
   rotateLifetimeEvidence,
   sameLifetimeSource,
+  settleLifetimeClaim,
   validateLifetimeDirectoryBinding,
   type LifetimeFileSystem,
   type LifetimeFileSystemOverrides,
@@ -84,6 +85,11 @@ type CandidateState =
       readonly source?: LifetimeSourceSnapshot;
     };
 
+type ExactMoveOutcome = {
+  readonly state: "moved" | "notMoved" | "indeterminate";
+  readonly error?: unknown;
+};
+
 function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException).code;
 }
@@ -107,9 +113,7 @@ function serializeRoot(root: DurableLifetimeRoot): {
 function parsedSchemaVersion(value: unknown): number | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const schemaVersion = (value as Record<string, unknown>).schemaVersion;
-  return typeof schemaVersion === "number" && Number.isSafeInteger(schemaVersion)
-    ? schemaVersion
-    : undefined;
+  return typeof schemaVersion === "number" ? schemaVersion : undefined;
 }
 
 function parseCandidateContent(
@@ -231,22 +235,61 @@ async function moveExactSource(
   source: LifetimeSourceSnapshot,
   fileSystem: LifetimeFileSystem,
   options: LifetimePublicationOptions,
-): Promise<boolean> {
-  if (!await pathMissing(targetPath, fileSystem)) return false;
-  const claim = await claimLifetimeSource(
-    directory,
-    sourcePath,
-    source,
-    fileSystem,
-    true,
-    evidenceOptions(options, fileSystem),
-  );
+  onMoved?: () => void,
+): Promise<ExactMoveOutcome> {
+  if (!await pathMissing(targetPath, fileSystem)) return { state: "notMoved" };
+  let claim: Awaited<ReturnType<typeof claimLifetimeSource>>;
   try {
-    if (!await pathMissing(targetPath, fileSystem)) return false;
-    return await moveClaimedLifetimeSource(claim, targetPath, fileSystem);
-  } finally {
-    await releaseLifetimeSourceClaim(claim, fileSystem);
+    claim = await claimLifetimeSource(
+      directory,
+      sourcePath,
+      source,
+      fileSystem,
+      true,
+      evidenceOptions(options, fileSystem),
+    );
+  } catch (error) {
+    return { state: "notMoved", error };
   }
+
+  let state: ExactMoveOutcome["state"] = "notMoved";
+  let moveError: unknown;
+  try {
+    if (await pathMissing(targetPath, fileSystem) &&
+        await moveClaimedLifetimeSource(claim, targetPath, fileSystem)) {
+      state = "moved";
+      onMoved?.();
+    }
+  } catch (error) {
+    moveError = error;
+    try {
+      const target = await readLifetimeSource(targetPath, fileSystem, MAX_STORE_BYTES);
+      if (sameLifetimeSource(target.snapshot, source) && await pathMissing(sourcePath, fileSystem)) {
+        state = "moved";
+        onMoved?.();
+      } else {
+        state = "indeterminate";
+      }
+    } catch {
+      state = "indeterminate";
+    }
+  }
+
+  let cleanupError: unknown;
+  try {
+    await releaseLifetimeSourceClaim(claim, fileSystem);
+  } catch (error) {
+    cleanupError = error;
+    // A one-shot cleanup failure must not leave our own live claim blocking the
+    // compensating move. Retry the exact claim, then drain Task 3A auxiliaries.
+    await releaseLifetimeSourceClaim(claim, fileSystem).catch(() => undefined);
+    await settleLifetimeClaim(
+      directory,
+      evidenceOptions(options, fileSystem),
+      false,
+    ).catch(() => undefined);
+  }
+  return { state, error: moveError ?? cleanupError };
 }
 
 async function removeTemp(
@@ -284,9 +327,15 @@ async function restorePrimary(
   expected: LifetimeSourceSnapshot,
   fileSystem: LifetimeFileSystem,
   options: LifetimePublicationOptions,
-): Promise<void> {
-  if (!await pathMissing(primaryPath, fileSystem)) return;
-  await moveExactSource(
+): Promise<boolean> {
+  try {
+    const current = await readLifetimeSource(primaryPath, fileSystem, MAX_STORE_BYTES);
+    if (sameLifetimeSource(current.snapshot, expected)) return true;
+    return false;
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") return false;
+  }
+  const restored = await moveExactSource(
     directory,
     backupPath,
     primaryPath,
@@ -294,6 +343,13 @@ async function restorePrimary(
     fileSystem,
     options,
   );
+  if (restored.state !== "moved") return false;
+  try {
+    const current = await readLifetimeSource(primaryPath, fileSystem, MAX_STORE_BYTES);
+    return sameLifetimeSource(current.snapshot, expected);
+  } catch {
+    return false;
+  }
 }
 
 async function flushDirectory(
@@ -325,6 +381,7 @@ export async function publishLifetimeGeneration(
   let tempSnapshot: LifetimeSourceSnapshot | undefined;
   let previousPrimary: LifetimeSourceSnapshot | undefined;
   let primaryMoved = false;
+  let primaryMoveUncertain = false;
   let commitAttempted = false;
 
   if (!Number.isSafeInteger(currentCommittedGeneration) || currentCommittedGeneration < 0) {
@@ -396,9 +453,12 @@ export async function publishLifetimeGeneration(
         previousPrimary,
         fileSystem,
         options,
+        () => { primaryMoved = true; },
       );
-      if (!moved) throw new Error("Lifetime primary changed before backup");
-      primaryMoved = true;
+      primaryMoveUncertain = moved.state === "indeterminate";
+      if (moved.state !== "moved" || moved.error) {
+        throw new Error("Lifetime primary move did not complete cleanly");
+      }
       await inject(options, "afterPrimaryToBackup");
     }
 
@@ -446,19 +506,23 @@ export async function publishLifetimeGeneration(
     if (commitAttempted) {
       return { status: "indeterminate", reason: "publicationCommitUncertain" };
     }
-    if (trusted && primaryMoved && previousPrimary) {
-      await restorePrimary(
+    let authorityRestored = true;
+    if (trusted && (primaryMoved || primaryMoveUncertain) && previousPrimary) {
+      authorityRestored = await restorePrimary(
         trusted,
         primaryPath,
         backupPath,
         previousPrimary,
         fileSystem!,
         options,
-      ).catch(() => undefined);
+      ).catch(() => false);
     }
     if (trusted) {
       await removeTemp(trusted, tempPath, tempSnapshot, fileSystem!, options)
         .catch(() => undefined);
+    }
+    if (!authorityRestored) {
+      return { status: "indeterminate", reason: "publicationCommitUncertain" };
     }
     return { status: "notPublished", reason: "ioFailure" };
   }
@@ -538,10 +602,7 @@ export async function recoverLifetimeGeneration(
     const primaryPath = resolve(binding.directory, PRIMARY_FILENAME);
     if (winner.path === primaryPath) {
       for (const candidate of valid) {
-        if (candidate.path === winner.path || candidate.path === resolve(binding.directory, BACKUP_FILENAME) &&
-            candidate.root.generation < winner.root.generation) {
-          continue;
-        }
+        if (candidate.path === winner.path) continue;
         await quarantineIfPresent(binding.directory, candidate, fileSystem, options);
       }
       const canonical = await readCandidate(primaryPath, 0, fileSystem);
@@ -572,6 +633,18 @@ export async function recoverLifetimeGeneration(
     if (winner.path.startsWith(resolve(binding.directory, TEMP_PREFIX))) {
       const leftover = await readCandidate(winner.path, 2, fileSystem);
       await quarantineIfPresent(binding.directory, leftover, fileSystem, options);
+    }
+    const recoveredBackup = await readCandidate(
+      resolve(binding.directory, BACKUP_FILENAME),
+      1,
+      fileSystem,
+    );
+    if (recoveredBackup.status === "unknownNewer") {
+      return { status: "recoveryRequired", reason: "unknownSchema" };
+    }
+    if (recoveredBackup.status === "valid" &&
+        recoveredBackup.root.generation < published.generation) {
+      await quarantineIfPresent(binding.directory, recoveredBackup, fileSystem, options);
     }
     return { status: "ready", root: published.root, generation: published.generation };
   } catch {

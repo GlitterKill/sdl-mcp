@@ -74,6 +74,14 @@ async function missing(path: string): Promise<boolean> {
   }
 }
 
+async function publicationEvidence(directory: string): Promise<string[]> {
+  return (await readdir(directory))
+    .filter((name) => name.startsWith(
+      "sdl-observability-lifetime.evidence.v1.validated-supported.publication.",
+    ))
+    .sort();
+}
+
 after(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) =>
     rm(directory, { recursive: true, force: true })));
@@ -265,6 +273,47 @@ describe("lifetime publication", () => {
     assert.equal(result.status, "notPublished");
     assert.deepEqual(await readFile(join(directory, PRIMARY)), replacement);
   });
+
+  it("restores the old primary when claim cleanup fails after its physical move", async () => {
+    const cleanupNames = [
+      ".sdl-observability-lifetime.claim-source.",
+      ".sdl-observability-lifetime.claim-cleanup.",
+      ".sdl-observability-lifetime.claim-record.",
+    ] as const;
+
+    for (const cleanupName of cleanupNames) {
+      const directory = await temporaryDirectory();
+      assert.equal((await publishLifetimeGeneration(directory, root(1), 0)).status, "committed");
+      const base = resolveLifetimeFileSystem();
+      let primaryMoved = false;
+      let failed = false;
+      const result = await publishLifetimeGeneration(directory, root(2), 1, {
+        fileSystem: {
+          rename: async (source, target) => {
+            await base.rename(source, target);
+            if (String(target) === join(directory, BACKUP)) primaryMoved = true;
+          },
+          unlink: async (path) => {
+            if (primaryMoved && !failed && basename(String(path)).startsWith(cleanupName)) {
+              failed = true;
+              throw Object.assign(new Error("injected cleanup failure"), { code: "EIO" });
+            }
+            await base.unlink(path);
+          },
+        },
+      });
+
+      assert.equal(failed, true, cleanupName);
+      assert.equal(result.status, "notPublished", cleanupName);
+      assert.equal(await generationAt(directory), 1, cleanupName);
+      assert.equal((await readdir(directory)).some((name) => name.startsWith(TEMP_PREFIX)), false);
+      assert.deepEqual(await recoverLifetimeGeneration(directory), {
+        status: "ready",
+        root: root(1),
+        generation: 1,
+      }, cleanupName);
+    }
+  });
 });
 
 describe("lifetime recovery", () => {
@@ -327,6 +376,81 @@ describe("lifetime recovery", () => {
     });
     assert.deepEqual(await readFile(join(directory, PRIMARY)), unknown);
     assert.equal(await generationAt(directory, BACKUP), 4);
+  });
+
+  it("recognizes every numeric newer schema before safe-integer supported parsing", async () => {
+    const unknown = Buffer.from(
+      '{"schemaVersion":9007199254740992,"generation":99,"opaque":"future"}',
+    );
+    const placements = [PRIMARY, BACKUP, `${TEMP_PREFIX}${"b".repeat(32)}.json`] as const;
+
+    for (const placement of placements) {
+      const directory = await temporaryDirectory();
+      if (placement !== PRIMARY) await writeFile(join(directory, PRIMARY), serialized(root(4)));
+      if (placement !== BACKUP) await writeFile(join(directory, BACKUP), serialized(root(3)));
+      await writeFile(join(directory, placement), unknown);
+      const before = new Map<string, Buffer>();
+      for (const name of await readdir(directory)) {
+        before.set(name, await readFile(join(directory, name)));
+      }
+
+      assert.deepEqual(await recoverLifetimeGeneration(directory), {
+        status: "recoveryRequired",
+        reason: "unknownSchema",
+      }, placement);
+      for (const [name, content] of before) {
+        assert.deepEqual(await readFile(join(directory, name)), content, `${placement}:${name}`);
+      }
+    }
+  });
+
+  it("treats nonnumeric schema versions as corrupt rather than unknown newer", async () => {
+    for (const schemaVersion of ["2", null, { future: 2 }]) {
+      const directory = await temporaryDirectory();
+      await writeFile(join(directory, PRIMARY), serialized(root(2)));
+      await writeFile(join(directory, BACKUP), JSON.stringify({ schemaVersion }));
+
+      assert.deepEqual(await recoverLifetimeGeneration(directory), {
+        status: "ready",
+        root: root(2),
+        generation: 2,
+      });
+      assert.equal((await publicationEvidence(directory)).length, 1);
+    }
+  });
+
+  it("quarantines a lower canonical backup after the higher primary is safe", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, PRIMARY), serialized(root(2)));
+    await writeFile(join(directory, BACKUP), serialized(root(1)));
+
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(2),
+      generation: 2,
+    });
+    assert.equal(await missing(join(directory, BACKUP)), true);
+    assert.equal((await publicationEvidence(directory)).length, 1);
+  });
+
+  it("quarantines every lower generation after promoting a temp winner", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, PRIMARY), serialized(root(2)));
+    await writeFile(join(directory, BACKUP), serialized(root(1)));
+    await writeFile(
+      join(directory, `${TEMP_PREFIX}${"c".repeat(32)}.json`),
+      serialized(root(3)),
+    );
+
+    assert.deepEqual(await recoverLifetimeGeneration(directory), {
+      status: "ready",
+      root: root(3),
+      generation: 3,
+    });
+    assert.equal(await missing(join(directory, BACKUP)), true);
+    const evidence = await publicationEvidence(directory);
+    assert.equal(evidence.length, 3);
+    assert.ok(evidence.length <= 8);
   });
 
   it("quarantines corrupt supported candidates through the shared bounded evidence set", async () => {
