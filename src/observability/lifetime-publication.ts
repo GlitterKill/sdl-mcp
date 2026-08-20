@@ -60,6 +60,19 @@ export interface LifetimePublicationOptions {
   readonly fault?: (stage: FaultStage) => void | Promise<void>;
 }
 
+export interface LifetimeReadOnlyLoadOptions {
+  readonly fileSystem?: LifetimeFileSystemOverrides;
+}
+
+export type ReadOnlyLoadOutcome =
+  | { readonly status: "ready"; readonly root: DurableLifetimeRoot; readonly generation: number }
+  | { readonly status: "empty" }
+  | { readonly status: "ioFailure" }
+  | {
+      readonly status: "recoveryRequired";
+      readonly reason: Extract<RecoveryReason, "unknownSchema" | "corruptCandidates">;
+    };
+
 type PublicationOutcome =
   | { readonly status: "committed"; readonly root: DurableLifetimeRoot; readonly generation: number }
   | {
@@ -411,6 +424,35 @@ async function flushDirectory(
     await handle.sync();
   } finally {
     await handle.close();
+  }
+}
+
+/** Read only the canonical primary without applying recovery or adoption policy. */
+export async function loadLifetimeGenerationReadOnly(
+  directory: string,
+  options: LifetimeReadOnlyLoadOptions = {},
+): Promise<ReadOnlyLoadOutcome> {
+  try {
+    const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
+    const binding = await validateLifetimeDirectoryBinding(directory, fileSystem);
+    const primary = await readCandidate(resolve(binding.directory, PRIMARY_FILENAME), 0, fileSystem);
+    if (primary.status === "missing") return { status: "empty" };
+    if (primary.status === "ioFailure") return { status: "ioFailure" };
+    if (primary.status === "unknownNewer") {
+      return { status: "recoveryRequired", reason: "unknownSchema" };
+    }
+    if (primary.status !== "valid") {
+      return { status: "recoveryRequired", reason: "corruptCandidates" };
+    }
+    return {
+      status: "ready",
+      root: primary.root,
+      generation: primary.root.generation,
+    };
+  } catch (error) {
+    return errorCode(error) === undefined
+      ? { status: "recoveryRequired", reason: "corruptCandidates" }
+      : { status: "ioFailure" };
   }
 }
 

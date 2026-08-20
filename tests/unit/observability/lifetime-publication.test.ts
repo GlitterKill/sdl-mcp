@@ -20,6 +20,7 @@ import process from "node:process";
 import { after, describe, it } from "node:test";
 
 import {
+  loadLifetimeGenerationReadOnly,
   publishLifetimeGeneration,
   recoverLifetimeGeneration,
   type LifetimePublicationOptions,
@@ -85,6 +86,168 @@ async function publicationEvidence(directory: string): Promise<string[]> {
 after(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) =>
     rm(directory, { recursive: true, force: true })));
+});
+
+describe("lifetime read-only load", () => {
+  it("returns any supported canonical primary generation without mutation", async () => {
+    const base = resolveLifetimeFileSystem();
+    for (const generation of [0, 2, 4]) {
+      const directory = await temporaryDirectory();
+      const expected = root(generation);
+      await writeFile(join(directory, PRIMARY), serialized(expected));
+      const openedFlags: Array<string | number> = [];
+
+      const result = await loadLifetimeGenerationReadOnly(directory, {
+        fileSystem: {
+          open: async (path, flags, mode) => {
+            openedFlags.push(flags);
+            return base.open(path, flags, mode);
+          },
+          rename: async () => { throw new Error("read-only load renamed a file"); },
+          unlink: async () => { throw new Error("read-only load unlinked a file"); },
+        },
+      });
+
+      assert.deepEqual(result, { status: "ready", root: expected, generation });
+      assert.equal(openedFlags.includes("wx"), false);
+      assert.equal(await generationAt(directory), generation);
+    }
+  });
+
+  it("returns empty for an absent primary without consulting or mutating other artifacts", async () => {
+    const directory = await temporaryDirectory();
+    const artifacts = [
+      [BACKUP, serialized(root(3))],
+      [`${TEMP_PREFIX}${"d".repeat(32)}.json`, serialized(root(4))],
+      ["sdl-observability-lifetime.evidence.ignored.json", "evidence"],
+    ] as const;
+    for (const [name, content] of artifacts) await writeFile(join(directory, name), content);
+    const before = new Map<string, Buffer>();
+    for (const name of await readdir(directory)) before.set(name, await readFile(join(directory, name)));
+    const base = resolveLifetimeFileSystem();
+    const mutationCalls: string[] = [];
+
+    const result = await loadLifetimeGenerationReadOnly(directory, {
+      fileSystem: {
+        open: async (path, flags, mode) => {
+          if (flags === "wx") mutationCalls.push(`open:${String(path)}`);
+          return base.open(path, flags, mode);
+        },
+        rename: async (source, target) => {
+          mutationCalls.push(`rename:${String(source)}:${String(target)}`);
+          throw new Error("read-only load renamed a file");
+        },
+        unlink: async (path) => {
+          mutationCalls.push(`unlink:${String(path)}`);
+          throw new Error("read-only load unlinked a file");
+        },
+      },
+    });
+
+    assert.deepEqual(result, { status: "empty" });
+    assert.deepEqual(mutationCalls, []);
+    assert.deepEqual((await readdir(directory)).sort(), [...before.keys()].sort());
+    for (const [name, content] of before) {
+      assert.deepEqual(await readFile(join(directory, name)), content, name);
+    }
+  });
+
+  it("preserves an unknown newer primary byte-for-byte", async () => {
+    const directory = await temporaryDirectory();
+    const unknown = Buffer.from(
+      '{"schemaVersion":9007199254740992,"generation":99,"opaque":"future"}',
+    );
+    await writeFile(join(directory, PRIMARY), unknown);
+
+    assert.deepEqual(await loadLifetimeGenerationReadOnly(directory), {
+      status: "recoveryRequired",
+      reason: "unknownSchema",
+    });
+    assert.deepEqual(await readFile(join(directory, PRIMARY)), unknown);
+  });
+
+  it("fails closed without mutation for corrupt, oversized, symlink, and nonregular primaries", async () => {
+    const malformed = await temporaryDirectory();
+    await writeFile(join(malformed, PRIMARY), "not-json");
+    assert.deepEqual(await loadLifetimeGenerationReadOnly(malformed), {
+      status: "recoveryRequired",
+      reason: "corruptCandidates",
+    });
+    assert.equal(await readFile(join(malformed, PRIMARY), "utf8"), "not-json");
+
+    const oversized = await temporaryDirectory();
+    await writeFile(join(oversized, PRIMARY), Buffer.alloc(MAX_STORE_BYTES + 1));
+    assert.deepEqual(await loadLifetimeGenerationReadOnly(oversized), {
+      status: "recoveryRequired",
+      reason: "corruptCandidates",
+    });
+    assert.equal((await lstat(join(oversized, PRIMARY))).size, MAX_STORE_BYTES + 1);
+
+    const linked = await temporaryDirectory();
+    const target = join(linked, "target.json");
+    await writeFile(target, serialized(root(1)));
+    await symlink(target, join(linked, PRIMARY), "file");
+    assert.deepEqual(await loadLifetimeGenerationReadOnly(linked), {
+      status: "recoveryRequired",
+      reason: "corruptCandidates",
+    });
+    assert.equal((await lstat(join(linked, PRIMARY))).isSymbolicLink(), true);
+
+    const nonregular = await temporaryDirectory();
+    await mkdir(join(nonregular, PRIMARY));
+    assert.deepEqual(await loadLifetimeGenerationReadOnly(nonregular), {
+      status: "recoveryRequired",
+      reason: "corruptCandidates",
+    });
+    assert.equal((await lstat(join(nonregular, PRIMARY))).isDirectory(), true);
+  });
+
+  it("reports coded primary read errors as operational failures", async () => {
+    for (const code of ["EIO", "EMFILE"] as const) {
+      const directory = await temporaryDirectory();
+      await writeFile(join(directory, PRIMARY), serialized(root(1)));
+      const base = resolveLifetimeFileSystem();
+
+      assert.deepEqual(await loadLifetimeGenerationReadOnly(directory, {
+        fileSystem: {
+          open: async (path, flags, mode) => {
+            if (String(path) === join(directory, PRIMARY)) {
+              throw Object.assign(new Error(code), { code });
+            }
+            return base.open(path, flags, mode);
+          },
+        },
+      }), { status: "ioFailure" }, code);
+    }
+  });
+
+  it("returns empty for a primary disappearance race without falling back", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, PRIMARY), serialized(root(1)));
+    await writeFile(join(directory, BACKUP), serialized(root(3)));
+    await writeFile(
+      join(directory, `${TEMP_PREFIX}${"e".repeat(32)}.json`),
+      serialized(root(4)),
+    );
+    const base = resolveLifetimeFileSystem();
+    let backupOpened = false;
+
+    const result = await loadLifetimeGenerationReadOnly(directory, {
+      fileSystem: {
+        open: async (path, flags, mode) => {
+          if (String(path) === join(directory, PRIMARY)) {
+            throw Object.assign(new Error("primary disappeared"), { code: "ENOENT" });
+          }
+          if (String(path) === join(directory, BACKUP)) backupOpened = true;
+          return base.open(path, flags, mode);
+        },
+      },
+    });
+
+    assert.deepEqual(result, { status: "empty" });
+    assert.equal(backupOpened, false);
+    assert.equal(await generationAt(directory, BACKUP), 3);
+  });
 });
 
 describe("lifetime publication", () => {
