@@ -122,6 +122,7 @@ const CLAIM_AUXILIARY = /^\.sdl-observability-lifetime\.claim-(?:cleanup|recover
 const CLAIM_CLEANUP_AUXILIARY = /^\.sdl-observability-lifetime\.claim-cleanup\.([0-9a-f]{32})$/;
 const MOVED_SOURCE_AUXILIARY = /^\.sdl-observability-lifetime\.(?:release|aux-delete)\.([0-9a-f]{32})$/;
 const DELETE_AUXILIARY_PREFIX = ".sdl-observability-lifetime.delete.";
+const NORMALIZE_AUXILIARY_SUFFIX = /\.normalize\.[0-9a-f]{32}$/;
 
 export function resolveLifetimeFileSystem(
   overrides: LifetimeFileSystemOverrides = {},
@@ -556,11 +557,14 @@ function classifyAuxiliary(
   name: string,
   source: Awaited<ReturnType<typeof readLifetimeSource>>,
 ): AuxiliaryEntry | null {
-  const logicalName = name.endsWith(".cleanup-next")
-    ? name.slice(0, -".cleanup-next".length)
-    : name.endsWith(".cleanup")
-      ? name.slice(0, -".cleanup".length)
-      : name;
+  const normalization = NORMALIZE_AUXILIARY_SUFFIX.exec(name);
+  const logicalName = normalization
+    ? name.slice(0, normalization.index)
+    : name.endsWith(".cleanup-next")
+      ? name.slice(0, -".cleanup-next".length)
+      : name.endsWith(".cleanup")
+        ? name.slice(0, -".cleanup".length)
+        : name;
   const create = CREATE_AUXILIARY.exec(logicalName);
   if (create) {
     const createRecord = parseCreateAuxiliary(source.content);
@@ -814,6 +818,41 @@ async function removeValidatedAuxiliary(
   return removeExactLifetimeSource(entry.path, entry.snapshot, candidate, fileSystem);
 }
 
+function normalizationCandidatePath(directory: string, entry: AuxiliaryEntry): string {
+  // Bind a bounded recovery slot to this exact physical alias, so two occupied
+  // legacy cleanup names never have to use each other as rename candidates.
+  const token = createHash("sha256")
+    .update(entry.name)
+    .update("\0")
+    .update(entry.snapshot.dev)
+    .update("\0")
+    .update(entry.snapshot.ino)
+    .update("\0")
+    .update(entry.snapshot.sha256)
+    .digest("hex")
+    .slice(0, 32);
+  return directChildPath(
+    directory,
+    resolve(directory, `${entry.logicalName}.normalize.${token}`),
+    "Lifetime auxiliary normalization",
+  );
+}
+
+async function normalizeCanonicalAuxiliary(
+  canonical: AuxiliaryEntry,
+  source: AuxiliaryEntry,
+  fileSystem: LifetimeFileSystem,
+): Promise<boolean> {
+  try {
+    await fileSystem.link(source.path, canonical.path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+  const restored = await readLifetimeSource(canonical.path, fileSystem, MAX_EVIDENCE_SOURCE_BYTES);
+  return sameLifetimeSource(restored.snapshot, canonical.snapshot);
+}
+
 async function restoreEvidenceDeletion(
   directory: string,
   entry: AuxiliaryEntry,
@@ -931,17 +970,29 @@ async function recoverStrandedAuxiliaries(
 
   const recoveryEntries: AuxiliaryEntry[] = [];
   const aliasesByCanonical = new Map<AuxiliaryEntry, AuxiliaryEntry[]>();
+  const normalizationByCanonical = new Map<AuxiliaryEntry, AuxiliaryEntry>();
   const aliasesByLogicalName = Map.groupBy(entries, (entry) => entry.logicalName);
   for (const aliases of aliasesByLogicalName.values()) {
-    const canonical = aliases.find((entry) => entry.name === entry.logicalName) ??
-      [...aliases].sort((left, right) => left.name.localeCompare(right.name))[0];
-    if (!canonical) return "invalid";
+    const sorted = [...aliases].sort((left, right) => left.name.localeCompare(right.name));
+    const storedCanonical = aliases.find((entry) => entry.name === entry.logicalName);
+    const representative = storedCanonical ?? sorted[0];
+    if (!representative) return "invalid";
+    // An alias-only set first restores its absent base. The synthetic entry
+    // lets dependency grouping and mutation accounting include that base.
+    const canonical = storedCanonical ?? (aliases.length > 1
+      ? {
+          ...representative,
+          name: representative.logicalName,
+          path: resolve(directory, representative.logicalName),
+        }
+      : representative);
     recoveryEntries.push(canonical);
-    aliasesByCanonical.set(
-      canonical,
-      aliases.filter((entry) => entry !== canonical)
-        .sort((left, right) => left.name.localeCompare(right.name)),
-    );
+    aliasesByCanonical.set(canonical, storedCanonical
+      ? sorted.filter((entry) => entry !== storedCanonical)
+      : aliases.length > 1 ? sorted : []);
+    if (!storedCanonical && aliases.length > 1) {
+      normalizationByCanonical.set(canonical, representative);
+    }
   }
 
   const createByNonce = new Map(
@@ -952,6 +1003,10 @@ async function recoverStrandedAuxiliaries(
   const groups = new Map<string, {
     readonly entries: AuxiliaryEntry[];
     readonly aliases: AuxiliaryEntry[];
+    readonly normalizations: Array<{
+      readonly canonical: AuxiliaryEntry;
+      readonly source: AuxiliaryEntry;
+    }>;
   }>();
   for (const entry of recoveryEntries) {
     let key: string;
@@ -968,12 +1023,19 @@ async function recoverStrandedAuxiliaries(
       if (!claim) return "invalid";
       key = sourceGroupKey(claim.source);
     }
-    const group = groups.get(key) ?? { entries: [], aliases: [] };
+    const group = groups.get(key) ?? { entries: [], aliases: [], normalizations: [] };
     group.entries.push(entry);
     group.aliases.push(...(aliasesByCanonical.get(entry) ?? []));
+    const normalizationSource = normalizationByCanonical.get(entry);
+    if (normalizationSource) {
+      group.normalizations.push({ canonical: entry, source: normalizationSource });
+    }
     groups.set(key, group);
   }
 
+  const occupiedNames = new Set(allNames);
+  const plannedCandidates = new Set<string>();
+  let invalidCandidatePlan = false;
   const orderedGroups = [...groups.entries()].map(([key, group]) => {
     const oldest = Math.min(...group.entries.map((entry) => {
       if (entry.claim) return Date.parse(entry.claim.createdAt);
@@ -983,16 +1045,30 @@ async function recoverStrandedAuxiliaries(
       const match = EVIDENCE_NAME.exec(evidenceName);
       return match?.[3] ? Number.parseInt(match[3], 36) : Number.MAX_SAFE_INTEGER;
     }));
+    const aliasPlans = group.aliases.map((alias) => {
+      const candidate = normalizationCandidatePath(directory, alias);
+      if (occupiedNames.has(basename(candidate)) || plannedCandidates.has(candidate)) {
+        invalidCandidatePlan = true;
+      }
+      plannedCandidates.add(candidate);
+      return { alias, candidate };
+    });
     return {
       key,
       entries: group.entries,
       aliases: group.aliases,
-      cost: group.entries.length + group.aliases.length,
+      aliasPlans,
+      normalizations: group.normalizations,
+      cost: group.normalizations.length +
+        group.aliases.length * 2 +
+        group.entries.reduce((cost, entry) =>
+          cost + (entry.kind === "evidence-delete" ? 1 : 2), 0),
       oldest,
     };
   }).sort((left, right) => left.oldest - right.oldest || left.key.localeCompare(right.key));
 
-  if (orderedGroups.some((group) => group.cost > MAX_LIFETIME_AUXILIARIES)) {
+  if (invalidCandidatePlan ||
+    orderedGroups.some((group) => group.cost > MAX_LIFETIME_AUXILIARIES)) {
     return "invalid";
   }
   const selectedGroups: typeof orderedGroups = [];
@@ -1012,8 +1088,18 @@ async function recoverStrandedAuxiliaries(
         : 1;
   try {
     for (const group of selectedGroups) {
-      for (const alias of group.aliases) {
-        if (!await removeValidatedAuxiliary(alias, fileSystem)) return "busy";
+      for (const normalization of group.normalizations) {
+        if (!await normalizeCanonicalAuxiliary(
+          normalization.canonical,
+          normalization.source,
+          fileSystem,
+        )) return "busy";
+      }
+      for (const { alias, candidate } of group.aliasPlans) {
+        if (!await pathAbsent(candidate, fileSystem) ||
+          !await removeExactLifetimeSource(alias.path, alias.snapshot, candidate, fileSystem)) {
+          return "busy";
+        }
       }
       const orderedEntries = [...group.entries].sort((left, right) =>
         priority(left) - priority(right) || left.name.localeCompare(right.name));
