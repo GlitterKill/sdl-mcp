@@ -472,24 +472,48 @@ test("dashboard registers a consuming renderer for every rendered or derived met
     assert.deepEqual(Object.keys(registry).sort(), claimed.sort());
     for (const path of claimed) assert.equal(typeof registry[path], "function", path);
 
-    const output = { textContent: "" };
-    const panel = {
-      querySelector(selector: string) {
-        return selector === '[data-field="p95LatencyMs"]' ? output : null;
-      },
-    };
-    (globalThis.document as unknown as { querySelector(selector: string): unknown }).querySelector =
-      (selector: string) => selector === '[data-panel="retrieval"]' ? panel : null;
-    (registry["retrieval.p95LatencyMs"] as (snapshot: unknown) => void)({
-      retrieval: { p95LatencyMs: 42 },
-    });
-    assert.equal(output.textContent, "42ms");
+    const sentinel = Object.freeze({ metric: "sentinel" });
+    const snapshotFor = (path: string): object => path.split(".").reverse().reduce<unknown>(
+      (value, part) => part.endsWith("[]")
+        ? { [part.slice(0, -2)]: [value] }
+        : { [part]: value },
+      sentinel,
+    ) as object;
+    for (const path of claimed) {
+      let receipt: { path: string; value: unknown; sink: string } | undefined;
+      const stop = new Error(`stop:${path}`);
+      assert.throws(
+        () => (registry[path] as Function)(snapshotFor(path), new Set(), (value: typeof receipt) => {
+          receipt = value;
+          throw stop;
+        }),
+        (error: unknown) => error === stop,
+        path,
+      );
+      assert.deepEqual(Object.keys(receipt ?? {}), ["path", "value", "sink"], path);
+      assert.equal(receipt?.path, path);
+      if (path.includes("[]")) assert.ok((receipt?.value as unknown[]).includes(sentinel), path);
+      else assert.equal(receipt?.value, sentinel, path);
+      assert.match(receipt?.sink ?? "", new RegExp(`^${METRIC_DISPOSITIONS[path].panel}(?:[.:]|$)`), path);
+    }
 
     const mutated = { ...registry };
     delete mutated["retrieval.p95LatencyMs"];
     assert.throws(
       () => assertCoverage?.(METRIC_DISPOSITIONS, mutated),
       /retrieval\.p95LatencyMs/,
+    );
+    const groupedPath = "latency.perTool[].phases[].maxMs";
+    assert.throws(
+      () => assertCoverage?.(METRIC_DISPOSITIONS, { ...registry, [groupedPath]: () => {} }),
+      new RegExp(groupedPath.replace(/[.[\]]/g, "\\$&")),
+    );
+    assert.throws(
+      () => assertCoverage?.(METRIC_DISPOSITIONS, {
+        ...registry,
+        [groupedPath]: registry["latency.perTool[].phases[].p95Ms"],
+      }),
+      new RegExp(groupedPath.replace(/[.[\]]/g, "\\$&")),
     );
     assert.doesNotMatch(
       readFileSync("src/ui/observability.js", "utf8"),
@@ -510,12 +534,91 @@ test("dashboard consumes every existing 15-minute series without browser history
   try {
     const dashboard = await import("../../../dist/ui/observability.js");
     const consumers = dashboard.TIMESERIES_RENDERERS as Record<string, unknown> | undefined;
+    const assertCoverage = dashboard.assertTimeseriesRendererCoverage as
+      | ((destinations: typeof TIMESERIES_PANEL_MAP, renderers: Record<string, unknown>) => void)
+      | undefined;
     assert.ok(consumers);
+    assert.equal(typeof assertCoverage, "function");
     assert.deepEqual(Object.keys(consumers), Object.keys(TIMESERIES_PANEL_MAP));
     for (const [series, destination] of Object.entries(TIMESERIES_PANEL_MAP)) {
       assert.equal(typeof consumers[series], "function", `${series}:${destination.panel}.${destination.field}`);
+      let receipt: { series: string; destination: { panel: string; field: string }; sink: string } | undefined;
+      const stop = new Error(`stop:${series}`);
+      assert.throws(
+        () => (consumers[series] as Function)([], (value: typeof receipt) => {
+          receipt = value;
+          throw stop;
+        }),
+        (error: unknown) => error === stop,
+      );
+      assert.deepEqual(receipt, {
+        series,
+        destination,
+        sink: `${destination.panel}.${destination.field}`,
+      });
+    }
+    assert.throws(
+      () => assertCoverage?.(TIMESERIES_PANEL_MAP, { ...consumers, p95LatencyMs: () => {} }),
+      /p95LatencyMs/,
+    );
+    assert.throws(
+      () => assertCoverage?.(TIMESERIES_PANEL_MAP, {
+        ...consumers,
+        p95LatencyMs: consumers.cacheHitRate,
+      }),
+      /p95LatencyMs/,
+    );
+
+    class FakeElement {
+      children: FakeElement[] = [];
+      className = "";
+      dataset: Record<string, string> = {};
+      innerHTML = "";
+      textContent = "";
+      classList = { add: (...names: string[]) => { this.className += ` ${names.join(" ")}`; } };
+      setAttribute() {}
+      append(...children: FakeElement[]) { this.children.push(...children); }
+      querySelector(selector: string): FakeElement | null {
+        const matches = (element: FakeElement) => selector === ".trend-bank"
+          ? element.className.split(/\s+/).includes("trend-bank")
+          : element.dataset.series === selector.match(/^\[data-series="(.+)"\]$/)?.[1];
+        for (const child of this.children) {
+          if (matches(child)) return child;
+          const nested = child.querySelector(selector);
+          if (nested) return nested;
+        }
+        return null;
+      }
+    }
+    const panels = new Map(Object.values(TIMESERIES_PANEL_MAP).map(({ panel }) => [panel, new FakeElement()]));
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        readyState: "loading",
+        addEventListener() {},
+        createElement: () => new FakeElement(),
+        createElementNS: () => new FakeElement(),
+        querySelector(selector: string) {
+          return panels.get(selector.match(/^\[data-panel="(.+)"\]$/)?.[1] ?? "") ?? null;
+        },
+      },
+    });
+    for (const series of Object.keys(TIMESERIES_PANEL_MAP)) {
+      const render = consumers[series] as (points: object[]) => void;
+      render([{ t: 1, value: 1 }, { t: 2, value: 2 }]);
+      render([{ t: 1, value: 2 }, { t: 2, value: 3 }]);
+      const destination = TIMESERIES_PANEL_MAP[series];
+      const panel = panels.get(destination.panel);
+      assert.ok(panel?.querySelector(`[data-series="${series}"]`), series);
+      const matches = (element: FakeElement): number =>
+        (element.dataset.series === series ? 1 : 0) + element.children.reduce((sum, child) => sum + matches(child), 0);
+      assert.equal(matches(panel as FakeElement), 1, series);
     }
     assert.doesNotMatch(readFileSync("src/ui/observability.js", "utf8"), /hitRateHistory/);
+    assert.doesNotMatch(
+      readFileSync("src/ui/observability.js", "utf8"),
+      /Object\.keys\(TIMESERIES_PANEL_MAP\)[\s\S]{0,200}renderMappedSeries/,
+    );
   } finally {
     if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
     else Reflect.deleteProperty(globalThis, "document");

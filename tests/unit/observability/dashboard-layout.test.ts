@@ -293,6 +293,7 @@ function loadDashboardHarness(): DashboardHarness {
     .replace(/^import[\s\S]*?;\s*$/gm, "")
     .replace(/\bexport (?=(?:const|function)\b)/g, "")
     .replace(/\nassertMetricRendererCoverage\(METRIC_DISPOSITIONS, METRIC_RENDERERS\);/, "")
+    .replace(/\nassertTimeseriesRendererCoverage\(TIMESERIES_PANEL_MAP, TIMESERIES_RENDERERS\);/, "")
     .replace(/\nif \(typeof document !== "undefined"[\s\S]*$/, "");
   const context = {
     getComputedStyle: () => ({ columnGap: "14px" }),
