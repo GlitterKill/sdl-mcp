@@ -23,6 +23,18 @@ interface RepoLifecycleState {
 }
 
 const repoStates = new Map<string, RepoLifecycleState>();
+const registeredRepoIds = new Set<string>();
+
+/** Replace process-local membership with the authoritative startup DB snapshot. */
+export function replaceRegisteredRepoIds(repoIds: Iterable<string>): void {
+  registeredRepoIds.clear();
+  for (const repoId of repoIds) registeredRepoIds.add(repoId);
+}
+
+/** Synchronous membership used by repository-scoped observability routes. */
+export function isRegisteredRepoId(repoId: string): boolean {
+  return registeredRepoIds.has(repoId);
+}
 
 function getRepoState(repoId: string): RepoLifecycleState {
   let state = repoStates.get(repoId);
@@ -108,6 +120,7 @@ export async function beginRepoRemoval(
     settled = true;
     if (advanceEpoch) state.epoch += 1;
     state.status = status;
+    if (advanceEpoch && status === "removed") registeredRepoIds.delete(repoId);
   };
 
   return {
@@ -140,6 +153,7 @@ export async function beginRepoRegistration(
     settled = true;
     if (advanceEpoch) state.epoch += 1;
     state.status = status;
+    if (advanceEpoch && status === "active") registeredRepoIds.add(repoId);
   };
 
   return {
@@ -152,4 +166,5 @@ export async function beginRepoRegistration(
 
 export function resetRepoLifecycleForTests(): void {
   repoStates.clear();
+  registeredRepoIds.clear();
 }

@@ -6,7 +6,9 @@ import {
   beginRepoRemoval,
   beginRepoRegistration,
   captureActiveRepoEpoch,
+  isRegisteredRepoId,
   isRepoEpochCurrent,
+  replaceRegisteredRepoIds,
   resetRepoLifecycleForTests,
   withRepoMutation,
 } from "../../dist/services/repo-lifecycle.js";
@@ -22,6 +24,32 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 describe("per-repository lifecycle barrier", () => {
   beforeEach(() => {
     resetRepoLifecycleForTests();
+  });
+
+  it("tracks only seeded and committed repository registrations", async () => {
+    replaceRegisteredRepoIds(["seeded", "replaced"]);
+    assert.equal(isRegisteredRepoId("seeded"), true);
+    assert.equal(isRegisteredRepoId("unknown"), false);
+
+    replaceRegisteredRepoIds(["replacement"]);
+    assert.equal(isRegisteredRepoId("seeded"), false);
+    assert.equal(isRegisteredRepoId("replacement"), true);
+
+    const aborted = await beginRepoRegistration("aborted");
+    aborted.abort();
+    assert.equal(isRegisteredRepoId("aborted"), false);
+
+    const registered = await beginRepoRegistration("runtime");
+    registered.commitActive();
+    assert.equal(isRegisteredRepoId("runtime"), true);
+
+    const failedRemoval = await beginRepoRemoval("runtime");
+    failedRemoval.abort();
+    assert.equal(isRegisteredRepoId("runtime"), true);
+
+    const removed = await beginRepoRemoval("runtime");
+    removed.commitTombstone();
+    assert.equal(isRegisteredRepoId("runtime"), false);
   });
 
   it("blocks production shadow staging before any active DB handoff", () => {

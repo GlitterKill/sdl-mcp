@@ -107,4 +107,55 @@ describe("HTTP shutdown wiring", () => {
       "HTTP transport cleanup must run before usage persistence and final DB/logger cleanup",
     );
   });
+
+  it("starts durable observability before taps and transports with one live registry", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    const bootstrapIndex = source.indexOf("await ensureConfiguredReposRegistered");
+    const seedIndex = source.indexOf("replaceRegisteredRepoIds(");
+    const createIndex = source.indexOf("createObservabilityService(observabilityConfig");
+    const startIndex = source.indexOf("await observabilityService.start()");
+    const tapIndex = source.indexOf("installObservabilityTap(observabilityService)");
+    const probeIndex = source.indexOf("startRuntimeProbes(observabilityConfig)");
+    const sidecarIndex = source.indexOf("await setupObservabilityDashboardSidecar(");
+    const httpIndex = source.indexOf("await setupHttpTransport(");
+
+    assert.ok(bootstrapIndex >= 0 && seedIndex > bootstrapIndex);
+    assert.ok(createIndex > seedIndex && startIndex > createIndex);
+    assert.ok(tapIndex > startIndex && probeIndex > startIndex);
+    assert.ok(sidecarIndex > startIndex && httpIndex > startIndex);
+    assert.match(
+      source,
+      /createObservabilityService\(observabilityConfig,\s*\{\s*lifetimeDirectory: dirname\(graphDbPath\),\s*isRegisteredRepoId,\s*\}\s*\)/s,
+    );
+    assert.equal(
+      source.slice(createIndex).match(/\bisRegisteredRepoId,/g)?.length,
+      3,
+      "the same exported predicate must feed the service and both HTTP surfaces",
+    );
+  });
+
+  it("awaits the final lifetime checkpoint before database and logger cleanup", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    assert.match(
+      source,
+      /shutdownMgr\.addCleanup\("observability", async \(\) => \{\s*stopRuntimeProbes\(\);\s*await observabilityService\?\.stop\(\);\s*\}\);/s,
+    );
+
+    const observabilityIndex = source.indexOf(
+      'shutdownMgr.addCleanup("observability"',
+    );
+    const dbIndex = source.indexOf('shutdownMgr.addCleanup("db"');
+    const loggerIndex = source.indexOf('shutdownMgr.addCleanup("logger"');
+    assert.ok(
+      observabilityIndex >= 0 &&
+        dbIndex > observabilityIndex &&
+        loggerIndex > dbIndex,
+    );
+  });
 });

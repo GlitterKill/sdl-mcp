@@ -1,3 +1,5 @@
+import { dirname } from "node:path";
+
 import { ServeOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { isNativeAddonGloballyEnabled } from "../../native/addon-loader.js";
@@ -17,6 +19,7 @@ import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import { configurePool, getLadybugConn } from "../../db/ladybug.js";
+import { listRepos } from "../../db/ladybug-queries.js";
 import { closeLadybugDbAfterDrainingWork } from "../../startup/graceful-database-shutdown.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
 import { createWalCheckpointMaintenance } from "../../db/wal-maintenance.js";
@@ -73,6 +76,10 @@ import type { ObservabilityService } from "../../observability/index.js";
 import {
   stopGraphIntegrityVerifierRecovery,
 } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
+import {
+  isRegisteredRepoId,
+  replaceRegisteredRepoIds,
+} from "../../services/repo-lifecycle.js";
 
 function writeStderrLine(message: string): boolean {
   return safeWriteStderr(`${message}\n`);
@@ -245,9 +252,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   shutdownMgr.addCleanup("walMaintenance", () => {
     walMaintenance?.stop();
   });
-  shutdownMgr.addCleanup("observability", () => {
+  shutdownMgr.addCleanup("observability", async () => {
     stopRuntimeProbes();
-    observabilityService?.stop();
+    await observabilityService?.stop();
   });
   shutdownMgr.addCleanup("server", () => stdioServer?.stop());
   shutdownMgr.addCleanup("observabilityDashboard", () =>
@@ -439,10 +446,17 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       writeServeStderrLine(message);
     });
 
+    replaceRegisteredRepoIds(
+      (await listRepos(await getLadybugConn(), 10_000)).map(
+        (repo) => repo.repoId,
+      ),
+    );
+
     await recoverStaleDerivedStateOnStartup(config, (message) => {
       writeServeStderrLine(message);
     });
   } else {
+    replaceRegisteredRepoIds([]);
     writeServeStderrLine(
       "[sdl-mcp] Skipping repository bootstrap and derived-state recovery because storage is not ready.",
     );
@@ -585,8 +599,11 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     sseMaxStreamMs: 3_600_000,
   };
   if (observabilityConfig.enabled) {
-    observabilityService = createObservabilityService(observabilityConfig);
-    observabilityService.start();
+    observabilityService = createObservabilityService(observabilityConfig, {
+      lifetimeDirectory: dirname(graphDbPath),
+      isRegisteredRepoId,
+    });
+    await observabilityService.start();
     installObservabilityTap(observabilityService);
     startRuntimeProbes(observabilityConfig);
     beamExplainStore = new BeamExplainStore({
@@ -624,6 +641,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
             observabilitySseHeartbeatMs: observabilityConfig.sseHeartbeatMs,
             observabilitySseMaxStreamMs: observabilityConfig.sseMaxStreamMs,
             getStartupReadiness: startupReadiness.getSnapshot,
+            isRegisteredRepoId,
           },
           config.httpAuth,
         );
@@ -662,6 +680,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
           observabilitySseHeartbeatMs: observabilityConfig.sseHeartbeatMs,
           observabilitySseMaxStreamMs: observabilityConfig.sseMaxStreamMs,
           getStartupReadiness: startupReadiness.getSnapshot,
+          isRegisteredRepoId,
         },
         config.httpAuth,
         config.http,

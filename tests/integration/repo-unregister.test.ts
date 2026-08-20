@@ -41,6 +41,7 @@ import {
 import { recordPrefetchOutcome } from "../../dist/graph/prefetch-outcomes.js";
 import {
   captureActiveRepoEpoch,
+  isRegisteredRepoId,
   resetRepoLifecycleForTests,
   withRepoMutation,
 } from "../../dist/services/repo-lifecycle.js";
@@ -71,6 +72,27 @@ describe("repo.unregister integration", () => {
     process.env.SDL_CONFIG = configPath;
     invalidateConfigCache();
   }
+
+  it("updates synchronous registration membership only after handler commits", async () => {
+    writeConfig();
+    const repoId = "registration-membership";
+
+    assert.equal(isRegisteredRepoId(repoId), false);
+    const registered = await handleRepoRegister({
+      repoId,
+      rootPath: tempRoot,
+      updateExisting: true,
+    });
+    assert.equal(registered.ok, true);
+    assert.equal(isRegisteredRepoId(repoId), true);
+
+    const removed = await handleRepoUnregister({
+      repoId,
+      confirmRepoId: repoId,
+    });
+    assert.deepEqual(removed, { ok: true, repoId, removed: true });
+    assert.equal(isRegisteredRepoId(repoId), false);
+  });
 
   async function seedRepo(repoId: string): Promise<void> {
     await withWriteConn((conn) =>
