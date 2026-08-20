@@ -160,6 +160,7 @@ describe("HTTP shutdown wiring", () => {
     const verifierIndex = source.indexOf(
       'shutdownMgr.addCleanup("graphIntegrityVerifier"',
     );
+    const drainIndex = source.indexOf('shutdownMgr.addCleanup("workDrain"');
     const observabilityIndex = source.indexOf(
       'shutdownMgr.addCleanup("observability"',
     );
@@ -171,7 +172,8 @@ describe("HTTP shutdown wiring", () => {
         httpIndex > dashboardIndex &&
         watchersIndex > httpIndex &&
         verifierIndex > watchersIndex &&
-        observabilityIndex > verifierIndex &&
+        drainIndex > verifierIndex &&
+        observabilityIndex > drainIndex &&
         dbIndex > observabilityIndex &&
         loggerIndex > dbIndex,
       "all event producers and transports must finish before the final checkpoint",
@@ -184,22 +186,15 @@ describe("HTTP shutdown wiring", () => {
       "utf8",
     );
     const fatalCatchIndex = source.lastIndexOf("} catch (error) {");
-    const stopIndex = source.indexOf(
-      "await stopObservability()",
+    const shutdownIndex = source.indexOf(
+      'await shutdownMgr.shutdown("startup failure", 1)',
       fatalCatchIndex,
     );
-    const closeIndex = source.indexOf(
-      "await closeDbAfterStartupFailure()",
-      fatalCatchIndex,
-    );
-    const exitIndex = source.indexOf("process.exit(1)", fatalCatchIndex);
 
     assert.ok(fatalCatchIndex >= 0);
     assert.ok(
-      stopIndex > fatalCatchIndex &&
-        closeIndex > stopIndex &&
-        exitIndex > closeIndex,
-      "fatal setup failure must release the lifetime lock before DB cleanup and exit",
+      shutdownIndex > fatalCatchIndex,
+      "fatal setup failure must use the managed producer-drain, checkpoint, and DB cleanup path",
     );
   });
 });

@@ -147,6 +147,46 @@ describe("main.ts shutdown wiring", () => {
     }
   });
 
+  it("continues through database cleanup when observability cleanup rejects", async () => {
+    const logs: string[] = [];
+    const order: string[] = [];
+    const originalExit = process.exit;
+    let exitCode: number | undefined;
+    process.exit = ((code?: string | number | null | undefined): never => {
+      exitCode = typeof code === "number" ? code : Number(code ?? 0);
+      return undefined as never;
+    }) as NodeJS.Process["exit"];
+
+    try {
+      const mgr = new ShutdownManager({
+        forceTimeoutMs: 10_000,
+        log: (message) => logs.push(message),
+      });
+      mgr.addCleanup("workDrain", async () => {
+        order.push("drain");
+      });
+      mgr.addCleanup("observability", async () => {
+        order.push("observability");
+        throw new Error("checkpoint failed");
+      });
+      mgr.addCleanup("db", async () => {
+        order.push("db");
+      });
+
+      await mgr.shutdown("startup failure", 1);
+
+      assert.deepStrictEqual(order, ["drain", "observability", "db"]);
+      assert.strictEqual(exitCode, 1);
+      assert.ok(
+        logs.some((line) =>
+          line.includes('Cleanup "observability" error: checkpoint failed'),
+        ),
+      );
+    } finally {
+      process.exit = originalExit;
+    }
+  });
+
   it("does not let stderr EPIPE abort shutdown logging", async () => {
     const originalExit = process.exit;
     const originalWrite = process.stderr.write;
@@ -396,16 +436,16 @@ describe("serve.ts shutdown wiring", () => {
     );
   });
 
-  it("closes LadybugDB when serve startup fails after DB init", () => {
+  it("uses managed cleanup when serve startup fails after DB init", () => {
     const source = readFileSync(
       join(process.cwd(), "src", "cli", "commands", "serve.ts"),
       "utf8",
     );
-    const closeIndex = source.indexOf("await closeDbAfterStartupFailure()");
-    const exitIndex = source.indexOf("process.exit(1)", closeIndex);
-
-    assert.ok(closeIndex >= 0, "startup catch should close DB");
-    assert.ok(closeIndex < exitIndex, "DB close must happen before exit");
+    assert.match(
+      source,
+      /await shutdownMgr\.shutdown\("startup failure", 1\)/,
+      "startup catch should run the registered drain, observability, DB, and logger cleanups",
+    );
   });
 
   it("wraps serve DB init in the startup cleanup catch", () => {
@@ -416,14 +456,16 @@ describe("serve.ts shutdown wiring", () => {
     const pidfileIndex = source.indexOf("shutdownMgr.setPidfilePath(pidfilePath)");
     const tryIndex = source.indexOf("try {", pidfileIndex);
     const initIndex = source.indexOf("await initGraphDb(");
-    const closeIndex = source.indexOf("await closeDbAfterStartupFailure()");
+    const shutdownIndex = source.indexOf(
+      'await shutdownMgr.shutdown("startup failure", 1)',
+    );
 
     assert.ok(pidfileIndex >= 0, "serve.ts should register pidfile");
     assert.ok(tryIndex >= 0, "serve.ts should have startup try/catch");
     assert.ok(initIndex >= 0, "serve.ts should initialize DB");
-    assert.ok(closeIndex >= 0, "serve.ts should close DB in catch");
+    assert.ok(shutdownIndex >= 0, "serve.ts should run managed cleanup in catch");
     assert.ok(
-      tryIndex < initIndex && initIndex < closeIndex,
+      tryIndex < initIndex && initIndex < shutdownIndex,
       "DB init must be inside the startup cleanup catch",
     );
   });

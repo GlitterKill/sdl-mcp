@@ -24,7 +24,10 @@ import {
   runToolDispatch,
 } from "../../dist/mcp/dispatch-limiter.js";
 import { withIndexingGate } from "../../dist/mcp/indexing-gate.js";
-import { closeLadybugDbAfterDrainingWork } from "../../dist/startup/graceful-database-shutdown.js";
+import {
+  closeLadybugDbAfterDrainingWork,
+  drainLadybugWork,
+} from "../../dist/startup/graceful-database-shutdown.js";
 
 let graphDbPath = "";
 
@@ -53,6 +56,42 @@ afterEach(async () => {
 });
 
 describe("graceful database shutdown", () => {
+  it("drains accepted work without closing the database and is repeatable", async () => {
+    graphDbPath = mkdtempSync(join(tmpdir(), "sdl-work-drain-"));
+    await initLadybugDb(graphDbPath);
+    configureToolDispatchLimiter({ maxConcurrency: 1, queueTimeoutMs: 1_000 });
+    const entered = deferred();
+    const release = deferred();
+    let drainSettled = false;
+    const foreground = runToolDispatch(async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+
+    const draining = drainLadybugWork({
+      dispatchTimeoutMs: 2_000,
+      pollMs: 2,
+    }).then(() => {
+      drainSettled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(drainSettled, false);
+
+    release.resolve();
+    await foreground;
+    await draining;
+    assert.notStrictEqual(getLadybugDbPath(), null);
+
+    await drainLadybugWork({ dispatchTimeoutMs: 2_000, pollMs: 2 });
+    assert.notStrictEqual(getLadybugDbPath(), null);
+    await closeLadybugDbAfterDrainingWork({
+      dispatchTimeoutMs: 2_000,
+      pollMs: 2,
+    });
+    assert.strictEqual(getLadybugDbPath(), null);
+  });
+
   it("aborts derived work and drains foreground dispatch before closing", async () => {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-graceful-db-shutdown-"));
     await initLadybugDb(graphDbPath);

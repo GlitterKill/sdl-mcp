@@ -10,12 +10,8 @@ export interface GracefulDatabaseShutdownOptions {
   pollMs?: number;
 }
 
-/**
- * Stop deferred writers, drain foreground tool work, then close LadybugDB.
- * Keeping these steps in one cleanup prevents a timeout from closing native
- * connections while a refresh or tool call still owns them.
- */
-export async function closeLadybugDbAfterDrainingWork(
+/** Stop deferred writers and wait for accepted foreground work to finish. */
+export async function drainLadybugWork(
   options: GracefulDatabaseShutdownOptions = {},
 ): Promise<void> {
   const dispatchTimeoutMs =
@@ -43,5 +39,12 @@ export async function closeLadybugDbAfterDrainingWork(
       `Timed out after ${dispatchTimeoutMs}ms waiting for tool dispatch before LadybugDB close`,
     );
   }
+}
+
+/** Drain accepted work before closing LadybugDB connections. */
+export async function closeLadybugDbAfterDrainingWork(
+  options: GracefulDatabaseShutdownOptions = {},
+): Promise<void> {
+  await drainLadybugWork(options);
   await closeLadybugDb();
 }

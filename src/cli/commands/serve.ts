@@ -20,7 +20,10 @@ import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import { configurePool, getLadybugConn } from "../../db/ladybug.js";
 import { listAllRepoIds } from "../../db/ladybug-queries.js";
-import { closeLadybugDbAfterDrainingWork } from "../../startup/graceful-database-shutdown.js";
+import {
+  closeLadybugDbAfterDrainingWork,
+  drainLadybugWork,
+} from "../../startup/graceful-database-shutdown.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
 import { createWalCheckpointMaintenance } from "../../db/wal-maintenance.js";
 import { printBanner } from "../../util/banner.js";
@@ -87,27 +90,6 @@ function writeStderrLine(message: string): boolean {
 
 async function stopGraphIntegrityVerifier(): Promise<void> {
   await stopGraphIntegrityVerifierRecovery();
-}
-
-async function closeDbAfterStartupFailure(): Promise<void> {
-  try {
-    await stopGraphIntegrityVerifier();
-  } catch (error) {
-    writeStderrLine(
-      `[sdl-mcp] Graph integrity verifier cleanup after startup failure failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-  try {
-    await closeLadybugDbAfterDrainingWork();
-  } catch (error) {
-    writeStderrLine(
-      `[sdl-mcp] LadybugDB cleanup after startup failure failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
 }
 
 export async function runStoragePreflightForReadiness(
@@ -294,6 +276,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     }
   });
   shutdownMgr.addCleanup("graphIntegrityVerifier", stopGraphIntegrityVerifier);
+  shutdownMgr.addCleanup("workDrain", drainLadybugWork);
   shutdownMgr.addCleanup("observability", stopObservability);
   shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork);
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
@@ -702,18 +685,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       await httpHandle.serverClosed;
     }
   } catch (error) {
-    if (pidfilePath) {
-      try {
-        removePidfile(pidfilePath);
-      } catch {
-        /* best-effort */
-      }
-    }
-    await stopObservability();
-    await closeDbAfterStartupFailure();
     writeServeStderrLine(
       `Fatal error: ${error instanceof Error ? error.message : String(error)}`,
     );
-    process.exit(1);
+    await shutdownMgr.shutdown("startup failure", 1);
   }
 }
