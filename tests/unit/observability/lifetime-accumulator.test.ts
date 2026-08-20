@@ -715,75 +715,117 @@ describe("lifetime observability contract", () => {
       repositories: repositoryMap(33),
     }));
 
-    const map32 = clone(durableRootFixture);
-    const map32Repository = map32.repositories[REPOSITORY_KEY];
-    assert.ok(map32Repository?.sections.retrieval);
-    map32Repository.sections.retrieval.byMode = {
+    const real32 = clone(durableRootFixture);
+    const real32Repository = real32.repositories[REPOSITORY_KEY];
+    assert.ok(real32Repository?.sections.retrieval);
+    real32Repository.sections.retrieval.byMode = boundedCounterMap(32);
+    assert.equal(Object.keys(parseDurableLifetimeRoot(real32)
+      .repositories[REPOSITORY_KEY]?.sections.retrieval?.byMode ?? {}).length, 32);
+
+    const real32WithOverflow = clone(durableRootFixture);
+    const real32WithOverflowRepository = real32WithOverflow.repositories[REPOSITORY_KEY];
+    assert.ok(real32WithOverflowRepository?.sections.retrieval);
+    real32WithOverflowRepository.sections.retrieval.byMode = {
       ...boundedCounterMap(32),
       __other__: 99,
     };
-    const parsedMap32 = parseDurableLifetimeRoot(map32)
+    const parsedMap32 = parseDurableLifetimeRoot(real32WithOverflow)
       .repositories[REPOSITORY_KEY]?.sections.retrieval?.byMode ?? {};
     assert.equal(Object.keys(parsedMap32).length, 33);
     assert.equal(Object.keys(parsedMap32)[0], "__other__");
 
-    const map33 = clone(durableRootFixture);
-    const map33Repository = map33.repositories[REPOSITORY_KEY];
-    assert.ok(map33Repository?.sections.retrieval);
-    map33Repository.sections.retrieval.byMode = {
+    const real33 = clone(durableRootFixture);
+    const real33Repository = real33.repositories[REPOSITORY_KEY];
+    assert.ok(real33Repository?.sections.retrieval);
+    real33Repository.sections.retrieval.byMode = boundedCounterMap(33);
+    assert.throws(() => parseDurableLifetimeRoot(real33));
+
+    const real33WithOverflow = clone(durableRootFixture);
+    const real33WithOverflowRepository = real33WithOverflow.repositories[REPOSITORY_KEY];
+    assert.ok(real33WithOverflowRepository?.sections.retrieval);
+    real33WithOverflowRepository.sections.retrieval.byMode = {
       ...boundedCounterMap(33),
       __other__: 99,
     };
-    assert.throws(() => parseDurableLifetimeRoot(map33));
+    assert.throws(() => parseDurableLifetimeRoot(real33WithOverflow));
   });
 
   it("enforces independent perTool and byEncoder 128-key boundaries", () => {
-    for (const [field, acceptedCount, rejectedCount] of [
-      ["perTool", 128, 129],
-      ["byEncoder", 128, 129],
-    ] as const) {
-      const accepted = clone(durableRootFixture);
-      const acceptedRepository = accepted.repositories[REPOSITORY_KEY];
-      assert.ok(acceptedRepository?.sections.latency);
-      assert.ok(acceptedRepository.sections.packed);
+    for (const field of ["perTool", "byEncoder"] as const) {
+      const real128 = clone(durableRootFixture);
+      const real128Repository = real128.repositories[REPOSITORY_KEY];
+      assert.ok(real128Repository?.sections.latency);
+      assert.ok(real128Repository.sections.packed);
       if (field === "perTool") {
-        const value = acceptedRepository.sections.latency.perTool["k:a"];
+        const value = real128Repository.sections.latency.perTool["k:a"];
         assert.ok(value);
-        acceptedRepository.sections.latency.perTool = Object.fromEntries(
-          Object.keys(boundedCounterMap(acceptedCount)).map((key) => [key, clone(value)]),
+        real128Repository.sections.latency.perTool = Object.fromEntries(
+          Object.keys(boundedCounterMap(128)).map((key) => [key, clone(value)]),
         );
-        acceptedRepository.sections.latency.perTool.__other__ = clone(value);
       } else {
-        const value = acceptedRepository.sections.packed.byEncoder["k:a"];
+        const value = real128Repository.sections.packed.byEncoder["k:a"];
         assert.ok(value);
-        acceptedRepository.sections.packed.byEncoder = Object.fromEntries(
-          Object.keys(boundedCounterMap(acceptedCount)).map((key) => [key, clone(value)]),
+        real128Repository.sections.packed.byEncoder = Object.fromEntries(
+          Object.keys(boundedCounterMap(128)).map((key) => [key, clone(value)]),
         );
-        acceptedRepository.sections.packed.byEncoder.__other__ = clone(value);
       }
-      const parsed = parseDurableLifetimeRoot(accepted)
+      const parsedReal128 = parseDurableLifetimeRoot(real128)
         .repositories[REPOSITORY_KEY]?.sections;
-      const parsedMap = field === "perTool"
-        ? parsed?.latency?.perTool
-        : parsed?.packed?.byEncoder;
-      assert.equal(Object.keys(parsedMap ?? {}).length, 129);
-      assert.equal(Object.keys(parsedMap ?? {})[0], "__other__");
+      const parsedReal128Map = field === "perTool"
+        ? parsedReal128?.latency?.perTool
+        : parsedReal128?.packed?.byEncoder;
+      assert.equal(Object.keys(parsedReal128Map ?? {}).length, 128);
 
-      const rejected = clone(accepted);
-      const rejectedRepository = rejected.repositories[REPOSITORY_KEY];
-      assert.ok(rejectedRepository?.sections.latency);
-      assert.ok(rejectedRepository.sections.packed);
+      const real128WithOverflow = clone(real128);
+      const overflowRepository = real128WithOverflow.repositories[REPOSITORY_KEY];
+      assert.ok(overflowRepository?.sections.latency);
+      assert.ok(overflowRepository.sections.packed);
       if (field === "perTool") {
-        const value = rejectedRepository.sections.latency.perTool["k:key000"];
+        const value = overflowRepository.sections.latency.perTool["k:key000"];
         assert.ok(value);
-        rejectedRepository.sections.latency.perTool["k:key128"] = clone(value);
+        overflowRepository.sections.latency.perTool.__other__ = clone(value);
       } else {
-        const value = rejectedRepository.sections.packed.byEncoder["k:key000"];
+        const value = overflowRepository.sections.packed.byEncoder["k:key000"];
         assert.ok(value);
-        rejectedRepository.sections.packed.byEncoder["k:key128"] = clone(value);
+        overflowRepository.sections.packed.byEncoder.__other__ = clone(value);
       }
-      assert.equal(rejectedCount, 129);
-      assert.throws(() => parseDurableLifetimeRoot(rejected));
+      const parsedOverflow = parseDurableLifetimeRoot(real128WithOverflow)
+        .repositories[REPOSITORY_KEY]?.sections;
+      const parsedOverflowMap = field === "perTool"
+        ? parsedOverflow?.latency?.perTool
+        : parsedOverflow?.packed?.byEncoder;
+      assert.equal(Object.keys(parsedOverflowMap ?? {}).length, 129);
+      assert.equal(Object.keys(parsedOverflowMap ?? {})[0], "__other__");
+
+      const real129 = clone(real128);
+      const real129Repository = real129.repositories[REPOSITORY_KEY];
+      assert.ok(real129Repository?.sections.latency);
+      assert.ok(real129Repository.sections.packed);
+      if (field === "perTool") {
+        const value = real129Repository.sections.latency.perTool["k:key000"];
+        assert.ok(value);
+        real129Repository.sections.latency.perTool["k:key128"] = clone(value);
+      } else {
+        const value = real129Repository.sections.packed.byEncoder["k:key000"];
+        assert.ok(value);
+        real129Repository.sections.packed.byEncoder["k:key128"] = clone(value);
+      }
+      assert.throws(() => parseDurableLifetimeRoot(real129));
+
+      const real129WithOverflow = clone(real128WithOverflow);
+      const rejectedOverflowRepository = real129WithOverflow.repositories[REPOSITORY_KEY];
+      assert.ok(rejectedOverflowRepository?.sections.latency);
+      assert.ok(rejectedOverflowRepository.sections.packed);
+      if (field === "perTool") {
+        const value = rejectedOverflowRepository.sections.latency.perTool["k:key000"];
+        assert.ok(value);
+        rejectedOverflowRepository.sections.latency.perTool["k:key128"] = clone(value);
+      } else {
+        const value = rejectedOverflowRepository.sections.packed.byEncoder["k:key000"];
+        assert.ok(value);
+        rejectedOverflowRepository.sections.packed.byEncoder["k:key128"] = clone(value);
+      }
+      assert.throws(() => parseDurableLifetimeRoot(real129WithOverflow));
     }
   });
 
