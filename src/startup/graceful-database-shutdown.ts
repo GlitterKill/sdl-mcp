@@ -17,17 +17,6 @@ export async function drainLadybugWork(
   const dispatchTimeoutMs =
     options.dispatchTimeoutMs ?? DEFAULT_DISPATCH_DRAIN_TIMEOUT_MS;
   await shutdownDerivedRefreshQueue(dispatchTimeoutMs);
-  const indexingIdle = await waitForIndexingIdle({
-    timeoutMs: dispatchTimeoutMs,
-    pollMs: options.pollMs,
-  });
-  if (!indexingIdle) {
-    throw new Error(
-      "Timed out after " +
-        dispatchTimeoutMs +
-        "ms waiting for indexing before LadybugDB close",
-    );
-  }
   const idle = await waitForToolDispatchIdle({
     activeAllowance: 0,
     timeoutMs: dispatchTimeoutMs,
@@ -37,6 +26,17 @@ export async function drainLadybugWork(
   if (!idle) {
     throw new Error(
       `Timed out after ${dispatchTimeoutMs}ms waiting for tool dispatch before LadybugDB close`,
+    );
+  }
+  const indexingIdle = await waitForIndexingIdle({
+    timeoutMs: dispatchTimeoutMs,
+    pollMs: options.pollMs,
+  });
+  if (!indexingIdle) {
+    throw new Error(
+      "Timed out after " +
+        dispatchTimeoutMs +
+        "ms waiting for indexing before LadybugDB close",
     );
   }
 }

@@ -20,6 +20,7 @@ import {
 } from "../../dist/indexer/derived-refresh-queue.js";
 import {
   configureToolDispatchLimiter,
+  getToolDispatchLimiter,
   resetToolDispatchLimiter,
   runToolDispatch,
 } from "../../dist/mcp/dispatch-limiter.js";
@@ -90,6 +91,63 @@ describe("graceful database shutdown", () => {
       pollMs: 2,
     });
     assert.strictEqual(getLadybugDbPath(), null);
+  });
+
+  it("waits for indexing launched as an accepted dispatch releases", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 1, queueTimeoutMs: 1_000 });
+    const dispatchEntered = deferred();
+    const dispatchWaitEntered = deferred();
+    const dispatchIdleObserved = deferred();
+    const launchIndexing = deferred();
+    const indexingEntered = deferred();
+    const releaseIndexing = deferred();
+    let indexing: Promise<void> | undefined;
+    let drainSettled = false;
+    let observeDrain = false;
+    const limiter = getToolDispatchLimiter();
+    const originalGetStats = limiter.getStats;
+    limiter.getStats = () => {
+      const stats = originalGetStats.call(limiter);
+      if (observeDrain && stats.active > 0) dispatchWaitEntered.resolve();
+      if (observeDrain && stats.active === 0) dispatchIdleObserved.resolve();
+      return stats;
+    };
+    const dispatch = runToolDispatch(async () => {
+      dispatchEntered.resolve();
+      await launchIndexing.promise;
+      indexing = withIndexingGate(async () => {
+        indexingEntered.resolve();
+        await releaseIndexing.promise;
+      });
+    });
+    await dispatchEntered.promise;
+
+    observeDrain = true;
+    const draining = drainLadybugWork({
+      dispatchTimeoutMs: 2_000,
+      pollMs: 0,
+    }).then(() => {
+      drainSettled = true;
+    });
+    await dispatchWaitEntered.promise;
+
+    launchIndexing.resolve();
+    await indexingEntered.promise;
+    await dispatch;
+    await dispatchIdleObserved.promise;
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.strictEqual(
+        drainSettled,
+        false,
+        "dispatch drain must include detached indexing it admitted",
+      );
+    } finally {
+      releaseIndexing.resolve();
+      await indexing;
+      await draining;
+      limiter.getStats = originalGetStats;
+    }
   });
 
   it("aborts derived work and drains foreground dispatch before closing", async () => {
