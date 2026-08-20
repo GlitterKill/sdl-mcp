@@ -3,6 +3,7 @@ import {
   MAX_REPOSITORIES,
   MAX_STORE_BYTES,
   OVERFLOW_KEY,
+  parseDurableLifetimeRoot,
   repositoryStorageKey,
   type Counter,
   type DurableLifetimeRepository,
@@ -38,6 +39,8 @@ const DYNAMIC_MAP_FIELDS = new Set([
   "profileCounts",
 ]);
 const MAXIMUM_TIMESTAMP = "9999-12-31T23:59:59.999999999+23:59";
+const VALIDATION_TIMESTAMP = "1970-01-01T00:00:00.000Z";
+const VALIDATION_REPOSITORY_KEY = repositoryStorageKey("lifetime-accumulator-validation");
 
 export const DYNAMIC_MAP_LOCATIONS = [
   "cache.perSource",
@@ -203,34 +206,57 @@ export function admitDynamicMapEntry<T>(
     return { value: normalizeDynamicMap(next), saturated };
   };
 
-  const merged = mergeAt(storageKey);
-  const candidateRoot = options.replaceMap(structuredClone(root), merged.value);
-  const reservedBytes = reservedSerializedBytes(candidateRoot);
-  // Only a new storage key grows the durable shape, so reject it against the
-  // prospective root before exposing either the candidate map or root.
-  if (!Object.hasOwn(current, storageKey) && reservedBytes > MAX_STORE_BYTES) {
+  const candidateFor = (key: string) => {
+    const merged = mergeAt(key);
+    const candidateRoot = options.replaceMap(structuredClone(root), merged.value);
     return {
-      root,
-      map: normalizeDynamicMap(current),
-      storageKey,
-      admitted: false,
-      status: "capacityRejected",
-      reason: "storeBytes",
-      reservedBytes,
-      saturated: false,
+      root: candidateRoot,
+      map: merged.value,
+      reservedBytes: reservedSerializedBytes(candidateRoot),
+      saturated: merged.saturated,
     };
+  };
+  const rejection = (key: string, reservedBytes: number): DynamicMapAdmission<T> => ({
+    root,
+    map: normalizeDynamicMap(current),
+    storageKey: key,
+    admitted: false,
+    status: "capacityRejected",
+    reason: "storeBytes",
+    reservedBytes,
+    saturated: false,
+  });
+  const accepted = (
+    key: string,
+    candidate: ReturnType<typeof candidateFor>,
+  ): DynamicMapAdmission<T> => ({
+    root: candidate.root,
+    map: candidate.map,
+    storageKey: key,
+    admitted: key !== OVERFLOW_KEY,
+    status: key === OVERFLOW_KEY ? "overflow" : "admitted",
+    reason: null,
+    reservedBytes: candidate.reservedBytes,
+    saturated: candidate.saturated,
+  });
+
+  const candidate = candidateFor(storageKey);
+  const isNewStorageKey = !Object.hasOwn(current, storageKey);
+  if (!isNewStorageKey || candidate.reservedBytes <= MAX_STORE_BYTES) {
+    return accepted(storageKey, candidate);
   }
 
-  return {
-    root: candidateRoot,
-    map: merged.value,
-    storageKey,
-    admitted: storageKey !== OVERFLOW_KEY,
-    status: storageKey === OVERFLOW_KEY ? "overflow" : "admitted",
-    reason: null,
-    reservedBytes,
-    saturated: merged.saturated,
-  };
+  if (storageKey !== OVERFLOW_KEY) {
+    // A real-key miss is never dropped: retry against the reserved overflow shape.
+    const overflow = candidateFor(OVERFLOW_KEY);
+    if (Object.hasOwn(current, OVERFLOW_KEY) || overflow.reservedBytes <= MAX_STORE_BYTES) {
+      return accepted(OVERFLOW_KEY, overflow);
+    }
+    return rejection(OVERFLOW_KEY, overflow.reservedBytes);
+  }
+
+  // An empty map has no overflow reservation until its first event supplies the value shape.
+  return rejection(storageKey, candidate.reservedBytes);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -369,18 +395,41 @@ export function emptyRepositoryLifetime(): DurableLifetimeRepository {
   };
 }
 
+function validateRepositoryLifetime(
+  repository: DurableLifetimeRepository,
+): DurableLifetimeRepository {
+  const parsed = parseDurableLifetimeRoot({
+    schemaVersion: 1,
+    generation: 0,
+    updatedAt: VALIDATION_TIMESTAMP,
+    processPeaks: null,
+    repositories: { [VALIDATION_REPOSITORY_KEY]: repository },
+  });
+  const validated = parsed.repositories[VALIDATION_REPOSITORY_KEY];
+  if (validated === undefined) throw new Error("Validated lifetime repository is missing");
+  return validated;
+}
+
 export function mergeRepositoryLifetime(
   baseline: DurableLifetimeRepository,
   epoch: DurableLifetimeRepository,
 ): DurableLifetimeRepository {
-  const sessionCount = mergeCounter(baseline.sessionCount, epoch.sessionCount);
-  const sections = mergeUnknown(baseline.sections, epoch.sections) as SaturatingResult<DurableLifetimeSections>;
+  const validatedBaseline = validateRepositoryLifetime(baseline);
+  const validatedEpoch = validateRepositoryLifetime(epoch);
+  const sessionCount = mergeCounter(validatedBaseline.sessionCount, validatedEpoch.sessionCount);
+  const sections = mergeUnknown(
+    validatedBaseline.sections,
+    validatedEpoch.sections,
+  ) as SaturatingResult<DurableLifetimeSections>;
   return {
-    epoch: Math.max(baseline.epoch, epoch.epoch),
-    resetAt: epoch.resetAt ?? baseline.resetAt,
-    lastCheckpointAt: epoch.lastCheckpointAt ?? baseline.lastCheckpointAt,
+    epoch: Math.max(validatedBaseline.epoch, validatedEpoch.epoch),
+    resetAt: validatedEpoch.resetAt ?? validatedBaseline.resetAt,
+    lastCheckpointAt: validatedEpoch.lastCheckpointAt ?? validatedBaseline.lastCheckpointAt,
     sessionCount: sessionCount.value,
-    saturated: baseline.saturated || epoch.saturated || sessionCount.saturated || sections.saturated,
+    saturated: validatedBaseline.saturated
+      || validatedEpoch.saturated
+      || sessionCount.saturated
+      || sections.saturated,
     sections: sections.value,
   };
 }
@@ -453,7 +502,7 @@ function maximumDynamicKey(index: number): string {
   return `k:${prefix}${"x".repeat(60)}`;
 }
 
-function maximizeForReservation(value: unknown): unknown {
+function maximizeForReservation(value: unknown, fieldName = ""): unknown {
   if (typeof value === "number") return Number.MAX_SAFE_INTEGER;
   if (typeof value === "string") return MAXIMUM_TIMESTAMP;
   if (typeof value === "boolean") return false;
@@ -463,7 +512,19 @@ function maximizeForReservation(value: unknown): unknown {
   let dynamicIndex = 0;
   for (const [key, nested] of Object.entries(value)) {
     const reservedKey = key.startsWith("k:") ? maximumDynamicKey(dynamicIndex++) : key;
-    result[reservedKey] = maximizeForReservation(nested);
+    result[reservedKey] = maximizeForReservation(nested, key);
+  }
+  if (
+    DYNAMIC_MAP_FIELDS.has(fieldName)
+    && !Object.hasOwn(value, OVERFLOW_KEY)
+    && Object.keys(value).length > 0
+  ) {
+    const largest = Object.values(result).reduce((selected, candidate) =>
+      Buffer.byteLength(JSON.stringify(candidate), "utf8")
+        > Buffer.byteLength(JSON.stringify(selected), "utf8")
+        ? candidate
+        : selected);
+    result[OVERFLOW_KEY] = structuredClone(largest);
   }
   return result;
 }
