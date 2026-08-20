@@ -1159,8 +1159,101 @@ test("dashboard client keeps session and lifetime receipt clocks independent", a
     assert.equal(switched.sessionReceivedAtMs, Number.NEGATIVE_INFINITY);
     assert.equal(switched.lifetimeReceivedAtMs, Number.NEGATIVE_INFINITY);
     assert.deepEqual(applied, [
-      "lifetime", "snapshot", "lifetime", "snapshot", "snapshot", "lifetime", "lifetime",
+      "snapshot", "lifetime", "snapshot", "lifetime", "snapshot", "snapshot", "lifetime",
+      "snapshot", "lifetime",
     ], "repo switches clear rendered lifetime values");
+  } finally {
+    if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("dashboard client rejects lifetime responses older than accepted lifetime", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  let now = 100;
+  const client = dashboard.createDashboardClient({
+    now: () => now,
+    buildHeaders: () => ({}),
+    fetchImpl: async () => new Response(null, { status: 500 }),
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  const newer = { ...readyEnvelope(), generatedAt: "2026-08-20T12:02:00.000000001Z" };
+  const older = { ...readyEnvelope(), generatedAt: "2026-08-20T12:01:00.999999999Z" };
+  assert.equal(client.acceptLifetime(newer), true);
+  now = 200;
+  assert.equal(client.acceptLifetime(older), false);
+  assert.equal(client.getState().lifetime, newer);
+  assert.equal(client.getState().lifetimeReceivedAtMs, 100);
+  assert.equal(client.acceptLifetime({ ...newer }), true, "equal timestamps remain valid");
+  assert.equal(client.getState().lifetimeReceivedAtMs, 200);
+});
+
+test("repository switch clears rendered session values before the next fetch", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const sessionRenders: unknown[] = [];
+  const lifetimeRenders: unknown[] = [];
+  const client = dashboard.createDashboardClient({
+    now: () => 100,
+    buildHeaders: () => ({}),
+    fetchImpl: async () => new Response(null, { status: 500 }),
+    applySnapshot: (snapshot: unknown, repoId: string) => sessionRenders.push({ snapshot, repoId }),
+    applyLifetime: (presentation: unknown) => lifetimeRenders.push(presentation),
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  client.acceptSnapshot({ repoId: "repo-a", generatedAt: GENERATED_AT });
+  client.acceptLifetime(readyEnvelope());
+  client.switchRepo("repo-b");
+  assert.deepEqual(sessionRenders.at(-1), { snapshot: null, repoId: "repo-b" });
+  assert.equal((lifetimeRenders.at(-1) as { state: string }).state, "UNAVAILABLE");
+  assert.equal(client.getState().snapshot, null);
+  assert.equal(client.view().snapshotAgeMs, null);
+  assert.equal(client.sectionState("cache"), "STALE");
+});
+
+test("session renderer removes prior repository values on switch", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const repo = { textContent: "repo-a" };
+  const generatedAt = { textContent: GENERATED_AT };
+  const scalar = { textContent: "secret-repo-a-value" };
+  const dynamic = {
+    children: ["secret-repo-a-row"],
+    replaceChildren() { this.children = []; },
+  };
+  const content = { hidden: false };
+  const noData = { hidden: true, textContent: "" };
+  const dashboardRoot = {
+    querySelector: (selector: string) => selector === '[data-field="content"]' ? content : noData,
+    querySelectorAll: (selector: string) => {
+      if (selector.includes("output[data-field]")) return [scalar];
+      if (selector.startsWith("div[data-field]")) return [dynamic];
+      return [];
+    },
+  };
+  const priorDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      querySelector(selector: string) {
+        if (selector === "#dashboard") return dashboardRoot;
+        if (selector.includes('repoId')) return repo;
+        if (selector.includes('generatedAt')) return generatedAt;
+        return null;
+      },
+    },
+  });
+  try {
+    assert.equal(typeof dashboard.applySnapshot, "function");
+    dashboard.applySnapshot(null, "repo-b");
+    assert.equal(repo.textContent, "repo-b");
+    assert.equal(generatedAt.textContent, "—");
+    assert.equal(scalar.textContent, "—");
+    assert.deepEqual(dynamic.children, []);
+    assert.equal(content.hidden, true);
+    assert.equal(noData.hidden, false);
   } finally {
     if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
     else Reflect.deleteProperty(globalThis, "document");
@@ -1172,7 +1265,8 @@ test("dashboard client uses one authenticated REST fallback and handles older se
   const createClient = dashboard.createDashboardClient as Function;
   const calls: Array<{ url: string; init: RequestInit }> = [];
   let interval: (() => Promise<void>) | null = null;
-  let intervalMs = 0;
+  const intervalHistory: number[] = [];
+  const clearedTimers: number[] = [];
   const client = createClient({
     now: () => 500,
     buildHeaders: () => ({ Accept: "application/json", Authorization: "Bearer secret" }),
@@ -1186,15 +1280,21 @@ test("dashboard client uses one authenticated REST fallback and handles older se
     },
     setIntervalFn: (callback: () => Promise<void>, delay: number) => {
       interval = callback;
-      intervalMs = delay;
-      return 7;
+      intervalHistory.push(delay);
+      return intervalHistory.length;
     },
-    clearIntervalFn: () => {},
+    clearIntervalFn: (timer: number) => clearedTimers.push(timer),
     applySnapshot: () => {},
     applyLifetime: () => {},
     applyTimeseries: () => {},
   });
   client.switchRepo("repo-a");
+  client.acceptLifetime({ ...readyEnvelope(), sampleIntervalMs: 5_000 });
+  client.setStreamConnected(false);
+  assert.equal(intervalHistory.at(-1), 5_000);
+  await client.fetchLifetime();
+  assert.equal(intervalHistory.at(-1), 2_000, "404 replaces the live fallback interval");
+  assert.ok(clearedTimers.length > 0);
   await client.hydrate();
   assert.equal(client.getState().sessionReceivedAtMs, 500);
   assert.equal(client.getState().lifetime, null);
@@ -1202,7 +1302,7 @@ test("dashboard client uses one authenticated REST fallback and handles older se
   assert.equal(client.view().lifetime.state, "UNAVAILABLE");
   assert.equal(client.sectionState("cache"), "FRESHNESS UNAVAILABLE");
   client.setStreamConnected(false);
-  assert.equal(intervalMs, 2_000);
+  assert.equal(intervalHistory.at(-1), 2_000);
   assert.ok(interval);
   const before = calls.length;
   await interval?.();
@@ -1249,6 +1349,7 @@ test("dashboard lifetime reset is exact, recovery-safe, and rehydrates before fo
     persistenceState: "recoveryRequired",
     recoveryReason: "corruptCandidates",
   });
+  assert.equal(client.view().resetDisabled, true);
   assert.equal(await client.resetLifetime({ control, confirmReset: () => true }), false);
   assert.equal(requests.length, 0, "recovery never sends reset");
   assert.equal(control.focusCount, 1);
@@ -1295,4 +1396,71 @@ test("dashboard lifetime reset exposes a fixed server error and preserves state"
   assert.deepEqual(errors, [{ area: "reset", message: "persistence_failed" }]);
   assert.equal(client.getState().lifetime, lifetime);
   assert.equal(control.focused, true);
+});
+
+test("committed reset with failed refresh withholds old values and reports partial success", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const requests: string[] = [];
+  const presentations: Array<{ state: string }> = [];
+  const errors: Array<{ area: string; message: string }> = [];
+  const control = { focused: false, focus() { this.focused = true; } };
+  const client = dashboard.createDashboardClient({
+    now: () => 1_000,
+    buildHeaders: () => ({ Authorization: "Bearer secret" }),
+    fetchImpl: async (url: string) => {
+      requests.push(url);
+      if (url.endsWith("/reset")) {
+        return Response.json({
+          schemaVersion: 1, repoId: "repo-a", epoch: 2,
+          resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
+          persistenceState: "ready",
+        });
+      }
+      return Response.json({ schemaVersion: 1, error: { code: "persistence_failed" } }, { status: 500 });
+    },
+    applySnapshot: () => {},
+    applyLifetime: (presentation: { state: string }) => presentations.push(presentation),
+    applyTimeseries: () => {},
+    onError: (area: string, error: Error) => errors.push({ area, message: error.message }),
+  });
+  client.switchRepo("repo-a");
+  client.acceptLifetime(readyEnvelope());
+  assert.equal(
+    await client.resetLifetime({ control, confirmReset: () => true }),
+    "committed-refresh-failed",
+  );
+  assert.deepEqual(requests, [
+    "/api/observability/lifetime/reset",
+    "/api/observability/lifetime?repoId=repo-a",
+  ]);
+  assert.equal(client.getState().lifetime, null);
+  assert.equal(client.getState().lifetimeReceivedAtMs, Number.NEGATIVE_INFINITY);
+  assert.equal(presentations.at(-1)?.state, "UNAVAILABLE");
+  assert.deepEqual(errors, [{ area: "lifetime", message: "HTTP 500" }]);
+  assert.equal(control.focused, true);
+});
+
+test("stale recovery still disables reset from the accepted raw envelope", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  let now = 0;
+  const client = dashboard.createDashboardClient({
+    now: () => now,
+    buildHeaders: () => ({}),
+    fetchImpl: async () => new Response(null, { status: 500 }),
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  client.acceptLifetime({
+    schemaVersion: 1,
+    sampleIntervalMs: 2_000,
+    generatedAt: GENERATED_AT,
+    repoId: "repo-a",
+    persistenceState: "recoveryRequired",
+    recoveryReason: "corruptCandidates",
+  });
+  now = 10_001;
+  assert.equal(client.view().lifetime.state, "STALE");
+  assert.equal(client.view().resetDisabled, true);
 });

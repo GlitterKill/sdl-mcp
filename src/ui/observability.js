@@ -117,6 +117,7 @@ export function createDashboardClient(options) {
     const presentation = lifetimePresentation(lifetime, 0);
     if (presentation.state === "UNAVAILABLE" || lifetime.repoId !== value.repoId) return false;
     if (value.snapshot && !lifetimeIsCurrentFor(value.snapshot, lifetime)) return false;
+    if (value.lifetime && !lifetimeIsCurrentFor(value.lifetime, lifetime)) return false;
     const interval = clampDashboardSampleInterval(lifetime.sampleIntervalMs);
     replace({
       ...value,
@@ -152,6 +153,7 @@ export function createDashboardClient(options) {
           sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS,
         });
         applyClientLifetime(lifetimePresentation(null, 0), null);
+        if (!value.streamConnected && fallbackTimer !== null) restartFallback();
         return false;
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -203,6 +205,7 @@ export function createDashboardClient(options) {
         sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS,
         streamConnected: false,
       };
+      applyClientSnapshot(null, repoId);
       applyClientLifetime(lifetimePresentation(null, 0), null);
       notify();
     },
@@ -244,6 +247,7 @@ export function createDashboardClient(options) {
             ? Math.max(0, currentNow - value.lifetimeReceivedAtMs)
             : Number.POSITIVE_INFINITY,
         ),
+        resetDisabled: value.lifetime?.persistenceState === "recoveryRequired",
       };
     },
     sectionState(section) {
@@ -277,8 +281,14 @@ export function createDashboardClient(options) {
           }),
         });
         if (!response.ok) throw new Error(json?.error?.code ?? `HTTP ${response.status}`);
-        await fetchLifetime();
-        return true;
+        value = {
+          ...value,
+          lifetime: null,
+          lifetimeReceivedAtMs: Number.NEGATIVE_INFINITY,
+        };
+        applyClientLifetime(lifetimePresentation(null, 0), null);
+        notify();
+        return await fetchLifetime() ? true : "committed-refresh-failed";
       } catch (error) {
         onError("reset", error);
         return false;
@@ -1459,8 +1469,30 @@ export function applyTimeseries(timeseries) {
 }
 
 // -------- Main snapshot apply --------
-function applySnapshot(snap) {
-  if (!snap || typeof snap !== "object") return;
+export function applySnapshot(snap, repoId) {
+  if (!snap || typeof snap !== "object") {
+    state.lastSnapshot = null;
+    setText(document.querySelector('[data-dashboard-field="repoId"]'), repoId);
+    setText(document.querySelector('[data-dashboard-field="generatedAt"]'), null);
+    const dashboard = document.querySelector("#dashboard");
+    if (!dashboard) return;
+    for (const element of dashboard.querySelectorAll(
+      "output[data-field], span[data-field], em[data-field]",
+    )) setText(element, null);
+    for (const element of dashboard.querySelectorAll(
+      'div[data-field]:not([data-field="content"]):not([data-field="noData"]), ul[data-field], svg[data-field], [data-series]',
+    )) element.replaceChildren();
+    const confidence = dashboard.querySelector('[data-field="confidenceBar"]');
+    confidence?.style?.setProperty("width", "0%");
+    const content = dashboard.querySelector('[data-field="content"]');
+    const noData = dashboard.querySelector('[data-field="noData"]');
+    if (content) content.hidden = true;
+    if (noData) {
+      noData.hidden = false;
+      noData.textContent = "No session metrics yet.";
+    }
+    return;
+  }
   state.lastSnapshot = snap;
   try {
     const rendered = new Set();
@@ -1642,7 +1674,7 @@ function renderClientView(view) {
     els.lifetimeWarning.hidden = !view.lifetime.warning;
   }
   if (els.lifetimeResetBtn) {
-    els.lifetimeResetBtn.disabled = view.lifetime.state === "RECOVERY REQUIRED";
+    els.lifetimeResetBtn.disabled = view.resetDisabled;
   }
   if (!dashboardClient) return;
   const clientState = dashboardClient.getState();
@@ -1905,7 +1937,9 @@ function bind() {
         confirmReset: () => window.confirm(`Reset repository lifetime metrics for "${repoId}"?`),
       });
       if (els.lifetimeResetStatus && reset) {
-        els.lifetimeResetStatus.textContent = `Repository lifetime reset for ${repoId}.`;
+        els.lifetimeResetStatus.textContent = reset === true
+          ? `Repository lifetime reset for ${repoId}.`
+          : `Repository lifetime reset committed for ${repoId}, but refreshed lifetime data is unavailable.`;
       }
     });
   }
