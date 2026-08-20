@@ -12,6 +12,7 @@ const MAX_EVIDENCE_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_CLAIM_BYTES = 16 * 1024;
 const MAX_LIFETIME_AUXILIARIES = 32;
 const MAX_LIFETIME_AUXILIARY_SCAN = 256;
+const MAX_NORMALIZE_CANDIDATES = 4;
 const CLAIM_WAIT_ATTEMPTS = 1_000;
 const CLAIM_RACE_RECHECK_ATTEMPTS = 8;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -818,19 +819,23 @@ async function removeValidatedAuxiliary(
   return removeExactLifetimeSource(entry.path, entry.snapshot, candidate, fileSystem);
 }
 
-function normalizationCandidatePath(directory: string, entry: AuxiliaryEntry): string {
+function normalizationCandidatePath(
+  directory: string,
+  entry: AuxiliaryEntry,
+  attempt: number,
+): string {
   // Bind a bounded recovery slot to this exact physical alias, so two occupied
   // legacy cleanup names never have to use each other as rename candidates.
-  const token = createHash("sha256")
+  const hash = createHash("sha256")
     .update(entry.name)
     .update("\0")
     .update(entry.snapshot.dev)
     .update("\0")
     .update(entry.snapshot.ino)
     .update("\0")
-    .update(entry.snapshot.sha256)
-    .digest("hex")
-    .slice(0, 32);
+    .update(entry.snapshot.sha256);
+  if (attempt > 0) hash.update("\0").update(String(attempt));
+  const token = hash.digest("hex").slice(0, 32);
   return directChildPath(
     directory,
     resolve(directory, `${entry.logicalName}.normalize.${token}`),
@@ -1034,6 +1039,7 @@ async function recoverStrandedAuxiliaries(
   }
 
   const occupiedNames = new Set(allNames);
+  const entriesByName = new Map(entries.map((entry) => [entry.name, entry] as const));
   const plannedCandidates = new Set<string>();
   let invalidCandidatePlan = false;
   const orderedGroups = [...groups.entries()].map(([key, group]) => {
@@ -1045,14 +1051,31 @@ async function recoverStrandedAuxiliaries(
       const match = EVIDENCE_NAME.exec(evidenceName);
       return match?.[3] ? Number.parseInt(match[3], 36) : Number.MAX_SAFE_INTEGER;
     }));
-    const aliasPlans = group.aliases.map((alias) => {
-      const candidate = normalizationCandidatePath(directory, alias);
-      if (occupiedNames.has(basename(candidate)) || plannedCandidates.has(candidate)) {
-        invalidCandidatePlan = true;
+    const aliasPlans: Array<{ readonly alias: AuxiliaryEntry; readonly candidate: string }> = [];
+    for (const alias of group.aliases) {
+      let selectedCandidate: string | undefined;
+      for (let attempt = 0; attempt < MAX_NORMALIZE_CANDIDATES; attempt++) {
+        const candidate = normalizationCandidatePath(directory, alias, attempt);
+        const occupied = entriesByName.get(basename(candidate));
+        if (occupied) {
+          if (
+            occupied.logicalName !== alias.logicalName ||
+            occupied.nonce !== alias.nonce ||
+            !sameLifetimeSource(occupied.snapshot, alias.snapshot)
+          ) {
+            invalidCandidatePlan = true;
+            break;
+          }
+          continue;
+        }
+        if (occupiedNames.has(basename(candidate)) || plannedCandidates.has(candidate)) continue;
+        plannedCandidates.add(candidate);
+        selectedCandidate = candidate;
+        break;
       }
-      plannedCandidates.add(candidate);
-      return { alias, candidate };
-    });
+      if (selectedCandidate) aliasPlans.push({ alias, candidate: selectedCandidate });
+      else invalidCandidatePlan = true;
+    }
     return {
       key,
       entries: group.entries,

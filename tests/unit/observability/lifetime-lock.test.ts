@@ -172,6 +172,24 @@ async function writeExactAuxiliaryAliases(
   for (const suffix of rest) await link(source, join(directory, `${logicalName}${suffix}`));
 }
 
+function normalizationCandidateName(
+  logicalName: string,
+  entryName: string,
+  snapshot: Awaited<ReturnType<typeof fileSnapshot>>,
+  attempt = 0,
+): string {
+  const hash = createHash("sha256")
+    .update(entryName)
+    .update("\0")
+    .update(snapshot.dev)
+    .update("\0")
+    .update(snapshot.ino)
+    .update("\0")
+    .update(snapshot.sha256);
+  if (attempt > 0) hash.update("\0").update(String(attempt));
+  return `${logicalName}.normalize.${hash.digest("hex").slice(0, 32)}`;
+}
+
 async function assertMissing(path: string): Promise<void> {
   await assert.rejects(lstat(path), { code: "ENOENT" });
 }
@@ -809,6 +827,103 @@ describe("lifetime persistence lock", () => {
       assertWriter(successor);
       assert.equal(await releaseLifetimeLease(successor.lease), true, stage);
       assert.deepEqual(await auxiliaryFiles(directory), [], stage);
+    }
+  });
+
+  it("recovers an exact normalize continuation interrupted after alias restoration", async () => {
+    const directory = await temporaryDirectory();
+    const nonce = "a6".repeat(16);
+    const logicalName = `.sdl-observability-lifetime.create.${nonce}`;
+    const canonicalPath = join(directory, logicalName);
+    const aliasPath = `${canonicalPath}.cleanup`;
+    await writeFile(canonicalPath, createAnchorRecord(999_999, nonce));
+    await link(canonicalPath, aliasPath);
+    const snapshot = await fileSnapshot(aliasPath);
+    const candidatePath = join(
+      directory,
+      normalizationCandidateName(logicalName, basename(aliasPath), snapshot),
+    );
+    let corruptCandidateRead = true;
+    let interrupted = false;
+
+    const first = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          const handle = await open(...args);
+          if (!corruptCandidateRead || String(args[0]) !== candidatePath) return handle;
+          corruptCandidateRead = false;
+          return new Proxy(handle, {
+            get(target, property, receiver) {
+              if (property === "readFile") {
+                return async () => {
+                  const content = await target.readFile();
+                  const changed = Buffer.from(content);
+                  changed[0] = changed[0] === 0x7b ? 0x5b : 0x7b;
+                  return changed;
+                };
+              }
+              const value = Reflect.get(target, property, receiver) as unknown;
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+        },
+        unlink: async (...args: Parameters<typeof unlink>) => {
+          if (!interrupted && String(args[0]) === candidatePath) {
+            interrupted = true;
+            throw Object.assign(new Error("restored candidate unlink interrupted"), { code: "EIO" });
+          }
+          return unlink(...args);
+        },
+      },
+    });
+    assert.equal(first.mode, "readOnly");
+    assert.equal(interrupted, true);
+    assert.equal((await lstat(aliasPath, { bigint: true })).ino,
+      (await lstat(candidatePath, { bigint: true })).ino);
+
+    let successor: Awaited<ReturnType<typeof acquireLifetimeLease>> | undefined;
+    for (let startup = 0; startup < 3; startup++) {
+      successor = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+      });
+      if (successor.mode === "writer") break;
+    }
+    assert.notEqual(successor, undefined);
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
+  it("fails closed without mutation for mismatched or exhausted normalize slots", async () => {
+    for (const state of ["mismatch", "exhausted"] as const) {
+      const directory = await temporaryDirectory();
+      const nonce = (state === "mismatch" ? "a7" : "a8").repeat(16);
+      const logicalName = `.sdl-observability-lifetime.create.${nonce}`;
+      const canonicalPath = join(directory, logicalName);
+      const aliasPath = `${canonicalPath}.cleanup`;
+      await writeFile(canonicalPath, createAnchorRecord(999_999, nonce));
+      await link(canonicalPath, aliasPath);
+      const snapshot = await fileSnapshot(aliasPath);
+      const attempts = state === "mismatch" ? [0] : [0, 1, 2, 3];
+      for (const attempt of attempts) {
+        const candidatePath = join(
+          directory,
+          normalizationCandidateName(logicalName, basename(aliasPath), snapshot, attempt),
+        );
+        if (state === "mismatch") {
+          await writeFile(candidatePath, createAnchorRecord(999_999, nonce, 999_999, ISO_2));
+        } else {
+          await link(aliasPath, candidatePath);
+        }
+      }
+      const before = await auxiliaryContents(directory);
+
+      const result = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+      });
+      assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" }, state);
+      assert.deepEqual(await auxiliaryContents(directory), before, state);
     }
   });
 
