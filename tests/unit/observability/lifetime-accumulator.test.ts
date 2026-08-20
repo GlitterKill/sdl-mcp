@@ -1130,9 +1130,40 @@ function replaceDynamicMap(
   location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
   map: Readonly<UnknownMap>,
 ): DurableLifetimeRoot {
-  const { container, field } = mapContainer(root, repositoryKey, location);
-  container[field] = structuredClone(map);
-  return root;
+  const repository = root.repositories[repositoryKey];
+  assert.ok(repository);
+  const [sectionName, field, nestedField] = location.split(".");
+  const sections = repository.sections as unknown as UnknownMap;
+  const section = sections[sectionName];
+  assert.ok(isUnknownMap(section));
+  let replacementSection: UnknownMap;
+  if (nestedField === undefined) {
+    replacementSection = { ...section, [field]: structuredClone(map) };
+  } else {
+    const perTool = section[field];
+    assert.ok(isUnknownMap(perTool));
+    const toolKey = Object.keys(perTool).filter((key) => key !== OVERFLOW_KEY).sort()[0];
+    assert.ok(toolKey);
+    const tool = perTool[toolKey];
+    assert.ok(isUnknownMap(tool));
+    replacementSection = {
+      ...section,
+      [field]: {
+        ...perTool,
+        [toolKey]: { ...tool, [nestedField]: structuredClone(map) },
+      },
+    };
+  }
+  return {
+    ...root,
+    repositories: {
+      ...root.repositories,
+      [repositoryKey]: {
+        ...repository,
+        sections: { ...sections, [sectionName]: replacementSection } as unknown as DurableLifetimeSections,
+      },
+    },
+  };
 }
 
 function firstMapValue(
@@ -1153,7 +1184,6 @@ function admitAtLocation(
   location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
   rawIdentifier: string,
   incoming: unknown,
-  reserve: (candidateRoot: DurableLifetimeRoot) => number = reservedSerializedBytes,
 ) {
   return admitDynamicMapEntry(
     root,
@@ -1165,7 +1195,6 @@ function admitAtLocation(
       repositoryKey,
       replaceMap: (candidateRoot, map) =>
         replaceDynamicMap(candidateRoot, repositoryKey, location, map),
-      reserve,
     },
   );
 }
@@ -1546,6 +1575,53 @@ describe("bounded lifetime accumulator", () => {
     assert.deepEqual(right, { __other__: 4, "k:a": 3 });
   });
 
+  it("uses code-unit lexical order for nested counter and sample maps", () => {
+    const expectedKeys = ["k:-", "k:.", "k:0", "k:A", "k:_", "k:a"];
+    const rawKeys = ["a", "_", "A", "0", ".", "-"];
+    const base = parseDurableLifetimeRoot(durableRootFixture);
+    const tool = firstMapValue(base, REPOSITORY_KEY, "toolOutput.perTool");
+    assert.ok(isUnknownMap(tool));
+    tool.detailCounts = Object.fromEntries(rawKeys.map((key, index) => [`k:${key}`, index + 1]));
+    tool.profileCounts = {};
+    const toolRoot = replaceDynamicMap(
+      base,
+      REPOSITORY_KEY,
+      "toolOutput.perTool",
+      {},
+    );
+    const toolResult = admitAtLocation(
+      toolRoot,
+      REPOSITORY_KEY,
+      "toolOutput.perTool",
+      "tool",
+      tool,
+    );
+    const storedTool = toolResult.map["k:tool"];
+    assert.ok(isUnknownMap(storedTool));
+    assert.ok(isUnknownMap(storedTool.detailCounts));
+    assert.deepEqual(Object.keys(storedTool.detailCounts), expectedKeys);
+
+    let sampleRoot = replaceDynamicMap(
+      base,
+      REPOSITORY_KEY,
+      "retrieval.phaseLatencyMs",
+      {},
+    );
+    for (const rawKey of rawKeys) {
+      sampleRoot = admitAtLocation(
+        sampleRoot,
+        REPOSITORY_KEY,
+        "retrieval.phaseLatencyMs",
+        rawKey,
+        sample,
+      ).root;
+    }
+    assert.deepEqual(
+      Object.keys(dynamicMapAt(sampleRoot, REPOSITORY_KEY, "retrieval.phaseLatencyMs")),
+      expectedKeys,
+    );
+  });
+
   it("keeps 128 perTool and byEncoder keys before overflowing key 129", () => {
     for (const location of ["latency.perTool", "toolOutput.perTool", "packed.byEncoder"] as const) {
       let root = parseDurableLifetimeRoot(durableRootFixture);
@@ -1693,54 +1769,63 @@ describe("bounded lifetime accumulator", () => {
     }
   });
 
-  it("skips full-root reservation for existing dynamic storage keys", () => {
-    let root = parseDurableLifetimeRoot(durableRootFixture);
-    let reservationCalls = 0;
-    const reserve = (candidateRoot: DurableLifetimeRoot) => {
-      reservationCalls += 1;
-      return reservedSerializedBytes(candidateRoot);
-    };
-    const real = admitAtLocation(
-      root,
-      REPOSITORY_KEY,
-      "retrieval.byMode",
-      "a",
-      2,
-      reserve,
-    );
-    assert.equal(real.map["k:a"], 3);
-    assert.equal(reservationCalls, 0);
+  it("shares unaffected branches when updating existing dynamic storage keys", () => {
+    const unaffectedKey = repositoryStorageKey("unaffected");
+    for (const [rawIdentifier, map, storageKey, expected] of [
+      ["a", { "k:a": 1 }, "k:a", 3],
+      ["invalid key", { [OVERFLOW_KEY]: 1 }, OVERFLOW_KEY, 3],
+    ] as const) {
+      const configured = replaceDynamicMap(
+        parseDurableLifetimeRoot(durableRootFixture),
+        REPOSITORY_KEY,
+        "retrieval.byMode",
+        map,
+      );
+      const root: DurableLifetimeRoot = {
+        ...configured,
+        repositories: {
+          ...configured.repositories,
+          [unaffectedKey]: emptyRepositoryLifetime(),
+        },
+      };
+      const repository = root.repositories[REPOSITORY_KEY];
+      assert.ok(repository?.sections.retrieval);
+      const result = admitAtLocation(
+        root,
+        REPOSITORY_KEY,
+        "retrieval.byMode",
+        rawIdentifier,
+        2,
+      );
 
-    root = admitAtLocation(
-      real.root,
-      REPOSITORY_KEY,
-      "retrieval.byMode",
-      "invalid key",
-      2,
-    ).root;
-    reservationCalls = 0;
-    const overflow = admitAtLocation(
-      root,
-      REPOSITORY_KEY,
-      "retrieval.byMode",
-      "another invalid key",
-      3,
-      reserve,
-    );
-    assert.equal(overflow.map[OVERFLOW_KEY], 5);
-    assert.equal(reservationCalls, 0);
+      assert.equal(result.map[storageKey], expected);
+      assert.equal(result.reservedBytes, null);
+      assert.notEqual(result.root, root);
+      assert.notEqual(result.root.repositories, root.repositories);
+      assert.notEqual(result.root.repositories[REPOSITORY_KEY], repository);
+      assert.notEqual(result.root.repositories[REPOSITORY_KEY]?.sections, repository.sections);
+      assert.notEqual(
+        result.root.repositories[REPOSITORY_KEY]?.sections.retrieval,
+        repository.sections.retrieval,
+      );
+      assert.equal(
+        result.root.repositories[REPOSITORY_KEY]?.sections.cache,
+        repository.sections.cache,
+      );
+      assert.equal(result.root.repositories[unaffectedKey], root.repositories[unaffectedKey]);
+      assert.equal(result.root.processPeaks, root.processPeaks);
+    }
 
-    const before = clone(overflow.root);
+    const invalidRoot = parseDurableLifetimeRoot(durableRootFixture);
+    const before = clone(invalidRoot);
     assert.throws(() => admitAtLocation(
-      overflow.root,
+      invalidRoot,
       REPOSITORY_KEY,
       "retrieval.byMode",
       "a",
       -1,
-      reserve,
     ));
-    assert.deepEqual(overflow.root, before);
-    assert.equal(reservationCalls, 0);
+    assert.deepEqual(invalidRoot, before);
   });
 
   it("aggregates every structured dynamic value shape into overflow", () => {
@@ -2017,5 +2102,32 @@ describe("bounded lifetime accumulator", () => {
     assert.equal(rejected.root, nearLimit.root);
     assert.deepEqual(rejected.map, beforeMap);
     assert.deepEqual(dynamicMapAt(nearLimit.root, nearLimit.repositoryKey, location), beforeMap);
+  });
+
+  it("does not permit callers to bypass byte admission", () => {
+    const location = "retrieval.byMode" as const;
+    const nearLimit = nearLimitDynamicRoot(location);
+    let bypassCalls = 0;
+    const unsafeOptions = {
+      location,
+      repositoryKey: nearLimit.repositoryKey,
+      replaceMap: (candidateRoot: DurableLifetimeRoot, map: Readonly<UnknownMap>) =>
+        replaceDynamicMap(candidateRoot, nearLimit.repositoryKey, location, map),
+      reserve: () => {
+        bypassCalls += 1;
+        return 0;
+      },
+    };
+    const result = admitDynamicMapEntry(
+      nearLimit.root,
+      dynamicMapAt(nearLimit.root, nearLimit.repositoryKey, location),
+      "invalid key",
+      1,
+      unsafeOptions,
+    );
+
+    assert.equal(bypassCalls, 0);
+    assert.equal(result.status, "capacityRejected");
+    assert.equal(result.root, nearLimit.root);
   });
 });

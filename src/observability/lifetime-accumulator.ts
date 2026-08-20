@@ -284,7 +284,8 @@ function validateCounterMap(value: unknown): Record<string, Counter> {
     throw new RangeError("Lifetime counter map exceeds its key contract");
   }
   const result: Record<string, Counter> = {};
-  for (const [key, counter] of entries.sort(([a], [b]) => a.localeCompare(b))) {
+  for (const key of Object.keys(value).sort()) {
+    const counter = value[key];
     if (typeof counter !== "number") throw new TypeError("Lifetime counter must be numeric");
     validateCounter(counter);
     result[key] = counter;
@@ -396,7 +397,6 @@ export function admitDynamicMapEntry<T>(
       candidateRoot: DurableLifetimeRoot,
       candidateMap: Readonly<Record<string, T>>,
     ) => DurableLifetimeRoot;
-    reserve: (candidateRoot: DurableLifetimeRoot) => number;
   },
 ): DynamicMapAdmission<T> {
   const validatedIncoming = validateDynamicValue(options.location, incoming) as T;
@@ -423,12 +423,11 @@ export function admitDynamicMapEntry<T>(
 
   const candidateFor = (key: string, reserveNewKey: boolean) => {
     const merged = mergeAt(key);
-    const candidateRoot = options.replaceMap(structuredClone(root), merged.value);
+    const candidateRoot = options.replaceMap(root, merged.value);
     const repository = candidateRoot.repositories[options.repositoryKey];
     if (repository === undefined) throw new Error("Lifetime repository is missing");
     if (merged.saturated) repository.saturated = true;
-    const reservedBytes = reserveNewKey ? options.reserve(candidateRoot) : null;
-    if (reservedBytes !== null) validateCounter(reservedBytes);
+    const reservedBytes = reserveNewKey ? reservedSerializedBytes(candidateRoot) : null;
     return {
       root: candidateRoot,
       map: merged.value,
