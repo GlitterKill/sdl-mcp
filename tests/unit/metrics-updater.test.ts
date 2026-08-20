@@ -108,16 +108,6 @@ describe("metrics-updater repository attribution", () => {
     assert.deepEqual(events.map(({ repoId }) => repoId), ["metrics-repo"]);
   });
 
-  it("passes repoId through both post-index session option objects", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src/indexer/metrics-updater.ts"),
-      "utf8",
-    );
-    assert.equal(
-      source.match(/\{\s*timeoutMs: postIndexSessionTimeoutMs,\s*repoId,?\s*\}/g)?.length,
-      2,
-    );
-  });
 });
 
 describe("metrics-updater semantic config branching", () => {

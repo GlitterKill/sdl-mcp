@@ -243,6 +243,8 @@ test("actual handler JSON and packed responses satisfy the output schema", async
   });
 
   const { handleSymbolSearch } = await import("../../dist/mcp/tools/symbol.js");
+  const { events, uninstall } = captureTap();
+  t.after(uninstall);
   const jsonResponse = await handleSymbolSearch({
     repoId: "test-repo",
     query: "sharedResult",
@@ -281,6 +283,7 @@ test("actual handler JSON and packed responses satisfy the output schema", async
   assert.deepStrictEqual(SymbolSearchResponseSchema.parse(jsonPayload), jsonPayload);
   assert.deepStrictEqual(SymbolSearchResponseSchema.parse(packedPayload), packedPayload);
   assert.equal(typeof packedResponse.results, "string");
+  assert.deepEqual(events.map(({ repoId }) => repoId), ["test-repo"]);
 });
 
 test("fallback path also publishes tap (decision=fallback)", () => {

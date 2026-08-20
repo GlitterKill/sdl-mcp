@@ -8,6 +8,12 @@ import {
 import { buildToolResponseEnvelope } from "../../dist/server.js";
 import { SliceBuildResponseSchema } from "../../dist/mcp/tools.js";
 import type { GraphSlice } from "../../dist/domain/types.js";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PackedWireTapEvent,
+} from "../../dist/observability/event-tap.js";
 
 function toStructuredContent(
   toolName: string,
@@ -15,6 +21,19 @@ function toStructuredContent(
   args: Record<string, unknown>,
 ): Record<string, unknown> {
   return buildToolResponseEnvelope(result, null, "", toolName, args).structuredContent;
+}
+
+function capturePackedWireEvents(): {
+  events: PackedWireTapEvent[];
+  uninstall: () => void;
+} {
+  const events: PackedWireTapEvent[] = [];
+  installObservabilityTap(new Proxy({} as ObservabilityTap, {
+    get: (_target, property) => property === "packedWire"
+      ? (event: PackedWireTapEvent) => events.push(event)
+      : () => {},
+  }));
+  return { events, uninstall: resetObservabilityTap };
 }
 
 function makeMockSlice(overrides?: Partial<GraphSlice>): GraphSlice {
@@ -258,6 +277,8 @@ describe("toAgentGraphSlice", () => {
     });
 
     const { handleSliceBuild } = await import("../../dist/mcp/tools/slice.js");
+    const { events, uninstall } = capturePackedWireEvents();
+    t.after(uninstall);
     for (const wireFormat of ["readable", "packed"] as const) {
       const response = await handleSliceBuild({
         repoId: slice.repoId,
@@ -275,6 +296,7 @@ describe("toAgentGraphSlice", () => {
       );
       assert.deepStrictEqual(SliceBuildResponseSchema.parse(payload), payload);
     }
+    assert.deepEqual(events.map(({ repoId }) => repoId), [slice.repoId]);
 
     const errorResponse = await handleSliceBuild({ repoId: slice.repoId });
     const errorPayload = JSON.parse(

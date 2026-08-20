@@ -41,6 +41,12 @@ import {
 } from "../../dist/retrieval/index-lifecycle.js";
 import { generateFileId, hashValue } from "../../dist/util/hashing.js";
 import { writeTestScipIndex } from "../fixtures/scip/builder.ts";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PostIndexSessionTapEvent,
+} from "../../dist/observability/event-tap.js";
 
 const RELEASE_SCALE_SYMBOL_COUNT = 2_112;
 const RELEASE_SCALE_PROVIDER_ID = "release-scale-scip";
@@ -63,6 +69,19 @@ const indexRepo: typeof runIndexRepo = (
     mode === "full" ? { ...options, isolatedRebuild: true } : options,
   );
 
+function capturePostIndexSessions(): {
+  events: PostIndexSessionTapEvent[];
+  uninstall: () => void;
+} {
+  const events: PostIndexSessionTapEvent[] = [];
+  installObservabilityTap(new Proxy({} as ObservabilityTap, {
+    get: (_target, property) => property === "postIndexSession"
+      ? (event: PostIndexSessionTapEvent) => events.push(event)
+      : () => {},
+  }));
+  return { events, uninstall: resetObservabilityTap };
+}
+
 describe("provider-first indexRepo fallback", () => {
   const previousConfig = process.env.SDL_CONFIG;
   const previousConfigPath = process.env.SDL_CONFIG_PATH;
@@ -71,6 +90,7 @@ describe("provider-first indexRepo fallback", () => {
   let configPath = "";
 
   afterEach(async () => {
+    resetObservabilityTap();
     await closeLadybugDb();
     invalidateConfigCache();
     if (previousConfig === undefined) delete process.env.SDL_CONFIG;
@@ -713,9 +733,13 @@ describe("provider-first indexRepo fallback", () => {
     });
     const progressEvents: string[] = [];
 
+    const { events, uninstall } = capturePostIndexSessions();
     const result = await indexRepo(repoId, "full", (progress) => {
       progressEvents.push(`${progress.stage}:${progress.substage ?? ""}`);
-    });
+    }).finally(uninstall);
+
+    assert.ok(events.length >= 2);
+    assert.ok(events.every(({ repoId: eventRepoId }) => eventRepoId === repoId));
 
     const firstScan = progressEvents.findIndex((event) =>
       event.startsWith("scanning:"),

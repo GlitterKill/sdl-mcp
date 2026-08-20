@@ -9,6 +9,12 @@ import type {
 } from "../../dist/context/types.js";
 import { sessionContentLedger } from "../../dist/mcp/session-dedupe.js";
 import { handleAgentContext } from "../../dist/mcp/tools/context.js";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PackedWireTapEvent,
+} from "../../dist/observability/event-tap.js";
 import type { ToolContext } from "../../dist/server.js";
 
 const originalBuildContext = ContextEngineV2.prototype.buildContext;
@@ -82,9 +88,31 @@ afterEach(() => {
     sessionContentLedger.clearSession(sessionId);
   }
   sessions.clear();
+  resetObservabilityTap();
 });
 
 describe("sdl.context v2 handler", () => {
+  it("attributes packed-wire telemetry to the validated repository", async () => {
+    const events: PackedWireTapEvent[] = [];
+    installObservabilityTap(new Proxy({} as ObservabilityTap, {
+      get: (_target, property) => property === "packedWire"
+        ? (event: PackedWireTapEvent) => events.push(event)
+        : () => {},
+    }));
+    stubEngine(contextPayload());
+
+    const response = await handleAgentContext({
+      repoId: "repo-context",
+      taskType: "explain",
+      taskText: "Explain symbolA",
+      budget: { maxTokens: 2048 },
+      wireFormat: "packed",
+    });
+
+    assert.equal((response as Record<string, unknown>).status, "complete");
+    assert.deepEqual(events.map(({ repoId }) => repoId), ["repo-context"]);
+  });
+
   it("adapts the strict public request and returns only the canonical v2 payload", async () => {
     let captured: ContextV2Request | undefined;
     stubEngine(contextPayload(), (request) => {

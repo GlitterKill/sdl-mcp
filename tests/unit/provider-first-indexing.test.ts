@@ -147,14 +147,6 @@ import type {
 } from "../../dist/indexer/provider-first/types.js";
 import { writeTestScipIndex } from "../fixtures/scip/builder.ts";
 
-it("threads repoId through both indexer tail post-index sessions", () => {
-  const source = readFileSync(join(process.cwd(), "src/indexer/indexer.ts"), "utf8");
-  assert.equal(
-    source.match(/\{\s*timeoutMs: postIndexSessionTimeoutMs,\s*repoId,?\s*\}/g)?.length,
-    2,
-  );
-});
-
 beforeEach(async () => {
   await withLadybugInitialization(async () => {});
 });

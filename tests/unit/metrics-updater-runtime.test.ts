@@ -5,6 +5,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { FinalizeIndexingParams } from "../../dist/indexer/metrics-updater.js";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PostIndexSessionTapEvent,
+} from "../../dist/observability/event-tap.js";
 
 const TEST_DB_PATH = join(
   tmpdir(),
@@ -20,6 +26,19 @@ async function resetTestDb(): Promise<void> {
   }
   mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
   await initLadybugDb(TEST_DB_PATH);
+}
+
+function capturePostIndexSessions(): {
+  events: PostIndexSessionTapEvent[];
+  uninstall: () => void;
+} {
+  const events: PostIndexSessionTapEvent[] = [];
+  installObservabilityTap(new Proxy({} as ObservabilityTap, {
+    get: (_target, property) => property === "postIndexSession"
+      ? (event: PostIndexSessionTapEvent) => events.push(event)
+      : () => {},
+  }));
+  return { events, uninstall: resetObservabilityTap };
 }
 
 describe("finalizeIndexing runtime fast paths", () => {
@@ -715,19 +734,24 @@ describe("materializeFileSummaries incremental targeting", () => {
       { symbolId },
     );
 
-    await finalizeIndexing({
-      repoId,
-      versionId: "v-normalize",
-      appConfig: { repos: [], semantic: { enabled: false } } as any,
-      hasIndexMutations: true,
-      callResolutionTelemetry: {
-        pass2EligibleFileCount: 0,
-        pass2ProcessedFileCount: 0,
-        pass2EdgesCreated: 0,
-        pass2EdgesFailed: 0,
-        pass2Duration: 0,
-      } as any,
-    });
+    const { events, uninstall } = capturePostIndexSessions();
+    try {
+      await finalizeIndexing({
+        repoId,
+        versionId: "v-normalize",
+        appConfig: { repos: [], semantic: { enabled: false } } as any,
+        hasIndexMutations: true,
+        callResolutionTelemetry: {
+          pass2EligibleFileCount: 0,
+          pass2ProcessedFileCount: 0,
+          pass2EdgesCreated: 0,
+          pass2EdgesFailed: 0,
+          pass2Duration: 0,
+        } as any,
+      });
+    } finally {
+      uninstall();
+    }
 
     const statusRow = await queries.querySingle<{
       status: string;
@@ -751,6 +775,7 @@ describe("materializeFileSummaries incremental targeting", () => {
     assert.equal(statusRow?.placeholderKind, "");
     assert.equal(statusRow?.placeholderTarget, "");
     assert.equal(queries.toNumber(metricsRow?.count ?? 0), 1);
+    assert.deepEqual(events.map(({ repoId: eventRepoId }) => eventRepoId), [repoId]);
   });
 
   it("repairs and audits dependency placeholder quality before reporting success", async () => {

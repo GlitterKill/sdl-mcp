@@ -116,6 +116,7 @@ describe("tool output projection metrics", () => {
     const result = await callRuntime(runtimeServer(), "compact");
     const event = events[0];
     assert.ok(event?.projection);
+    assert.equal(event.repoId, "test-repo");
 
     const raw = measureProjectionValue(CANONICAL_RESULT);
     const projected = measureProjectionValue(result.structuredContent);
@@ -322,6 +323,7 @@ describe("tool output projection metrics", () => {
       "isError",
     ]);
     assert.ok(event?.projection);
+    assert.equal(event.repoId, "test-repo");
     assert.ok(event.durationMs >= 0);
     assert.equal(event.diagnostics, undefined);
     assert.doesNotMatch(

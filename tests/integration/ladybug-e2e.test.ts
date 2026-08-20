@@ -31,6 +31,12 @@ import { buildRepoOverview } from "../../dist/graph/overview.js";
 import { computeDelta } from "../../dist/delta/diff.js";
 import { runGovernorLoop } from "../../dist/delta/blastRadius.js";
 import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PostIndexSessionTapEvent,
+} from "../../dist/observability/event-tap.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -66,6 +72,19 @@ function findSymbol(
     assert.fail(`Expected symbol ${kind}:${name} to exist${hint}`);
   }
   return match;
+}
+
+function capturePostIndexSessions(): {
+  events: PostIndexSessionTapEvent[];
+  uninstall: () => void;
+} {
+  const events: PostIndexSessionTapEvent[] = [];
+  installObservabilityTap(new Proxy({} as ObservabilityTap, {
+    get: (_target, property) => property === "postIndexSession"
+      ? (event: PostIndexSessionTapEvent) => events.push(event)
+      : () => {},
+  }));
+  return { events, uninstall: resetObservabilityTap };
 }
 
 describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
@@ -162,7 +181,10 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
   it("indexes fixture, detects clusters/processes, builds slice, and computes process blast radius", async () => {
     assert.ok(repoDir, "repoDir should be initialized in before()");
 
-    const full = await indexRepo(REPO_ID, "full");
+    const { events, uninstall } = capturePostIndexSessions();
+    const full = await indexRepo(REPO_ID, "full").finally(uninstall);
+    assert.ok(events.length >= 2);
+    assert.ok(events.every(({ repoId }) => repoId === REPO_ID));
     assert.ok(full.versionId.length > 0);
     const fullIntegrity = await getDerivedState(REPO_ID);
     assert.equal(fullIntegrity?.graphIntegrityState, "verified");
