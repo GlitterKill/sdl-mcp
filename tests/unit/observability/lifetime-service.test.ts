@@ -881,6 +881,77 @@ describe("ObservabilityService lifetime integration", () => {
     await h.service.stop();
   });
 
+  it("uses owning prefetch counts and retains omitted strategy shadows", async () => {
+    const h = harness();
+    await h.service.start();
+    const prefetch = (
+      repoId: string,
+      outcomeSamples: number,
+      hitRate: number,
+      wasteRate: number,
+      avgLatencyReductionMs: number,
+      strategies: Array<{ strategy: string; samples: number }>,
+    ) => h.service.prefetch({
+      repoId,
+      outcomeSamples,
+      hitRate,
+      wasteRate,
+      avgLatencyReductionMs,
+      queueDepth: 0,
+      acceptedPrefetch: 0,
+      suppressedPrefetch: 0,
+      topStrategies: strategies.map(({ strategy, samples }) => ({
+        strategy,
+        resourceKind: "symbol",
+        samples,
+        hitRate,
+        acceptedRate: 0,
+        wasteRate,
+        score: 1,
+        suppressed: 0,
+      })),
+    });
+
+    prefetch("repo-a", 4, 0.5, 0.25, 10, [{ strategy: "A", samples: 4 }]);
+    prefetch("repo-a", 4, 0.25, 0, 5, [{ strategy: "A", samples: 4 }]);
+    prefetch("repo-b", 4, 0.5, 0.25, 10, [{ strategy: "A", samples: 4 }]);
+    prefetch("repo-b", 10, 0.5, 0.25, 10, [{ strategy: "B", samples: 6 }]);
+    prefetch("repo-b", 14, 0.5, 0.25, 10, [{ strategy: "A", samples: 8 }]);
+
+    const unchangedOwner = await h.service.getLifetime("repo-a");
+    const rotatingTopFive = await h.service.getLifetime("repo-b");
+    assert.notEqual(unchangedOwner.persistenceState, "recoveryRequired");
+    assert.notEqual(rotatingTopFive.persistenceState, "recoveryRequired");
+    if (
+      unchangedOwner.persistenceState !== "recoveryRequired"
+      && rotatingTopFive.persistenceState !== "recoveryRequired"
+    ) {
+      assert.equal(unchangedOwner.sections.predictiveContext?.outcomeSamples, 4);
+      assert.equal(unchangedOwner.sections.predictiveContext?.hitOutcomes, 2);
+      assert.equal(unchangedOwner.sections.predictiveContext?.wasteOutcomes, 1);
+      assert.deepEqual(unchangedOwner.sections.predictiveContext?.latencyReductionMs, {
+        count: 4, sum: 40, max: 0,
+      });
+      assert.equal(
+        unchangedOwner.sections.predictiveContext?.byStrategy["k:A"]?.samples,
+        4,
+      );
+      assert.equal(rotatingTopFive.sections.predictiveContext?.outcomeSamples, 14);
+      assert.equal(rotatingTopFive.sections.predictiveContext?.byStrategy["k:A"]?.samples, 8);
+      assert.equal(rotatingTopFive.sections.predictiveContext?.byStrategy["k:B"]?.samples, 6);
+    }
+
+    await h.service.resetLifetime("repo-a");
+    prefetch("repo-a", 6, 0.5, 0.25, 10, [{ strategy: "A", samples: 6 }]);
+    const afterReset = await h.service.getLifetime("repo-a");
+    assert.notEqual(afterReset.persistenceState, "recoveryRequired");
+    if (afterReset.persistenceState !== "recoveryRequired") {
+      assert.equal(afterReset.sections.predictiveContext?.outcomeSamples, 2);
+      assert.equal(afterReset.sections.predictiveContext?.byStrategy["k:A"]?.samples, 2);
+    }
+    await h.service.stop();
+  });
+
   it("counts engine dispatch only from authoritative IndexEvent file totals", async () => {
     const h = harness();
     await h.service.start();
