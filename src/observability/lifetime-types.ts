@@ -311,13 +311,21 @@ export const LIFETIME_ROUTE_ERROR_CODES = [
 
 export type LifetimeRouteErrorCode = (typeof LIFETIME_ROUTE_ERROR_CODES)[number];
 
+export type LifetimeRouteError =
+  | {
+      code: "persistence_failed";
+      message: string;
+      retryable: true;
+    }
+  | {
+      code: Exclude<LifetimeRouteErrorCode, "persistence_failed">;
+      message: string;
+      retryable: false;
+    };
+
 export interface LifetimeRouteErrorV1 {
   schemaVersion: typeof LIFETIME_SCHEMA_VERSION;
-  error: {
-    code: LifetimeRouteErrorCode;
-    message: string;
-    retryable: boolean;
-  };
+  error: LifetimeRouteError;
 }
 
 const CounterSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -639,7 +647,22 @@ const LifetimeReadySchema = z.object({
   sections: DurableSectionsSchema,
   freshness: FreshnessSchema,
   processPeaks: ProcessPeaksSchema.nullable(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (value.persistenceState !== "capacityExceeded") return;
+  if (
+    value.epoch !== 0
+    || value.sessionCount !== 0
+    || value.resetAt !== null
+    || value.lastCheckpointAt !== null
+    || value.saturated
+    || SECTION_IDS.some((sectionId) => value.sections[sectionId] !== null)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "capacityExceeded lifetime values must be empty",
+    });
+  }
+});
 const LifetimeRecoverySchema = z.object({
   schemaVersion: z.literal(LIFETIME_SCHEMA_VERSION),
   sampleIntervalMs: SampleIntervalSchema,
@@ -649,6 +672,35 @@ const LifetimeRecoverySchema = z.object({
   recoveryReason: RecoveryReasonSchema,
 }).strict();
 const LifetimeEnvelopeSchema = z.union([LifetimeReadySchema, LifetimeRecoverySchema]);
+const NonRetryableRouteErrorCodeSchema = z.enum([
+  "invalid_query",
+  "invalid_json",
+  "invalid_body",
+  "repository_not_found",
+  "read_only",
+  "lifetime_capacity_exceeded",
+  "recovery_required",
+  "body_too_large",
+  "unsupported_media_type",
+  "confirmation_mismatch",
+  "persistence_indeterminate",
+]);
+const RouteErrorMessageSchema = z.string().min(1).max(256);
+const LifetimeRouteErrorSchema = z.object({
+  schemaVersion: z.literal(LIFETIME_SCHEMA_VERSION),
+  error: z.union([
+    z.object({
+      code: z.literal("persistence_failed"),
+      message: RouteErrorMessageSchema,
+      retryable: z.literal(true),
+    }).strict(),
+    z.object({
+      code: NonRetryableRouteErrorCodeSchema,
+      message: RouteErrorMessageSchema,
+      retryable: z.literal(false),
+    }).strict(),
+  ]),
+}).strict();
 const ResetRequestSchema = z.object({
   repoId: RepoIdSchema,
   confirmation: z.string().min(1).max(RESET_CONFIRMATION_PREFIX.length + MAX_REPO_ID_LENGTH),
@@ -673,6 +725,10 @@ export function parseDurableLifetimeRoot(value: unknown): DurableLifetimeRoot {
 
 export function parseLifetimeEnvelope(value: unknown): LifetimeEnvelopeV1 {
   return LifetimeEnvelopeSchema.parse(value) as LifetimeEnvelopeV1;
+}
+
+export function parseLifetimeRouteError(value: unknown): LifetimeRouteErrorV1 {
+  return LifetimeRouteErrorSchema.parse(value);
 }
 
 export function parseResetRequest(value: unknown): LifetimeResetRequest {

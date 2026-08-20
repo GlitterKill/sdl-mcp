@@ -11,6 +11,7 @@ import {
   LIFETIME_ROUTE_ERROR_CODES,
   parseDurableLifetimeRoot,
   parseLifetimeEnvelope,
+  parseLifetimeRouteError,
   parseResetRequest,
   repositoryStorageKey,
   type DurableLifetimeRoot,
@@ -272,6 +273,26 @@ const freshness = {
   resources: ISO,
 };
 
+const emptySections = {
+  cache: null,
+  retrieval: null,
+  beam: null,
+  delta: null,
+  indexing: null,
+  tokenEfficiency: null,
+  predictiveContext: null,
+  health: null,
+  latency: null,
+  pool: null,
+  scip: null,
+  packed: null,
+  ppr: null,
+  auditBuffer: null,
+  postIndex: null,
+  toolOutput: null,
+  resources: null,
+};
+
 const durableRootFixture = {
   schemaVersion: 1,
   generation: 7,
@@ -528,7 +549,7 @@ describe("lifetime observability contract", () => {
       "persistence_failed",
       "persistence_indeterminate",
     ]);
-    const errors: LifetimeRouteErrorV1[] = [
+    const approvedCodes = [
       "invalid_query",
       "invalid_json",
       "invalid_body",
@@ -541,11 +562,12 @@ describe("lifetime observability contract", () => {
       "confirmation_mismatch",
       "persistence_failed",
       "persistence_indeterminate",
-    ].map((code) => ({
+    ] as const;
+    const errors = approvedCodes.map((code) => ({
       schemaVersion: 1,
       error: { code, message: "fixed", retryable: code === "persistence_failed" },
     }));
-    assert.deepEqual(errors.map(({ error: routeError }) => routeError.code), [
+    assert.deepEqual(errors.map((value) => parseLifetimeRouteError(value).error.code), [
       "invalid_query",
       "invalid_json",
       "invalid_body",
@@ -559,6 +581,39 @@ describe("lifetime observability contract", () => {
       "persistence_failed",
       "persistence_indeterminate",
     ]);
+
+    const retryable: LifetimeRouteErrorV1 = {
+      schemaVersion: 1,
+      error: { code: "persistence_failed", message: "fixed", retryable: true },
+    };
+    const nonRetryable: LifetimeRouteErrorV1 = {
+      schemaVersion: 1,
+      error: { code: "persistence_indeterminate", message: "fixed", retryable: false },
+    };
+    assert.equal(parseLifetimeRouteError(retryable).error.retryable, true);
+    assert.equal(parseLifetimeRouteError(nonRetryable).error.retryable, false);
+    assert.throws(() => parseLifetimeRouteError({
+      schemaVersion: 1,
+      error: { code: "persistence_failed", message: "fixed", retryable: false },
+    }));
+    for (const code of [
+      "invalid_query",
+      "invalid_json",
+      "invalid_body",
+      "repository_not_found",
+      "read_only",
+      "lifetime_capacity_exceeded",
+      "recovery_required",
+      "body_too_large",
+      "unsupported_media_type",
+      "confirmation_mismatch",
+      "persistence_indeterminate",
+    ]) {
+      assert.throws(() => parseLifetimeRouteError({
+        schemaVersion: 1,
+        error: { code, message: "fixed", retryable: true },
+      }));
+    }
   });
 
   it("enforces sample interval and discriminant bounds", () => {
@@ -588,8 +643,20 @@ describe("lifetime observability contract", () => {
     for (const persistenceState of [
       "ready", "degraded", "readOnly", "capacityExceeded",
     ] as const) {
+      const envelope = persistenceState === "capacityExceeded"
+        ? {
+            ...readyEnvelopeFixture,
+            epoch: 0,
+            resetAt: null,
+            lastCheckpointAt: null,
+            persistenceState,
+            sessionCount: 0,
+            saturated: false,
+            sections: emptySections,
+          }
+        : { ...readyEnvelopeFixture, persistenceState };
       assert.equal(
-        parseLifetimeEnvelope({ ...readyEnvelopeFixture, persistenceState }).persistenceState,
+        parseLifetimeEnvelope(envelope).persistenceState,
         persistenceState,
       );
     }
@@ -606,6 +673,34 @@ describe("lifetime observability contract", () => {
       });
       assert.equal(parsed.persistenceState, "recoveryRequired");
       assert.equal(parsed.recoveryReason, recoveryReason);
+    }
+  });
+
+  it("enforces the capacityExceeded empty-lifetime invariant", () => {
+    const valid = {
+      ...readyEnvelopeFixture,
+      epoch: 0,
+      resetAt: null,
+      lastCheckpointAt: null,
+      persistenceState: "capacityExceeded",
+      sessionCount: 0,
+      saturated: false,
+      sections: emptySections,
+    };
+    const parsed = parseLifetimeEnvelope(valid);
+    assert.equal(parsed.persistenceState, "capacityExceeded");
+    assert.deepEqual(parsed.sections, emptySections);
+    assert.deepEqual(parsed.processPeaks, durableRootFixture.processPeaks);
+
+    for (const invalid of [
+      { ...valid, epoch: 1 },
+      { ...valid, sessionCount: 1 },
+      { ...valid, resetAt: ISO },
+      { ...valid, lastCheckpointAt: ISO },
+      { ...valid, saturated: true },
+      { ...valid, sections: { ...emptySections, cache: sections.cache } },
+    ]) {
+      assert.throws(() => parseLifetimeEnvelope(invalid));
     }
   });
 

@@ -62,6 +62,7 @@ export type {
   LifetimeRecoveryV1,
   LifetimeResetRequest,
   LifetimeResetSuccessV1,
+  LifetimeRouteError,
   LifetimeRouteErrorCode,
   LifetimeRouteErrorV1,
   PackedEncoderLifetime,
@@ -93,6 +94,7 @@ export {
   SECTION_IDS,
   parseDurableLifetimeRoot,
   parseLifetimeEnvelope,
+  parseLifetimeRouteError,
   parseResetRequest,
   repositoryStorageKey,
 } from "./lifetime-types.js";
