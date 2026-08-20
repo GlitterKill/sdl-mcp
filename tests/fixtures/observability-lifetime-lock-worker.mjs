@@ -1,14 +1,41 @@
 import { createInterface } from "node:readline";
-import { lstat } from "node:fs/promises";
+import { lstat, rename } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
   acquireLifetimeLease,
   releaseLifetimeLease,
 } from "../../dist/observability/lifetime-lock.js";
+import { rotateLifetimeEvidence } from "../../dist/observability/lifetime-evidence.js";
 
 const directory = process.argv[2];
 if (!directory) throw new Error("trusted directory argument is required");
+const operation = process.argv[3] ?? "lease";
+
+if (operation === "claim-before-move" || operation === "claim-after-move") {
+  const sourcePath = process.argv[4];
+  if (!sourcePath) throw new Error("claim source argument is required");
+  await rotateLifetimeEvidence(
+    directory,
+    sourcePath,
+    { kind: "lock", eligibility: "validated-supported" },
+    {
+      fileSystem: {
+        rename: async (source, target) => {
+          if (source !== sourcePath) return rename(source, target);
+          if (operation === "claim-before-move") {
+            process.stdout.write(`${JSON.stringify({ event: "claim-held", phase: "before-move" })}\n`);
+            await new Promise(() => setInterval(() => undefined, 1_000));
+          }
+          await rename(source, target);
+          process.stdout.write(`${JSON.stringify({ event: "claim-held", phase: "after-move" })}\n`);
+          await new Promise(() => setInterval(() => undefined, 1_000));
+        },
+      },
+    },
+  );
+  throw new Error("claim hold unexpectedly completed");
+}
 
 const result = await acquireLifetimeLease(directory);
 process.stdout.write(`${JSON.stringify({ event: "acquired", mode: result.mode })}\n`);

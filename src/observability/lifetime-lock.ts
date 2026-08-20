@@ -5,8 +5,8 @@ import { resolve } from "node:path";
 import process from "node:process";
 
 import {
-  LIFETIME_CLAIM_FILENAME,
   claimLifetimeSource,
+  isLifetimeDirectChild,
   lifetimeClaimErrorCode,
   moveClaimedLifetimeSource,
   readLifetimeSource,
@@ -14,6 +14,8 @@ import {
   resolveLifetimeFileSystem,
   rotateLifetimeEvidence,
   sameLifetimeSource,
+  validateLifetimeDirectory,
+  type LifetimeClaimOptions,
   type LifetimeFileSystem,
   type LifetimeFileSystemOverrides,
   type LifetimeSourceClaim,
@@ -54,6 +56,7 @@ export interface LifetimeLockOptions {
   readonly now?: () => Date;
   readonly pid?: number;
   readonly isPidAlive?: (pid: number) => boolean | Promise<boolean>;
+  readonly isClaimantPidAlive?: (pid: number) => boolean | Promise<boolean>;
   readonly signalPid?: (pid: number, signal: 0) => void;
   readonly randomBytes?: (size: number) => Buffer;
   readonly fileSystem?: LifetimeFileSystemOverrides;
@@ -140,27 +143,40 @@ function leaseFor(
   return { ...record, directory, lockPath };
 }
 
-function claimPath(directory: string): string {
-  return resolve(directory, LIFETIME_CLAIM_FILENAME);
-}
-
-async function claimExists(
-  directory: string,
+async function validLeaseBoundary(
+  lease: LifetimeWriterLease,
   fileSystem: LifetimeFileSystem,
 ): Promise<boolean> {
   try {
-    await fileSystem.lstat(claimPath(directory));
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    return true;
+    const trusted = await validateLifetimeDirectory(lease.directory, fileSystem);
+    return isLifetimeDirectChild(trusted, lease.lockPath, LIFETIME_LOCK_FILENAME) &&
+      (process.platform === "win32"
+        ? resolve(lease.lockPath).toLowerCase() ===
+          resolve(trusted, LIFETIME_LOCK_FILENAME).toLowerCase()
+        : resolve(lease.lockPath) === resolve(trusted, LIFETIME_LOCK_FILENAME));
+  } catch {
+    return false;
   }
+}
+
+function claimOptions(
+  options: LifetimeLockOptions,
+  fileSystem: LifetimeFileSystem,
+): LifetimeClaimOptions {
+  return {
+    now: options.now,
+    randomBytes: options.randomBytes,
+    fileSystem,
+    isClaimantPidAlive: options.isClaimantPidAlive,
+    signalPid: options.signalPid,
+  };
 }
 
 async function claimOwnedLock(
   lease: LifetimeWriterLease,
   current: StableLockRecord,
   fileSystem: LifetimeFileSystem,
+  options: LifetimeClaimOptions = {},
 ): Promise<LifetimeSourceClaim | null> {
   if (!leaseMatches(current.record, lease)) return null;
   let claim: LifetimeSourceClaim;
@@ -171,11 +187,12 @@ async function claimOwnedLock(
       current.snapshot,
       fileSystem,
       false,
+      options,
     );
   } catch {
     return null;
   }
-  const claimed = await readLifetimeSource(claim.claimPath, fileSystem, MAX_LOCK_BYTES);
+  const claimed = await readLifetimeSource(claim.witnessPath, fileSystem, MAX_LOCK_BYTES);
   const record = parseLockRecord(claimed.content.toString("utf8"));
   if (!record || !leaseMatches(record, lease)) {
     await releaseLifetimeSourceClaim(claim, fileSystem);
@@ -189,19 +206,59 @@ async function createWriterLock(
   lockPath: string,
   record: LifetimeLockRecord,
   fileSystem: LifetimeFileSystem,
+  options: LifetimeClaimOptions,
 ): Promise<CreateResult> {
-  if (await claimExists(directory, fileSystem)) return { status: "contended" };
+  const anchorPath = resolve(
+    directory,
+    `.sdl-observability-lifetime.create.${record.nonce}`,
+  );
   let handle: FileHandle | undefined;
   try {
-    handle = await fileSystem.open(lockPath, "wx", 0o600);
+    handle = await fileSystem.open(anchorPath, "wx", 0o600);
+    if (process.platform === "win32") {
+      await handle.chmod(0o600).catch(() => undefined);
+    } else {
+      await handle.chmod(0o600);
+    }
+    await handle.writeFile(serializeLock(record), "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+  } catch {
+    await closeQuietly(handle);
+    return { status: "failure" };
+  }
+
+  const anchor = await readLifetimeSource(anchorPath, fileSystem, MAX_LOCK_BYTES);
+  let claim: LifetimeSourceClaim;
+  try {
+    claim = await claimLifetimeSource(
+      directory,
+      anchorPath,
+      anchor.snapshot,
+      fileSystem,
+      false,
+      options,
+    );
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EEXIST"
-      ? { status: "exists" }
-      : { status: "failure" };
+    const currentAnchor = await readLifetimeSource(anchorPath, fileSystem, MAX_LOCK_BYTES)
+      .catch(() => null);
+    if (currentAnchor && sameLifetimeSource(currentAnchor.snapshot, anchor.snapshot)) {
+      await fileSystem.unlink(anchorPath).catch(() => undefined);
+    }
+    const code = lifetimeClaimErrorCode(error);
+    return { status: code === "busy" || code === "mismatch" ? "contended" : "failure" };
   }
 
   const lease = leaseFor(directory, lockPath, record);
   try {
+    try {
+      handle = await fileSystem.open(lockPath, "wx", 0o600);
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "EEXIST"
+        ? { status: "exists" }
+        : { status: "failure" };
+    }
     if (process.platform === "win32") {
       await handle.chmod(0o600).catch(() => undefined);
     } else {
@@ -212,12 +269,19 @@ async function createWriterLock(
     await handle.close();
     handle = undefined;
     const stored = await readStableLock(lockPath, fileSystem);
-    if (!stored || !leaseMatches(stored.record, lease)) return { status: "failure" };
-    if (await claimExists(directory, fileSystem)) return { status: "contended" };
-    return { status: "writer", lease };
+    return stored && leaseMatches(stored.record, lease)
+      ? { status: "writer", lease }
+      : { status: "failure" };
   } catch {
     await closeQuietly(handle);
     return { status: "failure" };
+  } finally {
+    await releaseLifetimeSourceClaim(claim, fileSystem).catch(() => undefined);
+    const currentAnchor = await readLifetimeSource(anchorPath, fileSystem, MAX_LOCK_BYTES)
+      .catch(() => null);
+    if (currentAnchor && sameLifetimeSource(currentAnchor.snapshot, anchor.snapshot)) {
+      await fileSystem.unlink(anchorPath).catch(() => undefined);
+    }
   }
 }
 
@@ -270,11 +334,13 @@ export async function acquireLifetimeLease(
   }
 
   const lockPath = resolve(trustedDirectory, LIFETIME_LOCK_FILENAME);
+  const sharedClaimOptions = claimOptions(options, fileSystem);
   const initial = await createWriterLock(
     trustedDirectory,
     lockPath,
     record,
     fileSystem,
+    sharedClaimOptions,
   );
   if (initial.status === "writer") return { mode: "writer", lease: initial.lease };
   if (initial.status === "failure") return readOnly("ioFailure");
@@ -306,6 +372,8 @@ export async function acquireLifetimeLease(
         fileSystem: options.fileSystem,
         expectedSource: existing.snapshot,
         waitForClaim: false,
+        isClaimantPidAlive: options.isClaimantPidAlive,
+        signalPid: options.signalPid,
       },
     );
   } catch (error) {
@@ -320,6 +388,7 @@ export async function acquireLifetimeLease(
     lockPath,
     record,
     fileSystem,
+    sharedClaimOptions,
   );
   return retry.status === "writer"
     ? { mode: "writer", lease: retry.lease }
@@ -350,6 +419,7 @@ export async function refreshLifetimeLease(
   options: Pick<LifetimeLockOptions, "now" | "fileSystem"> = {},
 ): Promise<boolean> {
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
+  if (!await validLeaseBoundary(lease, fileSystem)) return false;
   const current = await readStableLock(lease.lockPath, fileSystem);
   if (!current) return false;
   const claim = await claimOwnedLock(lease, current, fileSystem);
@@ -357,7 +427,7 @@ export async function refreshLifetimeLease(
   let handle: FileHandle | undefined;
   try {
     handle = await fileSystem.open(
-      claim.claimPath,
+      claim.witnessPath,
       constants.O_RDWR |
         (constants.O_NOFOLLOW ?? 0) |
         (constants.O_NONBLOCK ?? 0),
@@ -374,7 +444,7 @@ export async function refreshLifetimeLease(
     await handle.sync();
     await handle.close();
     handle = undefined;
-    const claimAfter = await readLifetimeSource(claim.claimPath, fileSystem, MAX_LOCK_BYTES);
+    const claimAfter = await readLifetimeSource(claim.witnessPath, fileSystem, MAX_LOCK_BYTES);
     const sourceAfter = await readLifetimeSource(lease.lockPath, fileSystem, MAX_LOCK_BYTES);
     const stored = parseLockRecord(sourceAfter.content.toString("utf8"));
     return sameLifetimeSource(claimAfter.snapshot, sourceAfter.snapshot) &&
@@ -395,6 +465,7 @@ export async function releaseLifetimeLease(
   options: Pick<LifetimeLockOptions, "fileSystem"> = {},
 ): Promise<boolean> {
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
+  if (!await validLeaseBoundary(lease, fileSystem)) return false;
   const current = await readStableLock(lease.lockPath, fileSystem);
   if (!current) return false;
   const claim = await claimOwnedLock(lease, current, fileSystem);
