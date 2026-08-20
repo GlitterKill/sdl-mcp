@@ -1449,6 +1449,8 @@ function initDashboardLayoutEditor() {
   layoutResetBtn.addEventListener("click", () => {
     try {
       if (!window.confirm("Reset dashboard panel layout?")) return;
+      cancelKeyboardTransaction();
+      cancelPointerTransaction();
       layout = resetDashboardLayout(
         localStorage,
         layout,

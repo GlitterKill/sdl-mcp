@@ -336,6 +336,19 @@ function makePointerFixture(
     visibilityTarget,
     windowTarget,
   });
+  const keyboardController = harness.installKeyboardLayoutTransactions({
+    entries: [{ panel, id: "panel", name: "Cache" }],
+    storage,
+    getLayout: () => layout,
+    setLayout: (next) => {
+      layout = next;
+    },
+    applyPanelRect: (_panel, rect) => applied.push({ ...rect }),
+    announce: (message) => announcements.push(message),
+    isEditMode: () => editMode,
+    visibilityTarget,
+    windowTarget,
+  });
   return {
     panel,
     header,
@@ -349,7 +362,26 @@ function makePointerFixture(
     applied,
     storage,
     controller,
+    keyboardController,
     layout: () => layout,
+    setLayout: (next: Layout) => {
+      layout = next;
+    },
+    reset: (
+      confirmed: boolean,
+      defaults: Layout = { panel: { col: 1, row: 1, cols: 4, rows: 2 } },
+    ) => {
+      if (!confirmed) return;
+      keyboardController.cancel();
+      controller.cancel();
+      layout = harness.resetDashboardLayout(
+        storage,
+        layout,
+        defaults,
+        (next) => applied.push({ ...next.panel }),
+        (message) => announcements.push(message),
+      );
+    },
     setEditMode: (enabled: boolean) => {
       editMode = enabled;
     },
@@ -395,6 +427,9 @@ function makeKeyboardFixture(
     storage,
     controller,
     layout: () => layout,
+    setLayout: (next: Layout) => {
+      layout = next;
+    },
     setEditMode: (enabled: boolean) => {
       editMode = enabled;
     },
@@ -422,7 +457,7 @@ describe("dashboard layout geometry", () => {
     assert.match(dashboardSource, /panel\.removeAttribute\("tabindex"\)/);
     assert.match(
       dashboardSource,
-      /layoutResetBtn\.addEventListener\("click", \(\) => \{\s*try \{\s*if \(!window\.confirm\("Reset dashboard panel layout\?"\)\) return;[\s\S]*?\} finally \{\s*layoutResetBtn\.focus\(\);/,
+      /layoutResetBtn\.addEventListener\("click", \(\) => \{\s*try \{\s*if \(!window\.confirm\("Reset dashboard panel layout\?"\)\) return;\s*cancelKeyboardTransaction\(\);\s*cancelPointerTransaction\(\);\s*layout = resetDashboardLayout\([\s\S]*?\} finally \{\s*layoutResetBtn\.focus\(\);/,
     );
   });
 
@@ -982,6 +1017,126 @@ describe("dashboard layout geometry", () => {
     assert.deepEqual({ ...fixture.layout().panel }, { col: 1, row: 1, cols: 4, rows: 2 });
     assert.deepEqual(fixture.announcements, ["Panel layout update failed."]);
     assert.equal(fixture.panel.focusCount, 1);
+  });
+
+  it("cancels an active pointer preview before a confirmed reset", () => {
+    const storage = makeStorage({
+      "sdl-observability-panel-layout-v3": JSON.stringify({
+        panel: { col: 1, row: 24, cols: 4, rows: 2 },
+      }),
+    });
+    const fixture = makePointerFixture(
+      { panel: { col: 1, row: 24, cols: 4, rows: 2 } },
+      storage,
+    );
+    const pointerId = 41;
+    fixture.header.dispatch("pointerdown", {
+      pointerId,
+      button: 0,
+      isPrimary: true,
+      clientX: 0,
+      clientY: 0,
+    });
+    fixture.header.dispatch("pointermove", { pointerId, clientX: 55, clientY: 70 });
+    assert.deepEqual(fixture.layout().panel, { col: 2, row: 25, cols: 4, rows: 2 });
+
+    fixture.reset(false);
+    assert.deepEqual(fixture.layout().panel, { col: 2, row: 25, cols: 4, rows: 2 });
+    assert.equal(fixture.header.capturedPointers.has(pointerId), true);
+
+    fixture.reset(true);
+    assert.deepEqual(fixture.layout().panel, { col: 1, row: 1, cols: 4, rows: 2 });
+    assert.equal(storage.values.has("sdl-observability-panel-layout-v3"), false);
+    assert.deepEqual(storage.calls, [
+      "get:sdl-observability-panel-layout-v2",
+      "remove:sdl-observability-panel-layout-v3",
+    ]);
+    assert.deepEqual(fixture.announcements, ["Panel layout reset."]);
+    assert.deepEqual(fixture.applied.at(-1), { col: 1, row: 1, cols: 4, rows: 2 });
+    assert.deepEqual(fixture.header.captureCalls, ["capture:41", "release:41"]);
+
+    fixture.header.dispatch("lostpointercapture", { pointerId });
+    fixture.header.dispatch("pointerup", { pointerId });
+    assert.deepEqual(fixture.layout().panel, { col: 1, row: 1, cols: 4, rows: 2 });
+    assert.equal(fixture.applied.length, 3, "preview, rollback, then defaults");
+    assert.equal(storage.calls.length, 2);
+    assert.deepEqual(fixture.announcements, ["Panel layout reset."]);
+  });
+
+  it("quarantines a held keyboard transaction after a confirmed reset", () => {
+    const storage = makeStorage({
+      "sdl-observability-panel-layout-v3": JSON.stringify({
+        panel: { col: 1, row: 24, cols: 4, rows: 2 },
+      }),
+    });
+    const fixture = makePointerFixture(
+      { panel: { col: 1, row: 24, cols: 4, rows: 2 } },
+      storage,
+    );
+    fixture.panel.dispatch("keydown", { key: "ArrowDown" });
+    assert.equal(fixture.layout().panel.row, 25);
+
+    fixture.reset(true);
+    assert.deepEqual(fixture.layout().panel, { col: 1, row: 1, cols: 4, rows: 2 });
+    assert.equal(storage.values.has("sdl-observability-panel-layout-v3"), false);
+    assert.deepEqual(fixture.announcements, ["Panel layout reset."]);
+
+    const orphanRepeat = fixture.panel.dispatch("keydown", {
+      key: "ArrowDown",
+      repeat: true,
+    });
+    assert.equal(orphanRepeat.defaultPrevented, true);
+    fixture.panel.dispatch("keyup", { key: "ArrowDown" });
+    assert.deepEqual(fixture.layout().panel, { col: 1, row: 1, cols: 4, rows: 2 });
+    assert.equal(fixture.applied.length, 3, "preview, rollback, then defaults");
+    assert.deepEqual(storage.calls, [
+      "get:sdl-observability-panel-layout-v2",
+      "remove:sdl-observability-panel-layout-v3",
+    ]);
+    assert.deepEqual(fixture.announcements, ["Panel layout reset."]);
+  });
+
+  it("ends the active pointer transaction before a failed reset restores current layout", () => {
+    const storage = makeStorage(
+      {
+        "sdl-observability-panel-layout-v3": JSON.stringify({
+          panel: { col: 1, row: 24, cols: 4, rows: 2 },
+        }),
+      },
+      { operation: "remove", key: "sdl-observability-panel-layout-v3" },
+    );
+    const fixture = makePointerFixture(
+      { panel: { col: 1, row: 24, cols: 4, rows: 2 } },
+      storage,
+    );
+    const pointerId = 42;
+    fixture.header.dispatch("pointerdown", {
+      pointerId,
+      button: 0,
+      isPrimary: true,
+      clientX: 0,
+      clientY: 0,
+    });
+    fixture.header.dispatch("pointermove", { pointerId, clientX: 55, clientY: 70 });
+
+    fixture.reset(true);
+    assert.deepEqual(
+      { ...fixture.layout().panel },
+      { col: 1, row: 24, cols: 4, rows: 2 },
+    );
+    assert.deepEqual(fixture.announcements, ["Panel layout reset failed."]);
+    assert.deepEqual(fixture.header.captureCalls, ["capture:42", "release:42"]);
+    const appliedAfterReset = fixture.applied.length;
+
+    fixture.header.dispatch("lostpointercapture", { pointerId });
+    fixture.header.dispatch("pointerup", { pointerId });
+    assert.equal(fixture.applied.length, appliedAfterReset);
+    assert.deepEqual(
+      { ...fixture.layout().panel },
+      { col: 1, row: 24, cols: 4, rows: 2 },
+    );
+    assert.deepEqual(fixture.announcements, ["Panel layout reset failed."]);
+    assert.equal(storage.values.has("sdl-observability-panel-layout-v3"), true);
   });
 
   it("starts primary pointer movement only from a non-interactive panel header", () => {
