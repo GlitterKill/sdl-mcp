@@ -3,6 +3,7 @@
 
 import { buildToolOutputViewModel } from "./observability-tool-output.js";
 import {
+  GRID,
   migrateV2Layout,
   movePanel,
   normalizeV3Layout,
@@ -1062,6 +1063,40 @@ function resetDashboardLayout(storage, current, defaults, apply, announce) {
   }
 }
 
+const sameLayoutRect = (left, right) =>
+  left.col === right.col &&
+  left.row === right.row &&
+  left.cols === right.cols &&
+  left.rows === right.rows;
+
+function restoreLayoutTransaction(transaction, getLayout, setLayout, applyPanelRect) {
+  const restored = { ...getLayout(), [transaction.id]: transaction.origin };
+  setLayout(restored);
+  applyPanelRect(transaction.panel, transaction.origin);
+}
+
+function commitLayoutTransaction(
+  transaction,
+  storage,
+  getLayout,
+  setLayout,
+  applyPanelRect,
+  announce,
+) {
+  const rect = getLayout()[transaction.id];
+  if (sameLayoutRect(rect, transaction.origin)) return;
+  try {
+    storage.setItem(LAYOUT_V3_KEY, JSON.stringify(getLayout()));
+    announce(
+      `${transaction.name}, column ${rect.col}, row ${rect.row}, width ${rect.cols}, height ${rect.rows}`,
+    );
+  } catch {
+    restoreLayoutTransaction(transaction, getLayout, setLayout, applyPanelRect);
+    announce("Panel layout update failed.");
+    transaction.panel.focus();
+  }
+}
+
 function installKeyboardLayoutTransactions({
   entries,
   storage,
@@ -1072,21 +1107,14 @@ function installKeyboardLayoutTransactions({
   isEditMode,
   visibilityTarget,
   windowTarget,
+  cancelOtherTransaction = () => {},
 }) {
   let active = null;
   // A cancelled physical key can keep auto-repeating until its keyup arrives.
   const cancelledHeld = new Set();
 
-  const sameRect = (left, right) =>
-    left.col === right.col &&
-    left.row === right.row &&
-    left.cols === right.cols &&
-    left.rows === right.rows;
-
   const restoreOrigin = (transaction) => {
-    const restored = { ...getLayout(), [transaction.id]: transaction.origin };
-    setLayout(restored);
-    applyPanelRect(transaction.panel, transaction.origin);
+    restoreLayoutTransaction(transaction, getLayout, setLayout, applyPanelRect);
   };
 
   const cancel = () => {
@@ -1102,18 +1130,14 @@ function installKeyboardLayoutTransactions({
     const completed = active;
     active = null;
     completed.held.clear();
-    const rect = getLayout()[completed.id];
-    if (sameRect(rect, completed.origin)) return;
-    try {
-      storage.setItem(LAYOUT_V3_KEY, JSON.stringify(getLayout()));
-      announce(
-        `${completed.name}, column ${rect.col}, row ${rect.row}, width ${rect.cols}, height ${rect.rows}`,
-      );
-    } catch {
-      restoreOrigin(completed);
-      announce("Panel layout update failed.");
-      completed.panel.focus();
-    }
+    commitLayoutTransaction(
+      completed,
+      storage,
+      getLayout,
+      setLayout,
+      applyPanelRect,
+      announce,
+    );
   };
 
   const arrowDelta = (key) => {
@@ -1144,6 +1168,7 @@ function installKeyboardLayoutTransactions({
       event.preventDefault();
       if (active && active.panel !== entry.panel) cancel();
       if (!active) {
+        cancelOtherTransaction();
         active = {
           ...entry,
           origin: { ...getLayout()[entry.id] },
@@ -1177,6 +1202,169 @@ function installKeyboardLayoutTransactions({
   return { cancel };
 }
 
+const INTERACTIVE_HEADER_TARGET =
+  'a, button, input, select, textarea, summary, [contenteditable], [role], [tabindex]:not([tabindex="-1"])';
+
+function installPointerLayoutTransactions({
+  entries,
+  grid,
+  storage,
+  getLayout,
+  setLayout,
+  applyPanelRect,
+  announce,
+  isEditMode,
+  visibilityTarget,
+  windowTarget,
+  cancelOtherTransaction = () => {},
+}) {
+  let active = null;
+
+  const releaseCapture = (transaction) => {
+    try {
+      if (transaction.captureTarget.hasPointerCapture(transaction.pointerId)) {
+        transaction.captureTarget.releasePointerCapture(transaction.pointerId);
+      }
+    } catch {
+      // The browser may drop capture between the check and release.
+    }
+  };
+
+  const cancel = () => {
+    if (!active) return;
+    const cancelled = active;
+    // lostpointercapture may fire synchronously from release; clear ownership first.
+    active = null;
+    releaseCapture(cancelled);
+    restoreLayoutTransaction(cancelled, getLayout, setLayout, applyPanelRect);
+  };
+
+  const commit = () => {
+    const completed = active;
+    // A synthetic lostpointercapture from release must not turn a commit into rollback.
+    active = null;
+    releaseCapture(completed);
+    commitLayoutTransaction(
+      completed,
+      storage,
+      getLayout,
+      setLayout,
+      applyPanelRect,
+      announce,
+    );
+  };
+
+  const roundCells = (pixels, step) =>
+    Math.sign(pixels) * Math.floor((Math.abs(pixels) / step) + 0.5);
+
+  const gridSteps = () => {
+    const style = getComputedStyle(grid);
+    const gap = Number.parseFloat(style.columnGap);
+    const padding =
+      (Number.parseFloat(style.paddingLeft) || 0) +
+      (Number.parseFloat(style.paddingRight) || 0);
+    const contentWidth = grid.getBoundingClientRect().width - padding;
+    const track = (contentWidth - (gap * (GRID.columns - 1))) / GRID.columns;
+    const column = track + gap;
+    return Number.isFinite(column) && column > 0
+      ? { column, row: GRID.rowPx + GRID.gapPx }
+      : null;
+  };
+
+  const preview = (event) => {
+    if (event.pointerId !== active?.pointerId) return;
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+    const steps = gridSteps();
+    if (!steps) return;
+    event.preventDefault();
+    const dx = roundCells(event.clientX - active.startX, steps.column);
+    const dy = roundCells(event.clientY - active.startY, steps.row);
+    // Absolute origin-based previews avoid accumulating sub-cell pointer jitter.
+    const originLayout = { ...getLayout(), [active.id]: active.origin };
+    const candidate = active.mode === "resize"
+      ? resizePanel(originLayout, active.id, dx, dy)
+      : movePanel(originLayout, active.id, dx, dy);
+    if (candidate === originLayout) return;
+    active.lastValid = candidate[active.id];
+    const next = { ...getLayout(), [active.id]: active.lastValid };
+    setLayout(next);
+    applyPanelRect(active.panel, active.lastValid);
+  };
+
+  const finish = (event) => {
+    if (event.pointerId !== active?.pointerId) return;
+    commit();
+  };
+
+  const cancelled = (event) => {
+    if (event.pointerId !== active?.pointerId) return;
+    cancel();
+  };
+
+  const start = (entry, mode, captureTarget, event) => {
+    if (
+      !isEditMode() ||
+      event.button !== 0 ||
+      event.isPrimary !== true ||
+      !Number.isInteger(event.pointerId) ||
+      !Number.isFinite(event.clientX) ||
+      !Number.isFinite(event.clientY)
+    ) return;
+    cancel();
+    cancelOtherTransaction();
+    try {
+      captureTarget.setPointerCapture(event.pointerId);
+    } catch {
+      return;
+    }
+    const origin = { ...getLayout()[entry.id] };
+    active = {
+      ...entry,
+      mode,
+      pointerId: event.pointerId,
+      captureTarget,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin,
+      lastValid: origin,
+    };
+    entry.panel.focus();
+    event.preventDefault();
+  };
+
+  for (const entry of entries) {
+    entry.header.addEventListener("pointerdown", (event) => {
+      if (
+        event.target !== event.currentTarget &&
+        event.target?.closest?.(INTERACTIVE_HEADER_TARGET)
+      ) return;
+      start(entry, "move", entry.header, event);
+    });
+    entry.resizeGrip.addEventListener("pointerdown", (event) => {
+      if (event.target !== event.currentTarget) return;
+      start(entry, "resize", entry.resizeGrip, event);
+    });
+    for (const target of [entry.header, entry.resizeGrip]) {
+      target.addEventListener("pointermove", preview);
+      target.addEventListener("pointerup", finish);
+      target.addEventListener("pointercancel", cancelled);
+      target.addEventListener("lostpointercapture", cancelled);
+    }
+    entry.panel.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !active) return;
+      event.preventDefault();
+      cancel();
+    });
+    entry.panel.addEventListener("blur", cancel);
+  }
+
+  visibilityTarget.addEventListener("visibilitychange", () => {
+    if (visibilityTarget.visibilityState !== "visible") cancel();
+  });
+  windowTarget.addEventListener("blur", cancel);
+  return { cancel };
+}
+
 function initDashboardLayoutEditor() {
   const grid = document.querySelector("#dashboard.dashboard-grid");
   const layoutEditBtn = document.querySelector("#layoutEditBtn");
@@ -1190,6 +1378,7 @@ function initDashboardLayoutEditor() {
   const defaults = migrateV2Layout({}, panelIds);
   let layout = loadDashboardLayout(panelIds, localStorage);
   let cancelKeyboardTransaction = () => {};
+  let cancelPointerTransaction = () => {};
 
   const applyPanelRect = (panel, rect) => {
     panel.style.setProperty("--panel-col", String(rect.col));
@@ -1200,7 +1389,10 @@ function initDashboardLayoutEditor() {
 
   const setEditMode = (requested) => {
     const enabled = requested && !mobile.matches;
-    if (!enabled) cancelKeyboardTransaction();
+    if (!enabled) {
+      cancelKeyboardTransaction();
+      cancelPointerTransaction();
+    }
     grid.dataset.layoutEdit = String(enabled);
     layoutEditBtn.setAttribute("aria-pressed", String(enabled));
     for (const panel of panels) {
@@ -1237,6 +1429,7 @@ function initDashboardLayoutEditor() {
   mobile.addEventListener("change", () => setEditMode(false));
 
   const keyboardEntries = [];
+  const pointerEntries = [];
   for (const panel of panels) {
     try {
       const heading = panel.querySelector(":scope > .panel-head h2");
@@ -1257,6 +1450,13 @@ function initDashboardLayoutEditor() {
       resizeGrip.setAttribute("aria-label", `Resize ${panelName}`);
       resizeGrip.setAttribute("aria-describedby", "layoutInstructions");
       panel.append(resizeGrip);
+      pointerEntries.push({
+        panel,
+        header: panel.querySelector(":scope > .panel-head"),
+        resizeGrip,
+        id: panel.dataset.panel,
+        name: panelName,
+      });
     } catch {
       panel.removeAttribute("tabindex");
     }
@@ -1276,6 +1476,24 @@ function initDashboardLayoutEditor() {
     isEditMode: () => grid.dataset.layoutEdit === "true",
     visibilityTarget: document,
     windowTarget: window,
+    cancelOtherTransaction: () => cancelPointerTransaction(),
+  }));
+  ({ cancel: cancelPointerTransaction } = installPointerLayoutTransactions({
+    entries: pointerEntries,
+    grid,
+    storage: localStorage,
+    getLayout: () => layout,
+    setLayout: (next) => {
+      layout = next;
+    },
+    applyPanelRect,
+    announce: (message) => {
+      if (layoutStatus) layoutStatus.textContent = message;
+    },
+    isEditMode: () => grid.dataset.layoutEdit === "true",
+    visibilityTarget: document,
+    windowTarget: window,
+    cancelOtherTransaction: () => cancelKeyboardTransaction(),
   }));
 
   setEditMode(false);

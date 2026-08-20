@@ -96,12 +96,35 @@ type DashboardHarness = {
     visibilityTarget: FakeEventTarget;
     windowTarget: FakeEventTarget;
   }): { cancel: () => void };
+  installPointerLayoutTransactions?: (options: {
+    entries: Array<{
+      panel: FakeEventTarget;
+      header: FakeEventTarget;
+      resizeGrip: FakeEventTarget;
+      id: string;
+      name: string;
+    }>;
+    grid: FakeEventTarget;
+    storage: StorageHarness;
+    getLayout: () => Layout;
+    setLayout: (layout: Layout) => void;
+    applyPanelRect: (panel: FakeEventTarget, rect: Rect) => void;
+    announce: (message: string) => void;
+    isEditMode: () => boolean;
+    visibilityTarget: FakeEventTarget;
+    windowTarget: FakeEventTarget;
+  }) => { cancel: () => void };
 };
 
 type FakeEvent = {
   key?: string;
   shiftKey?: boolean;
   repeat?: boolean;
+  pointerId?: number;
+  button?: number;
+  isPrimary?: boolean;
+  clientX?: number;
+  clientY?: number;
   target: unknown;
   currentTarget: unknown;
   defaultPrevented: boolean;
@@ -112,6 +135,9 @@ class FakeEventTarget {
   readonly listeners = new Map<string, Array<(event: FakeEvent) => void>>();
   visibilityState = "visible";
   focusCount = 0;
+  width = 1_306;
+  readonly captureCalls: string[] = [];
+  readonly capturedPointers = new Set<number>();
 
   addEventListener(type: string, listener: (event: FakeEvent) => void): void {
     const listeners = this.listeners.get(type) ?? [];
@@ -135,6 +161,25 @@ class FakeEventTarget {
 
   focus(): void {
     this.focusCount++;
+  }
+
+  getBoundingClientRect(): { width: number } {
+    return { width: this.width };
+  }
+
+  setPointerCapture(pointerId: number): void {
+    this.captureCalls.push(`capture:${pointerId}`);
+    this.capturedPointers.add(pointerId);
+  }
+
+  hasPointerCapture(pointerId: number): boolean {
+    return this.capturedPointers.has(pointerId);
+  }
+
+  releasePointerCapture(pointerId: number): void {
+    this.captureCalls.push(`release:${pointerId}`);
+    if (!this.capturedPointers.delete(pointerId)) return;
+    this.dispatch("lostpointercapture", { pointerId });
   }
 }
 
@@ -177,16 +222,66 @@ function loadDashboardHarness(): DashboardHarness {
     .replace(/^import[\s\S]*?;\s*$/gm, "")
     .replace(/\nif \(document\.readyState === "loading"\)[\s\S]*$/, "");
   const context = {
+    getComputedStyle: () => ({ columnGap: "14px" }),
+    GRID,
     migrateV2Layout,
     movePanel,
     normalizeV3Layout,
     resizePanel,
   } as Record<string, unknown>;
   runInNewContext(
-    `${source}\nglobalThis.__layoutHarness = { loadDashboardLayout, resetDashboardLayout, installKeyboardLayoutTransactions };`,
+    `${source}\nglobalThis.__layoutHarness = { loadDashboardLayout, resetDashboardLayout, installKeyboardLayoutTransactions, installPointerLayoutTransactions: typeof installPointerLayoutTransactions === "function" ? installPointerLayoutTransactions : undefined };`,
     context,
   );
   return context.__layoutHarness as DashboardHarness;
+}
+
+function makePointerFixture(
+  initial: Layout = { panel: { col: 1, row: 1, cols: 4, rows: 2 } },
+  storage = makeStorage(),
+) {
+  const harness = loadDashboardHarness();
+  assert.ok(harness.installPointerLayoutTransactions, "pointer transaction adapter exists");
+  const panel = new FakeEventTarget();
+  const header = new FakeEventTarget();
+  const resizeGrip = new FakeEventTarget();
+  const grid = new FakeEventTarget();
+  const visibilityTarget = new FakeEventTarget();
+  const windowTarget = new FakeEventTarget();
+  const announcements: string[] = [];
+  const applied: Rect[] = [];
+  let layout = structuredClone(initial);
+  let editMode = true;
+  const controller = harness.installPointerLayoutTransactions({
+    entries: [{ panel, header, resizeGrip, id: "panel", name: "Cache" }],
+    grid,
+    storage,
+    getLayout: () => layout,
+    setLayout: (next) => {
+      layout = next;
+    },
+    applyPanelRect: (_panel, rect) => applied.push({ ...rect }),
+    announce: (message) => announcements.push(message),
+    isEditMode: () => editMode,
+    visibilityTarget,
+    windowTarget,
+  });
+  return {
+    panel,
+    header,
+    resizeGrip,
+    grid,
+    visibilityTarget,
+    windowTarget,
+    announcements,
+    applied,
+    storage,
+    controller,
+    layout: () => layout,
+    setEditMode: (enabled: boolean) => {
+      editMode = enabled;
+    },
+  };
 }
 
 function makeKeyboardFixture(
@@ -279,7 +374,6 @@ describe("dashboard layout geometry", () => {
     assert.match(dashboardSource, /sdl-observability-panel-layout-v3/);
     assert.match(dashboardSource, /sdl-observability-panel-layout-v2/);
     assert.doesNotMatch(dashboardSource, /const defaults = \{/);
-    assert.doesNotMatch(dashboardSource, /addEventListener\("pointerdown"/);
     assert.match(
       dashboardSource,
       /catch \{[\s\S]*?return defaults;[\s\S]*?\}/,
@@ -782,7 +876,10 @@ describe("dashboard layout geometry", () => {
       assert.deepEqual(fixture.storage.calls, [], cancel);
       assert.deepEqual(fixture.announcements, [], cancel);
     }
-    assert.match(dashboardSource, /if \(!enabled\) cancelKeyboardTransaction\(\);/);
+    assert.match(
+      dashboardSource,
+      /if \(!enabled\) \{\s*cancelKeyboardTransaction\(\);\s*cancelPointerTransaction\(\);\s*\}/,
+    );
   });
 
   it("rolls back safely and reports failure when browser persistence is denied", () => {
@@ -797,5 +894,152 @@ describe("dashboard layout geometry", () => {
     assert.deepEqual({ ...fixture.layout().panel }, { col: 1, row: 1, cols: 4, rows: 2 });
     assert.deepEqual(fixture.announcements, ["Panel layout update failed."]);
     assert.equal(fixture.panel.focusCount, 1);
+  });
+
+  it("starts primary pointer movement only from a non-interactive panel header", () => {
+    const fixture = makePointerFixture({
+      panel: { col: 1, row: 1, cols: 4, rows: 2 },
+      blocker: { col: 7, row: 1, cols: 4, rows: 2 },
+    });
+    const pointer = { pointerId: 7, button: 0, isPrimary: true, clientX: 0, clientY: 0 };
+
+    fixture.setEditMode(false);
+    fixture.header.dispatch("pointerdown", {
+      ...pointer,
+      target: { closest: () => null },
+    });
+    fixture.setEditMode(true);
+    fixture.panel.dispatch("pointerdown", pointer);
+    fixture.header.dispatch("pointerdown", { ...pointer, button: 1 });
+    fixture.header.dispatch("pointerdown", { ...pointer, isPrimary: false });
+    fixture.header.dispatch("pointerdown", {
+      ...pointer,
+      target: { closest: () => ({}) },
+    });
+    assert.deepEqual(fixture.header.captureCalls, []);
+
+    fixture.header.dispatch("pointerdown", {
+      ...pointer,
+      target: { closest: () => null },
+    });
+    assert.deepEqual(fixture.header.captureCalls, ["capture:7"]);
+    assert.equal(fixture.panel.focusCount, 1);
+
+    fixture.header.dispatch("pointermove", { pointerId: 8, clientX: 110, clientY: 70 });
+    fixture.header.dispatch("pointercancel", { pointerId: 8 });
+    assert.deepEqual(fixture.layout().panel, { col: 1, row: 1, cols: 4, rows: 2 });
+    assert.deepEqual(fixture.header.captureCalls, ["capture:7"]);
+    fixture.header.dispatch("pointermove", { pointerId: 7, clientX: 110, clientY: 70 });
+    assert.deepEqual(fixture.layout().panel, { col: 3, row: 2, cols: 4, rows: 2 });
+
+    fixture.header.dispatch("pointermove", { pointerId: 7, clientX: 220, clientY: 0 });
+    assert.deepEqual(
+      fixture.layout().panel,
+      { col: 3, row: 2, cols: 4, rows: 2 },
+      "a colliding preview retains the last valid rectangle",
+    );
+    assert.deepEqual(fixture.storage.calls, []);
+    assert.deepEqual(fixture.announcements, []);
+
+    fixture.header.dispatch("pointerup", { pointerId: 8 });
+    assert.deepEqual(fixture.header.captureCalls, ["capture:7"]);
+    fixture.header.dispatch("pointerup", { pointerId: 7 });
+    fixture.header.dispatch("pointerup", { pointerId: 7 });
+    assert.deepEqual(fixture.header.captureCalls, ["capture:7", "release:7"]);
+    assert.deepEqual(fixture.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
+    assert.deepEqual(fixture.announcements, [
+      "Cache, column 3, row 2, width 4, height 2",
+    ]);
+  });
+
+  it("resizes only from the exact bottom-right handle and skips no-op commits", () => {
+    const fixture = makePointerFixture();
+    const pointer = { pointerId: 12, button: 0, isPrimary: true, clientX: 10, clientY: 20 };
+
+    fixture.resizeGrip.dispatch("pointerdown", {
+      ...pointer,
+      target: { closest: () => null },
+    });
+    assert.deepEqual(fixture.resizeGrip.captureCalls, []);
+
+    fixture.resizeGrip.dispatch("pointerdown", pointer);
+    fixture.resizeGrip.dispatch("pointermove", {
+      pointerId: 12,
+      clientX: 65,
+      clientY: 160,
+    });
+    assert.deepEqual(fixture.layout().panel, { col: 1, row: 1, cols: 5, rows: 4 });
+    assert.deepEqual(fixture.storage.calls, []);
+    fixture.resizeGrip.dispatch("pointerup", { pointerId: 12 });
+    assert.deepEqual(fixture.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
+    assert.deepEqual(fixture.announcements, [
+      "Cache, column 1, row 1, width 5, height 4",
+    ]);
+
+    fixture.resizeGrip.dispatch("pointerdown", { ...pointer, pointerId: 13 });
+    fixture.resizeGrip.dispatch("pointerup", { pointerId: 13 });
+    assert.deepEqual(fixture.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
+    assert.equal(fixture.announcements.length, 1);
+  });
+
+  it("rolls pointer previews back on every cancellation source before releasing capture", () => {
+    for (const cancel of [
+      "pointercancel",
+      "lostcapture",
+      "escape",
+      "panel-blur",
+      "window-blur",
+      "visibility",
+      "edit-exit",
+    ] as const) {
+      const fixture = makePointerFixture();
+      const pointerId = 21;
+      fixture.header.dispatch("pointerdown", {
+        pointerId,
+        button: 0,
+        isPrimary: true,
+        clientX: 0,
+        clientY: 0,
+      });
+      fixture.header.dispatch("pointermove", { pointerId, clientX: 55, clientY: 70 });
+      assert.deepEqual(fixture.layout().panel, { col: 2, row: 2, cols: 4, rows: 2 });
+
+      if (cancel === "pointercancel") fixture.header.dispatch("pointercancel", { pointerId });
+      if (cancel === "lostcapture") {
+        fixture.header.capturedPointers.delete(pointerId);
+        fixture.header.dispatch("lostpointercapture", { pointerId });
+      }
+      if (cancel === "escape") {
+        const event = fixture.panel.dispatch("keydown", { key: "Escape" });
+        assert.equal(event.defaultPrevented, true);
+      }
+      if (cancel === "panel-blur") fixture.panel.dispatch("blur");
+      if (cancel === "window-blur") fixture.windowTarget.dispatch("blur");
+      if (cancel === "visibility") {
+        fixture.visibilityTarget.visibilityState = "hidden";
+        fixture.visibilityTarget.dispatch("visibilitychange");
+      }
+      if (cancel === "edit-exit") fixture.controller.cancel();
+
+      assert.deepEqual(
+        { ...fixture.layout().panel },
+        { col: 1, row: 1, cols: 4, rows: 2 },
+        cancel,
+      );
+      assert.deepEqual(fixture.storage.calls, [], cancel);
+      assert.deepEqual(fixture.announcements, [], cancel);
+      assert.equal(fixture.applied.length, 2, `${cancel}: preview then one rollback`);
+      fixture.header.dispatch("pointerup", { pointerId });
+      assert.deepEqual(fixture.storage.calls, [], `${cancel}: late pointerup`);
+      assert.deepEqual(fixture.announcements, [], `${cancel}: late pointerup`);
+      assert.equal(fixture.header.capturedPointers.size, 0, cancel);
+      assert.deepEqual(
+        fixture.header.captureCalls,
+        cancel === "lostcapture"
+          ? ["capture:21"]
+          : ["capture:21", "release:21"],
+        cancel,
+      );
+    }
   });
 });
