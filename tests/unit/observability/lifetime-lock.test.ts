@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import {
   link,
@@ -50,6 +51,44 @@ function lockRecord(
   createdAt = ISO_1,
 ): string {
   return JSON.stringify({ schemaVersion: 1, pid, createdAt, nonce });
+}
+
+function createAnchorRecord(
+  claimantPid: number,
+  nonce: string,
+  lockPid = claimantPid,
+  createdAt = ISO_1,
+  lockCreatedAt = createdAt,
+): string {
+  const lock = { schemaVersion: 1, pid: lockPid, createdAt: lockCreatedAt, nonce };
+  return JSON.stringify({
+    schemaVersion: 1,
+    pid: claimantPid,
+    createdAt,
+    nonce,
+    lock,
+    lockSha256: createHash("sha256").update(JSON.stringify(lock)).digest("hex"),
+  });
+}
+
+async function fileSnapshot(path: string) {
+  const content = await readFile(path);
+  const stat = await lstat(path);
+  return {
+    dev: stat.dev.toString(),
+    ino: stat.ino.toString(),
+    size: stat.size,
+    sha256: createHash("sha256").update(content).digest("hex"),
+  };
+}
+
+function claimRecord(
+  pid: number,
+  nonce: string,
+  source: Awaited<ReturnType<typeof fileSnapshot>>,
+  createdAt = ISO_1,
+): string {
+  return JSON.stringify({ schemaVersion: 1, pid, createdAt, nonce, source });
 }
 
 function assertWriter(
@@ -575,24 +614,14 @@ describe("lifetime persistence lock", () => {
       const nonce = index.toString(16).padStart(32, "0");
       await writeFile(
         join(directory, `.sdl-observability-lifetime.create.${nonce}`),
-        lockRecord(999_999, nonce),
+        createAnchorRecord(999_999, nonce),
         { mode: 0o600 },
       );
     }
-    const inspected = new Set<string>();
     const result = await acquireLifetimeLease(directory, {
       isClaimantPidAlive: () => false,
-      fileSystem: {
-        open: async (...args: Parameters<typeof open>) => {
-          if (basename(String(args[0])).startsWith(".sdl-observability-lifetime.")) {
-            inspected.add(basename(String(args[0])).replace(/\.cleanup(?:-next)?$/, ""));
-          }
-          return open(...args);
-        },
-      },
     });
     assert.equal(result.mode, "readOnly");
-    assert.ok(inspected.size <= 32, `inspected ${inspected.size} auxiliaries`);
     assert.equal((await auxiliaryFiles(directory)).length, 1);
 
     const successor = await acquireLifetimeLease(directory, {
@@ -601,6 +630,132 @@ describe("lifetime persistence lock", () => {
     assertWriter(successor);
     assert.deepEqual(await auxiliaryFiles(directory), []);
     assert.equal(await releaseLifetimeLease(successor.lease), true);
+  });
+
+  it("applies the cleanup budget to complete claim dependency groups", async () => {
+    const directory = await temporaryDirectory();
+    for (let index = 0; index < 32; index++) {
+      const nonce = index.toString(16).padStart(32, "0");
+      const source = join(directory, `group-source-${index}.json`);
+      await writeFile(source, lockRecord(90_000 + index));
+      const snapshot = await fileSnapshot(source);
+      const createdAt = new Date(Date.parse(ISO_1) + index).toISOString();
+      await writeFile(
+        join(directory, `.sdl-observability-lifetime.claim-record.${nonce}.json`),
+        claimRecord(999_999, nonce, snapshot, createdAt),
+      );
+      await link(source, join(directory, `.sdl-observability-lifetime.claim-source.${nonce}`));
+    }
+
+    const first = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assert.equal(first.mode, "readOnly");
+    for (let index = 0; index < 32; index++) {
+      const nonce = index.toString(16).padStart(32, "0");
+      const record = join(directory, `.sdl-observability-lifetime.claim-record.${nonce}.json`);
+      const witness = join(directory, `.sdl-observability-lifetime.claim-source.${nonce}`);
+      if (index < 16) {
+        await assertMissing(record);
+        await assertMissing(witness);
+      } else {
+        assert.equal((await lstat(record)).isFile(), true);
+        assert.equal((await lstat(witness)).isFile(), true);
+      }
+    }
+
+    const second = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(second);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+    assert.equal(await releaseLifetimeLease(second.lease), true);
+  });
+
+  it("preserves one dependency group larger than the cleanup budget", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "oversized-group-source.json");
+    await writeFile(source, lockRecord(91_000));
+    const snapshot = await fileSnapshot(source);
+    for (let index = 0; index < 17; index++) {
+      const nonce = (index + 100).toString(16).padStart(32, "0");
+      await writeFile(
+        join(directory, `.sdl-observability-lifetime.claim-record.${nonce}.json`),
+        claimRecord(999_999, nonce, snapshot),
+      );
+      await link(source, join(directory, `.sdl-observability-lifetime.claim-source.${nonce}`));
+    }
+    const before = await auxiliaryFiles(directory);
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assert.equal(result.mode, "readOnly");
+    assert.deepEqual(await auxiliaryFiles(directory), before);
+  });
+
+  it("preserves create-lock candidates whose bound metadata disagrees", async () => {
+    for (const mismatch of ["pid", "timestamp", "nonce", "live-candidate"] as const) {
+      const directory = await temporaryDirectory();
+      const nonce = "a".repeat(32);
+      const candidateNonce = mismatch === "nonce" ? "b".repeat(32) : nonce;
+      const candidatePid = mismatch === "pid" ? 888_888
+        : mismatch === "live-candidate" ? process.pid
+          : 999_999;
+      const expectedLockPid = mismatch === "live-candidate" ? process.pid : 999_999;
+      const candidateTime = mismatch === "timestamp" ? ISO_2 : ISO_1;
+      await writeFile(
+        join(directory, `.sdl-observability-lifetime.create.${nonce}`),
+        createAnchorRecord(999_999, nonce, expectedLockPid, ISO_1, ISO_1),
+      );
+      await writeFile(
+        join(directory, `.sdl-observability-lifetime.create-lock.${nonce}`),
+        lockRecord(candidatePid, candidateNonce, candidateTime),
+      );
+      const before = await auxiliaryFiles(directory);
+
+      const result = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: (pid) => mismatch === "live-candidate" && pid === process.pid,
+      });
+      assert.equal(result.mode, "readOnly", mismatch);
+      assert.deepEqual(await auxiliaryFiles(directory), before, mismatch);
+    }
+  });
+
+  it("preserves claim artifacts whose filename nonce disagrees with content", async () => {
+    for (const kind of ["cleanup", "recovery-witness", "recovery-moved"] as const) {
+      const directory = await temporaryDirectory();
+      const source = join(directory, `${kind}-source.json`);
+      await writeFile(source, lockRecord(92_000));
+      const embeddedNonce = "c".repeat(32);
+      const filenameNonce = "d".repeat(32);
+      const path = join(
+        directory,
+        `.sdl-observability-lifetime.claim-${kind}.${filenameNonce}`,
+      );
+      await writeFile(path, claimRecord(999_999, embeddedNonce, await fileSnapshot(source)));
+
+      const result = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+      });
+      assert.equal(result.mode, "readOnly", kind);
+      assert.equal((await lstat(path)).isFile(), true, kind);
+    }
+  });
+
+  it("preserves a claim artifact without its paired durable record", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "standalone-cleanup-source.json");
+    await writeFile(source, lockRecord(93_000));
+    const nonce = "e".repeat(32);
+    const path = join(directory, `.sdl-observability-lifetime.claim-cleanup.${nonce}`);
+    await writeFile(path, claimRecord(999_999, nonce, await fileSnapshot(source)));
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assert.equal(result.mode, "readOnly");
+    assert.equal((await lstat(path)).isFile(), true);
   });
 
   it("preserves malformed or identity-mismatched claim metadata", async () => {

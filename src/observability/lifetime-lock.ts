@@ -115,6 +115,23 @@ function serializeLock(record: LifetimeLockRecord): string {
   });
 }
 
+function serializeCreateAnchor(record: LifetimeLockRecord): string {
+  const lock = {
+    schemaVersion: record.schemaVersion,
+    pid: record.pid,
+    createdAt: record.createdAt,
+    nonce: record.nonce,
+  };
+  return JSON.stringify({
+    schemaVersion: 1,
+    pid: process.pid,
+    createdAt: record.createdAt,
+    nonce: record.nonce,
+    lock,
+    lockSha256: createHash("sha256").update(JSON.stringify(lock)).digest("hex"),
+  });
+}
+
 async function closeQuietly(handle: FileHandle | undefined): Promise<void> {
   await handle?.close().catch(() => undefined);
 }
@@ -248,12 +265,7 @@ async function createWriterLock(
     directory,
     `.sdl-observability-lifetime.create.${record.nonce}`,
   );
-  const anchorContent = serializeLock({
-    schemaVersion: 1,
-    pid: process.pid,
-    createdAt: record.createdAt,
-    nonce: record.nonce,
-  });
+  const anchorContent = serializeCreateAnchor(record);
   let handle: FileHandle | undefined;
   let anchorIdentity: LifetimeSourceSnapshot | undefined;
   let claim: LifetimeSourceClaim | undefined;

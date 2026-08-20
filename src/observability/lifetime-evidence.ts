@@ -11,6 +11,7 @@ export const LIFETIME_CLAIM_FILENAME = "sdl-observability-lifetime.claim";
 const MAX_EVIDENCE_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_CLAIM_BYTES = 16 * 1024;
 const MAX_LIFETIME_AUXILIARIES = 32;
+const MAX_LIFETIME_AUXILIARY_SCAN = 256;
 const CLAIM_WAIT_ATTEMPTS = 1_000;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const HEX_128 = /^[0-9a-f]{32}$/;
@@ -80,13 +81,26 @@ interface EvidenceEntry {
   readonly snapshot: LifetimeSourceSnapshot;
 }
 
+interface SimpleAuxiliaryRecord {
+  readonly schemaVersion: 1;
+  readonly pid: number;
+  readonly createdAt: string;
+  readonly nonce: string;
+}
+
+interface CreateAuxiliaryRecord extends SimpleAuxiliaryRecord {
+  readonly lock: SimpleAuxiliaryRecord;
+  readonly lockSha256: string;
+}
+
 interface AuxiliaryEntry {
   readonly name: string;
   readonly logicalName: string;
   readonly path: string;
   readonly snapshot: LifetimeSourceSnapshot;
   readonly claim: LifetimeClaimRecord | null;
-  readonly simple: { readonly pid: number; readonly nonce: string } | null;
+  readonly simple: SimpleAuxiliaryRecord | null;
+  readonly create: CreateAuxiliaryRecord | null;
   readonly nonce: string | null;
   readonly kind: "create" | "created-lock" | "record" | "witness" |
     "claim-artifact" | "moved-source" | "evidence-delete";
@@ -312,28 +326,71 @@ function parseClaim(content: Buffer): LifetimeClaimRecord | null {
   }
 }
 
-function parseSimpleAuxiliary(
-  content: Buffer,
-): { readonly pid: number; readonly nonce: string } | null {
+function parseSimpleAuxiliaryValue(value: unknown): SimpleAuxiliaryRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    JSON.stringify(Object.keys(record)) !==
+      JSON.stringify(["schemaVersion", "pid", "createdAt", "nonce"]) ||
+    record.schemaVersion !== 1 ||
+    !Number.isSafeInteger(record.pid) ||
+    Number(record.pid) <= 0 ||
+    typeof record.createdAt !== "string" ||
+    !ISO_TIMESTAMP.test(record.createdAt) ||
+    new Date(record.createdAt).toISOString() !== record.createdAt ||
+    typeof record.nonce !== "string" ||
+    !HEX_128.test(record.nonce)
+  ) {
+    return null;
+  }
+  return {
+    schemaVersion: 1,
+    pid: Number(record.pid),
+    createdAt: record.createdAt,
+    nonce: record.nonce,
+  };
+}
+
+function parseSimpleAuxiliary(content: Buffer): SimpleAuxiliaryRecord | null {
+  try {
+    return parseSimpleAuxiliaryValue(JSON.parse(content.toString("utf8")) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function parseCreateAuxiliary(content: Buffer): CreateAuxiliaryRecord | null {
   try {
     const parsed: unknown = JSON.parse(content.toString("utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const value = parsed as Record<string, unknown>;
     if (
-      JSON.stringify(Object.keys(value)) !==
-        JSON.stringify(["schemaVersion", "pid", "createdAt", "nonce"]) ||
-      value.schemaVersion !== 1 ||
-      !Number.isSafeInteger(value.pid) ||
-      Number(value.pid) <= 0 ||
-      typeof value.createdAt !== "string" ||
-      !ISO_TIMESTAMP.test(value.createdAt) ||
-      new Date(value.createdAt).toISOString() !== value.createdAt ||
-      typeof value.nonce !== "string" ||
-      !HEX_128.test(value.nonce)
+      JSON.stringify(Object.keys(value)) !== JSON.stringify([
+        "schemaVersion",
+        "pid",
+        "createdAt",
+        "nonce",
+        "lock",
+        "lockSha256",
+      ]) ||
+      typeof value.lockSha256 !== "string" ||
+      !SHA_256.test(value.lockSha256)
     ) {
       return null;
     }
-    return { pid: Number(value.pid), nonce: value.nonce };
+    const simple = parseSimpleAuxiliaryValue({
+      schemaVersion: value.schemaVersion,
+      pid: value.pid,
+      createdAt: value.createdAt,
+      nonce: value.nonce,
+    });
+    const lock = parseSimpleAuxiliaryValue(value.lock);
+    if (!simple || !lock || lock.nonce !== simple.nonce) return null;
+    const lockSha256 = createHash("sha256")
+      .update(JSON.stringify(lock))
+      .digest("hex");
+    if (lockSha256 !== value.lockSha256) return null;
+    return { ...simple, lock, lockSha256 };
   } catch {
     return null;
   }
@@ -481,16 +538,17 @@ function classifyAuxiliary(
       : name;
   const create = CREATE_AUXILIARY.exec(logicalName);
   if (create) {
-    const simple = parseSimpleAuxiliary(source.content);
-    if (!simple || simple.nonce !== create[1]) return null;
+    const createRecord = parseCreateAuxiliary(source.content);
+    if (!createRecord || createRecord.nonce !== create[1]) return null;
     return {
       name,
       logicalName,
       path: resolve(directory, name),
       snapshot: source.snapshot,
       claim: null,
-      simple,
-      nonce: simple.nonce,
+      simple: null,
+      create: createRecord,
+      nonce: createRecord.nonce,
       kind: "create",
     };
   }
@@ -506,6 +564,7 @@ function classifyAuxiliary(
       snapshot: source.snapshot,
       claim: null,
       simple,
+      create: null,
       nonce: simple.nonce,
       kind: "created-lock",
     };
@@ -520,6 +579,7 @@ function classifyAuxiliary(
       snapshot: source.snapshot,
       claim,
       simple: null,
+      create: null,
       nonce: claim.nonce,
       kind: "record",
     };
@@ -533,13 +593,15 @@ function classifyAuxiliary(
       snapshot: source.snapshot,
       claim: null,
       simple: null,
+      create: null,
       nonce: witness[1] ?? null,
       kind: "witness",
     };
   }
-  if (CLAIM_AUXILIARY.test(logicalName)) {
+  const claimArtifact = CLAIM_AUXILIARY.exec(logicalName);
+  if (claimArtifact) {
     const claim = parseClaim(source.content);
-    if (!claim) return null;
+    if (!claim || claim.nonce !== claimArtifact[1]) return null;
     return {
       name,
       logicalName,
@@ -547,6 +609,7 @@ function classifyAuxiliary(
       snapshot: source.snapshot,
       claim,
       simple: null,
+      create: null,
       nonce: claim.nonce,
       kind: "claim-artifact",
     };
@@ -560,6 +623,7 @@ function classifyAuxiliary(
       snapshot: source.snapshot,
       claim: null,
       simple: null,
+      create: null,
       nonce: moved[1] ?? null,
       kind: "moved-source",
     };
@@ -575,6 +639,7 @@ function classifyAuxiliary(
       snapshot: source.snapshot,
       claim: null,
       simple: null,
+      create: null,
       nonce: null,
       kind: "evidence-delete",
     };
@@ -588,6 +653,19 @@ function sameClaimRecord(left: LifetimeClaimRecord, right: LifetimeClaimRecord):
     left.createdAt === right.createdAt &&
     left.nonce === right.nonce &&
     sameLifetimeSource(left.source, right.source);
+}
+
+function sameSimpleRecord(left: SimpleAuxiliaryRecord, right: SimpleAuxiliaryRecord): boolean {
+  return left.schemaVersion === right.schemaVersion &&
+    left.pid === right.pid &&
+    left.createdAt === right.createdAt &&
+    left.nonce === right.nonce;
+}
+
+function sourceGroupKey(source: LifetimeSourceSnapshot): string {
+  return source.ino !== "0"
+    ? `inode:${source.dev}:${source.ino}`
+    : `content:${source.size}:${source.sha256}`;
 }
 
 async function removeValidatedAuxiliary(
@@ -633,12 +711,11 @@ async function recoverStrandedAuxiliaries(
     .filter((name) => name.startsWith(AUXILIARY_PREFIX) && !ignoredNames.has(name))
     .sort();
   if (allNames.length === 0) return "available";
-  const overCap = allNames.length > MAX_LIFETIME_AUXILIARIES;
-  const names = allNames.slice(0, MAX_LIFETIME_AUXILIARIES);
+  if (allNames.length > MAX_LIFETIME_AUXILIARY_SCAN) return "invalid";
   const entries: AuxiliaryEntry[] = [];
   const logicalNames = new Set<string>();
   try {
-    for (const name of names) {
+    for (const name of allNames) {
       const path = directChildPath(directory, resolve(directory, name), "Lifetime auxiliary");
       const source = await readLifetimeSource(path, fileSystem, MAX_EVIDENCE_SOURCE_BYTES);
       const entry = classifyAuxiliary(directory, name, source);
@@ -652,12 +729,16 @@ async function recoverStrandedAuxiliaries(
 
   const claims = new Map<string, LifetimeClaimRecord>();
   for (const entry of entries) {
-    if (!entry.claim) continue;
+    if (entry.kind !== "record" || !entry.claim) continue;
     const existing = claims.get(entry.claim.nonce);
     if (existing && !sameClaimRecord(existing, entry.claim)) return "invalid";
     claims.set(entry.claim.nonce, entry.claim);
   }
   for (const entry of entries) {
+    if (entry.kind === "claim-artifact") {
+      const durable = entry.nonce ? claims.get(entry.nonce) : undefined;
+      if (!durable || !entry.claim || !sameClaimRecord(durable, entry.claim)) return "invalid";
+    }
     if (entry.kind === "witness" || entry.kind === "moved-source") {
       const claim = entry.nonce ? claims.get(entry.nonce) : undefined;
       if (!claim || !sameLifetimeIdentity(entry.snapshot, claim.source)) return "invalid";
@@ -665,19 +746,27 @@ async function recoverStrandedAuxiliaries(
     if (entry.kind === "create") {
       const referringClaim = [...claims.values()].find((claim) =>
         sameLifetimeIdentity(entry.snapshot, claim.source));
-      if (referringClaim && referringClaim.pid !== entry.simple?.pid) return "invalid";
+      if (referringClaim && referringClaim.pid !== entry.create?.pid) return "invalid";
     }
     if (entry.kind === "created-lock") {
       const anchor = entries.find((candidate) =>
         candidate.kind === "create" && candidate.nonce === entry.nonce);
-      if (!anchor) return "invalid";
+      if (
+        !anchor?.create ||
+        !entry.simple ||
+        !sameSimpleRecord(anchor.create.lock, entry.simple) ||
+        anchor.create.lockSha256 !== entry.snapshot.sha256
+      ) {
+        return "invalid";
+      }
     }
   }
 
   const pids = new Set<number>();
   for (const entry of entries) {
     if (entry.claim) pids.add(entry.claim.pid);
-    if (entry.kind === "create" && entry.simple) pids.add(entry.simple.pid);
+    if (entry.create) pids.add(entry.create.pid);
+    if (entry.simple) pids.add(entry.simple.pid);
   }
   try {
     for (const pid of pids) {
@@ -687,24 +776,76 @@ async function recoverStrandedAuxiliaries(
     return "invalid";
   }
 
-  const ordered = [...entries].sort((left, right) => {
-    const priority = (entry: AuxiliaryEntry) =>
-      entry.kind === "witness" || entry.kind === "moved-source" ? 0
-        : entry.kind === "record" ? 2
-          : 1;
-    return priority(left) - priority(right) || left.name.localeCompare(right.name);
-  });
+  const createByNonce = new Map(
+    entries
+      .filter((entry) => entry.kind === "create" && entry.nonce)
+      .map((entry) => [entry.nonce as string, entry] as const),
+  );
+  const groups = new Map<string, AuxiliaryEntry[]>();
+  for (const entry of entries) {
+    let key: string;
+    if (entry.kind === "evidence-delete") {
+      key = `evidence:${entry.logicalName}`;
+    } else if (entry.kind === "create") {
+      key = sourceGroupKey(entry.snapshot);
+    } else if (entry.kind === "created-lock") {
+      const anchor = entry.nonce ? createByNonce.get(entry.nonce) : undefined;
+      if (!anchor) return "invalid";
+      key = sourceGroupKey(anchor.snapshot);
+    } else {
+      const claim = entry.claim ?? (entry.nonce ? claims.get(entry.nonce) : undefined);
+      if (!claim) return "invalid";
+      key = sourceGroupKey(claim.source);
+    }
+    const group = groups.get(key) ?? [];
+    group.push(entry);
+    groups.set(key, group);
+  }
+
+  const orderedGroups = [...groups.entries()].map(([key, groupEntries]) => {
+    const oldest = Math.min(...groupEntries.map((entry) => {
+      if (entry.claim) return Date.parse(entry.claim.createdAt);
+      if (entry.create) return Date.parse(entry.create.createdAt);
+      if (entry.simple) return Date.parse(entry.simple.createdAt);
+      const evidenceName = entry.logicalName.slice(DELETE_AUXILIARY_PREFIX.length);
+      const match = EVIDENCE_NAME.exec(evidenceName);
+      return match?.[3] ? Number.parseInt(match[3], 36) : Number.MAX_SAFE_INTEGER;
+    }));
+    return { key, entries: groupEntries, oldest };
+  }).sort((left, right) => left.oldest - right.oldest || left.key.localeCompare(right.key));
+
+  if (orderedGroups.some((group) => group.entries.length > MAX_LIFETIME_AUXILIARIES)) {
+    return "invalid";
+  }
+  const selectedGroups: typeof orderedGroups = [];
+  let selectedCount = 0;
+  for (const group of orderedGroups) {
+    if (selectedCount + group.entries.length > MAX_LIFETIME_AUXILIARIES) break;
+    selectedGroups.push(group);
+    selectedCount += group.entries.length;
+  }
+  if (selectedGroups.length === 0) return "invalid";
+
+  const priority = (entry: AuxiliaryEntry) =>
+    entry.kind === "witness" || entry.kind === "moved-source" ||
+      entry.kind === "created-lock" ? 0
+      : entry.kind === "record" ? 2
+        : 1;
   try {
-    for (const entry of ordered) {
-      const recovered = entry.kind === "evidence-delete"
-        ? await restoreEvidenceDeletion(directory, entry, fileSystem)
-        : await removeValidatedAuxiliary(entry, fileSystem);
-      if (!recovered) return "busy";
+    for (const group of selectedGroups) {
+      const orderedEntries = [...group.entries].sort((left, right) =>
+        priority(left) - priority(right) || left.name.localeCompare(right.name));
+      for (const entry of orderedEntries) {
+        const recovered = entry.kind === "evidence-delete"
+          ? await restoreEvidenceDeletion(directory, entry, fileSystem)
+          : await removeValidatedAuxiliary(entry, fileSystem);
+        if (!recovered) return "busy";
+      }
     }
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? "busy" : "invalid";
   }
-  return overCap ? "busy" : "available";
+  return selectedGroups.length < orderedGroups.length ? "busy" : "available";
 }
 
 async function recoverExistingClaim(
@@ -753,16 +894,13 @@ async function recoverExistingClaim(
   }
   if (await claimantAlive(record.pid, options)) return "live";
 
-  const randomBytes = options.randomBytes ?? nodeRandomBytes;
-  const recoveryNonce = randomBytes(16);
-  if (recoveryNonce.length !== 16) return "invalid";
   const recoveryWitnessPath = resolve(
     directory,
-    `.sdl-observability-lifetime.claim-recovery-witness.${recoveryNonce.toString("hex")}`,
+    `.sdl-observability-lifetime.claim-recovery-witness.${record.nonce}`,
   );
   const recoveryMovedPath = resolve(
     directory,
-    `.sdl-observability-lifetime.claim-recovery-moved.${recoveryNonce.toString("hex")}`,
+    `.sdl-observability-lifetime.claim-recovery-moved.${record.nonce}`,
   );
   if (!await pathAbsent(recoveryWitnessPath, fileSystem) ||
       !await pathAbsent(recoveryMovedPath, fileSystem)) return "raced";
