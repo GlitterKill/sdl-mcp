@@ -11,6 +11,7 @@ import type { LifetimeStore } from "../../../dist/observability/lifetime-store.j
 import { ObservabilityService } from "../../../dist/observability/service.js";
 import {
   SECTION_IDS,
+  parseLifetimeEnvelope,
   type LifetimeEnvelopeV1,
   type LifetimeFreshness,
   type LifetimeReadyV1,
@@ -52,6 +53,48 @@ function withEvent(value: LifetimeReadyV1): LifetimeReadyV1 {
       },
     },
   };
+}
+
+function largeLifetime(repoId: string): LifetimeReadyV1 {
+  const detailCounts = Object.fromEntries(
+    Array.from({ length: 8 }, (_, index) => [`k:detail-${index.toString().padStart(2, "0")}`, Number.MAX_SAFE_INTEGER]),
+  );
+  const profileCounts = Object.fromEntries(
+    Array.from({ length: 8 }, (_, index) => [`k:profile-${index.toString().padStart(2, "0")}`, Number.MAX_SAFE_INTEGER]),
+  );
+  const counters = {
+    calls: Number.MAX_SAFE_INTEGER,
+    errors: Number.MAX_SAFE_INTEGER,
+    rawBytes: Number.MAX_SAFE_INTEGER,
+    projectedBytes: Number.MAX_SAFE_INTEGER,
+    rawTokens: Number.MAX_SAFE_INTEGER,
+    projectedTokens: Number.MAX_SAFE_INTEGER,
+    removedFields: Number.MAX_SAFE_INTEGER,
+    handled: Number.MAX_SAFE_INTEGER,
+    truncated: Number.MAX_SAFE_INTEGER,
+    recoveryEmitted: Number.MAX_SAFE_INTEGER,
+    invalidRecovery: Number.MAX_SAFE_INTEGER,
+    projectedBytesMax: Number.MAX_SAFE_INTEGER,
+    projectedTokensMax: Number.MAX_SAFE_INTEGER,
+    detailCounts,
+    profileCounts,
+  };
+  const value = {
+    ...ready(repoId),
+    sections: {
+      ...ready(repoId).sections,
+      toolOutput: {
+        ...counters,
+        perTool: Object.fromEntries(
+          Array.from({ length: 128 }, (_, index) => [
+            `k:tool-${index.toString().padStart(3, "0")}`,
+            counters,
+          ]),
+        ),
+      },
+    },
+  };
+  return parseLifetimeEnvelope(value) as LifetimeReadyV1;
 }
 
 type SnapshotSubscriber = (snapshot: ObservabilitySnapshot) => void;
@@ -304,6 +347,77 @@ test("lifetime GET returns recovery without inventing ready fields", async () =>
       "persistenceState", "recoveryReason",
     ]);
     assert.deepEqual(value, recovery);
+  } finally {
+    await server.close();
+  }
+});
+
+test("lifetime GET revalidates registration after its awaited refresh", async () => {
+  let registrationChecks = 0;
+  let resolveLifetime!: (value: LifetimeEnvelopeV1) => void;
+  const lifetime = new Promise<LifetimeEnvelopeV1>((resolve) => {
+    resolveLifetime = resolve;
+  });
+  const server = await setupObservabilityDashboardSidecar(
+    0,
+    {
+      observabilityService: serviceDouble({ getLifetime: async () => lifetime }),
+      isRegisteredRepoId: () => {
+        registrationChecks += 1;
+        return registrationChecks === 1;
+      },
+    },
+    { enabled: true, token: "test-token" },
+    async () => true,
+  );
+  try {
+    const responsePromise = request(server, "/api/observability/lifetime?repoId=repo-a");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    resolveLifetime(ready("repo-a"));
+    const response = await responsePromise;
+    assert.equal(response.status, 404);
+    assertRouteError(
+      await body(response),
+      "repository_not_found",
+      "The repository was not found.",
+    );
+    assert.equal(registrationChecks, 2);
+  } finally {
+    await server.close();
+  }
+});
+
+test("lifetime GET and reset preflight serialize getLifetime rejection", async () => {
+  const server = await start(serviceDouble({
+    getLifetime: async () => {
+      throw new Error("read failed");
+    },
+  }));
+  try {
+    const get = await request(server, "/api/observability/lifetime?repoId=repo-a");
+    assert.equal(get.status, 503);
+    assertRouteError(
+      await body(get),
+      "persistence_failed",
+      "Repository lifetime persistence failed.",
+      true,
+    );
+
+    const reset = await request(server, "/api/observability/lifetime/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repoId: "repo-a",
+        confirmation: "RESET REPOSITORY LIFETIME: repo-a",
+      }),
+    });
+    assert.equal(reset.status, 503);
+    assertRouteError(
+      await body(reset),
+      "persistence_failed",
+      "Repository lifetime persistence failed.",
+      true,
+    );
   } finally {
     await server.close();
   }
@@ -671,6 +785,68 @@ test("observability SSE emits an awaited lifetime event after each snapshot for 
     ]);
     assert.deepEqual(lifetimeCalls, ["repo-a", "repo-a"]);
   } finally {
+    await server.close();
+  }
+});
+
+test("observability SSE waits for drain when a schema-valid lifetime exceeds the write buffer", async () => {
+  const lifetime = largeLifetime("repo-a");
+  assert.ok(JSON.stringify(lifetime).length > 100_000);
+  let subscriber: SnapshotSubscriber | null = null;
+  const server = await start(serviceDouble({
+    getLifetime: async () => lifetime,
+    onSubscribe: (value) => {
+      subscriber = value;
+    },
+  }));
+  try {
+    const response = await request(server, "/api/observability/stream?repoId=repo-a");
+    assert.equal(response.status, 200);
+    while (subscriber === null) await new Promise<void>((resolve) => setImmediate(resolve));
+    subscriber({ schemaVersion: 1, generatedAt: NOW, repoId: "repo-a" } as ObservabilitySnapshot);
+    const events = await readSseEvents(response, 4);
+    assert.deepEqual(events.map((entry) => entry.event), [
+      "snapshot", "lifetime", "snapshot", "lifetime",
+    ]);
+    assert.deepEqual(events[1]?.data, lifetime);
+    assert.deepEqual(events[3]?.data, lifetime);
+  } finally {
+    await server.close();
+  }
+});
+
+test("observability SSE bounds snapshots retained behind a stalled lifetime", async () => {
+  let subscriber: SnapshotSubscriber | null = null;
+  let lifetimeCalls = 0;
+  const stalled = new Promise<LifetimeEnvelopeV1>(() => {});
+  const server = await start(serviceDouble({
+    getLifetime: async () => {
+      lifetimeCalls += 1;
+      return stalled;
+    },
+    onSubscribe: (value) => {
+      subscriber = value;
+    },
+  }));
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  try {
+    const response = await request(server, "/api/observability/stream?repoId=repo-a");
+    assert.ok(response.body);
+    reader = response.body.getReader();
+    const initial = await reader.read();
+    assert.match(new TextDecoder().decode(initial.value), /event: snapshot/);
+    while (subscriber === null) await new Promise<void>((resolve) => setImmediate(resolve));
+    for (let index = 0; index < 3; index += 1) {
+      subscriber({ schemaVersion: 1, generatedAt: NOW, repoId: "repo-a" } as ObservabilitySnapshot);
+    }
+    const closed = await Promise.race([
+      reader.read().then((result) => result.done),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 250)),
+    ]);
+    assert.equal(closed, true);
+    assert.equal(lifetimeCalls, 1);
+  } finally {
+    await reader?.cancel();
     await server.close();
   }
 });

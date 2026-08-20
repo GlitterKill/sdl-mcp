@@ -890,7 +890,18 @@ async function routeObservabilityApiRequest(
       lifetimeRouteError(res, "repository_not_found");
       return true;
     }
-    json(res, 200, await observabilityService.getLifetime(repoId));
+    let lifetime: LifetimeEnvelopeV1;
+    try {
+      lifetime = await observabilityService.getLifetime(repoId);
+    } catch {
+      lifetimeRouteError(res, "persistence_failed");
+      return true;
+    }
+    if (!services.isRegisteredRepoId?.(repoId)) {
+      lifetimeRouteError(res, "repository_not_found");
+      return true;
+    }
+    json(res, 200, lifetime);
     return true;
   }
 
@@ -926,7 +937,13 @@ async function routeObservabilityApiRequest(
       return true;
     }
 
-    const current = await observabilityService.getLifetime(request.repoId);
+    let current: LifetimeEnvelopeV1;
+    try {
+      current = await observabilityService.getLifetime(request.repoId);
+    } catch {
+      lifetimeRouteError(res, "persistence_failed");
+      return true;
+    }
     if (current.persistenceState === "recoveryRequired") {
       lifetimeRouteError(res, "recovery_required");
       return true;
@@ -1183,17 +1200,43 @@ async function routeObservabilityApiRequest(
     let unsubscribe: (() => void) | null = null;
     let heartbeatTimer: NodeJS.Timeout | null = null;
     let maxStreamTimer: NodeJS.Timeout | null = null;
-    let snapshotDelivery = Promise.resolve();
+    let pendingSnapshot: ObservabilitySnapshot | null = null;
+    let snapshotDelivery: Promise<void> | null = null;
+    const pendingWriteCancellations = new Set<() => void>();
+    let resolveStreamClosed!: () => void;
+    const streamClosed = new Promise<void>((resolve) => {
+      resolveStreamClosed = resolve;
+    });
 
-    const sendEvent = (event: string, data: unknown): boolean => {
+    const waitForDrain = (): Promise<boolean> => new Promise((resolve) => {
+      let settled = false;
+      const finish = (drained: boolean): void => {
+        if (settled) return;
+        settled = true;
+        res.off("drain", onDrain);
+        res.off("close", onClosed);
+        res.off("error", onClosed);
+        pendingWriteCancellations.delete(onClosed);
+        resolve(drained);
+      };
+      const onDrain = (): void => finish(true);
+      const onClosed = (): void => finish(false);
+      pendingWriteCancellations.add(onClosed);
+      res.once("drain", onDrain);
+      res.once("close", onClosed);
+      res.once("error", onClosed);
+      if (closed || res.destroyed) finish(false);
+    });
+
+    const sendEvent = async (event: string, data: unknown): Promise<boolean> => {
       if (closed || res.destroyed) return false;
       try {
         const ok = res.write(
           `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
         );
         // Abort streams that start accumulating too much buffered data.
-        if (!ok || res.writableLength > 1_048_576) return false;
-        return true;
+        if (res.writableLength > 1_048_576) return false;
+        return ok || await waitForDrain();
       } catch (err) {
         logger.warn("Observability SSE write failed", { error: err });
         return false;
@@ -1203,6 +1246,10 @@ async function routeObservabilityApiRequest(
     const cleanup = (): void => {
       if (closed) return;
       closed = true;
+      pendingSnapshot = null;
+      resolveStreamClosed();
+      for (const cancel of pendingWriteCancellations) cancel();
+      pendingWriteCancellations.clear();
       if (maxStreamTimer) {
         clearTimeout(maxStreamTimer);
         maxStreamTimer = null;
@@ -1233,17 +1280,40 @@ async function routeObservabilityApiRequest(
     };
 
     const enqueueSnapshot = (snapshot: ObservabilitySnapshot): void => {
-      snapshotDelivery = snapshotDelivery.then(async () => {
-        if (!sendEvent("snapshot", snapshot)) throw new Error("snapshot write failed");
-        const lifetime = await observabilityService.getLifetime(repoId);
-        if (!sendEvent("lifetime", lifetime)) throw new Error("lifetime write failed");
-      }).catch((err) => {
-        logger.warn("Observability SSE snapshot pair failed", { error: err });
+      if (closed) return;
+      if (pendingSnapshot !== null) {
+        // The service emits on a fixed cadence. One pending tick is bounded;
+        // further overload closes so no required snapshot/lifetime pair is dropped.
         endStream();
-      });
+        return;
+      }
+      pendingSnapshot = snapshot;
+      if (snapshotDelivery !== null) return;
+      snapshotDelivery = (async () => {
+        try {
+          while (!closed && pendingSnapshot !== null) {
+            const next = pendingSnapshot;
+            pendingSnapshot = null;
+            if (!await sendEvent("snapshot", next)) throw new Error("snapshot write failed");
+            const lifetime = await Promise.race([
+              observabilityService.getLifetime(repoId),
+              streamClosed.then(() => null),
+            ]);
+            if (lifetime === null) return;
+            if (!await sendEvent("lifetime", lifetime)) throw new Error("lifetime write failed");
+          }
+        } catch (err) {
+          logger.warn("Observability SSE snapshot pair failed", { error: err });
+          endStream();
+        } finally {
+          snapshotDelivery = null;
+        }
+      })();
     };
 
     req.on("close", cleanup);
+    res.on("close", cleanup);
+    res.on("error", cleanup);
 
     maxStreamTimer = setTimeout(() => {
       endStream();
@@ -1270,8 +1340,9 @@ async function routeObservabilityApiRequest(
     if (closed) return true;
 
     heartbeatTimer = setInterval(() => {
-      snapshotDelivery = snapshotDelivery.then(() => {
-        if (!sendEvent("heartbeat", { t: Date.now() })) endStream();
+      if (snapshotDelivery !== null) return;
+      void sendEvent("heartbeat", { t: Date.now() }).then((sent) => {
+        if (!sent) endStream();
       });
     }, sseHeartbeatMs);
     heartbeatTimer.unref();
