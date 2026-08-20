@@ -717,7 +717,7 @@ describe("dashboard layout geometry", () => {
       key: "ArrowDown",
       repeat: true,
     });
-    assert.equal(orphanRepeat.defaultPrevented, false);
+    assert.equal(orphanRepeat.defaultPrevented, true);
     assert.equal(fixture.layout().panel.row, 24);
     fixture.panel.dispatch("keyup", { key: "ArrowDown" });
     assert.deepEqual(fixture.storage.calls, []);
@@ -735,6 +735,20 @@ describe("dashboard layout geometry", () => {
     assert.equal(freshPress.layout().panel.row, 2);
     freshPress.panel.dispatch("keyup", { key: "ArrowDown" });
     assert.deepEqual(freshPress.storage.calls, ["set:sdl-observability-panel-layout-v3"]);
+
+    const outsideEditMode = makeKeyboardFixture();
+    outsideEditMode.panel.dispatch("keydown", { key: "ArrowDown" });
+    outsideEditMode.panel.dispatch("keydown", { key: "Escape" });
+    outsideEditMode.setEditMode(false);
+    const inactiveRepeat = outsideEditMode.panel.dispatch("keydown", {
+      key: "ArrowDown",
+      repeat: true,
+    });
+    assert.equal(inactiveRepeat.defaultPrevented, false);
+    assert.equal(outsideEditMode.layout().panel.row, 1);
+    outsideEditMode.panel.dispatch("keyup", { key: "ArrowDown" });
+    assert.deepEqual(outsideEditMode.storage.calls, []);
+    assert.deepEqual(outsideEditMode.announcements, []);
   });
 
   it("routes window blur through cancellation and ignores the later held-key release", () => {

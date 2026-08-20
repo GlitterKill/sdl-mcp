@@ -1135,7 +1135,10 @@ function installKeyboardLayoutTransactions({
       const delta = arrowDelta(event.key);
       if (!delta || !isEditMode()) return;
       if (cancelledHeld.has(event.key)) {
-        if (event.repeat) return;
+        if (event.repeat) {
+          event.preventDefault();
+          return;
+        }
         cancelledHeld.delete(event.key);
       }
       event.preventDefault();
