@@ -1304,7 +1304,14 @@ async function recoverStrandedAuxiliaries(
       }
       for (const { alias, candidate } of group.aliasPlans) {
         if (!await pathAbsent(candidate, fileSystem) ||
-          !await removeExactLifetimeSource(alias.path, alias.snapshot, candidate, fileSystem)) {
+          !await removeExactLifetimeSource(
+            alias.path,
+            alias.snapshot,
+            candidate,
+            fileSystem,
+            false,
+            auxiliaryReadLimit(alias.name),
+          )) {
           return "busy";
         }
       }

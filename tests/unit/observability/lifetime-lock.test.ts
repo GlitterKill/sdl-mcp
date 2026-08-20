@@ -1486,6 +1486,109 @@ describe("lifetime persistence lock", () => {
     }
   });
 
+  it("retires large exact source-content aliases and converges across startups", async () => {
+    for (const [kindIndex, kind] of ["claim-source", "aux-delete", "evidence-delete"].entries()) {
+      for (const [shapeIndex, shape] of ["cleanup", "normalize"].entries()) {
+        const directory = await temporaryDirectory();
+        const index = kindIndex * 2 + shapeIndex;
+        const nonce = (0xf0 + index).toString(16).padStart(32, "0");
+        const timestamp = (1_700_000_200_000 + index).toString(36).padStart(11, "0");
+        const targetName =
+          `sdl-observability-lifetime.evidence.v1.validated-supported.lock.${timestamp}.${nonce}.json`;
+        const logicalName = kind === "evidence-delete"
+          ? `.sdl-observability-lifetime.delete.${targetName}`
+          : `.sdl-observability-lifetime.${kind}.${nonce}`;
+        const basePath = join(directory, logicalName);
+        const content = Buffer.alloc(20 * 1024, index + 1);
+        await writeFile(basePath, content, { mode: 0o600 });
+        const snapshot = await fileSnapshot(basePath);
+        if (kind !== "evidence-delete") {
+          await writeFile(
+            join(directory, `.sdl-observability-lifetime.claim-record.${nonce}.json`),
+            claimRecord(999_999, nonce, snapshot),
+          );
+        }
+        const suffix = shape === "cleanup"
+          ? ".cleanup"
+          : `.normalize.${(0xa0 + index).toString(16).padStart(32, "0")}`;
+        await link(basePath, `${basePath}${suffix}`);
+
+        let successor: Awaited<ReturnType<typeof acquireLifetimeLease>> | undefined;
+        for (let startup = 0; startup < 3; startup++) {
+          successor = await acquireLifetimeLease(directory, {
+            isClaimantPidAlive: () => false,
+          });
+          if (successor.mode === "writer") break;
+        }
+        assert.notEqual(successor, undefined, `${kind}-${shape}`);
+        assertWriter(successor);
+        assert.deepEqual(await auxiliaryFiles(directory), [], `${kind}-${shape}`);
+        if (kind === "evidence-delete") {
+          assert.deepEqual(await readFile(join(directory, targetName)), content, shape);
+        }
+        assert.equal(await releaseLifetimeLease(successor.lease), true, `${kind}-${shape}`);
+      }
+    }
+  });
+
+  it("rejects oversized exact source-content aliases without mutation", async () => {
+    for (const [kindIndex, kind] of ["claim-source", "aux-delete", "evidence-delete"].entries()) {
+      for (const [shapeIndex, shape] of ["cleanup", "normalize"].entries()) {
+        const directory = await temporaryDirectory();
+        const index = kindIndex * 2 + shapeIndex;
+        const nonce = (0x90 + index).toString(16).padStart(32, "0");
+        const timestamp = (1_700_000_300_000 + index).toString(36).padStart(11, "0");
+        const targetName =
+          `sdl-observability-lifetime.evidence.v1.validated-supported.lock.${timestamp}.${nonce}.json`;
+        const logicalName = kind === "evidence-delete"
+          ? `.sdl-observability-lifetime.delete.${targetName}`
+          : `.sdl-observability-lifetime.${kind}.${nonce}`;
+        const basePath = join(directory, logicalName);
+        await writeFile(basePath, Buffer.alloc(2 * 1024 * 1024 + 1, index + 1), { mode: 0o600 });
+        const snapshot = await fileSnapshot(basePath);
+        const recordPath = join(
+          directory,
+          `.sdl-observability-lifetime.claim-record.${nonce}.json`,
+        );
+        if (kind !== "evidence-delete") {
+          await writeFile(recordPath, claimRecord(999_999, nonce, snapshot));
+        }
+        const suffix = shape === "cleanup"
+          ? ".cleanup"
+          : `.normalize.${(0xc0 + index).toString(16).padStart(32, "0")}`;
+        const aliasPath = `${basePath}${suffix}`;
+        await link(basePath, aliasPath);
+        const beforeNames = await auxiliaryFiles(directory);
+        const beforeBase = await fileSnapshot(basePath);
+        const beforeAlias = await fileSnapshot(aliasPath);
+        const beforeRecord = kind === "evidence-delete" ? undefined : await readFile(recordPath, "utf8");
+        let payloadOpened = false;
+
+        const result = await acquireLifetimeLease(directory, {
+          isClaimantPidAlive: () => false,
+          fileSystem: {
+            open: async (...args: Parameters<typeof open>) => {
+              if (String(args[0]) === basePath || String(args[0]) === aliasPath) payloadOpened = true;
+              return open(...args);
+            },
+          },
+        });
+        assert.deepEqual(
+          result,
+          { mode: "readOnly", reason: "invalidLock" },
+          `${kind}-${shape}`,
+        );
+        assert.equal(payloadOpened, false, `${kind}-${shape}`);
+        assert.deepEqual(await auxiliaryFiles(directory), beforeNames, `${kind}-${shape}`);
+        assert.deepEqual(await fileSnapshot(basePath), beforeBase, `${kind}-${shape}`);
+        assert.deepEqual(await fileSnapshot(aliasPath), beforeAlias, `${kind}-${shape}`);
+        if (beforeRecord !== undefined) {
+          assert.equal(await readFile(recordPath, "utf8"), beforeRecord, `${kind}-${shape}`);
+        }
+      }
+    }
+  });
+
   it("recovers exact fixed and claim-cleanup aliases across two startups", async () => {
     const directory = await temporaryDirectory();
     const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
