@@ -7,6 +7,7 @@ import {
   DEFAULT_AGGREGATOR_OPTIONS,
   percentile,
 } from "../../../dist/observability/aggregator.js";
+import type { RuntimeExecutionEvent } from "../../../dist/mcp/telemetry.js";
 
 const REPO = "sdl-mcp";
 
@@ -39,6 +40,25 @@ function toolProjection(
     responseHandled: false,
     recoveryEmitted: false,
     invalidRecoveryCount: 0,
+    ...overrides,
+  };
+}
+
+function runtimeExecution(
+  overrides: Partial<RuntimeExecutionEvent>,
+): RuntimeExecutionEvent {
+  return {
+    repoId: REPO,
+    runtime: "node",
+    executable: "node",
+    exitCode: 0,
+    durationMs: 5,
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    timedOut: false,
+    policyDecision: "approved",
+    auditHash: "runtime-audit",
+    artifactHandle: null,
     ...overrides,
   };
 }
@@ -92,6 +112,20 @@ describe("Aggregator", () => {
     assert.equal(tokenEfficiency.totalUsed, 100);
     assert.equal(tokenEfficiency.totalSaved, 40);
     assert.equal(tokenEfficiency.savingsRatio, 40 / 140);
+  });
+
+  it("uses canonical runtime exit and timeout fields for latency errors", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordRuntimeExecution(runtimeExecution({ exitCode: 1, durationMs: 3 }));
+    agg.recordRuntimeExecution(runtimeExecution({ timedOut: true, durationMs: 7 }));
+    agg.recordRuntimeExecution(runtimeExecution({ durationMs: 11 }));
+
+    assert.deepEqual(agg.getSnapshot(REPO).latency.perTool["sdl.runtime.execute"], {
+      count: 3,
+      avgMs: 7,
+      p95Ms: 11,
+      errorCount: 2,
+    });
   });
 
   it("aggregates packed-wire byte savings", () => {

@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 
 import { ObservabilityConfigSchema } from "../../../dist/config/types.js";
 import {
+  admitRepository,
   emptyLifetimeSections,
   emptyRepositoryLifetime,
 } from "../../../dist/observability/lifetime-accumulator.js";
+import type { RuntimeExecutionEvent } from "../../../dist/mcp/telemetry.js";
 import type {
   LifetimeStore,
   PublishOutcome,
@@ -19,6 +21,7 @@ import {
   repositoryStorageKey,
   type DurableLifetimeRepository,
   type DurableLifetimeRoot,
+  type ToolOutputLifetimeCounters,
 } from "../../../dist/observability/lifetime-types.js";
 import {
   ObservabilityService,
@@ -210,7 +213,110 @@ function resource(service: ObservabilityService, cpuPct: number): void {
   });
 }
 
+function runtimeExecution(
+  service: ObservabilityService,
+  overrides: Partial<RuntimeExecutionEvent>,
+): void {
+  service.runtimeExecution({
+    repoId: "repo-a",
+    runtime: "node",
+    executable: "node",
+    exitCode: 0,
+    durationMs: 5,
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    timedOut: false,
+    policyDecision: "approved",
+    auditHash: "runtime-audit",
+    artifactHandle: null,
+    ...overrides,
+  });
+}
+
+function maximalStorageKey(index: number): string {
+  return `k:${index.toString().padStart(3, "0")}${"x".repeat(61)}`;
+}
+
+function maximalCounterMap(count: number): Record<string, number> {
+  return Object.fromEntries(Array.from({ length: count }, (_, index) => [
+    maximalStorageKey(index),
+    Number.MAX_SAFE_INTEGER,
+  ]));
+}
+
+function maximalToolOutputCounters(nestedKeys = 32): ToolOutputLifetimeCounters {
+  return {
+    calls: Number.MAX_SAFE_INTEGER,
+    errors: Number.MAX_SAFE_INTEGER,
+    rawBytes: Number.MAX_SAFE_INTEGER,
+    projectedBytes: Number.MAX_SAFE_INTEGER,
+    rawTokens: Number.MAX_SAFE_INTEGER,
+    projectedTokens: Number.MAX_SAFE_INTEGER,
+    removedFields: Number.MAX_SAFE_INTEGER,
+    handled: Number.MAX_SAFE_INTEGER,
+    truncated: Number.MAX_SAFE_INTEGER,
+    recoveryEmitted: Number.MAX_SAFE_INTEGER,
+    invalidRecovery: Number.MAX_SAFE_INTEGER,
+    projectedBytesMax: Number.MAX_SAFE_INTEGER,
+    projectedTokensMax: Number.MAX_SAFE_INTEGER,
+    detailCounts: maximalCounterMap(nestedKeys),
+    profileCounts: maximalCounterMap(nestedKeys),
+  };
+}
+
+function largeRepository(fullTools: number, partialNestedKeys = 32): DurableLifetimeRepository {
+  const value = repository();
+  const perTool = Object.fromEntries(Array.from({ length: fullTools }, (_, index) => [
+    maximalStorageKey(index),
+    maximalToolOutputCounters(),
+  ]));
+  if (fullTools < 128) {
+    perTool[maximalStorageKey(fullTools)] = maximalToolOutputCounters(partialNestedKeys);
+  }
+  value.sections.toolOutput = {
+    ...maximalToolOutputCounters(),
+    perTool,
+  };
+  return value;
+}
+
+function byteCapacityRoot(): DurableLifetimeRoot {
+  let value = root();
+  for (const repoId of ["large-0", "large-1"]) {
+    const admission = admitRepository(value, repoId, largeRepository(127));
+    assert.equal(admission.admitted, true);
+    value = admission.root;
+  }
+  const padding = admitRepository(value, "padding", largeRepository(17, 9));
+  assert.equal(padding.admitted, true);
+  const rejection = admitRepository(padding.root, "probe", emptyRepositoryLifetime());
+  assert.equal(Object.keys(padding.root.repositories).length < MAX_REPOSITORIES, true);
+  assert.equal(rejection.admitted, false);
+  assert.equal(rejection.reason, "storeBytes");
+  return padding.root;
+}
+
 describe("ObservabilityService lifetime integration", () => {
+  it("aligns canonical runtime failures between session and lifetime latency", async () => {
+    const h = harness();
+    await h.service.start();
+    runtimeExecution(h.service, { exitCode: 1, durationMs: 3 });
+    runtimeExecution(h.service, { timedOut: true, durationMs: 7 });
+    runtimeExecution(h.service, { durationMs: 11 });
+
+    const session = h.service.getSnapshot("repo-a").latency.perTool["sdl.runtime.execute"];
+    const lifetime = await h.service.getLifetime("repo-a");
+    assert.deepEqual(session, { count: 3, avgMs: 7, p95Ms: 11, errorCount: 2 });
+    assert.notEqual(lifetime.persistenceState, "recoveryRequired");
+    if (lifetime.persistenceState !== "recoveryRequired") {
+      assert.deepEqual(lifetime.sections.latency?.perTool["k:sdl.runtime.execute"], {
+        calls: 3,
+        errors: 2,
+        durationMs: { count: 3, sum: 21, max: 11 },
+      });
+    }
+  });
+
   it("attributes accepted repository events without leaking freshness across repositories", async () => {
     const h = harness();
     await h.service.start();
@@ -502,6 +608,53 @@ describe("ObservabilityService lifetime integration", () => {
       processPeaks: null,
     });
     assert.equal(Object.hasOwn(h.service, "capacityExceeded"), false);
+  });
+
+  it("reports byte-capacity rejection globally and reattempts admission after a committed reset", async () => {
+    const initial = byteCapacityRoot();
+    const registered = new Set([
+      "large-0", "large-1", "padding", "byte-rejected", "another-rejected", "never-event",
+    ]);
+    const h = harness(new FakeStore({ mode: "writer", root: initial, generation: 0 }), registered);
+    await h.service.start();
+    cache(h.service, "byte-rejected");
+    cache(h.service, "another-rejected");
+
+    const rejected = await h.service.getLifetime("byte-rejected");
+    assert.deepEqual(rejected, {
+      schemaVersion: 1,
+      sampleIntervalMs: 2_000,
+      generatedAt: "2026-08-20T12:00:00.000Z",
+      repoId: "byte-rejected",
+      epoch: 0,
+      resetAt: null,
+      lastCheckpointAt: null,
+      persistenceState: "capacityExceeded",
+      sessionCount: 0,
+      saturated: false,
+      sections: emptyLifetimeSections(),
+      freshness: Object.fromEntries(SECTION_IDS.map((section) => [section,
+        section === "cache" ? "2026-08-20T12:00:00.000Z" : null])),
+      processPeaks: null,
+    });
+    assert.equal(
+      (await h.service.getLifetime("another-rejected")).persistenceState,
+      "capacityExceeded",
+    );
+    const neverEvent = await h.service.getLifetime("never-event");
+    assert.equal(neverEvent.persistenceState, "ready");
+    for (const repoId of ["byte-rejected", "another-rejected"]) {
+      assert.equal(Object.values(h.service as unknown as Record<string, unknown>).some((value) =>
+        value instanceof Set && value.has(repoId)), false);
+    }
+
+    await h.service.resetLifetime("large-0");
+    cache(h.service, "byte-rejected");
+    const admitted = await h.service.getLifetime("byte-rejected");
+    assert.equal(admitted.persistenceState, "ready");
+    if (admitted.persistenceState !== "recoveryRequired") {
+      assert.equal(admitted.sections.cache?.hits, 1);
+    }
   });
 
   it("does not allocate durable state on GET and keeps eventless/read-only session counts at zero", async () => {

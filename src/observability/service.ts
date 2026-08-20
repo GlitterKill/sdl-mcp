@@ -172,6 +172,7 @@ export class ObservabilityService implements ObservabilityTap {
   private lifetimeWriter = false;
   private lifetimeFrozen = false;
   private lifetimeOpenFailed = false;
+  private lifetimeCapacityFull = false;
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
   private lifetimeTail: Promise<void> = Promise.resolve();
@@ -515,8 +516,9 @@ export class ObservabilityService implements ObservabilityTap {
       && this.lifetimeFreshness.has(repoId)
       && stored === undefined
       && live === undefined
-      && Object.keys(this.buildCurrentLifetimeRoot(generatedAt).repositories).length
-        >= MAX_REPOSITORIES;
+      && (this.lifetimeCapacityFull
+        || Object.keys(this.buildCurrentLifetimeRoot(generatedAt).repositories).length
+          >= MAX_REPOSITORIES);
     const value = capacityExceeded
       ? emptyRepositoryLifetime()
       : readOnly
@@ -794,6 +796,9 @@ export class ObservabilityService implements ObservabilityTap {
       state.eventProduced = pending?.eventProduced.has(repoId) ?? false;
     }
     this.pendingReset = null;
+    if (Object.keys(root.repositories).length < MAX_REPOSITORIES) {
+      this.lifetimeCapacityFull = false;
+    }
   }
 
   private acceptCommittedLifetime(
@@ -827,14 +832,18 @@ export class ObservabilityService implements ObservabilityTap {
   private ensureLifetimeRepository(repoId: string): LifetimeRepositoryState | null {
     const existing = this.lifetimeRepositories.get(repoId);
     if (existing !== undefined) return existing;
-    const baseline = this.committedLifetime?.repositories[repositoryStorageKey(repoId)]
-      ?? emptyRepositoryLifetime();
+    const stored = this.committedLifetime?.repositories[repositoryStorageKey(repoId)];
+    const baseline = stored ?? emptyRepositoryLifetime();
     const admission = admitRepository(
       this.buildCurrentLifetimeRoot(this.nowIso()),
       repoId,
       baseline,
     );
-    if (!admission.admitted) return null;
+    if (!admission.admitted) {
+      this.lifetimeCapacityFull = true;
+      return null;
+    }
+    if (stored === undefined) this.lifetimeCapacityFull = false;
     const created: LifetimeRepositoryState = {
       baseline,
       active: activeLifetimeMetadata(baseline),
@@ -1846,7 +1855,11 @@ function toolCallLifetimeDelta(event: ToolCallEvent): DurableLifetimeRepository 
 }
 
 function runtimeLifetimeDelta(event: RuntimeExecutionEvent): DurableLifetimeRepository {
-  return latencyLifetimeDelta("sdl.runtime.execute", event.durationMs, event.exitCode !== 0);
+  return latencyLifetimeDelta(
+    "sdl.runtime.execute",
+    event.durationMs,
+    event.exitCode !== 0 || event.timedOut,
+  );
 }
 
 function pprLifetimeDelta(event: PprTapEvent): DurableLifetimeRepository {

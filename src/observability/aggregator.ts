@@ -1062,11 +1062,7 @@ export class Aggregator {
   }
 
   recordRuntimeExecution(event: RuntimeExecutionEvent): void {
-    const evt = event as RuntimeExecutionEvent & {
-      durationMs?: number;
-      failed?: boolean;
-    };
-    const dur = Number.isFinite(evt.durationMs) ? (evt.durationMs ?? 0) : 0;
+    const dur = Number.isFinite(event.durationMs) ? event.durationMs : 0;
     this.recordToolCall({
       tool: "sdl.runtime.execute",
       request: {
@@ -1074,7 +1070,7 @@ export class Aggregator {
         method: "runtime",
         params: undefined,
       } as ToolCallEvent["request"],
-      response: evt.failed === true
+      response: event.exitCode !== 0 || event.timedOut
         ? { error: { message: "Runtime execution failed" } }
         : { result: undefined },
       durationMs: dur,
