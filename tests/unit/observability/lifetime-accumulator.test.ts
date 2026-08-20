@@ -43,6 +43,7 @@ import {
 } from "../../../dist/observability/lifetime-accumulator.js";
 
 const ISO = "2026-08-19T12:34:56.789Z";
+const LONG_FRACTION = 0.0000010000000000000002;
 const REPOSITORY_KEY =
   "sha256:351fd6257aec4d4e1eb66c2a91150162c6f0fad3eb086851e1c7ca1f2e0527f9";
 
@@ -1027,6 +1028,14 @@ function maximalSections(): DurableLifetimeSections {
     if (typeof value === "number") return maximum;
     if (value === null || typeof value !== "object") return value;
     if (Array.isArray(value)) return value.map(maximize);
+    if (
+      Object.keys(value).length === 3
+      && Object.hasOwn(value, "count")
+      && Object.hasOwn(value, "sum")
+      && Object.hasOwn(value, "max")
+    ) {
+      return { count: maximum, sum: LONG_FRACTION, max: LONG_FRACTION };
+    }
     return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, maximize(nested)]));
   };
   const filled = maximize(maximal) as DurableLifetimeSections;
@@ -1138,18 +1147,13 @@ function firstMapValue(
   return structuredClone(map[key]);
 }
 
-function mergeAdmissionValue(a: unknown, b: unknown) {
-  return typeof a === "number" && typeof b === "number"
-    ? mergeCounter(a, b)
-    : { value: structuredClone(b), saturated: false };
-}
-
 function admitAtLocation(
   root: DurableLifetimeRoot,
   repositoryKey: string,
   location: (typeof DYNAMIC_MAP_LOCATIONS)[number],
   rawIdentifier: string,
   incoming: unknown,
+  reserve: (candidateRoot: DurableLifetimeRoot) => number = reservedSerializedBytes,
 ) {
   return admitDynamicMapEntry(
     root,
@@ -1158,9 +1162,10 @@ function admitAtLocation(
     incoming,
     {
       location,
-      merge: mergeAdmissionValue,
+      repositoryKey,
       replaceMap: (candidateRoot, map) =>
         replaceDynamicMap(candidateRoot, repositoryKey, location, map),
+      reserve,
     },
   );
 }
@@ -1175,11 +1180,11 @@ function maximalRootFixture(): { root: DurableLifetimeRoot; repositoryKey: strin
       generation: Number.MAX_SAFE_INTEGER,
       updatedAt: timestamp,
       processPeaks: {
-        cpuPct: Number.MAX_SAFE_INTEGER,
-        rssMb: Number.MAX_SAFE_INTEGER,
-        heapUsedMb: Number.MAX_SAFE_INTEGER,
-        heapTotalMb: Number.MAX_SAFE_INTEGER,
-        eventLoopLagMs: Number.MAX_SAFE_INTEGER,
+        cpuPct: LONG_FRACTION,
+        rssMb: LONG_FRACTION,
+        heapUsedMb: LONG_FRACTION,
+        heapTotalMb: LONG_FRACTION,
+        eventLoopLagMs: LONG_FRACTION,
       },
       repositories: {
         [repositoryKey]: {
@@ -1598,6 +1603,239 @@ describe("bounded lifetime accumulator", () => {
     assert.ok(materializedRepository?.sections.toolOutput);
     materializedRepository.sections.toolOutput.perTool.__other__ = clone(large);
     assert.equal(reservedSerializedBytes(root), reservedSerializedBytes(materialized));
+  });
+
+  it("conservatively reserves long fractional numeric encodings", () => {
+    const root: DurableLifetimeRoot = {
+      schemaVersion: 1,
+      generation: Number.MAX_SAFE_INTEGER,
+      updatedAt: "9999-12-31T23:59:59.999999999+23:59",
+      processPeaks: {
+        cpuPct: LONG_FRACTION,
+        rssMb: LONG_FRACTION,
+        heapUsedMb: LONG_FRACTION,
+        heapTotalMb: LONG_FRACTION,
+        eventLoopLagMs: LONG_FRACTION,
+      },
+      repositories: {},
+    };
+
+    assert.ok(
+      reservedSerializedBytes(root) >= Buffer.byteLength(JSON.stringify(root)),
+      "reservation must cover valid long decimal encodings",
+    );
+  });
+
+  it("rejects invalid new dynamic values without mutating the root", () => {
+    const numericLocation = "retrieval.byMode" as const;
+    const numericRoot = replaceDynamicMap(
+      parseDurableLifetimeRoot(durableRootFixture),
+      REPOSITORY_KEY,
+      numericLocation,
+      {},
+    );
+    for (const invalid of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const before = clone(numericRoot);
+      assert.throws(() => admitAtLocation(
+        numericRoot,
+        REPOSITORY_KEY,
+        numericLocation,
+        "new-key",
+        invalid,
+      ));
+      assert.deepEqual(numericRoot, before);
+    }
+
+    const structuredLocation = "cache.perSource" as const;
+    const structuredRoot = replaceDynamicMap(
+      parseDurableLifetimeRoot(durableRootFixture),
+      REPOSITORY_KEY,
+      structuredLocation,
+      {},
+    );
+    const before = clone(structuredRoot);
+    assert.throws(() => admitAtLocation(
+      structuredRoot,
+      REPOSITORY_KEY,
+      structuredLocation,
+      "new-key",
+      { hits: 1 },
+    ));
+    assert.deepEqual(structuredRoot, before);
+  });
+
+  it("propagates dynamic saturation into the durable repository atomically", () => {
+    for (const [rawIdentifier, map] of [
+      ["a", { "k:a": Number.MAX_SAFE_INTEGER }],
+      ["invalid key", { [OVERFLOW_KEY]: Number.MAX_SAFE_INTEGER }],
+    ] as const) {
+      const root = replaceDynamicMap(
+        parseDurableLifetimeRoot(durableRootFixture),
+        REPOSITORY_KEY,
+        "retrieval.byMode",
+        map,
+      );
+      const repository = root.repositories[REPOSITORY_KEY];
+      assert.ok(repository);
+      repository.saturated = false;
+
+      const result = admitAtLocation(
+        root,
+        REPOSITORY_KEY,
+        "retrieval.byMode",
+        rawIdentifier,
+        1,
+      );
+      assert.equal(result.map[result.storageKey], Number.MAX_SAFE_INTEGER);
+      assert.equal(result.saturated, true);
+      assert.equal(result.root.repositories[REPOSITORY_KEY]?.saturated, true);
+      assert.equal(root.repositories[REPOSITORY_KEY]?.saturated, false);
+    }
+  });
+
+  it("skips full-root reservation for existing dynamic storage keys", () => {
+    let root = parseDurableLifetimeRoot(durableRootFixture);
+    let reservationCalls = 0;
+    const reserve = (candidateRoot: DurableLifetimeRoot) => {
+      reservationCalls += 1;
+      return reservedSerializedBytes(candidateRoot);
+    };
+    const real = admitAtLocation(
+      root,
+      REPOSITORY_KEY,
+      "retrieval.byMode",
+      "a",
+      2,
+      reserve,
+    );
+    assert.equal(real.map["k:a"], 3);
+    assert.equal(reservationCalls, 0);
+
+    root = admitAtLocation(
+      real.root,
+      REPOSITORY_KEY,
+      "retrieval.byMode",
+      "invalid key",
+      2,
+    ).root;
+    reservationCalls = 0;
+    const overflow = admitAtLocation(
+      root,
+      REPOSITORY_KEY,
+      "retrieval.byMode",
+      "another invalid key",
+      3,
+      reserve,
+    );
+    assert.equal(overflow.map[OVERFLOW_KEY], 5);
+    assert.equal(reservationCalls, 0);
+
+    const before = clone(overflow.root);
+    assert.throws(() => admitAtLocation(
+      overflow.root,
+      REPOSITORY_KEY,
+      "retrieval.byMode",
+      "a",
+      -1,
+      reserve,
+    ));
+    assert.deepEqual(overflow.root, before);
+    assert.equal(reservationCalls, 0);
+  });
+
+  it("aggregates every structured dynamic value shape into overflow", () => {
+    const base = parseDurableLifetimeRoot(durableRootFixture);
+    const cases = [
+      {
+        location: "cache.perSource" as const,
+        assertMerged(value: unknown) {
+          assert.ok(isUnknownMap(value));
+          assert.equal(value.hits, 6);
+          assert.deepEqual(value.lookupMs, { count: 2, sum: 4, max: 2 });
+        },
+      },
+      {
+        location: "tokenEfficiency.compressionBySource" as const,
+        assertMerged(value: unknown) {
+          assert.ok(isUnknownMap(value));
+          assert.equal(value.events, 2);
+          assert.equal(value.storedBytes, 18);
+        },
+      },
+      {
+        location: "predictiveContext.byStrategy" as const,
+        assertMerged(value: unknown) {
+          assert.ok(isUnknownMap(value));
+          assert.equal(value.samples, 2);
+          assert.deepEqual(value.latencyReductionMs, { count: 2, sum: 4, max: 2 });
+        },
+      },
+      {
+        location: "latency.perTool" as const,
+        assertMerged(value: unknown) {
+          assert.ok(isUnknownMap(value));
+          assert.equal(value.calls, 6);
+          assert.deepEqual(value.durationMs, { count: 2, sum: 4, max: 2 });
+        },
+      },
+      {
+        location: "packed.byEncoder" as const,
+        assertMerged(value: unknown) {
+          assert.ok(isUnknownMap(value));
+          assert.equal(value.decisions, 2);
+          assert.equal(value.baselineTokens, 14);
+        },
+      },
+      {
+        location: "toolOutput.perTool" as const,
+        assertMerged(value: unknown) {
+          assert.ok(isUnknownMap(value));
+          assert.equal(value.calls, 2);
+          assert.equal(value.rawBytes, 6);
+          assert.equal(value.projectedBytesMax, 12);
+          assert.deepEqual(value.detailCounts, { "k:a": 2, "k:z": 4 });
+        },
+      },
+      {
+        location: "retrieval.byMode" as const,
+        assertMerged(value: unknown) {
+          assert.equal(value, 2);
+        },
+      },
+      {
+        location: "retrieval.phaseLatencyMs" as const,
+        assertMerged(value: unknown) {
+          assert.deepEqual(value, { count: 2, sum: 2, max: 1 });
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const template = firstMapValue(base, REPOSITORY_KEY, testCase.location);
+      let root = replaceDynamicMap(
+        clone(base),
+        REPOSITORY_KEY,
+        testCase.location,
+        {},
+      );
+      root = admitAtLocation(
+        root,
+        REPOSITORY_KEY,
+        testCase.location,
+        "invalid key one",
+        template,
+      ).root;
+      const result = admitAtLocation(
+        root,
+        REPOSITORY_KEY,
+        testCase.location,
+        "invalid key two",
+        template,
+      );
+      assert.equal(result.status, "overflow");
+      assert.deepEqual(Object.keys(result.map), [OVERFLOW_KEY]);
+      testCase.assertMerged(result.map[OVERFLOW_KEY]);
+    }
   });
 
   it("admits 32 repositories and rejects repository 33 without mutation", () => {

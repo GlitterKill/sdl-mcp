@@ -39,6 +39,9 @@ const DYNAMIC_MAP_FIELDS = new Set([
   "profileCounts",
 ]);
 const MAXIMUM_TIMESTAMP = "9999-12-31T23:59:59.999999999+23:59";
+// JSON numbers need at most 24 characters in this domain; quotes make this
+// reservation-only string a deterministic, conservative 34-byte stand-in.
+const MAXIMUM_NUMERIC_JSON_PLACEHOLDER = "0".repeat(32);
 const VALIDATION_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 const VALIDATION_REPOSITORY_KEY = repositoryStorageKey("lifetime-accumulator-validation");
 
@@ -77,7 +80,7 @@ export interface DynamicMapAdmission<T> {
   admitted: boolean;
   status: "admitted" | "overflow" | "capacityRejected";
   reason: "storeBytes" | null;
-  reservedBytes: number;
+  reservedBytes: number | null;
   saturated: boolean;
 }
 
@@ -171,6 +174,216 @@ export function normalizeDynamicMap<T>(value: Readonly<Record<string, T>>): Reco
   );
 }
 
+type DynamicFieldAlgebra = "counter" | "sample" | "maximum" | "counterMap";
+
+const COUNTER_VALUE_LOCATIONS = new Set<DynamicMapLocation>([
+  "retrieval.byMode",
+  "retrieval.byType",
+  "retrieval.candidatesBySource",
+  "indexing.phaseCounts",
+  "indexing.engineDispatch",
+  "packed.axisHits",
+  "toolOutput.detailCounts",
+  "toolOutput.profileCounts",
+  "toolOutput.perTool.detailCounts",
+  "toolOutput.perTool.profileCounts",
+]);
+const SAMPLE_VALUE_LOCATIONS = new Set<DynamicMapLocation>([
+  "retrieval.phaseLatencyMs",
+  "indexing.languageMs",
+]);
+const STRUCTURED_VALUE_FIELDS: Partial<
+  Record<DynamicMapLocation, readonly (readonly [string, DynamicFieldAlgebra])[]>
+> = {
+  "cache.perSource": [
+    ["hits", "counter"],
+    ["misses", "counter"],
+    ["lookupMs", "sample"],
+  ],
+  "tokenEfficiency.compressionBySource": [
+    ["events", "counter"],
+    ["realizedEvents", "counter"],
+    ["estimatedTokensAvoided", "counter"],
+    ["originalTokens", "counter"],
+    ["returnedTokens", "counter"],
+    ["savedTokens", "counter"],
+    ["opportunities", "counter"],
+    ["hits", "counter"],
+    ["storedBytes", "counter"],
+  ],
+  "predictiveContext.byStrategy": [
+    ["samples", "counter"],
+    ["hits", "counter"],
+    ["wasted", "counter"],
+    ["accepted", "counter"],
+    ["suppressed", "counter"],
+    ["latencyReductionMs", "sample"],
+  ],
+  "latency.perTool": [
+    ["calls", "counter"],
+    ["errors", "counter"],
+    ["durationMs", "sample"],
+  ],
+  "packed.byEncoder": [
+    ["decisions", "counter"],
+    ["packed", "counter"],
+    ["fallback", "counter"],
+    ["packedBytes", "counter"],
+    ["baselineBytes", "counter"],
+    ["packedTokens", "counter"],
+    ["baselineTokens", "counter"],
+  ],
+  "toolOutput.perTool": [
+    ["calls", "counter"],
+    ["errors", "counter"],
+    ["rawBytes", "counter"],
+    ["projectedBytes", "counter"],
+    ["rawTokens", "counter"],
+    ["projectedTokens", "counter"],
+    ["removedFields", "counter"],
+    ["handled", "counter"],
+    ["truncated", "counter"],
+    ["recoveryEmitted", "counter"],
+    ["invalidRecovery", "counter"],
+    ["projectedBytesMax", "maximum"],
+    ["projectedTokensMax", "maximum"],
+    ["detailCounts", "counterMap"],
+    ["profileCounts", "counterMap"],
+  ],
+};
+
+function exactRecord(
+  value: unknown,
+  fields: readonly (readonly [string, DynamicFieldAlgebra])[],
+): Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError("Lifetime dynamic value must be an object");
+  const expected = fields.map(([field]) => field);
+  const actual = Object.keys(value);
+  if (actual.length !== expected.length || expected.some((field) => !Object.hasOwn(value, field))) {
+    throw new TypeError("Lifetime dynamic value has an invalid shape");
+  }
+  return value;
+}
+
+function validateSampleTotal(value: unknown): SampleTotal {
+  if (!isSample(value)) throw new TypeError("Lifetime sample has an invalid shape");
+  validateCounter(value.count);
+  validateSafeValue(value.sum);
+  validateSafeValue(value.max);
+  return { count: value.count, sum: value.sum, max: value.max };
+}
+
+function validateCounterMap(value: unknown): Record<string, Counter> {
+  if (!isRecord(value)) throw new TypeError("Lifetime counter map must be an object");
+  const entries = Object.entries(value);
+  const realKeys = entries.filter(([key]) => key !== OVERFLOW_KEY);
+  if (
+    realKeys.length > MAX_DYNAMIC_KEYS
+    || entries.some(([key]) => key !== OVERFLOW_KEY && !/^k:[A-Za-z0-9._:-]{1,64}$/.test(key))
+  ) {
+    throw new RangeError("Lifetime counter map exceeds its key contract");
+  }
+  const result: Record<string, Counter> = {};
+  for (const [key, counter] of entries.sort(([a], [b]) => a.localeCompare(b))) {
+    if (typeof counter !== "number") throw new TypeError("Lifetime counter must be numeric");
+    validateCounter(counter);
+    result[key] = counter;
+  }
+  return result;
+}
+
+function validateStructuredDynamicValue(
+  value: unknown,
+  fields: readonly (readonly [string, DynamicFieldAlgebra])[],
+): Record<string, unknown> {
+  const record = exactRecord(value, fields);
+  const result: Record<string, unknown> = {};
+  for (const [field, algebra] of fields) {
+    const nested = record[field];
+    if (algebra === "sample") {
+      result[field] = validateSampleTotal(nested);
+    } else if (algebra === "counterMap") {
+      result[field] = validateCounterMap(nested);
+    } else {
+      if (typeof nested !== "number") throw new TypeError("Lifetime counter must be numeric");
+      validateCounter(nested);
+      result[field] = nested;
+    }
+  }
+  return result;
+}
+
+function validateDynamicValue(location: DynamicMapLocation, value: unknown): unknown {
+  if (COUNTER_VALUE_LOCATIONS.has(location)) {
+    if (typeof value !== "number") throw new TypeError("Lifetime counter must be numeric");
+    validateCounter(value);
+    return value;
+  }
+  if (SAMPLE_VALUE_LOCATIONS.has(location)) return validateSampleTotal(value);
+  const fields = STRUCTURED_VALUE_FIELDS[location];
+  if (fields === undefined) throw new Error(`Missing dynamic algebra for ${location}`);
+  return validateStructuredDynamicValue(value, fields);
+}
+
+function mergeStructuredDynamicValue(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+  fields: readonly (readonly [string, DynamicFieldAlgebra])[],
+): SaturatingResult<Record<string, unknown>> {
+  const value: Record<string, unknown> = {};
+  let saturated = false;
+  for (const [field, algebra] of fields) {
+    if (algebra === "sample") {
+      const merged = mergeSampleWithSaturation(
+        left[field] as SampleTotal,
+        right[field] as SampleTotal,
+      );
+      value[field] = merged.value;
+      saturated ||= merged.saturated;
+    } else if (algebra === "counterMap") {
+      const merged = mergeDynamicMaps(
+        left[field] as Record<string, Counter>,
+        right[field] as Record<string, Counter>,
+        { location: "retrieval.byMode", merge: mergeCounter },
+      );
+      value[field] = merged.value;
+      saturated ||= merged.saturated;
+    } else if (algebra === "maximum") {
+      value[field] = Math.max(left[field] as number, right[field] as number);
+    } else {
+      const merged = mergeCounter(left[field] as number, right[field] as number);
+      value[field] = merged.value;
+      saturated ||= merged.saturated;
+    }
+  }
+  return { value, saturated };
+}
+
+function mergeDynamicValue(
+  location: DynamicMapLocation,
+  left: unknown,
+  right: unknown,
+): SaturatingResult<unknown> {
+  const validatedLeft = validateDynamicValue(location, left);
+  const validatedRight = validateDynamicValue(location, right);
+  if (COUNTER_VALUE_LOCATIONS.has(location)) {
+    return mergeCounter(validatedLeft as number, validatedRight as number);
+  }
+  if (SAMPLE_VALUE_LOCATIONS.has(location)) {
+    return mergeSampleWithSaturation(
+      validatedLeft as SampleTotal,
+      validatedRight as SampleTotal,
+    );
+  }
+  const fields = STRUCTURED_VALUE_FIELDS[location];
+  if (fields === undefined) throw new Error(`Missing dynamic algebra for ${location}`);
+  return mergeStructuredDynamicValue(
+    validatedLeft as Record<string, unknown>,
+    validatedRight as Record<string, unknown>,
+    fields,
+  );
+}
+
 export function admitDynamicMapEntry<T>(
   root: DurableLifetimeRoot,
   current: Readonly<Record<string, T>>,
@@ -178,13 +391,15 @@ export function admitDynamicMapEntry<T>(
   incoming: T,
   options: {
     location: DynamicMapLocation;
-    merge: (a: T, b: T) => SaturatingResult<T>;
+    repositoryKey: string;
     replaceMap: (
       candidateRoot: DurableLifetimeRoot,
       candidateMap: Readonly<Record<string, T>>,
     ) => DurableLifetimeRoot;
+    reserve: (candidateRoot: DurableLifetimeRoot) => number;
   },
 ): DynamicMapAdmission<T> {
+  const validatedIncoming = validateDynamicValue(options.location, incoming) as T;
   const requestedKey = canonicalDynamicKey(rawIdentifier);
   const realKeyCount = Object.keys(current).filter((key) => key !== OVERFLOW_KEY).length;
   const isNewRealKey = requestedKey !== OVERFLOW_KEY && !Object.hasOwn(current, requestedKey);
@@ -197,22 +412,27 @@ export function admitDynamicMapEntry<T>(
     const existing = next[key];
     let saturated = false;
     if (existing === undefined) {
-      next[key] = structuredClone(incoming);
+      next[key] = structuredClone(validatedIncoming);
     } else {
-      const merged = options.merge(existing, incoming);
-      next[key] = merged.value;
+      const merged = mergeDynamicValue(options.location, existing, validatedIncoming);
+      next[key] = merged.value as T;
       saturated = merged.saturated;
     }
     return { value: normalizeDynamicMap(next), saturated };
   };
 
-  const candidateFor = (key: string) => {
+  const candidateFor = (key: string, reserveNewKey: boolean) => {
     const merged = mergeAt(key);
     const candidateRoot = options.replaceMap(structuredClone(root), merged.value);
+    const repository = candidateRoot.repositories[options.repositoryKey];
+    if (repository === undefined) throw new Error("Lifetime repository is missing");
+    if (merged.saturated) repository.saturated = true;
+    const reservedBytes = reserveNewKey ? options.reserve(candidateRoot) : null;
+    if (reservedBytes !== null) validateCounter(reservedBytes);
     return {
       root: candidateRoot,
       map: merged.value,
-      reservedBytes: reservedSerializedBytes(candidateRoot),
+      reservedBytes,
       saturated: merged.saturated,
     };
   };
@@ -240,16 +460,17 @@ export function admitDynamicMapEntry<T>(
     saturated: candidate.saturated,
   });
 
-  const candidate = candidateFor(storageKey);
   const isNewStorageKey = !Object.hasOwn(current, storageKey);
-  if (!isNewStorageKey || candidate.reservedBytes <= MAX_STORE_BYTES) {
+  const candidate = candidateFor(storageKey, isNewStorageKey);
+  if (candidate.reservedBytes === null || candidate.reservedBytes <= MAX_STORE_BYTES) {
     return accepted(storageKey, candidate);
   }
 
   if (storageKey !== OVERFLOW_KEY) {
     // A real-key miss is never dropped: retry against the reserved overflow shape.
-    const overflow = candidateFor(OVERFLOW_KEY);
-    if (Object.hasOwn(current, OVERFLOW_KEY) || overflow.reservedBytes <= MAX_STORE_BYTES) {
+    const isNewOverflow = !Object.hasOwn(current, OVERFLOW_KEY);
+    const overflow = candidateFor(OVERFLOW_KEY, isNewOverflow);
+    if (overflow.reservedBytes === null || overflow.reservedBytes <= MAX_STORE_BYTES) {
       return accepted(OVERFLOW_KEY, overflow);
     }
     return rejection(OVERFLOW_KEY, overflow.reservedBytes);
@@ -503,7 +724,7 @@ function maximumDynamicKey(index: number): string {
 }
 
 function maximizeForReservation(value: unknown, fieldName = ""): unknown {
-  if (typeof value === "number") return Number.MAX_SAFE_INTEGER;
+  if (typeof value === "number") return MAXIMUM_NUMERIC_JSON_PLACEHOLDER;
   if (typeof value === "string") return MAXIMUM_TIMESTAMP;
   if (typeof value === "boolean") return false;
   if (!isRecord(value)) return value;
