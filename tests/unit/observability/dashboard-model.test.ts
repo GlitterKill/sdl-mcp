@@ -461,30 +461,40 @@ test("dashboard registers a consuming renderer for every rendered or derived met
   try {
     const dashboard = await import("../../../dist/ui/observability.js");
     const registry = dashboard.METRIC_RENDERERS as Record<string, unknown> | undefined;
+    const assertCoverage = dashboard.assertMetricRendererCoverage as
+      | ((dispositions: typeof METRIC_DISPOSITIONS, renderers: Record<string, unknown>) => void)
+      | undefined;
     assert.ok(registry);
+    assert.equal(typeof assertCoverage, "function");
     const claimed = Object.entries(METRIC_DISPOSITIONS)
       .filter(([, entry]) => entry.disposition !== "sessionOnly")
       .map(([path]) => path);
-    assert.deepEqual(Object.keys(registry), claimed);
+    assert.deepEqual(Object.keys(registry).sort(), claimed.sort());
     for (const path of claimed) assert.equal(typeof registry[path], "function", path);
 
-    for (const path of [
-      "latency.perTool[].phases[].count",
-      "latency.perTool[].phases[].maxMs",
-    ]) assert.equal(registry[path]?.name, "renderLatencyPanel");
-    for (const path of ["toolVolume.perTool[]", "toolVolume.perToolErrors[]"])
-      assert.equal(registry[path]?.name, "renderToolVolumePanel");
-    for (const path of [
-      "tokenEfficiency.compressionLayers.bySource[].storedBytes",
-      "tokenEfficiency.compressionLayers.byTool[].hitRatePct",
-      "packed.axisHits.none",
-      "packed.byEncoder[].tokensSavedRatio",
-    ]) assert.equal(registry[path]?.name, "renderTokenEfficiencyPanel");
-    for (const path of [
-      "toolOutput.overall.rawBytesTotal",
-      "toolOutput.overall.profileCounts[]",
-      "toolOutput.perTool[].maxProjectedTokens",
-    ]) assert.equal(registry[path]?.name, "renderToolOutputPanel");
+    const output = { textContent: "" };
+    const panel = {
+      querySelector(selector: string) {
+        return selector === '[data-field="p95LatencyMs"]' ? output : null;
+      },
+    };
+    (globalThis.document as unknown as { querySelector(selector: string): unknown }).querySelector =
+      (selector: string) => selector === '[data-panel="retrieval"]' ? panel : null;
+    (registry["retrieval.p95LatencyMs"] as (snapshot: unknown) => void)({
+      retrieval: { p95LatencyMs: 42 },
+    });
+    assert.equal(output.textContent, "42ms");
+
+    const mutated = { ...registry };
+    delete mutated["retrieval.p95LatencyMs"];
+    assert.throws(
+      () => assertCoverage?.(METRIC_DISPOSITIONS, mutated),
+      /retrieval\.p95LatencyMs/,
+    );
+    assert.doesNotMatch(
+      readFileSync("src/ui/observability.js", "utf8"),
+      /Object\.entries\(METRIC_DISPOSITIONS\)[\s\S]{0,300}PANEL_RENDERERS/,
+    );
   } finally {
     if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
     else Reflect.deleteProperty(globalThis, "document");

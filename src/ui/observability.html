@@ -118,7 +118,7 @@
         </header>
         <div class="stat-grid">
           <div class="stat-cell"><span class="stat-label">AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgLatencyMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95LatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95LatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95LatencyMs">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">EMPTY</span><span class="stat-values"><span><small>SESSION</small><output data-field="emptyResultCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="emptyResultCount">—</output></span></span></div>
         </div>
         <div class="stack-bar" data-field="hybridMix" aria-label="Hybrid mix"></div>
@@ -134,13 +134,13 @@
         </header>
         <div class="stat-grid">
           <div class="stat-cell"><span class="stat-label">AVG MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgBuildMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgBuildMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">P95 MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95BuildMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95BuildMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">HANDLES</span><span class="stat-values"><span><small>SESSION</small><output data-field="retainedExplainHandles">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="retainedExplainHandles">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P95 MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95BuildMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">HANDLES</span><span class="stat-values"><span><small>SESSION CURRENT</small><output data-field="retainedExplainHandles">—</output></span><span><small>REPO LIFETIME PEAK</small><output data-lifetime-field="retainedHandlesPeak">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">ACCEPT</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgAccepted">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgAccepted">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">EVICT</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgEvicted">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgEvicted">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">REJECT</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgRejected">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgRejected">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">FRONTIER AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgFrontierMaxSize">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgFrontierMaxSize">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">FRONTIER P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95FrontierMaxSize">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95FrontierMaxSize">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">FRONTIER P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95FrontierMaxSize">—</output></span></span></div>
         </div>
         <form id="beamExplainForm" class="beam-form">
           <input id="beamSliceHandle" placeholder="sliceHandle" autocomplete="off" spellcheck="false" />
@@ -156,10 +156,10 @@
         </header>
         <div class="stat-grid">
           <div class="stat-cell"><span class="stat-label">BLAST AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgBlastRadiusLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgBlastRadiusLatencyMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">BLAST P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95BlastRadiusLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95BlastRadiusLatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">BLAST P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95BlastRadiusLatencyMs">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">DB ROUND TRIPS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgDbRoundTripsPerChangedSymbol">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgDbRoundTripsPerChangedSymbol">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">PATH AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgPathExplanationLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgPathExplanationLatencyMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">PATH P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95PathExplanationLatencyMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95PathExplanationLatencyMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">PATH P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95PathExplanationLatencyMs">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">FALLBACKS</span><span class="stat-values"><span><small>SESSION</small><output data-field="fallbackPathQueryCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="fallbackPathQueryCount">—</output></span></span></div>
         </div>
       </section>
@@ -243,8 +243,8 @@
         </header>
         <div class="stat-grid">
           <div class="stat-cell"><span class="stat-label">AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">P50</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50Ms">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p50Ms">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">P99</span><span class="stat-values"><span><small>SESSION</small><output data-field="p99Ms">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p99Ms">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P50</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50Ms">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P99</span><span class="stat-values"><span><small>SESSION</small><output data-field="p99Ms">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">MAX</span><span class="stat-values"><span><small>SESSION</small><output data-field="maxMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="maxMs">—</output></span></span></div>
         </div>
         <div class="metric-table" data-field="perTool"></div>
@@ -257,7 +257,7 @@
         </header>
         <div class="stat-grid">
           <div class="stat-cell"><span class="stat-label">AVG MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgComputeMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgComputeMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">P95 MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95ComputeMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95ComputeMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P95 MS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95ComputeMs">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">SEEDS</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgSeedCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgSeedCount">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">TOUCHED</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgTouched">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgTouched">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">NATIVE RATIO</span><span class="stat-values"><span><small>SESSION</small><output data-field="nativeRatio">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="nativeRatio">—</output></span></span></div>
@@ -303,8 +303,8 @@
             <div class="stat-cell"><span class="stat-label">ERRORS</span><span class="stat-values"><span><small>SESSION</small><output data-field="errors">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="errors">—</output></span></span></div>
             <div class="stat-cell"><span class="stat-label">HANDLED</span><span class="stat-values"><span><small>SESSION</small><output data-field="handled">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="handled">—</output></span></span></div>
             <div class="stat-cell"><span class="stat-label">TRUNCATED</span><span class="stat-values"><span><small>SESSION</small><output data-field="truncated">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="truncated">—</output></span></span></div>
-            <div class="stat-cell"><span class="stat-label">P50 TOKENS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50Tokens">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p50Tokens">—</output></span></span></div>
-            <div class="stat-cell"><span class="stat-label">P95 TOKENS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95Tokens">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95Tokens">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">P50 TOKENS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50Tokens">—</output></span></span></div>
+            <div class="stat-cell"><span class="stat-label">P95 TOKENS</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95Tokens">—</output></span></span></div>
             <div class="stat-cell"><span class="stat-label">DETAIL</span><span class="stat-values"><span><small>SESSION</small><output data-field="detail">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="detail">—</output></span></span></div>
             <div class="stat-cell"><span class="stat-label">RECOVERY</span><span class="stat-values"><span><small>SESSION</small><output data-field="recovery">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="recovery">—</output></span></span></div>
           </div>
@@ -320,13 +320,13 @@
         <div class="stat-grid">
           <div class="stat-cell"><span class="stat-label">SESSIONS</span><span class="stat-values"><span><small>SESSION</small><output data-field="totalSessions">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="totalSessions">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="avgDurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="avgDurationMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">P50</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50DurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p50DurationMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95DurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p95DurationMs">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">P99</span><span class="stat-values"><span><small>SESSION</small><output data-field="p99DurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="p99DurationMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P50</span><span class="stat-values"><span><small>SESSION</small><output data-field="p50DurationMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="p95DurationMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">P99</span><span class="stat-values"><span><small>SESSION</small><output data-field="p99DurationMs">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">MAX</span><span class="stat-values"><span><small>SESSION</small><output data-field="maxDurationMs">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="maxDurationMs">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">TIMEOUTS</span><span class="stat-values"><span><small>SESSION</small><output data-field="timeoutCount">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="timeoutCount">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">LAST TIMED OUT</span><span class="stat-values"><span><small>SESSION</small><output data-field="lastTimedOut">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="lastTimedOut">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">LAST ENDED</span><span class="stat-values"><span><small>SESSION</small><output data-field="lastEndedAt">—</output></span><span><small>REPO LIFETIME</small><output data-lifetime-field="lastEndedAt">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">LAST TIMED OUT</span><span class="stat-values"><span><small>SESSION</small><output data-field="lastTimedOut">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">LAST ENDED</span><span class="stat-values"><span><small>SESSION</small><output data-field="lastEndedAt">—</output></span></span></div>
         </div>
         <div class="stat-grid" data-metric-scope="audit">
           <div class="stat-cell"><span class="stat-label">AUDIT BUF</span><span class="stat-values"><span><small>SESSION</small><output data-field="auditBufferDepth">—</output></span></span></div>
@@ -343,13 +343,13 @@
         </header>
         <div class="stat-grid" data-metric-scope="resources">
           <div class="stat-cell"><span class="stat-label">CPU AVG</span><span class="stat-values"><span><small>SESSION</small><output data-field="cpuPctAvg2">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">CPU MAX</span><span class="stat-values"><span><small>SERVER PEAK</small><output data-field="cpuPctMax">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">CPU MAX</span><span class="stat-values"><span><small>SESSION PEAK</small><output data-field="cpuPctMax">—</output></span><span><small>SERVER PEAK</small><output data-lifetime-field="processPeaks.cpuPct">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">RSS</span><span class="stat-values"><span><small>CURRENT</small><output data-field="rssMb">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">RSS MAX</span><span class="stat-values"><span><small>SERVER PEAK</small><output data-field="rssMbMax">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">HEAP</span><span class="stat-values"><span><small>CURRENT</small><output data-field="heapUsedMb">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">HEAP TOTAL</span><span class="stat-values"><span><small>CURRENT</small><output data-field="heapTotalMb">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">RSS MAX</span><span class="stat-values"><span><small>SESSION PEAK</small><output data-field="rssMbMax">—</output></span><span><small>SERVER PEAK</small><output data-lifetime-field="processPeaks.rssMb">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">HEAP</span><span class="stat-values"><span><small>CURRENT</small><output data-field="heapUsedMb">—</output></span><span><small>SERVER PEAK</small><output data-lifetime-field="processPeaks.heapUsedMb">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">HEAP TOTAL</span><span class="stat-values"><span><small>CURRENT</small><output data-field="heapTotalMb">—</output></span><span><small>SERVER PEAK</small><output data-lifetime-field="processPeaks.heapTotalMb">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">EVENT-LOOP P95</span><span class="stat-values"><span><small>SESSION</small><output data-field="eventLoopLagP95Ms">—</output></span></span></div>
-          <div class="stat-cell"><span class="stat-label">EVENT-LOOP MAX</span><span class="stat-values"><span><small>SERVER PEAK</small><output data-field="eventLoopLagMaxMs">—</output></span></span></div>
+          <div class="stat-cell"><span class="stat-label">EVENT-LOOP MAX</span><span class="stat-values"><span><small>SESSION PEAK</small><output data-field="eventLoopLagMaxMs">—</output></span><span><small>SERVER PEAK</small><output data-lifetime-field="processPeaks.eventLoopLagMs">—</output></span></span></div>
           <div class="stat-cell"><span class="stat-label">UPTIME</span><span class="stat-values"><span><small>SESSION</small><output data-field="uptimeMs">—</output></span></span></div>
         </div>
         <div class="metric-table" data-metric-scope="pool" data-field="poolTable"></div>

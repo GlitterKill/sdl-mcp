@@ -278,6 +278,56 @@ test("stdio observability dashboard sidecar serves only observability routes", a
     assert.match(htmlBody, />CURRENT</);
     assert.match(htmlBody, />SERVER PEAK</);
     assert.match(htmlBody, /data-panel="delta"/);
+    const statCells = [...htmlBody.matchAll(/<div class="stat-cell">[\s\S]*?<\/div>/g)]
+      .map((match) => match[0]);
+    const statCell = (field: string): string => {
+      const cell = statCells.find((candidate) => candidate.includes(` data-field="${field}"`));
+      assert.ok(cell, `missing stat cell for ${field}`);
+      return cell;
+    };
+    for (const sessionOnlyField of [
+      "p95LatencyMs",
+      "p95BuildMs",
+      "p95FrontierMaxSize",
+      "p95BlastRadiusLatencyMs",
+      "p95PathExplanationLatencyMs",
+      "p50Ms",
+      "p99Ms",
+      "p95ComputeMs",
+      "p50Tokens",
+      "p95Tokens",
+      "p50DurationMs",
+      "p95DurationMs",
+      "p99DurationMs",
+      "lastTimedOut",
+      "lastEndedAt",
+    ]) {
+      assert.doesNotMatch(statCell(sessionOnlyField), /REPO LIFETIME|data-lifetime-field=/, sessionOnlyField);
+    }
+    const handles = statCell("retainedExplainHandles");
+    assert.match(handles, />SESSION CURRENT</);
+    assert.match(handles, />REPO LIFETIME PEAK</);
+    assert.match(handles, /data-lifetime-field="retainedHandlesPeak"/);
+    assert.doesNotMatch(handles, /data-lifetime-field="retainedExplainHandles"/);
+    for (const [sessionField, lifetimeField] of [
+      ["cpuPctMax", "processPeaks.cpuPct"],
+      ["rssMbMax", "processPeaks.rssMb"],
+      ["eventLoopLagMaxMs", "processPeaks.eventLoopLagMs"],
+    ]) {
+      const cell = statCell(sessionField);
+      assert.match(cell, />SESSION PEAK</, sessionField);
+      assert.match(cell, />SERVER PEAK</, sessionField);
+      assert.match(cell, new RegExp(`data-lifetime-field="${lifetimeField.replaceAll(".", "\\.")}"`), sessionField);
+    }
+    for (const [currentField, lifetimeField] of [
+      ["heapUsedMb", "processPeaks.heapUsedMb"],
+      ["heapTotalMb", "processPeaks.heapTotalMb"],
+    ]) {
+      const cell = statCell(currentField);
+      assert.match(cell, />CURRENT</, currentField);
+      assert.match(cell, />SERVER PEAK</, currentField);
+      assert.match(cell, new RegExp(`data-lifetime-field="${lifetimeField.replaceAll(".", "\\.")}"`), currentField);
+    }
     for (const scope of ["pool", "audit", "resources"]) {
       const cell = htmlBody.match(new RegExp(`<[^>]+data-metric-scope="${scope}"[\\s\\S]*?<\\/div>`))?.[0] ?? "";
       assert.notEqual(cell, "", scope);

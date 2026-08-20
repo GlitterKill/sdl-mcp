@@ -364,32 +364,6 @@ function updateRetrieval(r) {
   });
 }
 
-function updateBeam(b) {
-  const panel = $('[data-panel="beam"]');
-  if (!panel || !b) return;
-  setVal(panel, "totalSliceBuilds", fmtNum(b.totalSliceBuilds));
-  setVal(panel, "avgBuildMs", fmtMs(b.avgBuildMs));
-  setVal(panel, "p95BuildMs", fmtMs(b.p95BuildMs));
-  setVal(panel, "retainedExplainHandles", fmtNum(b.retainedExplainHandles));
-  setVal(panel, "avgAccepted", fmtNum(b.avgAccepted, 1));
-  setVal(panel, "avgEvicted", fmtNum(b.avgEvicted, 1));
-  setVal(panel, "avgRejected", fmtNum(b.avgRejected, 1));
-  setVal(panel, "avgFrontierMaxSize", fmtNum(b.avgFrontierMaxSize, 1));
-  setVal(panel, "p95FrontierMaxSize", fmtNum(b.p95FrontierMaxSize, 1));
-}
-
-function updateDelta(d) {
-  const panel = $('[data-panel="delta"]');
-  if (!panel || !d) return;
-  setVal(panel, "totalBlastRadiusComputations", fmtNum(d.totalBlastRadiusComputations));
-  setVal(panel, "avgBlastRadiusLatencyMs", fmtMs(d.avgBlastRadiusLatencyMs));
-  setVal(panel, "p95BlastRadiusLatencyMs", fmtMs(d.p95BlastRadiusLatencyMs));
-  setVal(panel, "avgDbRoundTripsPerChangedSymbol", fmtNum(d.avgDbRoundTripsPerChangedSymbol, 1));
-  setVal(panel, "avgPathExplanationLatencyMs", fmtMs(d.avgPathExplanationLatencyMs));
-  setVal(panel, "p95PathExplanationLatencyMs", fmtMs(d.p95PathExplanationLatencyMs));
-  setVal(panel, "fallbackPathQueryCount", fmtNum(d.fallbackPathQueryCount));
-}
-
 function updateIndexing(i) {
   const panel = $('[data-panel="indexing"]');
   if (!panel || !i) return;
@@ -639,22 +613,6 @@ function updatePool(p) {
   });
 }
 
-function updateScip(s) {
-  const panel = $('[data-panel="scip"]');
-  if (!panel || !s) return;
-  setVal(
-    panel,
-    "lastIngestAt",
-    s.lastIngestAt ? new Date(s.lastIngestAt).toLocaleTimeString() : "never",
-  );
-  setVal(panel, "totalIngests", fmtNum(s.totalIngests));
-  setVal(panel, "successCount", fmtNum(s.successCount));
-  setVal(panel, "failureCount", fmtNum(s.failureCount));
-  setVal(panel, "avgIngestMs", fmtMs(s.avgIngestMs));
-  setVal(panel, "totalEdgesCreated", fmtNum(s.totalEdgesCreated));
-  setVal(panel, "totalEdgesUpgraded", fmtNum(s.totalEdgesUpgraded));
-}
-
 function updatePpr(p) {
   const panel = $('[data-panel="ppr"]');
   if (!panel || !p) return;
@@ -815,49 +773,337 @@ function renderToolOutputTable(panel, toolOutput) {
   });
 }
 
-function renderBottleneckPanel(snapshot) {
-  updateBottleneck(snapshot.bottleneck);
-  setText(document.querySelector('[data-dashboard-field="repoId"]'), snapshot.repoId);
-  setText(document.querySelector('[data-dashboard-field="generatedAt"]'), snapshot.generatedAt);
+const metricRenderers = Object.create(null);
+
+function metricValue(snapshot, path) {
+  return path.split(".").reduce((value, part) => value?.[part], snapshot);
 }
-function renderCachePanel(snapshot) { updateCache(snapshot.cache); }
-function renderRetrievalPanel(snapshot) { updateRetrieval(snapshot.retrieval); }
-function renderBeamPanel(snapshot) { updateBeam(snapshot.beam); }
-function renderDeltaPanel(snapshot) { updateDelta(snapshot.delta); }
-function renderIndexingPanel(snapshot) { updateIndexing(snapshot.indexing); }
-function renderTokenEfficiencyPanel(snapshot) { updateTokenEfficiency(snapshot.tokenEfficiency, snapshot.packed); }
-function renderPredictiveContextPanel(snapshot) { updatePredictiveContext(snapshot.predictiveContext); }
-function renderHealthPanel(snapshot) { updateHealth(snapshot.health); }
-function renderLatencyPanel(snapshot) { updateLatency(snapshot.latency); }
-function renderScipPanel(snapshot) { updateScip(snapshot.scip); }
-function renderPprPanel(snapshot) { updatePpr(snapshot.ppr); }
-function renderToolVolumePanel(snapshot) { updateToolVolume(snapshot.toolVolume); }
-function renderPostIndexPanel(snapshot) { updatePostIndex(snapshot.postIndexSession, null); }
-function renderToolOutputPanel(snapshot) { updateToolOutput(snapshot.toolOutput); }
 
-const PANEL_RENDERERS = Object.freeze({
-  bottleneck: renderBottleneckPanel,
-  cache: renderCachePanel,
-  retrieval: renderRetrievalPanel,
-  beam: renderBeamPanel,
-  delta: renderDeltaPanel,
-  indexing: renderIndexingPanel,
-  tokenEfficiency: renderTokenEfficiencyPanel,
-  predictiveContext: renderPredictiveContextPanel,
-  health: renderHealthPanel,
-  latency: renderLatencyPanel,
-  scip: renderScipPanel,
-  ppr: renderPprPanel,
-  toolVolume: renderToolVolumePanel,
-  postIndex: renderPostIndexPanel,
-  toolOutput: renderToolOutputPanel,
-});
+function registerMetricConsumer(path, renderer) {
+  if (Object.hasOwn(metricRenderers, path)) throw new Error(`Duplicate metric consumer: ${path}`);
+  metricRenderers[path] = renderer;
+}
 
-export const METRIC_RENDERERS = Object.freeze(Object.fromEntries(
-  Object.entries(METRIC_DISPOSITIONS)
+function registerScalarConsumer(path, panelName, field, format = String) {
+  registerMetricConsumer(path, function renderScalarMetric(snapshot) {
+    const panel = document.querySelector(`[data-panel="${panelName}"]`);
+    if (!panel) return;
+    setVal(panel, field, format(metricValue(snapshot, path)));
+  });
+}
+
+function registerDashboardConsumer(path, field) {
+  registerMetricConsumer(path, function renderDashboardMetric(snapshot) {
+    setText(document.querySelector(`[data-dashboard-field="${field}"]`), metricValue(snapshot, path));
+  });
+}
+
+function registerGroupedConsumers(paths, renderer) {
+  for (const path of paths) registerMetricConsumer(path, renderer);
+}
+
+registerDashboardConsumer("generatedAt", "generatedAt");
+registerDashboardConsumer("repoId", "repoId");
+registerGroupedConsumers([
+  "bottleneck.dominant",
+  "bottleneck.confidence",
+  "bottleneck.topSignals[].name",
+  "bottleneck.topSignals[].value",
+  "bottleneck.topSignals[].unit",
+  "bottleneck.topSignals[].weight",
+], (snapshot) => updateBottleneck(snapshot.bottleneck));
+
+registerScalarConsumer("cache.overallHitRatePct", "cache", "hitRate", (value) => fmtPct(value, 1));
+registerScalarConsumer("cache.totalHits", "cache", "totalHits", fmtNum);
+registerScalarConsumer("cache.totalMisses", "cache", "totalMisses", fmtNum);
+registerGroupedConsumers([
+  "cache.perSource[].source",
+  "cache.perSource[].hits",
+  "cache.perSource[].misses",
+  "cache.perSource[].hitRatePct",
+  "cache.perSource[].avgLatencyMs",
+], (snapshot) => updateCache(snapshot.cache));
+registerScalarConsumer("cache.avgLookupLatencyMs", "cache", "avgLookupLatencyMs", fmtMs);
+
+registerScalarConsumer("retrieval.totalRetrievals", "retrieval", "totalRetrievals", fmtNum);
+registerScalarConsumer("retrieval.avgLatencyMs", "retrieval", "avgLatencyMs", fmtMs);
+registerScalarConsumer("retrieval.p95LatencyMs", "retrieval", "p95LatencyMs", fmtMs);
+registerGroupedConsumers([
+  "retrieval.byMode[]",
+  "retrieval.candidateCountPerSource[]",
+  "retrieval.phaseLatencyMs[].count",
+  "retrieval.phaseLatencyMs[].avgMs",
+  "retrieval.phaseLatencyMs[].p95Ms",
+  "retrieval.phaseLatencyMs[].maxMs",
+  "retrieval.byRetrievalType[]",
+], (snapshot) => updateRetrieval(snapshot.retrieval));
+registerScalarConsumer("retrieval.emptyResultCount", "retrieval", "emptyResultCount", fmtNum);
+
+registerScalarConsumer("beam.totalSliceBuilds", "beam", "totalSliceBuilds", fmtNum);
+registerScalarConsumer("beam.avgBuildMs", "beam", "avgBuildMs", fmtMs);
+registerScalarConsumer("beam.p95BuildMs", "beam", "p95BuildMs", fmtMs);
+registerScalarConsumer("beam.avgAccepted", "beam", "avgAccepted", (value) => fmtNum(value, 1));
+registerScalarConsumer("beam.avgEvicted", "beam", "avgEvicted", (value) => fmtNum(value, 1));
+registerScalarConsumer("beam.avgRejected", "beam", "avgRejected", (value) => fmtNum(value, 1));
+registerScalarConsumer("beam.avgFrontierMaxSize", "beam", "avgFrontierMaxSize", (value) => fmtNum(value, 1));
+registerScalarConsumer("beam.p95FrontierMaxSize", "beam", "p95FrontierMaxSize", (value) => fmtNum(value, 1));
+registerScalarConsumer("beam.retainedExplainHandles", "beam", "retainedExplainHandles", fmtNum);
+
+registerScalarConsumer("delta.totalBlastRadiusComputations", "delta", "totalBlastRadiusComputations", fmtNum);
+registerScalarConsumer("delta.avgBlastRadiusLatencyMs", "delta", "avgBlastRadiusLatencyMs", fmtMs);
+registerScalarConsumer("delta.p95BlastRadiusLatencyMs", "delta", "p95BlastRadiusLatencyMs", fmtMs);
+registerScalarConsumer("delta.avgDbRoundTripsPerChangedSymbol", "delta", "avgDbRoundTripsPerChangedSymbol", (value) => fmtNum(value, 1));
+registerScalarConsumer("delta.avgPathExplanationLatencyMs", "delta", "avgPathExplanationLatencyMs", fmtMs);
+registerScalarConsumer("delta.p95PathExplanationLatencyMs", "delta", "p95PathExplanationLatencyMs", fmtMs);
+registerScalarConsumer("delta.fallbackPathQueryCount", "delta", "fallbackPathQueryCount", fmtNum);
+
+registerScalarConsumer("indexing.totalEvents", "indexing", "totalEvents", fmtNum);
+registerScalarConsumer("indexing.filesPerMinute", "indexing", "filesPerMinute", (value) => `${fmtNum(value, 1)}/min`);
+registerScalarConsumer("indexing.avgPass1Ms", "indexing", "avgPass1Ms", fmtMs);
+registerScalarConsumer("indexing.avgPass2Ms", "indexing", "avgPass2Ms", fmtMs);
+registerGroupedConsumers([
+  "indexing.phaseCounts[]",
+  "indexing.perLanguageAvgMs[]",
+  "indexing.engineDispatch.rust",
+  "indexing.engineDispatch.ts",
+], (snapshot) => updateIndexing(snapshot.indexing));
+registerScalarConsumer("indexing.failures", "indexing", "failures", fmtNum);
+registerScalarConsumer("indexing.derivedStateLagMs", "indexing", "derivedStateLagMs", fmtMs);
+
+registerScalarConsumer("tokenEfficiency.totalUsed", "tokenEfficiency", "totalUsed", fmtNum);
+registerScalarConsumer("tokenEfficiency.totalSaved", "tokenEfficiency", "totalSaved", fmtNum);
+registerScalarConsumer("tokenEfficiency.savingsRatio", "tokenEfficiency", "savingsRatio", (value) => fmtPct((value || 0) * 100, 1));
+registerScalarConsumer("tokenEfficiency.avgPerCall", "tokenEfficiency", "avgPerCall", (value) => fmtNum(value, 1));
+registerGroupedConsumers([
+  "tokenEfficiency.compressionLayers.totalEvents",
+  "tokenEfficiency.compressionLayers.totalRealizedEvents",
+  "tokenEfficiency.compressionLayers.totalEstimatedTokensAvoided",
+  "tokenEfficiency.compressionLayers.totalOriginalTokens",
+  "tokenEfficiency.compressionLayers.totalReturnedTokens",
+  "tokenEfficiency.compressionLayers.totalSavedTokens",
+  "tokenEfficiency.compressionLayers.totalStoredBytes",
+  "tokenEfficiency.compressionLayers.bySource[].source",
+  "tokenEfficiency.compressionLayers.bySource[].events",
+  "tokenEfficiency.compressionLayers.bySource[].realizedEvents",
+  "tokenEfficiency.compressionLayers.bySource[].estimatedTokensAvoided",
+  "tokenEfficiency.compressionLayers.bySource[].originalTokens",
+  "tokenEfficiency.compressionLayers.bySource[].returnedTokens",
+  "tokenEfficiency.compressionLayers.bySource[].savedTokens",
+  "tokenEfficiency.compressionLayers.bySource[].opportunities",
+  "tokenEfficiency.compressionLayers.bySource[].hits",
+  "tokenEfficiency.compressionLayers.bySource[].hitRatePct",
+  "tokenEfficiency.compressionLayers.bySource[].storedBytes",
+  "tokenEfficiency.compressionLayers.byTool[].tool",
+  "tokenEfficiency.compressionLayers.byTool[].source",
+  "tokenEfficiency.compressionLayers.byTool[].events",
+  "tokenEfficiency.compressionLayers.byTool[].realizedEvents",
+  "tokenEfficiency.compressionLayers.byTool[].estimatedTokensAvoided",
+  "tokenEfficiency.compressionLayers.byTool[].originalTokens",
+  "tokenEfficiency.compressionLayers.byTool[].returnedTokens",
+  "tokenEfficiency.compressionLayers.byTool[].savedTokens",
+  "tokenEfficiency.compressionLayers.byTool[].opportunities",
+  "tokenEfficiency.compressionLayers.byTool[].hits",
+  "tokenEfficiency.compressionLayers.byTool[].hitRatePct",
+  "tokenEfficiency.compressionLayers.byTool[].storedBytes",
+  "packed.totalDecisions",
+  "packed.packedCount",
+  "packed.fallbackCount",
+  "packed.packedAdoptionPct",
+  "packed.packedBytesTotal",
+  "packed.jsonBaselineBytesTotal",
+  "packed.bytesSaved",
+  "packed.bytesSavedRatio",
+  "packed.packedTokensTotal",
+  "packed.jsonBaselineTokensTotal",
+  "packed.tokensSaved",
+  "packed.tokensSavedRatio",
+  "packed.axisHits.bytes",
+  "packed.axisHits.tokens",
+  "packed.axisHits.none",
+  "packed.perEncoder[]",
+  "packed.byEncoder[].totalDecisions",
+  "packed.byEncoder[].packedCount",
+  "packed.byEncoder[].fallbackCount",
+  "packed.byEncoder[].packedAdoptionPct",
+  "packed.byEncoder[].jsonBaselineBytesTotal",
+  "packed.byEncoder[].packedBytesTotal",
+  "packed.byEncoder[].bytesSaved",
+  "packed.byEncoder[].bytesSavedRatio",
+  "packed.byEncoder[].jsonBaselineTokensTotal",
+  "packed.byEncoder[].packedTokensTotal",
+  "packed.byEncoder[].tokensSaved",
+  "packed.byEncoder[].tokensSavedRatio",
+], (snapshot) => updateTokenEfficiency(snapshot.tokenEfficiency, snapshot.packed));
+
+registerScalarConsumer("predictiveContext.policyMode", "predictiveContext", "policyMode", (value) => (value || "disabled").toUpperCase());
+registerScalarConsumer("predictiveContext.outcomeSamples", "predictiveContext", "outcomeSamples", fmtNum);
+registerScalarConsumer("predictiveContext.suppressedPrefetch", "predictiveContext", "suppressedPrefetch", fmtNum);
+registerScalarConsumer("predictiveContext.acceptedPrefetch", "predictiveContext", "acceptedPrefetch", fmtNum);
+registerScalarConsumer("predictiveContext.hitRatePct", "predictiveContext", "hitRatePct", (value) => fmtPct(value, 1));
+registerScalarConsumer("predictiveContext.wasteRatePct", "predictiveContext", "wasteRatePct", (value) => fmtPct(value, 1));
+registerScalarConsumer("predictiveContext.avgLatencyReductionMs", "predictiveContext", "avgLatencyReductionMs", fmtMs);
+registerGroupedConsumers([
+  "predictiveContext.topStrategies[].strategy",
+  "predictiveContext.topStrategies[].resourceKind",
+  "predictiveContext.topStrategies[].samples",
+  "predictiveContext.topStrategies[].hitRatePct",
+  "predictiveContext.topStrategies[].acceptedRatePct",
+  "predictiveContext.topStrategies[].wasteRatePct",
+  "predictiveContext.topStrategies[].score",
+  "predictiveContext.topStrategies[].suppressed",
+], (snapshot) => updatePredictiveContext(snapshot.predictiveContext));
+
+registerScalarConsumer("health.score", "health", "score", (value) => fmtNum(value, 0));
+registerGroupedConsumers([
+  "health.components.freshness",
+  "health.components.coverage",
+  "health.components.errorRate",
+  "health.components.edgeQuality",
+  "health.components.callResolution",
+], (snapshot) => updateHealth(snapshot.health));
+registerScalarConsumer("health.watcherRunning", "health", "watcherRunning", (value) => value ? "ON" : "OFF");
+registerScalarConsumer("health.watcherProvider", "health", "watcherProvider", (value) => value || "—");
+registerScalarConsumer("health.watcherConfiguredProvider", "health", "watcherConfiguredProvider", (value) => value || "—");
+registerScalarConsumer("health.watcherFallbackReason", "health", "watcherFallbackReason", (value) => value || "—");
+registerScalarConsumer("health.watcherQueueDepth", "health", "watcherQueueDepth", fmtNum);
+registerScalarConsumer("health.watcherStale", "health", "watcherStale", (value) => value ? "STALE" : "FRESH");
+registerScalarConsumer("health.watcherErrors", "health", "watcherErrors", fmtNum);
+registerScalarConsumer("health.watcherRestartCount", "health", "watcherRestartCount", fmtNum);
+registerScalarConsumer("health.watcherWatchmanWarningCount", "health", "watcherWatchmanWarningCount", fmtNum);
+registerGroupedConsumers([
+  "health.watcherWatchmanWarnings[]",
+  "health.watcherWatchmanVersion",
+  "health.watcherWatchmanWatchRoot",
+  "health.watcherWatchmanRelativePath",
+  "health.watcherWatchmanLastClock",
+], (snapshot) => updateHealth(snapshot.health));
+registerScalarConsumer("health.watcherWatchmanRecrawlCount", "health", "watcherWatchmanRecrawlCount", fmtNum);
+registerScalarConsumer("health.watcherWatchmanFreshInstanceCount", "health", "watcherWatchmanFreshInstanceCount", fmtNum);
+
+registerScalarConsumer("latency.avgMs", "latency", "avgMs", fmtMs);
+registerScalarConsumer("latency.p50Ms", "latency", "p50Ms", fmtMs);
+registerScalarConsumer("latency.p95Ms", "latency", "p95Ms", fmtMs);
+registerScalarConsumer("latency.p99Ms", "latency", "p99Ms", fmtMs);
+registerScalarConsumer("latency.maxMs", "latency", "maxMs", fmtMs);
+registerGroupedConsumers([
+  "latency.perTool[].count",
+  "latency.perTool[].avgMs",
+  "latency.perTool[].p95Ms",
+  "latency.perTool[].errorCount",
+  "latency.perTool[].phases[].count",
+  "latency.perTool[].phases[].avgMs",
+  "latency.perTool[].phases[].p95Ms",
+  "latency.perTool[].phases[].maxMs",
+], (snapshot) => updateLatency(snapshot.latency));
+
+registerScalarConsumer("scip.totalIngests", "scip", "totalIngests", fmtNum);
+registerScalarConsumer("scip.successCount", "scip", "successCount", fmtNum);
+registerScalarConsumer("scip.failureCount", "scip", "failureCount", fmtNum);
+registerScalarConsumer("scip.totalEdgesCreated", "scip", "totalEdgesCreated", fmtNum);
+registerScalarConsumer("scip.totalEdgesUpgraded", "scip", "totalEdgesUpgraded", fmtNum);
+registerScalarConsumer("scip.avgIngestMs", "scip", "avgIngestMs", fmtMs);
+registerScalarConsumer("scip.lastIngestAt", "scip", "lastIngestAt", (value) => value ? new Date(value).toLocaleTimeString() : "never");
+
+registerScalarConsumer("ppr.totalRuns", "ppr", "totalRuns", fmtNum);
+registerGroupedConsumers([
+  "ppr.nativeCount",
+  "ppr.jsCount",
+  "ppr.fallbackCount",
+], (snapshot) => updatePpr(snapshot.ppr));
+registerScalarConsumer("ppr.nativeRatio", "ppr", "nativeRatio", (value) => fmtPct(value * 100, 1));
+registerScalarConsumer("ppr.avgComputeMs", "ppr", "avgComputeMs", fmtMs);
+registerScalarConsumer("ppr.p95ComputeMs", "ppr", "p95ComputeMs", fmtMs);
+registerScalarConsumer("ppr.avgTouched", "ppr", "avgTouched", (value) => fmtNum(value, 1));
+registerScalarConsumer("ppr.avgSeedCount", "ppr", "avgSeedCount", (value) => fmtNum(value, 1));
+
+registerScalarConsumer("toolVolume.totalCalls", "toolVolume", "totalCalls", fmtNum);
+registerGroupedConsumers([
+  "toolVolume.perTool[]",
+  "toolVolume.perToolErrors[]",
+], (snapshot) => updateToolVolume(snapshot.toolVolume));
+registerScalarConsumer("toolVolume.callsPerMinute", "toolVolume", "callsPerMinute", (value) => `${fmtNum(value, 1)}/min`);
+
+registerScalarConsumer("postIndexSession.totalSessions", "postIndex", "totalSessions", fmtNum);
+registerScalarConsumer("postIndexSession.avgDurationMs", "postIndex", "avgDurationMs", fmtMs);
+registerScalarConsumer("postIndexSession.p50DurationMs", "postIndex", "p50DurationMs", fmtMs);
+registerScalarConsumer("postIndexSession.p95DurationMs", "postIndex", "p95DurationMs", fmtMs);
+registerScalarConsumer("postIndexSession.p99DurationMs", "postIndex", "p99DurationMs", fmtMs);
+registerScalarConsumer("postIndexSession.maxDurationMs", "postIndex", "maxDurationMs", fmtMs);
+registerScalarConsumer("postIndexSession.timeoutCount", "postIndex", "timeoutCount", fmtNum);
+registerScalarConsumer("postIndexSession.lastDurationMs", "postIndex", "lastDurationMs", fmtMs);
+registerScalarConsumer("postIndexSession.lastTimedOut", "postIndex", "lastTimedOut", (value) => value ? "YES" : "NO");
+registerScalarConsumer("postIndexSession.lastEndedAt", "postIndex", "lastEndedAt", (value) => value ? new Date(value).toLocaleTimeString() : "never");
+
+registerGroupedConsumers([
+  "toolOutput.schemaVersion",
+  "toolOutput.overall.calls",
+  "toolOutput.overall.errors",
+  "toolOutput.overall.rawBytesTotal",
+  "toolOutput.overall.projectedBytesTotal",
+  "toolOutput.overall.rawTokensTotal",
+  "toolOutput.overall.projectedTokensTotal",
+  "toolOutput.overall.reductionRatio",
+  "toolOutput.overall.removedFieldTotal",
+  "toolOutput.overall.handledCount",
+  "toolOutput.overall.handledRate",
+  "toolOutput.overall.truncatedCount",
+  "toolOutput.overall.truncatedRate",
+  "toolOutput.overall.detailCounts.summary",
+  "toolOutput.overall.detailCounts.compact",
+  "toolOutput.overall.detailCounts.standard",
+  "toolOutput.overall.detailCounts.full",
+  "toolOutput.overall.profileCounts[]",
+  "toolOutput.overall.recoveryEmittedCount",
+  "toolOutput.overall.invalidRecoveryCount",
+  "toolOutput.overall.p50ProjectedBytes",
+  "toolOutput.overall.p95ProjectedBytes",
+  "toolOutput.overall.maxProjectedBytes",
+  "toolOutput.overall.p50ProjectedTokens",
+  "toolOutput.overall.p95ProjectedTokens",
+  "toolOutput.overall.maxProjectedTokens",
+  "toolOutput.perTool[].tool",
+  "toolOutput.perTool[].calls",
+  "toolOutput.perTool[].errors",
+  "toolOutput.perTool[].rawBytesTotal",
+  "toolOutput.perTool[].projectedBytesTotal",
+  "toolOutput.perTool[].rawTokensTotal",
+  "toolOutput.perTool[].projectedTokensTotal",
+  "toolOutput.perTool[].reductionRatio",
+  "toolOutput.perTool[].removedFieldTotal",
+  "toolOutput.perTool[].handledCount",
+  "toolOutput.perTool[].handledRate",
+  "toolOutput.perTool[].truncatedCount",
+  "toolOutput.perTool[].truncatedRate",
+  "toolOutput.perTool[].detailCounts.summary",
+  "toolOutput.perTool[].detailCounts.compact",
+  "toolOutput.perTool[].detailCounts.standard",
+  "toolOutput.perTool[].detailCounts.full",
+  "toolOutput.perTool[].profileCounts[]",
+  "toolOutput.perTool[].recoveryEmittedCount",
+  "toolOutput.perTool[].invalidRecoveryCount",
+  "toolOutput.perTool[].p50ProjectedBytes",
+  "toolOutput.perTool[].p95ProjectedBytes",
+  "toolOutput.perTool[].maxProjectedBytes",
+  "toolOutput.perTool[].p50ProjectedTokens",
+  "toolOutput.perTool[].p95ProjectedTokens",
+  "toolOutput.perTool[].maxProjectedTokens",
+], (snapshot) => updateToolOutput(snapshot.toolOutput));
+
+export const METRIC_RENDERERS = Object.freeze({ ...metricRenderers });
+
+export function assertMetricRendererCoverage(dispositions, renderers) {
+  const claimed = Object.entries(dispositions)
     .filter(([, entry]) => entry.disposition !== "sessionOnly")
-    .map(([path, entry]) => [path, PANEL_RENDERERS[entry.panel]]),
-));
+    .map(([path]) => path);
+  for (const path of claimed) {
+    if (typeof renderers[path] !== "function") throw new Error(`Missing metric consumer: ${path}`);
+  }
+  for (const path of Object.keys(renderers)) {
+    if (!claimed.includes(path)) throw new Error(`Unclaimed metric consumer: ${path}`);
+  }
+}
+
+assertMetricRendererCoverage(METRIC_DISPOSITIONS, METRIC_RENDERERS);
 
 function renderMappedSeries(points, destination, seriesName) {
   const panel = document.querySelector(`[data-panel="${destination.panel}"]`);
