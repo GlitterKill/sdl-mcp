@@ -642,6 +642,73 @@ describe("lifetime persistence lock", () => {
     assert.deepEqual(await auxiliaryFiles(directory), []);
   });
 
+  it("recovers exact create cleanup aliases across two startups", async () => {
+    const directory = await temporaryDirectory();
+    const nonce = "79".repeat(16);
+    const anchorPath = join(directory, `.sdl-observability-lifetime.create.${nonce}`);
+    const cleanupPath = `${anchorPath}.cleanup`;
+    const cleanupNextPath = `${anchorPath}.cleanup-next`;
+    await writeFile(anchorPath, createAnchorRecord(999_999, nonce));
+    await link(anchorPath, cleanupPath);
+    let interrupted = false;
+
+    const first = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        unlink: async (path) => {
+          if (!interrupted && String(path) === cleanupNextPath) {
+            interrupted = true;
+            throw Object.assign(new Error("create alias cleanup interrupted"), { code: "EIO" });
+          }
+          return unlink(path);
+        },
+      },
+    });
+    assert.equal(first.mode, "readOnly");
+    assert.equal(interrupted, true);
+
+    const successor = await acquireLifetimeLease(directory, {
+      pid: 4343,
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
+  it("preserves exact create cleanup aliases for a live claimant", async () => {
+    const directory = await temporaryDirectory();
+    const nonce = "7a".repeat(16);
+    const anchorPath = join(directory, `.sdl-observability-lifetime.create.${nonce}`);
+    const cleanupPath = `${anchorPath}.cleanup`;
+    await writeFile(anchorPath, createAnchorRecord(4242, nonce));
+    await link(anchorPath, cleanupPath);
+    const before = await auxiliaryFiles(directory);
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: (pid) => pid === 4242,
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "contended" });
+    assert.deepEqual(await auxiliaryFiles(directory), before);
+  });
+
+  it("preserves mismatched create cleanup aliases as invalid", async () => {
+    const directory = await temporaryDirectory();
+    const nonce = "7b".repeat(16);
+    const anchorPath = join(directory, `.sdl-observability-lifetime.create.${nonce}`);
+    const cleanupPath = `${anchorPath}.cleanup`;
+    await writeFile(anchorPath, createAnchorRecord(999_999, nonce));
+    await writeFile(cleanupPath, createAnchorRecord(999_999, nonce, 999_999, ISO_2));
+    const before = await auxiliaryFiles(directory);
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" });
+    assert.deepEqual(await auxiliaryFiles(directory), before);
+  });
+
   it("recovers an inode-zero lock witness interrupted after its cleanup rename", async () => {
     const directory = await temporaryDirectory();
     const nonce = "73".repeat(16);
@@ -957,6 +1024,111 @@ describe("lifetime persistence lock", () => {
     });
     assertWriter(result);
     assert.equal(await releaseLifetimeLease(result.lease), true);
+  });
+
+  it("recovers exact fixed and claim-cleanup aliases across two startups", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+    const nonce = "7c".repeat(16);
+    const recordPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-record.${nonce}.json`,
+    );
+    const cleanupPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-cleanup.${nonce}`,
+    );
+    const recoveryMovedPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-recovery-moved.${nonce}`,
+    );
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    const source = await fileSnapshot(lockPath);
+    await writeFile(recordPath, claimRecord(999_999, nonce, source));
+    await link(recordPath, fixedPath);
+    await link(recordPath, cleanupPath);
+    let interrupted = false;
+
+    const first = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isPidAlive: () => false,
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        unlink: async (path) => {
+          if (!interrupted && String(path) === recoveryMovedPath) {
+            interrupted = true;
+            throw Object.assign(new Error("claim alias recovery interrupted"), { code: "EIO" });
+          }
+          return unlink(path);
+        },
+      },
+    });
+    assert.equal(first.mode, "readOnly");
+    assert.equal(interrupted, true);
+
+    const successor = await acquireLifetimeLease(directory, {
+      pid: 4343,
+      isPidAlive: () => false,
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+  });
+
+  it("keeps an exact fixed and claim-cleanup alias authoritative while claimant is live", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+    const nonce = "7d".repeat(16);
+    const recordPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-record.${nonce}.json`,
+    );
+    const cleanupPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-cleanup.${nonce}`,
+    );
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    const source = await fileSnapshot(lockPath);
+    await writeFile(recordPath, claimRecord(4242, nonce, source));
+    await link(recordPath, fixedPath);
+    await link(recordPath, cleanupPath);
+    const before = await auxiliaryFiles(directory);
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: (pid) => pid === 4242,
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "contended" });
+    assert.deepEqual(await auxiliaryFiles(directory), before);
+  });
+
+  it("preserves mismatched fixed and claim-cleanup aliases as invalid", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+    const nonce = "7e".repeat(16);
+    const recordPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-record.${nonce}.json`,
+    );
+    const cleanupPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-cleanup.${nonce}`,
+    );
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    const source = await fileSnapshot(lockPath);
+    await writeFile(recordPath, claimRecord(999_999, nonce, source));
+    await link(recordPath, fixedPath);
+    await writeFile(cleanupPath, claimRecord(999_999, nonce, source, ISO_2));
+    const before = await auxiliaryFiles(directory);
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" });
+    assert.deepEqual(await auxiliaryFiles(directory), before);
   });
 
   it("retries initial fixed-claim EPERM or EACCES after an exact cleanup rename", async () => {

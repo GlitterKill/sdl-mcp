@@ -729,6 +729,29 @@ async function matchingClaimCleanup(
   }
 }
 
+async function matchingPresentClaimCleanup(
+  directory: string,
+  record: LifetimeClaimRecord,
+  fixedSnapshot: LifetimeSourceSnapshot,
+  fileSystem: LifetimeFileSystem,
+): Promise<boolean> {
+  const cleanupPath = directChildPath(
+    directory,
+    resolve(directory, `.sdl-observability-lifetime.claim-cleanup.${record.nonce}`),
+    "Lifetime claim cleanup",
+  );
+  try {
+    const cleanup = await readLifetimeSource(cleanupPath, fileSystem, MAX_CLAIM_BYTES);
+    const cleanupRecord = parseClaim(cleanup.content);
+    return cleanupRecord !== null &&
+      sameClaimRecord(cleanupRecord, record) &&
+      sameLifetimeSource(cleanup.snapshot, fixedSnapshot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 async function matchingInitialClaimCleanup(
   directory: string,
   fixedStat: BigIntStats,
@@ -906,13 +929,35 @@ async function recoverStrandedAuxiliaries(
     return "invalid";
   }
 
+  let recoveryEntries = entries;
+  let retiredAliases = 0;
+  const aliasesByLogicalName = Map.groupBy(entries, (entry) => entry.logicalName);
+  try {
+    for (const aliases of aliasesByLogicalName.values()) {
+      if (aliases.length < 2) continue;
+      const canonical = aliases.find((entry) => entry.name === entry.logicalName) ??
+        [...aliases].sort((left, right) => left.name.localeCompare(right.name))[0];
+      if (!canonical) return "invalid";
+      for (const alias of aliases) {
+        if (alias === canonical) continue;
+        if (retiredAliases >= MAX_LIFETIME_AUXILIARIES) return "busy";
+        if (!await removeValidatedAuxiliary(alias, fileSystem)) return "busy";
+        retiredAliases++;
+      }
+      recoveryEntries = recoveryEntries.filter((entry) =>
+        entry === canonical || entry.logicalName !== canonical.logicalName);
+    }
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "busy" : "invalid";
+  }
+
   const createByNonce = new Map(
-    entries
+    recoveryEntries
       .filter((entry) => entry.kind === "create" && entry.nonce)
       .map((entry) => [entry.nonce as string, entry] as const),
   );
   const groups = new Map<string, AuxiliaryEntry[]>();
-  for (const entry of entries) {
+  for (const entry of recoveryEntries) {
     let key: string;
     if (entry.kind === "evidence-delete") {
       key = `evidence:${entry.logicalName}`;
@@ -949,12 +994,13 @@ async function recoverStrandedAuxiliaries(
   }
   const selectedGroups: typeof orderedGroups = [];
   let selectedCount = 0;
+  const remainingBudget = MAX_LIFETIME_AUXILIARIES - retiredAliases;
   for (const group of orderedGroups) {
-    if (selectedCount + group.entries.length > MAX_LIFETIME_AUXILIARIES) break;
+    if (selectedCount + group.entries.length > remainingBudget) break;
     selectedGroups.push(group);
     selectedCount += group.entries.length;
   }
-  if (selectedGroups.length === 0) return "invalid";
+  if (selectedGroups.length === 0) return retiredAliases > 0 ? "busy" : "invalid";
 
   const priority = (entry: AuxiliaryEntry) =>
     entry.kind === "witness" || entry.kind === "create-witness" ||
@@ -1043,6 +1089,7 @@ async function recoverExistingClaim(
     "Lifetime claim source witness",
   );
   let witness: Awaited<ReturnType<typeof readLifetimeSource>> | null = null;
+  let cleanupWitness = false;
   try {
     witness = await readLifetimeSource(durableWitnessPath, fileSystem);
     if (!sameLifetimeIdentity(witness.snapshot, record.source)) {
@@ -1063,6 +1110,16 @@ async function recoverExistingClaim(
           sameLifetimeSource(currentFixed.snapshot, fixed.snapshot) &&
           sameLifetimeSource(currentRecord.snapshot, durableRecord.snapshot)
         ) {
+          if (await matchingPresentClaimCleanup(
+            directory,
+            record,
+            fixed.snapshot,
+            fileSystem,
+          )) {
+            if (await claimantAlive(record.pid, options)) return "live";
+            cleanupWitness = true;
+            break;
+          }
           if (await matchingClaimCleanup(directory, record, fixed.snapshot, fileSystem)) {
             return "raced";
           }
@@ -1089,7 +1146,7 @@ async function recoverExistingClaim(
         return "invalid";
       }
     }
-    return "invalid";
+    if (!cleanupWitness) return "invalid";
   }
   if (await claimantAlive(record.pid, options)) return "live";
 
