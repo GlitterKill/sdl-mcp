@@ -61,6 +61,7 @@ import {
   type LifetimeFreshness,
   type LifetimeReadyV1,
   type ProcessPeaks,
+  type RecoveryReason,
   type SampleTotal,
   type SectionId,
   type ToolOutputLifetimeCounters,
@@ -120,6 +121,13 @@ interface PublicationBoundary {
   readonly processPeaks: ProcessPeaks | null;
 }
 
+interface PendingReset {
+  readonly targetRepoId: string;
+  readonly boundary: PublicationBoundary;
+  readonly interleaved: Map<string, DurableLifetimeRepository>;
+  readonly eventProduced: Set<string>;
+}
+
 const CHECKPOINT_INTERVAL_MS = 30_000;
 
 /**
@@ -163,6 +171,15 @@ export class ObservabilityService implements ObservabilityTap {
   private startPromise: Promise<void> | null = null;
   private lifetimeTail: Promise<void> = Promise.resolve();
   private pendingCheckpoint: PublicationBoundary | null = null;
+  private pendingReset: PendingReset | null = null;
+  private readonly watcherCumulative = new Map<
+    string,
+    NonNullable<DurableLifetimeSections["health"]>
+  >();
+  private readonly prefetchCumulative = new Map<
+    string,
+    NonNullable<DurableLifetimeSections["predictiveContext"]>
+  >();
 
   constructor(config: ObservabilityConfig, options: ObservabilityServiceOptions = {}) {
     this.config = config;
@@ -449,11 +466,17 @@ export class ObservabilityService implements ObservabilityTap {
   async getLifetime(repoId: string): Promise<LifetimeEnvelopeV1> {
     if (this.startPromise !== null) await this.startPromise;
     const store = this.lifetimeStore;
+    let refreshRecoveryReason: RecoveryReason | null = null;
     if (store !== null && store.state().mode === "readOnly") {
       try {
-        await store.refreshReadOnly();
-        const refreshed = store.state();
-        if (refreshed.root !== null) this.committedLifetime = refreshed.root;
+        const outcome = await store.refreshReadOnly();
+        if (outcome.status === "refreshed") {
+          this.committedLifetime = outcome.root;
+        } else if (outcome.status === "ioFailure") {
+          this.logWarn("lifetime read-only refresh failed", outcome.status);
+        } else if (outcome.status === "recoveryRequired") {
+          refreshRecoveryReason = outcome.reason;
+        }
       } catch (err) {
         this.logWarn("lifetime read-only refresh failed", err);
       }
@@ -461,16 +484,15 @@ export class ObservabilityService implements ObservabilityTap {
 
     const state = store?.state();
     const generatedAt = this.nowIso();
-    if (this.lifetimeFrozen || state?.mode === "recoveryRequired") {
+    if (this.lifetimeFrozen || refreshRecoveryReason !== null || state?.mode === "recoveryRequired") {
       return {
         schemaVersion: LIFETIME_SCHEMA_VERSION,
         sampleIntervalMs: clampInterval(this.config.sampleIntervalMs),
         generatedAt,
         repoId,
         persistenceState: "recoveryRequired",
-        recoveryReason: state?.mode === "recoveryRequired"
-          ? state.reason
-          : "indeterminatePublication",
+        recoveryReason: refreshRecoveryReason
+          ?? (state?.mode === "recoveryRequired" ? state.reason : "indeterminatePublication"),
       };
     }
 
@@ -504,10 +526,9 @@ export class ObservabilityService implements ObservabilityTap {
       saturated: value.saturated,
       sections: capacityExceeded ? emptyLifetimeSections() : structuredClone(value.sections),
       freshness: this.responseFreshness(repoId),
-      processPeaks: mergeProcessPeaks(
-        this.committedLifetime?.processPeaks ?? null,
-        this.lifetimeWriter && !this.lifetimeFrozen ? this.processPeakEpoch : null,
-      ),
+      processPeaks: this.lifetimeWriter && !this.lifetimeFrozen
+        ? this.visibleProcessPeaks()
+        : this.committedLifetime?.processPeaks ?? null,
     };
   }
 
@@ -528,9 +549,11 @@ export class ObservabilityService implements ObservabilityTap {
       const oldTargetBaseline = structuredClone(target.baseline);
       const capturedActive = structuredClone(target.active);
       const capturedProduced = target.eventProduced;
+      const boundary = this.snapshotPublicationBoundary();
       target.active = activeLifetimeMetadata(oldTargetBaseline);
       target.eventProduced = false;
       const rollback = (): void => {
+        this.pendingReset = null;
         target.baseline = oldTargetBaseline;
         target.active = mergeRepositoryLifetime(
           capturedActive,
@@ -541,13 +564,19 @@ export class ObservabilityService implements ObservabilityTap {
       let candidate: DurableLifetimeRoot;
       let resetValue: DurableLifetimeRepository;
       try {
-        candidate = this.buildResetCandidate(repoId, resetAt, capturedActive);
+        candidate = this.buildResetCandidate(repoId, resetAt, boundary);
         const candidateValue = candidate.repositories[repositoryStorageKey(repoId)];
         if (candidateValue === undefined) throw new Error("Reset repository is unavailable");
         resetValue = candidateValue;
         // Events arriving while reset publishes belong to the new epoch.
         target.baseline = resetValue;
         target.active = activeLifetimeMetadata(resetValue, target.active);
+        this.pendingReset = {
+          targetRepoId: repoId,
+          boundary,
+          interleaved: new Map(),
+          eventProduced: new Set(),
+        };
       } catch (error) {
         rollback();
         throw error;
@@ -560,9 +589,7 @@ export class ObservabilityService implements ObservabilityTap {
         throw err;
       }
       if (outcome.status === "committed") {
-        this.committedLifetime = structuredClone(outcome.root);
-        target.baseline = outcome.root.repositories[repositoryStorageKey(repoId)] ?? resetValue;
-        target.active = activeLifetimeMetadata(target.baseline, target.active);
+        this.acceptCommittedReset(outcome.root, repoId, resetValue, boundary);
         return this.readyLifetime(repoId, "ready");
       }
       if (outcome.status === "notPublished") {
@@ -596,10 +623,7 @@ export class ObservabilityService implements ObservabilityTap {
       saturated: value.saturated,
       sections: structuredClone(value.sections),
       freshness: this.responseFreshness(repoId),
-      processPeaks: mergeProcessPeaks(
-        this.committedLifetime?.processPeaks ?? null,
-        this.processPeakEpoch,
-      ),
+      processPeaks: this.visibleProcessPeaks(),
     };
   }
 
@@ -639,16 +663,25 @@ export class ObservabilityService implements ObservabilityTap {
   }
 
   private capturePublicationBoundary(): PublicationBoundary {
+    const boundary = this.snapshotPublicationBoundary();
+    for (const state of this.lifetimeRepositories.values()) {
+      state.active = activeLifetimeMetadata(state.baseline);
+      state.eventProduced = false;
+    }
+    this.processPeakEpoch = null;
+    return boundary;
+  }
+
+  private snapshotPublicationBoundary(): PublicationBoundary {
     const actives = new Map<string, DurableLifetimeRepository>();
     const eventProduced = new Map<string, boolean>();
     for (const [repoId, state] of this.lifetimeRepositories) {
       actives.set(repoId, structuredClone(state.active));
       eventProduced.set(repoId, state.eventProduced);
-      state.active = activeLifetimeMetadata(state.baseline);
-      state.eventProduced = false;
     }
-    const processPeaks = this.processPeakEpoch;
-    this.processPeakEpoch = null;
+    const processPeaks = this.processPeakEpoch === null
+      ? null
+      : structuredClone(this.processPeakEpoch);
     return { actives, eventProduced, processPeaks };
   }
 
@@ -694,21 +727,55 @@ export class ObservabilityService implements ObservabilityTap {
   private buildResetCandidate(
     repoId: string,
     timestamp: string,
-    capturedActive: DurableLifetimeRepository,
+    boundary: PublicationBoundary,
   ): DurableLifetimeRoot {
     const base = structuredClone(this.committedLifetime ?? emptyLifetimeRoot(timestamp));
-    const state = this.lifetimeRepositories.get(repoId);
-    if (state === undefined) throw new Error("Reset repository is unavailable");
-    base.repositories[repositoryStorageKey(repoId)] = resetRepositoryLifetime(
-      lifetimeView(state.baseline, capturedActive),
-      timestamp,
-    );
+    for (const [currentRepoId, state] of this.lifetimeRepositories) {
+      const captured = boundary.actives.get(currentRepoId)
+        ?? activeLifetimeMetadata(state.baseline);
+      let repository = lifetimeView(state.baseline, captured);
+      if (currentRepoId === repoId) {
+        repository = resetRepositoryLifetime(repository, timestamp);
+      } else {
+        if ((boundary.eventProduced.get(currentRepoId) ?? false) && !state.sessionCounted) {
+          repository = incrementSessionCount(repository).value;
+        }
+        repository = { ...repository, lastCheckpointAt: timestamp };
+      }
+      base.repositories[repositoryStorageKey(currentRepoId)] = repository;
+    }
     return {
       ...base,
       generation: Math.min(Number.MAX_SAFE_INTEGER, base.generation + 1),
       updatedAt: timestamp,
+      processPeaks: mergeProcessPeaks(base.processPeaks, boundary.processPeaks),
       repositories: orderedRecord(base.repositories),
     };
+  }
+
+  private acceptCommittedReset(
+    root: DurableLifetimeRoot,
+    targetRepoId: string,
+    resetValue: DurableLifetimeRepository,
+    boundary: PublicationBoundary,
+  ): void {
+    const pending = this.pendingReset;
+    this.committedLifetime = structuredClone(root);
+    for (const [repoId, state] of this.lifetimeRepositories) {
+      const stored = root.repositories[repositoryStorageKey(repoId)];
+      if (repoId === targetRepoId) {
+        state.baseline = stored ?? resetValue;
+        state.active = activeLifetimeMetadata(state.baseline, state.active);
+        continue;
+      }
+      if (stored !== undefined) state.baseline = stored;
+      if (boundary.eventProduced.get(repoId) ?? false) state.sessionCounted = true;
+      const interleaved = pending?.interleaved.get(repoId)
+        ?? activeLifetimeMetadata(state.baseline);
+      state.active = activeLifetimeMetadata(state.baseline, interleaved);
+      state.eventProduced = pending?.eventProduced.has(repoId) ?? false;
+    }
+    this.pendingReset = null;
   }
 
   private acceptCommittedLifetime(
@@ -767,7 +834,7 @@ export class ObservabilityService implements ObservabilityTap {
   private recordLifetimeEvent(
     repoId: string | undefined,
     sections: readonly SectionId[],
-    update: (repository: DurableLifetimeRepository) => DurableLifetimeRepository,
+    createDelta: () => DurableLifetimeRepository,
   ): void {
     if (repoId === undefined || !this.isRegisteredRepoId(repoId)) return;
     const timestamp = this.nowIso();
@@ -777,8 +844,16 @@ export class ObservabilityService implements ObservabilityTap {
     if (!this.lifetimeWriter || this.lifetimeFrozen) return;
     const state = this.ensureLifetimeRepository(repoId);
     if (state === null) return;
-    state.active = update(state.active);
+    const delta = createDelta();
+    state.active = addLifetimeDelta(state.active, delta);
     state.eventProduced = true;
+    const pending = this.pendingReset;
+    if (pending !== null && pending.targetRepoId !== repoId) {
+      const interleaved = pending.interleaved.get(repoId)
+        ?? activeLifetimeMetadata(state.baseline);
+      pending.interleaved.set(repoId, addLifetimeDelta(interleaved, delta));
+      pending.eventProduced.add(repoId);
+    }
   }
 
   private visibleActiveLifetime(
@@ -789,6 +864,16 @@ export class ObservabilityService implements ObservabilityTap {
     return captured === undefined
       ? state.active
       : mergeRepositoryLifetime(captured, state.active);
+  }
+
+  private visibleProcessPeaks(): ProcessPeaks | null {
+    return mergeProcessPeaks(
+      mergeProcessPeaks(
+        this.committedLifetime?.processPeaks ?? null,
+        this.pendingCheckpoint?.processPeaks ?? null,
+      ),
+      this.processPeakEpoch,
+    );
   }
 
   private recordProcessFreshness(section: "pool" | "auditBuffer" | "resources"): void {
@@ -812,6 +897,26 @@ export class ObservabilityService implements ObservabilityTap {
     } catch {
       return false;
     }
+  }
+
+  private watcherHealthLifetimeDelta(
+    event: WatcherHealthTelemetryEvent,
+  ): DurableLifetimeRepository {
+    const current = watcherHealthCumulativeSnapshot(event);
+    const previous = this.watcherCumulative.get(event.repoId);
+    this.watcherCumulative.set(event.repoId, current);
+    return sectionDelta("health", cumulativeHealthDelta(current, previous));
+  }
+
+  private prefetchLifetimeDelta(
+    event: PrefetchTelemetryEvent,
+  ): DurableLifetimeRepository {
+    const snapshot = prefetchCumulativeSnapshot(event);
+    const current = snapshot.sections.predictiveContext;
+    if (current === null) return emptyRepositoryLifetime();
+    const previous = this.prefetchCumulative.get(event.repoId);
+    this.prefetchCumulative.set(event.repoId, current);
+    return sectionDelta("predictiveContext", cumulativePrefetchDelta(current, previous));
   }
 
   private nowIso(): string {
@@ -924,8 +1029,7 @@ export class ObservabilityService implements ObservabilityTap {
         sections.push("tokenEfficiency");
       }
       if (event.projection !== undefined) sections.push("toolOutput");
-      this.recordLifetimeEvent(event.repoId, sections, (active) =>
-        addLifetimeDelta(active, toolCallLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, sections, () => toolCallLifetimeDelta(event));
     } catch (err) {
       this.logWarn("toolCall failed", err);
     }
@@ -934,8 +1038,7 @@ export class ObservabilityService implements ObservabilityTap {
   indexEvent(event: IndexEvent): void {
     try {
       this.getAggregator(event.repoId).recordIndexEvent(event);
-      this.recordLifetimeEvent(event.repoId, ["indexing"], (active) =>
-        addLifetimeDelta(active, indexEventLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["indexing"], () => indexEventLifetimeDelta(event));
     } catch (err) {
       this.logWarn("indexEvent failed", err);
     }
@@ -959,8 +1062,8 @@ export class ObservabilityService implements ObservabilityTap {
   semanticSearch(event: SemanticSearchTelemetryEvent): void {
     try {
       this.getAggregator(event.repoId).recordSemanticSearch(event);
-      this.recordLifetimeEvent(event.repoId, ["retrieval"], (active) =>
-        addLifetimeDelta(active, semanticSearchLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["retrieval"], () =>
+        semanticSearchLifetimeDelta(event));
     } catch (err) {
       this.logWarn("semanticSearch failed", err);
     }
@@ -977,8 +1080,8 @@ export class ObservabilityService implements ObservabilityTap {
   prefetch(event: PrefetchTelemetryEvent): void {
     try {
       this.getAggregator(event.repoId).recordPrefetch(event);
-      this.recordLifetimeEvent(event.repoId, ["predictiveContext"], (active) =>
-        addLifetimeDelta(active, prefetchLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["predictiveContext"], () =>
+        this.prefetchLifetimeDelta(event));
     } catch (err) {
       this.logWarn("prefetch failed", err);
     }
@@ -987,8 +1090,8 @@ export class ObservabilityService implements ObservabilityTap {
   watcherHealth(event: WatcherHealthTelemetryEvent): void {
     try {
       this.getAggregator(event.repoId).recordWatcherHealth(event);
-      this.recordLifetimeEvent(event.repoId, ["health"], (active) =>
-        addLifetimeDelta(active, watcherHealthLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["health"], () =>
+        this.watcherHealthLifetimeDelta(event));
     } catch (err) {
       this.logWarn("watcherHealth failed", err);
     }
@@ -1005,8 +1108,7 @@ export class ObservabilityService implements ObservabilityTap {
   runtimeExecution(event: RuntimeExecutionEvent): void {
     try {
       this.getAggregator(event.repoId).recordRuntimeExecution(event);
-      this.recordLifetimeEvent(event.repoId, ["latency"], (active) =>
-        addLifetimeDelta(active, runtimeLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["latency"], () => runtimeLifetimeDelta(event));
     } catch (err) {
       this.logWarn("runtimeExecution failed", err);
     }
@@ -1053,8 +1155,7 @@ export class ObservabilityService implements ObservabilityTap {
         seedCount: event.seedCount,
         iterations: event.iterations,
       });
-      this.recordLifetimeEvent(event.repoId, ["ppr"], (active) =>
-        addLifetimeDelta(active, pprLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["ppr"], () => pprLifetimeDelta(event));
     } catch (err) {
       this.logWarn("pprResult failed", err);
     }
@@ -1068,8 +1169,7 @@ export class ObservabilityService implements ObservabilityTap {
         durationMs: event.durationMs,
         failed: event.failed,
       });
-      this.recordLifetimeEvent(event.repoId, ["scip"], (active) =>
-        addLifetimeDelta(active, scipLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["scip"], () => scipLifetimeDelta(event));
     } catch (err) {
       this.logWarn("scipIngest failed", err);
     }
@@ -1090,8 +1190,8 @@ export class ObservabilityService implements ObservabilityTap {
       for (const aggregator of this.aggregators.values()) {
         aggregator.recordPackedWire(event);
       }
-      this.recordLifetimeEvent(event.repoId, ["packed", "tokenEfficiency"], (active) =>
-        addLifetimeDelta(active, packedLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["packed", "tokenEfficiency"], () =>
+        packedLifetimeDelta(event));
     } catch (err) {
       this.logWarn("packedWire failed", err);
     }
@@ -1108,8 +1208,8 @@ export class ObservabilityService implements ObservabilityTap {
         hit: event.hit,
         realized: event.realized,
       });
-      this.recordLifetimeEvent(event.repoId, ["tokenEfficiency"], (active) =>
-        addLifetimeDelta(active, tokenSavingsLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["tokenEfficiency"], () =>
+        tokenSavingsLifetimeDelta(event));
     } catch (err) {
       this.logWarn("tokenSavings failed", err);
     }
@@ -1158,8 +1258,8 @@ export class ObservabilityService implements ObservabilityTap {
           engine: event.engine,
           durationMs: event.durationMs,
         });
-        this.recordLifetimeEvent(targetRepoId, ["indexing"], (active) =>
-          addLifetimeDelta(active, indexPhaseLifetimeDelta(event)));
+        this.recordLifetimeEvent(targetRepoId, ["indexing"], () =>
+          indexPhaseLifetimeDelta(event));
         if (event.phase.toLowerCase().includes("start")) {
           this.recordGraphEvent({ type: "graph.index.started", repoId: targetRepoId, mode: event.phase });
         }
@@ -1188,8 +1288,7 @@ export class ObservabilityService implements ObservabilityTap {
         count: event.count,
         hits: event.hits,
       });
-      this.recordLifetimeEvent(event.repoId, ["cache"], (active) =>
-        addLifetimeDelta(active, cacheLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["cache"], () => cacheLifetimeDelta(event));
     } catch (err) {
       this.logWarn("cacheLookup failed", err);
     }
@@ -1204,8 +1303,7 @@ export class ObservabilityService implements ObservabilityTap {
         rejected: event.rejected,
         maxFrontierSize: event.maxFrontierSize,
       });
-      this.recordLifetimeEvent(event.repoId, ["beam"], (active) =>
-        addLifetimeDelta(active, beamLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["beam"], () => beamLifetimeDelta(event));
     } catch (err) {
       this.logWarn("sliceBuild failed", err);
     }
@@ -1227,8 +1325,7 @@ export class ObservabilityService implements ObservabilityTap {
         fallbackPathQueryCount: event.fallbackPathQueryCount,
         pathExplanationLatencyMs: event.pathExplanationLatencyMs,
       });
-      this.recordLifetimeEvent(event.repoId, ["delta"], (active) =>
-        addLifetimeDelta(active, deltaLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["delta"], () => deltaLifetimeDelta(event));
     } catch (err) {
       this.logWarn("deltaBlastRadius failed", err);
     }
@@ -1276,8 +1373,7 @@ export class ObservabilityService implements ObservabilityTap {
         aggregator.recordPostIndexSession(rec);
       }
       this.getAggregator("_global").recordPostIndexSession(rec);
-      this.recordLifetimeEvent(event.repoId, ["postIndex"], (active) =>
-        addLifetimeDelta(active, postIndexLifetimeDelta(event)));
+      this.recordLifetimeEvent(event.repoId, ["postIndex"], () => postIndexLifetimeDelta(event));
     } catch (err) {
       this.logWarn("postIndexSession failed", err);
     }
@@ -1493,11 +1589,6 @@ function indexPhaseLifetimeDelta(event: IndexPhaseTapEvent): DurableLifetimeRepo
       ...emptyIndexingSection(), languageMs: dynamicEntry(event.language, exactSample(event.durationMs)),
     }));
   }
-  if (event.engine !== undefined) {
-    deltas.push(sectionDelta("indexing", {
-      ...emptyIndexingSection(), engineDispatch: dynamicEntry(event.engine, 1),
-    }));
-  }
   return combineLifetimeDeltas(deltas);
 }
 
@@ -1519,7 +1610,7 @@ function tokenSavingsLifetimeDelta(event: TokenSavingsTapEvent): DurableLifetime
   });
 }
 
-function prefetchLifetimeDelta(event: PrefetchTelemetryEvent): DurableLifetimeRepository {
+function prefetchCumulativeSnapshot(event: PrefetchTelemetryEvent): DurableLifetimeRepository {
   const samples = safeCounter(event.outcomeSamples);
   const base = sectionDelta("predictiveContext", {
     outcomeSamples: samples,
@@ -1549,14 +1640,109 @@ function prefetchLifetimeDelta(event: PrefetchTelemetryEvent): DurableLifetimeRe
   return combineLifetimeDeltas(deltas);
 }
 
-function watcherHealthLifetimeDelta(event: WatcherHealthTelemetryEvent): DurableLifetimeRepository {
-  return sectionDelta("health", {
+function watcherHealthCumulativeSnapshot(
+  event: WatcherHealthTelemetryEvent,
+): NonNullable<DurableLifetimeSections["health"]> {
+  return {
     watcherErrors: safeCounter(event.errors),
     watcherRestarts: safeCounter(event.restartCount),
     watchmanWarnings: safeCounter(event.watchmanWarningCount),
     watchmanRecrawls: safeCounter(event.watchmanRecrawlCount),
     watchmanFreshInstances: safeCounter(event.watchmanFreshInstanceCount),
-  });
+  };
+}
+
+function forwardDelta(current: number, previous: number, restarted: boolean): number {
+  return restarted ? current : Math.max(0, current - previous);
+}
+
+function cumulativeHealthDelta(
+  current: NonNullable<DurableLifetimeSections["health"]>,
+  previous: NonNullable<DurableLifetimeSections["health"]> | undefined,
+): NonNullable<DurableLifetimeSections["health"]> {
+  if (previous === undefined) return structuredClone(current);
+  const restarted = current.watcherErrors < previous.watcherErrors
+    || current.watcherRestarts < previous.watcherRestarts
+    || current.watchmanWarnings < previous.watchmanWarnings
+    || current.watchmanRecrawls < previous.watchmanRecrawls
+    || current.watchmanFreshInstances < previous.watchmanFreshInstances;
+  return {
+    watcherErrors: forwardDelta(current.watcherErrors, previous.watcherErrors, restarted),
+    watcherRestarts: forwardDelta(current.watcherRestarts, previous.watcherRestarts, restarted),
+    watchmanWarnings: forwardDelta(current.watchmanWarnings, previous.watchmanWarnings, restarted),
+    watchmanRecrawls: forwardDelta(current.watchmanRecrawls, previous.watchmanRecrawls, restarted),
+    watchmanFreshInstances: forwardDelta(
+      current.watchmanFreshInstances,
+      previous.watchmanFreshInstances,
+      restarted,
+    ),
+  };
+}
+
+function cumulativeSampleDelta(
+  current: SampleTotal,
+  previous: SampleTotal,
+  restarted: boolean,
+): SampleTotal {
+  return {
+    count: forwardDelta(current.count, previous.count, restarted),
+    sum: forwardDelta(current.sum, previous.sum, restarted),
+    max: 0,
+  };
+}
+
+function cumulativePrefetchDelta(
+  current: NonNullable<DurableLifetimeSections["predictiveContext"]>,
+  previous: NonNullable<DurableLifetimeSections["predictiveContext"]> | undefined,
+): NonNullable<DurableLifetimeSections["predictiveContext"]> {
+  if (previous === undefined) return structuredClone(current);
+  const restarted = current.outcomeSamples < previous.outcomeSamples
+    || current.hitOutcomes < previous.hitOutcomes
+    || current.wasteOutcomes < previous.wasteOutcomes
+    || current.accepted < previous.accepted
+    || current.suppressed < previous.suppressed
+    || current.latencyReductionMs.count < previous.latencyReductionMs.count
+    || current.latencyReductionMs.sum < previous.latencyReductionMs.sum;
+  const byStrategy: typeof current.byStrategy = {};
+  for (const [key, value] of Object.entries(current.byStrategy)) {
+    const old = previous.byStrategy[key];
+    if (old === undefined) {
+      byStrategy[key] = structuredClone(value);
+      continue;
+    }
+    const strategyRestarted = value.samples < old.samples
+      || value.hits < old.hits
+      || value.wasted < old.wasted
+      || value.accepted < old.accepted
+      || value.suppressed < old.suppressed
+      || value.latencyReductionMs.count < old.latencyReductionMs.count
+      || value.latencyReductionMs.sum < old.latencyReductionMs.sum;
+    byStrategy[key] = {
+      samples: forwardDelta(value.samples, old.samples, strategyRestarted),
+      hits: forwardDelta(value.hits, old.hits, strategyRestarted),
+      wasted: forwardDelta(value.wasted, old.wasted, strategyRestarted),
+      accepted: forwardDelta(value.accepted, old.accepted, strategyRestarted),
+      suppressed: forwardDelta(value.suppressed, old.suppressed, strategyRestarted),
+      latencyReductionMs: cumulativeSampleDelta(
+        value.latencyReductionMs,
+        old.latencyReductionMs,
+        strategyRestarted,
+      ),
+    };
+  }
+  return {
+    outcomeSamples: forwardDelta(current.outcomeSamples, previous.outcomeSamples, restarted),
+    hitOutcomes: forwardDelta(current.hitOutcomes, previous.hitOutcomes, restarted),
+    wasteOutcomes: forwardDelta(current.wasteOutcomes, previous.wasteOutcomes, restarted),
+    accepted: forwardDelta(current.accepted, previous.accepted, restarted),
+    suppressed: forwardDelta(current.suppressed, previous.suppressed, restarted),
+    latencyReductionMs: cumulativeSampleDelta(
+      current.latencyReductionMs,
+      previous.latencyReductionMs,
+      restarted,
+    ),
+    byStrategy: orderedRecord(byStrategy),
+  };
 }
 
 function latencyLifetimeDelta(

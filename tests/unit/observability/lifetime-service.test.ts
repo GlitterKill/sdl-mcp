@@ -9,6 +9,7 @@ import {
 import type {
   LifetimeStore,
   PublishOutcome,
+  ReadOnlyRefreshOutcome,
   StoreState,
 } from "../../../dist/observability/lifetime-store.js";
 import {
@@ -27,6 +28,7 @@ import {
   getObservabilityTap,
   resetObservabilityTap,
 } from "../../../dist/observability/event-tap.js";
+import { logger } from "../../../dist/util/logger.js";
 
 const CONFIG = ObservabilityConfigSchema.parse({ sampleIntervalMs: 2_000 });
 
@@ -54,6 +56,7 @@ class FakeStore implements LifetimeStore {
   refreshes = 0;
   closed = 0;
   checkpointOutcomes: PublishOutcome[] = [];
+  refreshOutcomes: ReadOnlyRefreshOutcome[] = [];
   resetOutcome: PublishOutcome | null = null;
   onRefresh: (() => void) | null = null;
   onCheckpoint: ((snapshot: DurableLifetimeRoot) => Promise<PublishOutcome>) | null = null;
@@ -103,9 +106,25 @@ class FakeStore implements LifetimeStore {
     return outcome;
   }
 
-  async refreshReadOnly(): Promise<void> {
+  async refreshReadOnly(): Promise<ReadOnlyRefreshOutcome> {
     this.refreshes += 1;
     this.onRefresh?.();
+    const outcome = this.refreshOutcomes.shift() ?? { status: "unchanged" };
+    if (outcome.status === "refreshed") {
+      this.current = {
+        mode: "readOnly",
+        root: structuredClone(outcome.root),
+        generation: outcome.generation,
+      };
+    } else if (outcome.status === "recoveryRequired") {
+      this.current = {
+        mode: "recoveryRequired",
+        root: this.current.root,
+        generation: this.current.generation,
+        reason: outcome.reason,
+      };
+    }
+    return outcome;
   }
 
   async close(finalSnapshot?: DurableLifetimeRoot): Promise<void> {
@@ -283,9 +302,12 @@ describe("ObservabilityService lifetime integration", () => {
     cache(secondary.service, "repo-a");
     const higherSections = structuredClone(baselineSections);
     if (higherSections.cache) higherSections.cache.hits = 9;
-    readOnlyStore.onRefresh = () => {
-      readOnlyStore.current = { mode: "readOnly", root: root(4, { [key]: repository({ sections: higherSections, sessionCount: 3 }) }), generation: 4 };
-    };
+    const higherRoot = root(4, {
+      [key]: repository({ sections: higherSections, sessionCount: 3 }),
+    });
+    readOnlyStore.refreshOutcomes.push({
+      status: "refreshed", root: higherRoot, generation: 4,
+    });
     const readOnlyValue = await secondary.service.getLifetime("repo-a");
     assert.equal(readOnlyValue.persistenceState, "readOnly");
     if (readOnlyValue.persistenceState !== "recoveryRequired") {
@@ -301,14 +323,10 @@ describe("ObservabilityService lifetime integration", () => {
     if (retained.persistenceState !== "recoveryRequired") {
       assert.equal(retained.sections.cache?.hits, 9);
     }
-    readOnlyStore.onRefresh = () => {
-      readOnlyStore.current = {
-        mode: "recoveryRequired",
-        root: readOnlyStore.current.root,
-        generation: readOnlyStore.current.generation,
-        reason: "unknownSchema",
-      };
-    };
+    readOnlyStore.onRefresh = null;
+    readOnlyStore.refreshOutcomes.push({
+      status: "recoveryRequired", reason: "unknownSchema",
+    });
     const recovery = await secondary.service.getLifetime("repo-a");
     assert.equal(recovery.persistenceState, "recoveryRequired");
     if (recovery.persistenceState === "recoveryRequired") {
@@ -704,6 +722,225 @@ describe("ObservabilityService lifetime integration", () => {
     assert.equal(value.sections.cache?.lookupMs.sum, Number.MAX_SAFE_INTEGER);
     assert.equal(value.sections.cache?.perSource["k:card"]?.hits, Number.MAX_SAFE_INTEGER);
     await h.service.stop();
+  });
+
+  it("keeps pending process peaks visible without loss across checkpoint outcomes", async () => {
+    for (const outcomeKind of ["committed", "notPublished", "indeterminate"] as const) {
+      const h = harness();
+      let resolveCheckpoint!: (outcome: PublishOutcome) => void;
+      h.store.onCheckpoint = async () => new Promise<PublishOutcome>((resolve) => {
+        resolveCheckpoint = resolve;
+      });
+      await h.service.start();
+      resource(h.service, 20);
+      const timer = h.timers.find((entry) => entry.delay === 30_000);
+      assert.ok(timer);
+      timer.callback();
+      await settle();
+      resource(h.service, 10);
+      const pending = await h.service.getLifetime("repo-a");
+      assert.notEqual(pending.persistenceState, "recoveryRequired");
+      if (pending.persistenceState !== "recoveryRequired") {
+        assert.equal(pending.processPeaks?.cpuPct, 20);
+      }
+      const candidate = h.store.checkpoints[0];
+      assert.ok(candidate);
+      resolveCheckpoint(outcomeKind === "committed"
+        ? { status: "committed", root: candidate, generation: candidate.generation }
+        : outcomeKind === "notPublished"
+          ? { status: "notPublished", reason: "ioFailure" }
+          : { status: "indeterminate", reason: "authorityUncertain", stage: "commit" });
+      await settle();
+      const settled = await h.service.getLifetime("repo-a");
+      if (outcomeKind === "indeterminate") {
+        assert.equal(settled.persistenceState, "recoveryRequired");
+      } else {
+        assert.notEqual(settled.persistenceState, "recoveryRequired");
+        if (settled.persistenceState !== "recoveryRequired") {
+          assert.equal(settled.processPeaks?.cpuPct, 20);
+        }
+        h.store.onCheckpoint = null;
+        await h.service.stop();
+      }
+    }
+  });
+
+  it("includes pending process peaks in a capacity-exceeded envelope", async () => {
+    const registered = new Set(Array.from({ length: MAX_REPOSITORIES + 1 }, (_, index) => `peak-${index}`));
+    const h = harness(new FakeStore(), registered);
+    let resolveCheckpoint!: (outcome: PublishOutcome) => void;
+    h.store.onCheckpoint = async () => new Promise<PublishOutcome>((resolve) => {
+      resolveCheckpoint = resolve;
+    });
+    await h.service.start();
+    for (const repoId of registered) cache(h.service, repoId);
+    resource(h.service, 22);
+    const timer = h.timers.find((entry) => entry.delay === 30_000);
+    assert.ok(timer);
+    timer.callback();
+    await settle();
+    resource(h.service, 11);
+    const value = await h.service.getLifetime(`peak-${MAX_REPOSITORIES}`);
+    assert.equal(value.persistenceState, "capacityExceeded");
+    if (value.persistenceState !== "recoveryRequired") {
+      assert.equal(value.processPeaks?.cpuPct, 22);
+    }
+    resolveCheckpoint({ status: "notPublished", reason: "ioFailure" });
+    await settle();
+    h.store.onCheckpoint = null;
+    await h.service.stop();
+  });
+
+  it("publishes non-target active epochs and process peaks in a reset generation", async () => {
+    const h = harness();
+    let resolveReset!: (outcome: PublishOutcome) => void;
+    h.store.onReset = async () => new Promise<PublishOutcome>((resolve) => {
+      resolveReset = resolve;
+    });
+    await h.service.start();
+    cache(h.service, "repo-a");
+    cache(h.service, "repo-b");
+    resource(h.service, 12);
+    const resetting = h.service.resetLifetime("repo-a");
+    await settle();
+    const candidate = h.store.resets[0];
+    assert.ok(candidate);
+    const aCandidate = candidate.repositories[repositoryStorageKey("repo-a")];
+    const bCandidate = candidate.repositories[repositoryStorageKey("repo-b")];
+    assert.equal(aCandidate?.epoch, 1);
+    assert.equal(aCandidate?.sections.cache, null);
+    assert.equal(bCandidate?.sections.cache?.hits, 1);
+    assert.equal(bCandidate?.sessionCount, 1);
+    assert.equal(candidate.processPeaks?.cpuPct, 12);
+    cache(h.service, "repo-b");
+    resolveReset({ status: "committed", root: candidate, generation: candidate.generation });
+    await resetting;
+    const b = await h.service.getLifetime("repo-b");
+    assert.notEqual(b.persistenceState, "recoveryRequired");
+    if (b.persistenceState !== "recoveryRequired") {
+      assert.equal(b.sections.cache?.hits, 2);
+      assert.equal(b.sessionCount, 1);
+      assert.equal(b.processPeaks?.cpuPct, 12);
+    }
+
+    const crashed = harness(new FakeStore({
+      mode: "readOnly", root: structuredClone(candidate), generation: candidate.generation,
+    }));
+    await crashed.service.start();
+    const recovered = await crashed.service.getLifetime("repo-b");
+    assert.equal(recovered.persistenceState, "readOnly");
+    if (recovered.persistenceState !== "recoveryRequired") {
+      assert.equal(recovered.sections.cache?.hits, 1);
+      assert.equal(recovered.processPeaks?.cpuPct, 12);
+    }
+  });
+
+  it("turns cumulative watcher and prefetch snapshots into isolated forward deltas", async () => {
+    const h = harness();
+    await h.service.start();
+    const watcher = (repoId: string, errors: number, restartCount: number) => h.service.watcherHealth({
+      repoId, enabled: true, running: true, stale: false, errors, queueDepth: 0,
+      eventsReceived: 0, eventsProcessed: 0, restartCount,
+    });
+    const prefetch = (repoId: string, outcomeSamples: number, accepted: number, suppressed: number) =>
+      h.service.prefetch({
+        repoId, hitRate: 0.5, wasteRate: 0.25, avgLatencyReductionMs: 10,
+        queueDepth: 0, outcomeSamples, acceptedPrefetch: accepted,
+        suppressedPrefetch: suppressed,
+        topStrategies: [{
+          strategy: "beam", resourceKind: "symbol", samples: outcomeSamples,
+          hitRate: 0.5, acceptedRate: 0.5, wasteRate: 0.25, score: 1,
+          suppressed,
+        }],
+      });
+
+    watcher("repo-a", 1, 1);
+    watcher("repo-a", 1, 1);
+    watcher("repo-a", 3, 2);
+    watcher("repo-a", 1, 0);
+    watcher("repo-b", 1, 0);
+    prefetch("repo-a", 4, 2, 1);
+    prefetch("repo-a", 4, 2, 1);
+    prefetch("repo-a", 6, 3, 2);
+    prefetch("repo-a", 2, 1, 0);
+    prefetch("repo-b", 2, 1, 0);
+
+    const a = await h.service.getLifetime("repo-a");
+    const b = await h.service.getLifetime("repo-b");
+    assert.notEqual(a.persistenceState, "recoveryRequired");
+    assert.notEqual(b.persistenceState, "recoveryRequired");
+    if (a.persistenceState !== "recoveryRequired" && b.persistenceState !== "recoveryRequired") {
+      assert.equal(a.sections.health?.watcherErrors, 4);
+      assert.equal(a.sections.health?.watcherRestarts, 2);
+      assert.equal(b.sections.health?.watcherErrors, 1);
+      assert.equal(a.sections.predictiveContext?.outcomeSamples, 8);
+      assert.equal(a.sections.predictiveContext?.accepted, 4);
+      assert.equal(a.sections.predictiveContext?.byStrategy["k:beam"]?.samples, 8);
+      assert.equal(b.sections.predictiveContext?.outcomeSamples, 2);
+    }
+    await h.service.stop();
+  });
+
+  it("counts engine dispatch only from authoritative IndexEvent file totals", async () => {
+    const h = harness();
+    await h.service.start();
+    h.service.indexPhase({ repoId: "repo-a", phase: "pass1", engine: "rust", durationMs: 2 });
+    h.service.indexPhase({ repoId: "repo-a", phase: "_meta.engine", engine: "rust", durationMs: 0 });
+    h.service.indexEvent({
+      repoId: "repo-a", versionId: "v1",
+      stats: {
+        filesScanned: 1, symbolsExtracted: 1, edgesExtracted: 0, durationMs: 2, errors: 0,
+        pass1Engine: { rustFiles: 1, tsFiles: 0, rustFallbackFiles: 0, perLanguageFallback: {} },
+      },
+    });
+    const value = await h.service.getLifetime("repo-a");
+    assert.notEqual(value.persistenceState, "recoveryRequired");
+    if (value.persistenceState !== "recoveryRequired") {
+      assert.equal(value.sections.indexing?.engineDispatch["k:rust"], 1);
+      assert.deepEqual(value.sections.indexing?.pass1Ms, { count: 1, sum: 2, max: 2 });
+      assert.equal(value.sections.indexing?.phaseCounts["k:pass1"], 1);
+    }
+    await h.service.stop();
+  });
+
+  it("logs only read-only ioFailure refresh outcomes and retains validated state", async (t) => {
+    const key = repositoryStorageKey("repo-a");
+    const baselineSections = emptyLifetimeSections();
+    baselineSections.cache = {
+      hits: 5, misses: 0, lookupMs: { count: 5, sum: 5, max: 1 }, perSource: {},
+    };
+    const store = new FakeStore({
+      mode: "readOnly",
+      root: root(2, { [key]: repository({ sections: baselineSections }) }),
+      generation: 2,
+    });
+    const warn = t.mock.method(logger, "warn");
+    const h = harness(store);
+    await h.service.start();
+    store.refreshOutcomes.push({ status: "ioFailure" });
+    let value = await h.service.getLifetime("repo-a");
+    assert.equal(warn.mock.callCount(), 1);
+    if (value.persistenceState !== "recoveryRequired") assert.equal(value.sections.cache?.hits, 5);
+
+    store.refreshOutcomes.push({ status: "unchanged" });
+    await h.service.getLifetime("repo-a");
+    assert.equal(warn.mock.callCount(), 1);
+
+    const refreshedSections = structuredClone(baselineSections);
+    if (refreshedSections.cache) refreshedSections.cache.hits = 9;
+    const refreshedRoot = root(3, { [key]: repository({ sections: refreshedSections }) });
+    store.refreshOutcomes.push({ status: "refreshed", root: refreshedRoot, generation: 3 });
+    value = await h.service.getLifetime("repo-a");
+    assert.equal(warn.mock.callCount(), 1);
+    if (value.persistenceState !== "recoveryRequired") assert.equal(value.sections.cache?.hits, 9);
+
+    store.refreshOutcomes.push({ status: "recoveryRequired", reason: "unknownSchema" });
+    value = await h.service.getLifetime("repo-a");
+    assert.equal(value.persistenceState, "recoveryRequired");
+    if (value.persistenceState === "recoveryRequired") {
+      assert.equal(value.recoveryReason, "unknownSchema");
+    }
+    assert.equal(warn.mock.callCount(), 1);
   });
 
   it("keeps legacy start session-only when lifetime persistence is not configured", async () => {
