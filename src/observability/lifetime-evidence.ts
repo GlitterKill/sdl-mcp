@@ -1,5 +1,5 @@
 import { createHash, randomBytes as nodeRandomBytes } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import * as nodeFs from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
@@ -13,9 +13,11 @@ const MAX_CLAIM_BYTES = 16 * 1024;
 const MAX_LIFETIME_AUXILIARIES = 32;
 const MAX_LIFETIME_AUXILIARY_SCAN = 256;
 const CLAIM_WAIT_ATTEMPTS = 1_000;
+const CLAIM_RACE_RECHECK_ATTEMPTS = 8;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const HEX_128 = /^[0-9a-f]{32}$/;
 const SHA_256 = /^[0-9a-f]{64}$/;
+const DECIMAL_IDENTITY = /^(?:0|[1-9][0-9]*)$/;
 
 export interface LifetimeEvidenceLabel {
   readonly kind: "lock" | "publication";
@@ -144,7 +146,7 @@ export async function validateLifetimeDirectory(
   fileSystem: LifetimeFileSystem,
 ): Promise<string> {
   const trusted = resolve(directory);
-  const stat = await fileSystem.lstat(trusted);
+  const stat = await fileSystem.lstat(trusted, { bigint: true });
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
     throw new Error("Lifetime directory must be a regular non-symlink directory");
   }
@@ -170,18 +172,18 @@ export function isLifetimeDirectChild(
     (expectedName === undefined || basename(candidate) === expectedName);
 }
 
-function regularFile(stat: Stats, label: string, maxBytes: number): void {
+function regularFile(stat: BigIntStats, label: string, maxBytes: number): void {
   if (stat.isSymbolicLink() || !stat.isFile()) {
     throw new Error(`${label} must be a regular non-symlink file`);
   }
-  if (stat.size > maxBytes) throw new Error(`${label} exceeds its size limit`);
+  if (stat.size > BigInt(maxBytes)) throw new Error(`${label} exceeds its size limit`);
 }
 
-function statSnapshot(stat: Stats, content: Buffer): LifetimeSourceSnapshot {
+function statSnapshot(stat: BigIntStats, content: Buffer): LifetimeSourceSnapshot {
   return {
-    dev: stat.dev.toString(),
-    ino: stat.ino.toString(),
-    size: stat.size,
+    dev: stat.dev.toString(10),
+    ino: stat.ino.toString(10),
+    size: Number(stat.size),
     sha256: createHash("sha256").update(content).digest("hex"),
   };
 }
@@ -215,7 +217,7 @@ export async function readLifetimeSource(
   fileSystem: LifetimeFileSystem,
   maxBytes = MAX_EVIDENCE_SOURCE_BYTES,
 ): Promise<{ readonly content: Buffer; readonly snapshot: LifetimeSourceSnapshot }> {
-  const before = await fileSystem.lstat(path);
+  const before = await fileSystem.lstat(path, { bigint: true });
   regularFile(before, "Lifetime source", maxBytes);
   let handle: FileHandle | undefined;
   try {
@@ -225,14 +227,14 @@ export async function readLifetimeSource(
         (constants.O_NOFOLLOW ?? 0) |
         (constants.O_NONBLOCK ?? 0),
     );
-    const opened = await handle.stat();
+    const opened = await handle.stat({ bigint: true });
     regularFile(opened, "Lifetime source", maxBytes);
     if (before.dev !== opened.dev || before.ino !== opened.ino || before.size !== opened.size) {
       throw new Error("Lifetime source changed while opening");
     }
     const content = await handle.readFile();
-    const afterOpen = await handle.stat();
-    const afterPath = await fileSystem.lstat(path);
+    const afterOpen = await handle.stat({ bigint: true });
+    const afterPath = await fileSystem.lstat(path, { bigint: true });
     const snapshot = statSnapshot(opened, content);
     if (
       afterOpen.dev !== opened.dev ||
@@ -277,7 +279,9 @@ function parseSnapshot(value: unknown): LifetimeSourceSnapshot | null {
   if (
     JSON.stringify(Object.keys(source)) !== JSON.stringify(["dev", "ino", "size", "sha256"]) ||
     typeof source.dev !== "string" ||
+    !DECIMAL_IDENTITY.test(source.dev) ||
     typeof source.ino !== "string" ||
+    !DECIMAL_IDENTITY.test(source.ino) ||
     !Number.isSafeInteger(source.size) ||
     Number(source.size) < 0 ||
     typeof source.sha256 !== "string" ||
@@ -416,7 +420,7 @@ function witnessPath(directory: string, nonce: string): string {
 
 async function pathAbsent(path: string, fileSystem: LifetimeFileSystem): Promise<boolean> {
   try {
-    await fileSystem.lstat(path);
+    await fileSystem.lstat(path, { bigint: true });
     return false;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
@@ -655,6 +659,41 @@ function sameClaimRecord(left: LifetimeClaimRecord, right: LifetimeClaimRecord):
     sameLifetimeSource(left.source, right.source);
 }
 
+async function matchingClaimCleanup(
+  directory: string,
+  record: LifetimeClaimRecord,
+  fixedSnapshot: LifetimeSourceSnapshot,
+  fileSystem: LifetimeFileSystem,
+): Promise<boolean> {
+  const cleanupPath = directChildPath(
+    directory,
+    resolve(directory, `.sdl-observability-lifetime.claim-cleanup.${record.nonce}`),
+    "Lifetime claim cleanup",
+  );
+  try {
+    await fileSystem.lstat(cleanupPath, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  try {
+    const cleanup = await readLifetimeSource(cleanupPath, fileSystem, MAX_CLAIM_BYTES);
+    const cleanupRecord = parseClaim(cleanup.content);
+    return cleanupRecord !== null &&
+      sameClaimRecord(cleanupRecord, record) &&
+      sameLifetimeSource(cleanup.snapshot, fixedSnapshot);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (
+      (code === "ENOENT" || code === "EPERM" || code === "EACCES") &&
+      await pathAbsent(cleanupPath, fileSystem)
+    ) {
+      return true;
+    }
+    throw error;
+  }
+}
+
 function sameSimpleRecord(left: SimpleAuxiliaryRecord, right: SimpleAuxiliaryRecord): boolean {
   return left.schemaVersion === right.schemaVersion &&
     left.pid === right.pid &&
@@ -724,7 +763,10 @@ async function recoverStrandedAuxiliaries(
       entries.push(entry);
     }
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "busy" : "invalid";
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "EPERM" || code === "EACCES"
+      ? "busy"
+      : "invalid";
   }
 
   const claims = new Map<string, LifetimeClaimRecord>();
@@ -737,16 +779,22 @@ async function recoverStrandedAuxiliaries(
   for (const entry of entries) {
     if (entry.kind === "claim-artifact") {
       const durable = entry.nonce ? claims.get(entry.nonce) : undefined;
-      if (!durable || !entry.claim || !sameClaimRecord(durable, entry.claim)) return "invalid";
+      if (!durable || !entry.claim || !sameClaimRecord(durable, entry.claim)) {
+        return "invalid";
+      }
     }
     if (entry.kind === "witness" || entry.kind === "moved-source") {
       const claim = entry.nonce ? claims.get(entry.nonce) : undefined;
-      if (!claim || !sameLifetimeIdentity(entry.snapshot, claim.source)) return "invalid";
+      if (!claim || !sameLifetimeIdentity(entry.snapshot, claim.source)) {
+        return "invalid";
+      }
     }
     if (entry.kind === "create") {
       const referringClaim = [...claims.values()].find((claim) =>
         sameLifetimeIdentity(entry.snapshot, claim.source));
-      if (referringClaim && referringClaim.pid !== entry.create?.pid) return "invalid";
+      if (referringClaim && referringClaim.pid !== entry.create?.pid) {
+        return "invalid";
+      }
     }
     if (entry.kind === "created-lock") {
       const anchor = entries.find((candidate) =>
@@ -843,7 +891,9 @@ async function recoverStrandedAuxiliaries(
       }
     }
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "busy" : "invalid";
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? "busy"
+      : "invalid";
   }
   return selectedGroups.length < orderedGroups.length ? "busy" : "available";
 }
@@ -858,7 +908,9 @@ async function recoverExistingClaim(
   try {
     fixed = await readLifetimeSource(fixedPath, fileSystem, MAX_CLAIM_BYTES);
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "raced" : "invalid";
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? "raced"
+      : "invalid";
   }
   const record = parseClaim(fixed.content);
   if (!record) return "invalid";
@@ -873,12 +925,19 @@ async function recoverExistingClaim(
   } catch {
     try {
       const current = await readLifetimeSource(fixedPath, fileSystem, MAX_CLAIM_BYTES);
-      return sameLifetimeSource(current.snapshot, fixed.snapshot) ? "invalid" : "raced";
+      if (!sameLifetimeSource(current.snapshot, fixed.snapshot)) return "raced";
+      return await matchingClaimCleanup(directory, record, fixed.snapshot, fileSystem)
+        ? "raced"
+        : "invalid";
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code === "ENOENT" ? "raced" : "invalid";
+      return (error as NodeJS.ErrnoException).code === "ENOENT"
+        ? "raced"
+        : "invalid";
     }
   }
-  if (!sameLifetimeSource(fixed.snapshot, durableRecord.snapshot)) return "invalid";
+  if (!sameLifetimeSource(fixed.snapshot, durableRecord.snapshot)) {
+    return "invalid";
+  }
 
   const durableWitnessPath = directChildPath(
     directory,
@@ -888,9 +947,51 @@ async function recoverExistingClaim(
   let witness: Awaited<ReturnType<typeof readLifetimeSource>> | null = null;
   try {
     witness = await readLifetimeSource(durableWitnessPath, fileSystem);
-    if (!sameLifetimeIdentity(witness.snapshot, record.source)) return "invalid";
+    if (!sameLifetimeIdentity(witness.snapshot, record.source)) {
+      return "invalid";
+    }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "invalid";
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "EPERM" && code !== "EACCES") {
+      return "invalid";
+    }
+    for (let attempt = 0; attempt < CLAIM_RACE_RECHECK_ATTEMPTS; attempt++) {
+      try {
+        const [currentFixed, currentRecord] = await Promise.all([
+          readLifetimeSource(fixedPath, fileSystem, MAX_CLAIM_BYTES),
+          readLifetimeSource(durableRecordPath, fileSystem, MAX_CLAIM_BYTES),
+        ]);
+        if (
+          sameLifetimeSource(currentFixed.snapshot, fixed.snapshot) &&
+          sameLifetimeSource(currentRecord.snapshot, durableRecord.snapshot)
+        ) {
+          if (await matchingClaimCleanup(directory, record, fixed.snapshot, fileSystem)) {
+            return "raced";
+          }
+          // An absent witness can be the first visible step of a live claimant's
+          // ordered teardown. Keep that owner authoritative while it finishes.
+          if (code === "ENOENT" && await claimantAlive(record.pid, options)) return "live";
+          if (attempt + 1 < CLAIM_RACE_RECHECK_ATTEMPTS) {
+            await waitOneMillisecond();
+            continue;
+          }
+          return "invalid";
+        }
+        return "raced";
+      } catch (recheckError) {
+        const recheckCode = (recheckError as NodeJS.ErrnoException).code;
+        if (recheckCode === "ENOENT") return "raced";
+        if (
+          (recheckCode === "EPERM" || recheckCode === "EACCES") &&
+          attempt + 1 < CLAIM_RACE_RECHECK_ATTEMPTS
+        ) {
+          await waitOneMillisecond();
+          continue;
+        }
+        return "invalid";
+      }
+    }
+    return "invalid";
   }
   if (await claimantAlive(record.pid, options)) return "live";
 
@@ -1190,7 +1291,7 @@ async function unusedPath(
 ): Promise<string> {
   const path = directChildPath(directory, resolve(directory, name), "Lifetime target");
   if (await pathAbsent(path, fileSystem)) return path;
-  const existing = await fileSystem.lstat(path);
+  const existing = await fileSystem.lstat(path, { bigint: true });
   regularFile(existing, "Lifetime target", MAX_EVIDENCE_SOURCE_BYTES);
   throw new Error("Lifetime target already exists");
 }

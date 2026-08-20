@@ -23,6 +23,8 @@ import { afterEach, describe, it } from "node:test";
 
 import {
   LIFETIME_CLAIM_FILENAME,
+  readLifetimeSource,
+  resolveLifetimeFileSystem,
   type LifetimeEvidenceLabel,
   rotateLifetimeEvidence,
 } from "../../../dist/observability/lifetime-evidence.js";
@@ -73,12 +75,54 @@ function createAnchorRecord(
 
 async function fileSnapshot(path: string) {
   const content = await readFile(path);
-  const stat = await lstat(path);
+  const stat = await lstat(path, { bigint: true });
   return {
     dev: stat.dev.toString(),
     ino: stat.ino.toString(),
-    size: stat.size,
+    size: Number(stat.size),
     sha256: createHash("sha256").update(content).digest("hex"),
+  };
+}
+
+interface TestIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
+}
+
+function identityStat<T extends object>(stat: T, identity: TestIdentity): T {
+  const bigint = typeof Reflect.get(stat, "dev") === "bigint";
+  return new Proxy(stat, {
+    get(target, property, receiver) {
+      if (property === "dev") return bigint ? identity.dev : Number(identity.dev);
+      if (property === "ino") return bigint ? identity.ino : Number(identity.ino);
+      const value = Reflect.get(target, property, receiver) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function identityFixtureFileSystem(identityForPath: (path: string) => TestIdentity | undefined) {
+  return {
+    lstat: async (...args: Parameters<typeof lstat>) => {
+      const stat = await lstat(...args);
+      const identity = identityForPath(String(args[0]));
+      return identity ? identityStat(stat, identity) : stat;
+    },
+    open: async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      const identity = identityForPath(String(args[0]));
+      if (!identity) return handle;
+      return new Proxy(handle, {
+        get(target, property, receiver) {
+          if (property === "stat") {
+            return async (...statArguments: Parameters<typeof target.stat>) =>
+              identityStat(await target.stat(...statArguments), identity);
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    },
   };
 }
 
@@ -186,6 +230,102 @@ afterEach(async () => {
 });
 
 describe("lifetime persistence lock", () => {
+  it("keeps file identities lossless above Number.MAX_SAFE_INTEGER", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "high-identity-source.json");
+    await writeFile(source, lockRecord(4_001));
+    const low = { dev: 9_007_199_254_740_992n, ino: 9_007_199_254_740_992n };
+    const high = { dev: 9_007_199_254_740_993n, ino: 9_007_199_254_740_993n };
+
+    const stable = await readLifetimeSource(
+      source,
+      resolveLifetimeFileSystem(identityFixtureFileSystem(() => high)),
+    );
+    assert.equal(stable.snapshot.dev, high.dev.toString());
+    assert.equal(stable.snapshot.ino, high.ino.toString());
+
+    let identityReads = 0;
+    const changingFileSystem = resolveLifetimeFileSystem(identityFixtureFileSystem((path) => {
+      if (path !== source) return undefined;
+      identityReads++;
+      return identityReads <= 2 ? low : high;
+    }));
+    await assert.rejects(
+      readLifetimeSource(source, changingFileSystem),
+      /changed while reading/,
+    );
+  });
+
+  it("keeps rounded high-bit source identities in separate cleanup groups", async () => {
+    const directory = await temporaryDirectory();
+    const low = { dev: 9_007_199_254_740_992n, ino: 9_007_199_254_740_992n };
+    const high = { dev: 9_007_199_254_740_993n, ino: 9_007_199_254_740_993n };
+    assert.equal(Number(low.ino), Number(high.ino), "the regression fixture aliases as Number");
+    const content = lockRecord(4_002);
+    const sourceSize = Buffer.byteLength(content);
+    const sourceHash = createHash("sha256").update(content).digest("hex");
+    const identities = new Map<string, TestIdentity>();
+    for (let index = 0; index < 16; index++) {
+      const nonce = (index + 500).toString(16).padStart(32, "0");
+      const identity = index < 8 ? low : high;
+      identities.set(nonce, identity);
+      const snapshot = {
+        dev: identity.dev.toString(),
+        ino: identity.ino.toString(),
+        size: sourceSize,
+        sha256: sourceHash,
+      };
+      await writeFile(
+        join(directory, `.sdl-observability-lifetime.claim-record.${nonce}.json`),
+        claimRecord(999_999, nonce, snapshot),
+      );
+      await writeFile(
+        join(directory, `.sdl-observability-lifetime.claim-source.${nonce}`),
+        content,
+      );
+    }
+    const fixture = identityFixtureFileSystem((path) => {
+      for (const [nonce, identity] of identities) {
+        if (basename(path).includes(nonce)) return identity;
+      }
+      return undefined;
+    });
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+      fileSystem: fixture,
+    });
+    assertWriter(result);
+    assert.deepEqual(await auxiliaryFiles(directory), []);
+    assert.equal(await releaseLifetimeLease(result.lease), true);
+  });
+
+  it("rejects non-canonical persisted device and inode strings", async () => {
+    for (const [field, value] of [
+      ["dev", "01"],
+      ["ino", "+1"],
+      ["dev", "-1"],
+    ] as const) {
+      const directory = await temporaryDirectory();
+      const nonce = "f".repeat(32);
+      const path = join(directory, `.sdl-observability-lifetime.claim-record.${nonce}.json`);
+      const source = {
+        dev: "0",
+        ino: "0",
+        size: 0,
+        sha256: createHash("sha256").update("").digest("hex"),
+        [field]: value,
+      };
+      await writeFile(path, claimRecord(999_999, nonce, source));
+
+      const result = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+      });
+      assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" }, `${field}:${value}`);
+      assert.equal((await lstat(path)).isFile(), true);
+    }
+  });
+
   it("exclusively creates a closed, synced writer record with bounded identity", async () => {
     const directory = await temporaryDirectory();
     const result = await acquireLifetimeLease(directory, {
@@ -489,6 +629,259 @@ describe("lifetime persistence lock", () => {
     });
     assertWriter(result);
     assert.equal(await releaseLifetimeLease(result.lease), true);
+  });
+
+  it("rechecks a claim when a raced witness open reports EPERM", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    await crashClaimWorker(directory, lockPath, "claim-before-move");
+    let raced = false;
+
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isPidAlive: () => false,
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          if (
+            !raced &&
+            basename(String(args[0])).startsWith(".sdl-observability-lifetime.claim-source.")
+          ) {
+            raced = true;
+            await unlink(fixedPath);
+            throw Object.assign(new Error("witness link raced away"), { code: "EPERM" });
+          }
+          return open(...args);
+        },
+      },
+    });
+    assert.equal(raced, true);
+    assertWriter(result);
+    assert.equal(await releaseLifetimeLease(result.lease), true);
+  });
+
+  it("fails closed when EPERM leaves the exact claim and record unchanged", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    await crashClaimWorker(directory, lockPath, "claim-before-move");
+    const before = await auxiliaryFiles(directory);
+    let denied = false;
+
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isPidAlive: () => false,
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          if (
+            !denied &&
+            basename(String(args[0])).startsWith(".sdl-observability-lifetime.claim-source.")
+          ) {
+            denied = true;
+            throw Object.assign(new Error("witness access denied"), { code: "EPERM" });
+          }
+          return open(...args);
+        },
+      },
+    });
+    assert.equal(denied, true);
+    assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" });
+    assert.deepEqual(await auxiliaryFiles(directory), before);
+  });
+
+  it("recognizes an exact matching cleanup artifact during witness EPERM", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    await crashClaimWorker(directory, lockPath, "claim-before-move");
+    const recordName = (await readdir(directory)).find((name) =>
+      name.startsWith(".sdl-observability-lifetime.claim-record."));
+    assert.ok(recordName);
+    const nonce = recordName.slice(
+      ".sdl-observability-lifetime.claim-record.".length,
+      -".json".length,
+    );
+    const cleanupPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-cleanup.${nonce}`,
+    );
+    let denied = false;
+    let fixedRemoved = false;
+
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isPidAlive: () => false,
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          const path = String(args[0]);
+          if (
+            !denied &&
+            basename(path).startsWith(".sdl-observability-lifetime.claim-source.")
+          ) {
+            denied = true;
+            await link(fixedPath, cleanupPath);
+            throw Object.assign(new Error("witness denied during cleanup"), { code: "EPERM" });
+          }
+          const handle = await open(...args);
+          if (path === cleanupPath && !fixedRemoved) {
+            fixedRemoved = true;
+            await unlink(fixedPath);
+          }
+          return handle;
+        },
+      },
+    });
+    assert.equal(denied, true);
+    assert.equal(fixedRemoved, true);
+    assertWriter(result);
+    assert.equal(await releaseLifetimeLease(result.lease), true);
+  });
+
+  it("boundedly rechecks EPERM until matching cleanup becomes visible", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    await crashClaimWorker(directory, lockPath, "claim-before-move");
+    const recordName = (await readdir(directory)).find((name) =>
+      name.startsWith(".sdl-observability-lifetime.claim-record."));
+    assert.ok(recordName);
+    const nonce = recordName.slice(
+      ".sdl-observability-lifetime.claim-record.".length,
+      -".json".length,
+    );
+    const cleanupPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-cleanup.${nonce}`,
+    );
+    let witnessDenied = false;
+    let cleanupChecks = 0;
+    let fixedRemoved = false;
+
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isPidAlive: () => false,
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        lstat: async (...args: Parameters<typeof lstat>) => {
+          if (String(args[0]) === cleanupPath && ++cleanupChecks === 2) {
+            await link(fixedPath, cleanupPath);
+          }
+          return lstat(...args);
+        },
+        open: async (...args: Parameters<typeof open>) => {
+          const path = String(args[0]);
+          if (
+            !witnessDenied &&
+            basename(path).startsWith(".sdl-observability-lifetime.claim-source.")
+          ) {
+            witnessDenied = true;
+            throw Object.assign(new Error("witness denied before cleanup appears"), {
+              code: "EPERM",
+            });
+          }
+          const handle = await open(...args);
+          if (path === cleanupPath && !fixedRemoved) {
+            fixedRemoved = true;
+            await unlink(fixedPath);
+          }
+          return handle;
+        },
+      },
+    });
+    assert.ok(cleanupChecks >= 2);
+    assert.equal(fixedRemoved, true);
+    assertWriter(result);
+    assert.equal(await releaseLifetimeLease(result.lease), true);
+  });
+
+  it("retries when the matching cleanup artifact itself races away with EPERM", async () => {
+    const directory = await temporaryDirectory();
+    const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
+    const fixedPath = join(directory, LIFETIME_CLAIM_FILENAME);
+    await writeFile(lockPath, lockRecord(999_999), { mode: 0o600 });
+    await crashClaimWorker(directory, lockPath, "claim-before-move");
+    const recordName = (await readdir(directory)).find((name) =>
+      name.startsWith(".sdl-observability-lifetime.claim-record."));
+    assert.ok(recordName);
+    const nonce = recordName.slice(
+      ".sdl-observability-lifetime.claim-record.".length,
+      -".json".length,
+    );
+    const cleanupPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-cleanup.${nonce}`,
+    );
+    let witnessDenied = false;
+    let cleanupDenied = false;
+
+    const result = await acquireLifetimeLease(directory, {
+      pid: 4242,
+      isPidAlive: () => false,
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          const path = String(args[0]);
+          if (
+            !witnessDenied &&
+            basename(path).startsWith(".sdl-observability-lifetime.claim-source.")
+          ) {
+            witnessDenied = true;
+            await link(fixedPath, cleanupPath);
+            throw Object.assign(new Error("witness denied during cleanup"), { code: "EPERM" });
+          }
+          if (path === cleanupPath && !cleanupDenied) {
+            cleanupDenied = true;
+            await unlink(cleanupPath);
+            await unlink(fixedPath);
+            throw Object.assign(new Error("cleanup raced away"), { code: "EPERM" });
+          }
+          return open(...args);
+        },
+      },
+    });
+    assert.equal(witnessDenied, true);
+    assert.equal(cleanupDenied, true);
+    assertWriter(result);
+    assert.equal(await releaseLifetimeLease(result.lease), true);
+  });
+
+  it("treats EPERM from a concurrently removed claim auxiliary as raced", async () => {
+    const directory = await temporaryDirectory();
+    const sourcePath = join(directory, "auxiliary-race-source.json");
+    const nonce = "7".repeat(32);
+    const recordPath = join(
+      directory,
+      `.sdl-observability-lifetime.claim-record.${nonce}.json`,
+    );
+    await writeFile(sourcePath, lockRecord(999_999));
+    await writeFile(recordPath, claimRecord(999_999, nonce, await fileSnapshot(sourcePath)));
+    let raced = false;
+
+    const result = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+      fileSystem: {
+        open: async (...args: Parameters<typeof open>) => {
+          if (!raced && String(args[0]) === recordPath) {
+            raced = true;
+            await unlink(recordPath);
+            throw Object.assign(new Error("claim record raced away"), { code: "EPERM" });
+          }
+          return open(...args);
+        },
+      },
+    });
+    assert.deepEqual(result, { mode: "readOnly", reason: "contended" });
+    const successor = await acquireLifetimeLease(directory, {
+      isClaimantPidAlive: () => false,
+    });
+    assertWriter(successor);
+    assert.equal(await releaseLifetimeLease(successor.lease), true);
   });
 
   it("recovers a proven-dead crashed claim after its source moved", async () => {
@@ -852,8 +1245,9 @@ describe("lifetime persistence lock", () => {
           }
           return link(source, target);
         },
-        lstat: async (path: string) => {
-          const result = await lstat(path);
+        lstat: async (...args: Parameters<typeof lstat>) => {
+          const path = String(args[0]);
+          const result = await lstat(...args);
           if (
             path === join(directory, "sdl-observability-lifetime.claim") &&
             creatorPaused
@@ -975,77 +1369,79 @@ describe("lifetime persistence lock", () => {
   });
 
   it("serializes concurrent lock/publication evidence rotation at the shared cap", async () => {
-    const directory = await temporaryDirectory();
-    const paths: string[] = [];
-    for (let index = 0; index < 7; index++) {
-      const source = join(directory, `seed-${index}.json`);
-      await writeFile(source, lockRecord(40_000 + index));
-      paths.push(await rotateLifetimeEvidence(
+    for (let iteration = 0; iteration < 6; iteration++) {
+      const directory = await temporaryDirectory();
+      const paths: string[] = [];
+      for (let index = 0; index < 7; index++) {
+        const source = join(directory, `seed-${index}.json`);
+        await writeFile(source, lockRecord(40_000 + index));
+        paths.push(await rotateLifetimeEvidence(
+          directory,
+          source,
+          {
+            kind: index === 0 ? "publication" : "lock",
+            eligibility: index === 0
+              ? "protected-unknown-newer"
+              : "validated-supported",
+          },
+          {
+            now: () => new Date(1_700_000_002_000 + index),
+            randomBytes: () => Buffer.alloc(16, index),
+          },
+        ));
+      }
+      const sourceA = join(directory, "rotation-a.json");
+      const sourceB = join(directory, "rotation-b.json");
+      await writeFile(sourceA, lockRecord(50_001));
+      await writeFile(sourceB, lockRecord(50_002));
+      const aRenameReady = Promise.withResolvers<void>();
+      const secondAttempt = Promise.withResolvers<void>();
+
+      const rotationA = rotateLifetimeEvidence(
         directory,
-        source,
+        sourceA,
+        { kind: "lock", eligibility: "validated-supported" },
         {
-          kind: index === 0 ? "publication" : "lock",
-          eligibility: index === 0
-            ? "protected-unknown-newer"
-            : "validated-supported",
+          now: () => new Date(1_700_000_003_000),
+          randomBytes: () => Buffer.alloc(16, 0xaa),
+          fileSystem: {
+            link,
+            rename: async (source: string, target: string) => {
+              if (source === sourceA) {
+                aRenameReady.resolve();
+                await secondAttempt.promise;
+              }
+              return rename(source, target);
+            },
+          },
         },
+      );
+      await aRenameReady.promise;
+      const rotationB = rotateLifetimeEvidence(
+        directory,
+        sourceB,
+        { kind: "publication", eligibility: "validated-supported" },
         {
-          now: () => new Date(1_700_000_002_000 + index),
-          randomBytes: () => Buffer.alloc(16, index),
+          now: () => new Date(1_700_000_003_001),
+          randomBytes: () => Buffer.alloc(16, 0xbb),
+          fileSystem: {
+            link: async (source: string, target: string) => {
+              secondAttempt.resolve();
+              return link(source, target);
+            },
+            rename: async (source: string, target: string) => {
+              secondAttempt.resolve();
+              return rename(source, target);
+            },
+          },
         },
-      ));
+      );
+      await Promise.all([rotationA, rotationB]);
+
+      assert.equal((await evidenceFiles(directory)).length, 8, `iteration ${iteration}`);
+      assert.equal((await lstat(paths[0])).isFile(), true, "protected evidence remains");
+      await assert.rejects(lstat(paths[1]), { code: "ENOENT" });
     }
-    const sourceA = join(directory, "rotation-a.json");
-    const sourceB = join(directory, "rotation-b.json");
-    await writeFile(sourceA, lockRecord(50_001));
-    await writeFile(sourceB, lockRecord(50_002));
-    const aRenameReady = Promise.withResolvers<void>();
-    const secondAttempt = Promise.withResolvers<void>();
-
-    const rotationA = rotateLifetimeEvidence(
-      directory,
-      sourceA,
-      { kind: "lock", eligibility: "validated-supported" },
-      {
-        now: () => new Date(1_700_000_003_000),
-        randomBytes: () => Buffer.alloc(16, 0xaa),
-        fileSystem: {
-          link,
-          rename: async (source: string, target: string) => {
-            if (source === sourceA) {
-              aRenameReady.resolve();
-              await secondAttempt.promise;
-            }
-            return rename(source, target);
-          },
-        },
-      },
-    );
-    await aRenameReady.promise;
-    const rotationB = rotateLifetimeEvidence(
-      directory,
-      sourceB,
-      { kind: "publication", eligibility: "validated-supported" },
-      {
-        now: () => new Date(1_700_000_003_001),
-        randomBytes: () => Buffer.alloc(16, 0xbb),
-        fileSystem: {
-          link: async (source: string, target: string) => {
-            secondAttempt.resolve();
-            return link(source, target);
-          },
-          rename: async (source: string, target: string) => {
-            secondAttempt.resolve();
-            return rename(source, target);
-          },
-        },
-      },
-    );
-    await Promise.all([rotationA, rotationB]);
-
-    assert.equal((await evidenceFiles(directory)).length, 8);
-    assert.equal((await lstat(paths[0])).isFile(), true, "protected evidence remains");
-    await assert.rejects(lstat(paths[1]), { code: "ENOENT" });
   });
 
   it("restores a stranded evidence-eviction candidate before acquiring", async () => {

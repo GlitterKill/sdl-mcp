@@ -1,5 +1,5 @@
 import { createHash, randomBytes as nodeRandomBytes } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
@@ -136,11 +136,12 @@ async function closeQuietly(handle: FileHandle | undefined): Promise<void> {
   await handle?.close().catch(() => undefined);
 }
 
-function identitySnapshot(stat: Stats): LifetimeSourceSnapshot {
+function identitySnapshot(stat: BigIntStats): LifetimeSourceSnapshot {
+  if (stat.size > BigInt(MAX_LOCK_BYTES)) throw new Error("Lifetime file exceeds its size limit");
   return {
-    dev: stat.dev.toString(),
-    ino: stat.ino.toString(),
-    size: stat.size,
+    dev: stat.dev.toString(10),
+    ino: stat.ino.toString(10),
+    size: Number(stat.size),
     sha256: createHash("sha256").update("").digest("hex"),
   };
 }
@@ -153,7 +154,7 @@ async function cleanupExactCreatedPath(
 ): Promise<void> {
   if (!expected) return;
   try {
-    await fileSystem.lstat(candidate);
+    await fileSystem.lstat(candidate, { bigint: true });
     return;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
@@ -277,7 +278,7 @@ async function createWriterLock(
     } catch {
       return { status: "failure" };
     }
-    anchorIdentity = identitySnapshot(await handle.stat());
+    anchorIdentity = identitySnapshot(await handle.stat({ bigint: true }));
     if (process.platform === "win32") await handle.chmod(0o600).catch(() => undefined);
     else await handle.chmod(0o600);
     await handle.writeFile(anchorContent, "utf8");
@@ -312,7 +313,7 @@ async function createWriterLock(
         ? { status: "exists" }
         : { status: "failure" };
     }
-    lockIdentity = identitySnapshot(await handle.stat());
+    lockIdentity = identitySnapshot(await handle.stat({ bigint: true }));
     if (process.platform === "win32") {
       await handle.chmod(0o600).catch(() => undefined);
     } else {
@@ -376,7 +377,7 @@ export async function acquireLifetimeLease(
   const fileSystem = resolveLifetimeFileSystem(options.fileSystem);
   const trustedDirectory = resolve(directory);
   try {
-    const directoryStat = await fileSystem.lstat(trustedDirectory);
+    const directoryStat = await fileSystem.lstat(trustedDirectory, { bigint: true });
     if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
       return readOnly("invalidLock");
     }
@@ -561,7 +562,7 @@ export async function releaseLifetimeLease(
   );
   try {
     try {
-      await fileSystem.lstat(candidatePath);
+      await fileSystem.lstat(candidatePath, { bigint: true });
       return false;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
