@@ -15,6 +15,7 @@ import {
 
 type Rect = { col: number; row: number; cols: number; rows: number };
 type Layout = Record<string, Rect>;
+const RECT_KEYS = ["col", "row", "cols", "rows"];
 
 const html = readFileSync("src/ui/observability.html", "utf8");
 const layoutSource = readFileSync("src/ui/observability-layout.js", "utf8");
@@ -61,6 +62,10 @@ function assertValidLayout(layout: Layout): void {
       assert.equal(overlaps(rect, layout[priorId]), false, `${id} overlaps ${priorId}`);
     }
   }
+}
+
+function assertCanonicalRect(rect: Rect): void {
+  assert.deepEqual(Object.keys(rect), RECT_KEYS);
 }
 
 type StorageHarness = {
@@ -217,6 +222,44 @@ describe("dashboard layout geometry", () => {
     for (const hostile of hostileInputs) {
       assertValidLayout(normalizeV3Layout(hostile, panelIds));
     }
+  });
+
+  it("emits canonical rectangles without carrying untrusted own properties", () => {
+    const largeExtraKey = "x".repeat(4_096);
+    const saved = JSON.parse(`{
+      "cache": {
+        "col": 19,
+        "row": 40,
+        "cols": 6,
+        "rows": 4,
+        "__proto__": { "polluted": true },
+        "constructor": { "prototype": { "polluted": true } },
+        "prototype": { "polluted": true },
+        "${largeExtraKey}": "ignored"
+      }
+    }`) as Record<string, Rect>;
+    const before = JSON.stringify(saved);
+    const normalized = normalizeV3Layout(saved, ["cache"]);
+
+    assertCanonicalRect(normalized.cache);
+    assert.equal(JSON.stringify(saved), before);
+    assert.doesNotMatch(JSON.stringify(normalized), /polluted|ignored/);
+    const target = {};
+    const targetPrototype = Object.getPrototypeOf(target);
+    Object.assign(target, normalized.cache);
+    assert.equal(Object.getPrototypeOf(target), targetPrototype);
+    assert.equal(Object.hasOwn(normalized.cache, largeExtraKey), false);
+
+    const migrated = migrateV2Layout({
+      health: { col: 1, row: 2, cols: 2, rows: 1, extra: true },
+    }, ["health"]);
+    const editable = {
+      panel: { col: 1, row: 2, cols: 4, rows: 2, extra: true },
+    };
+    assertCanonicalRect(migrated.health);
+    assertCanonicalRect(movePanel(editable, "panel", 1, 0).panel);
+    assertCanonicalRect(resizePanel(editable, "panel", 1, 0).panel);
+    assert.equal(editable.panel.extra, true);
   });
 
   it("falls back from storage SecurityError and continues without writes", () => {

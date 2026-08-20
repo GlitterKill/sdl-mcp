@@ -75,7 +75,12 @@ function collides(layout, candidate, excludedId) {
 
 function placeBelow(layout, rect) {
   if (!isLayoutRect(rect)) return null;
-  const candidate = { ...rect };
+  const candidate = {
+    col: rect.col,
+    row: rect.row,
+    cols: rect.cols,
+    rows: rect.rows,
+  };
   while (collides(layout, candidate)) {
     if (candidate.row >= Number.MAX_SAFE_INTEGER - candidate.rows) return null;
     candidate.row += 1;
