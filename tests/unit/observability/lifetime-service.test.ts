@@ -287,13 +287,19 @@ function byteCapacityRoot(): DurableLifetimeRoot {
     assert.equal(admission.admitted, true);
     value = admission.root;
   }
-  const padding = admitRepository(value, "padding", largeRepository(17, 9));
+  const padding = admitRepository(value, "padding", largeRepository(17, 6));
   assert.equal(padding.admitted, true);
-  const rejection = admitRepository(padding.root, "probe", emptyRepositoryLifetime());
-  assert.equal(Object.keys(padding.root.repositories).length < MAX_REPOSITORIES, true);
+  const emptyTarget = admitRepository(
+    padding.root,
+    "empty-target",
+    emptyRepositoryLifetime(),
+  );
+  assert.equal(emptyTarget.admitted, true);
+  const rejection = admitRepository(emptyTarget.root, "probe", emptyRepositoryLifetime());
+  assert.equal(Object.keys(emptyTarget.root.repositories).length < MAX_REPOSITORIES, true);
   assert.equal(rejection.admitted, false);
   assert.equal(rejection.reason, "storeBytes");
-  return padding.root;
+  return emptyTarget.root;
 }
 
 describe("ObservabilityService lifetime integration", () => {
@@ -610,16 +616,23 @@ describe("ObservabilityService lifetime integration", () => {
     assert.equal(Object.hasOwn(h.service, "capacityExceeded"), false);
   });
 
-  it("reports byte-capacity rejection globally and reattempts admission after a committed reset", async () => {
+  it("probes byte capacity without mutation and reflects exact committed reset headroom", async () => {
     const initial = byteCapacityRoot();
     const registered = new Set([
-      "large-0", "large-1", "padding", "byte-rejected", "another-rejected", "never-event",
+      "large-0", "large-1", "padding", "empty-target", "byte-rejected", "never-event",
     ]);
     const h = harness(new FakeStore({ mode: "writer", root: initial, generation: 0 }), registered);
     await h.service.start();
     cache(h.service, "byte-rejected");
-    cache(h.service, "another-rejected");
 
+    const internals = h.service as unknown as Record<string, unknown>;
+    const sessionEntries = internals.aggregators;
+    const durableEntries = internals.lifetimeRepositories;
+    const committed = internals.committedLifetime;
+    assert.ok(sessionEntries instanceof Map);
+    assert.ok(durableEntries instanceof Map);
+    const committedBytes = JSON.stringify(committed);
+    const durableBytes = JSON.stringify([...durableEntries]);
     const rejected = await h.service.getLifetime("byte-rejected");
     assert.deepEqual(rejected, {
       schemaVersion: 1,
@@ -637,23 +650,59 @@ describe("ObservabilityService lifetime integration", () => {
         section === "cache" ? "2026-08-20T12:00:00.000Z" : null])),
       processPeaks: null,
     });
-    assert.equal(
-      (await h.service.getLifetime("another-rejected")).persistenceState,
-      "capacityExceeded",
-    );
+    assert.deepEqual(await h.service.getLifetime("byte-rejected"), rejected);
+    assert.strictEqual(internals.aggregators, sessionEntries);
+    assert.strictEqual(internals.lifetimeRepositories, durableEntries);
+    assert.strictEqual(internals.committedLifetime, committed);
+    assert.equal(JSON.stringify(internals.committedLifetime), committedBytes);
+    assert.equal(JSON.stringify([...durableEntries]), durableBytes);
+    assert.equal(durableEntries.size, 0);
     const neverEvent = await h.service.getLifetime("never-event");
     assert.equal(neverEvent.persistenceState, "ready");
-    for (const repoId of ["byte-rejected", "another-rejected"]) {
-      assert.equal(Object.values(h.service as unknown as Record<string, unknown>).some((value) =>
-        value instanceof Set && value.has(repoId)), false);
-    }
+    assert.equal(Object.hasOwn(h.service, "lifetimeCapacityFull"), false);
+
+    await h.service.resetLifetime("empty-target");
+    assert.equal(
+      (await h.service.getLifetime("byte-rejected")).persistenceState,
+      "capacityExceeded",
+    );
 
     await h.service.resetLifetime("large-0");
+    const available = await h.service.getLifetime("byte-rejected");
+    assert.equal(available.persistenceState, "ready");
+    if (available.persistenceState !== "recoveryRequired") {
+      assert.equal(available.sections.cache, null);
+    }
     cache(h.service, "byte-rejected");
     const admitted = await h.service.getLifetime("byte-rejected");
     assert.equal(admitted.persistenceState, "ready");
     if (admitted.persistenceState !== "recoveryRequired") {
       assert.equal(admitted.sections.cache?.hits, 1);
+    }
+  });
+
+  it("co-locates exact freshness with one fixed-size session entry per active repository", async () => {
+    const registered = new Set(Array.from({ length: 100 }, (_, index) => `session-${index}`));
+    const h = harness(new FakeStore(), registered);
+    await h.service.start();
+    for (const repoId of registered) cache(h.service, repoId);
+
+    const internals = h.service as unknown as Record<string, unknown>;
+    const repositoryMaps = Object.values(internals).filter((value) =>
+      value instanceof Map && [...registered].every((repoId) => value.has(repoId)));
+    assert.equal(repositoryMaps.length, 1);
+    assert.equal(repositoryMaps[0]?.size, 100);
+    assert.equal(Object.hasOwn(h.service, "lifetimeFreshness"), false);
+    assert.equal(Object.hasOwn(h.service, "lifetimeCapacityFull"), false);
+    const durableEntries = internals.lifetimeRepositories;
+    assert.ok(durableEntries instanceof Map);
+    assert.equal(durableEntries.size, MAX_REPOSITORIES);
+
+    const overflow = await h.service.getLifetime("session-99");
+    assert.equal(overflow.persistenceState, "capacityExceeded");
+    if (overflow.persistenceState !== "recoveryRequired") {
+      assert.equal(overflow.freshness.cache, "2026-08-20T12:00:00.000Z");
+      assert.equal(overflow.sections.cache, null);
     }
   });
 
@@ -744,17 +793,24 @@ describe("ObservabilityService lifetime integration", () => {
     cache(h.service, "repo-a");
     const stopping = h.service.stop();
     const sameStop = h.service.stop();
+    const restarting = h.service.start();
     assert.strictEqual(sameStop, stopping);
     await settle();
     assert.equal(h.store.closed, 0);
     const candidate = h.store.checkpoints[0];
     assert.ok(candidate);
     resolveCheckpoint({ status: "committed", root: candidate, generation: candidate.generation });
-    const outcomes = await Promise.allSettled([stopping, sameStop]);
+    const outcomes = await Promise.allSettled([stopping, sameStop, restarting]);
     assert.equal(outcomes[0]?.status, "rejected");
     assert.equal(outcomes[1]?.status, "rejected");
-    if (outcomes[0]?.status === "rejected" && outcomes[1]?.status === "rejected") {
+    assert.equal(outcomes[2]?.status, "rejected");
+    if (
+      outcomes[0]?.status === "rejected"
+      && outcomes[1]?.status === "rejected"
+      && outcomes[2]?.status === "rejected"
+    ) {
       assert.strictEqual(outcomes[0].reason, outcomes[1].reason);
+      assert.strictEqual(outcomes[0].reason, outcomes[2].reason);
       assert.match(String(outcomes[0].reason), /final checkpoint not committed/);
     }
     assert.equal(h.store.closed, 1);
@@ -763,6 +819,41 @@ describe("ObservabilityService lifetime integration", () => {
     assert.equal(finalSnapshot.generation, candidate.generation + 1);
     assert.equal(finalSnapshot.repositories[repositoryStorageKey("repo-a")]?.sections.cache?.hits, 2);
     assert.ok(h.timers.every((entry) => entry.cleared));
+  });
+
+  it("waits for a pending stop before starting one fresh shared lifecycle", async () => {
+    const h = harness();
+    let opens = 0;
+    let releaseClose!: () => void;
+    const service = new ObservabilityService(CONFIG, {
+      ...h.options,
+      openLifetimeStore: async () => {
+        opens += 1;
+        return h.store;
+      },
+    });
+    h.store.onClose = async () => new Promise<void>((resolve) => { releaseClose = resolve; });
+    await service.start();
+    assert.equal(opens, 1);
+    const stopping = service.stop();
+    await settle();
+    const firstRestart = service.start();
+    const concurrentRestart = service.start();
+    let restarted = false;
+    void firstRestart.then(() => { restarted = true; });
+    await settle();
+    assert.equal(restarted, false);
+    assert.equal(opens, 1);
+
+    releaseClose();
+    await stopping;
+    await Promise.all([firstRestart, concurrentRestart]);
+    assert.equal(opens, 2);
+    assert.equal(h.timers.filter((timer) => !timer.cleared).length, 2);
+
+    h.store.onClose = null;
+    await service.stop();
+    assert.equal(h.store.closed, 2);
   });
 
   it("shares a successful concurrent stop and starts a fresh stop lifecycle after restart", async () => {

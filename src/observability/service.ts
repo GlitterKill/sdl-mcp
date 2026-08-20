@@ -55,7 +55,6 @@ import {
 } from "./lifetime-store.js";
 import {
   LIFETIME_SCHEMA_VERSION,
-  MAX_REPOSITORIES,
   OVERFLOW_KEY,
   SECTION_IDS,
   repositoryStorageKey,
@@ -120,6 +119,11 @@ interface LifetimeRepositoryState {
   sessionCounted: boolean;
 }
 
+interface SessionRepositoryState {
+  readonly aggregator: Aggregator;
+  readonly freshness: LifetimeFreshness;
+}
+
 interface PublicationBoundary {
   readonly actives: Map<string, DurableLifetimeRepository>;
   readonly eventProduced: Map<string, boolean>;
@@ -151,7 +155,7 @@ export class ObservabilityService implements ObservabilityTap {
   private readonly options: Required<Pick<ObservabilityServiceOptions,
     "now" | "isRegisteredRepoId" | "scheduleInterval" | "clearScheduledInterval"
   >> & Pick<ObservabilityServiceOptions, "lifetimeDirectory" | "openLifetimeStore">;
-  private readonly aggregators = new Map<string, Aggregator>();
+  private readonly aggregators = new Map<string, SessionRepositoryState>();
   private readonly subscribers = new Set<SnapshotSubscriber>();
   private readonly graphSubscribers = new Set<GraphSubscriber>();
   private readonly graphEvents = new RingBuffer<GraphActivityEvent>(200);
@@ -166,13 +170,11 @@ export class ObservabilityService implements ObservabilityTap {
   private lifetimeStore: LifetimeStore | null = null;
   private committedLifetime: DurableLifetimeRoot | null = null;
   private readonly lifetimeRepositories = new Map<string, LifetimeRepositoryState>();
-  private readonly lifetimeFreshness = new Map<string, LifetimeFreshness>();
   private readonly processFreshness = emptyFreshness();
   private processPeakEpoch: ProcessPeaks | null = null;
   private lifetimeWriter = false;
   private lifetimeFrozen = false;
   private lifetimeOpenFailed = false;
-  private lifetimeCapacityFull = false;
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
   private lifetimeTail: Promise<void> = Promise.resolve();
@@ -208,9 +210,23 @@ export class ObservabilityService implements ObservabilityTap {
    * `stop()`) is a no-op. The interval timer is `.unref()`-ed so it does
    * not keep the process alive.
    */
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    if (this.stopPromise !== null) {
+      if (this.startPromise !== null) return this.startPromise;
+      const stopping = this.stopPromise;
+      // A restart requested during shutdown shares one continuation behind close.
+      const restarting = stopping.then(() => {
+        if (this.stopPromise === stopping) this.stopPromise = null;
+        return this.startInternal();
+      });
+      this.startPromise = restarting;
+      void restarting.catch(() => {
+        if (this.stopPromise === stopping) this.stopPromise = null;
+        if (this.startPromise === restarting) this.startPromise = null;
+      });
+      return restarting;
+    }
     if (this.startPromise !== null) return this.startPromise;
-    this.stopPromise = null;
     this.startPromise = this.startInternal();
     return this.startPromise;
   }
@@ -273,12 +289,14 @@ export class ObservabilityService implements ObservabilityTap {
    */
   stop(): Promise<void> {
     if (this.stopPromise !== null) return this.stopPromise;
-    this.stopPromise = this.stopInternal();
+    const starting = this.startPromise;
+    this.startPromise = null;
+    this.stopPromise = this.stopInternal(starting);
     return this.stopPromise;
   }
 
-  private async stopInternal(): Promise<void> {
-    if (this.startPromise !== null) await this.startPromise;
+  private async stopInternal(starting: Promise<void> | null): Promise<void> {
+    if (starting !== null) await starting;
     if (this.sampleTimer !== null) {
       this.options.clearScheduledInterval(this.sampleTimer);
       this.sampleTimer = null;
@@ -320,7 +338,6 @@ export class ObservabilityService implements ObservabilityTap {
       }
     } finally {
       this.lifetimeStore = null;
-      this.startPromise = null;
     }
   }
 
@@ -343,7 +360,7 @@ export class ObservabilityService implements ObservabilityTap {
           eventLoopLagMs: safeTotal(sample.eventLoopLagMs),
         });
       }
-      for (const aggregator of this.aggregators.values()) {
+      for (const { aggregator } of this.aggregators.values()) {
         try {
           aggregator.recordResourceSample(sample);
         } catch (err) {
@@ -365,7 +382,7 @@ export class ObservabilityService implements ObservabilityTap {
         const beamStore = this.beamExplainStore;
         if (beamStore !== null) {
           const size = beamStore.size === undefined ? 0 : beamStore.size();
-          for (const aggregator of this.aggregators.values()) {
+          for (const { aggregator } of this.aggregators.values()) {
             aggregator.setBeamRetainedHandles(size);
           }
         }
@@ -434,12 +451,16 @@ export class ObservabilityService implements ObservabilityTap {
    * Get-or-create the aggregator for a repository.
    */
   private getAggregator(repoId: string): Aggregator {
-    let agg = this.aggregators.get(repoId);
-    if (!agg) {
-      agg = this.newAggregator();
-      this.aggregators.set(repoId, agg);
+    return this.getSessionRepository(repoId).aggregator;
+  }
+
+  private getSessionRepository(repoId: string): SessionRepositoryState {
+    let entry = this.aggregators.get(repoId);
+    if (entry === undefined) {
+      entry = { aggregator: this.newAggregator(), freshness: emptyFreshness() };
+      this.aggregators.set(repoId, entry);
     }
-    return agg;
+    return entry;
   }
 
   private newAggregator(): Aggregator {
@@ -512,13 +533,18 @@ export class ObservabilityService implements ObservabilityTap {
     const stored = this.committedLifetime?.repositories[repositoryStorageKey(repoId)];
     const live = this.lifetimeRepositories.get(repoId);
     const readOnly = state?.mode === "readOnly";
+    const session = this.aggregators.get(repoId);
+    const hasRepositoryEvent = session !== undefined
+      && SECTION_IDS.some((section) => session.freshness[section] !== null);
     const capacityExceeded = !readOnly
-      && this.lifetimeFreshness.has(repoId)
+      && hasRepositoryEvent
       && stored === undefined
       && live === undefined
-      && (this.lifetimeCapacityFull
-        || Object.keys(this.buildCurrentLifetimeRoot(generatedAt).repositories).length
-          >= MAX_REPOSITORIES);
+      && !admitRepository(
+        this.buildCurrentLifetimeRoot(generatedAt),
+        repoId,
+        emptyRepositoryLifetime(),
+      ).admitted;
     const value = capacityExceeded
       ? emptyRepositoryLifetime()
       : readOnly
@@ -796,9 +822,6 @@ export class ObservabilityService implements ObservabilityTap {
       state.eventProduced = pending?.eventProduced.has(repoId) ?? false;
     }
     this.pendingReset = null;
-    if (Object.keys(root.repositories).length < MAX_REPOSITORIES) {
-      this.lifetimeCapacityFull = false;
-    }
   }
 
   private acceptCommittedLifetime(
@@ -839,11 +862,7 @@ export class ObservabilityService implements ObservabilityTap {
       repoId,
       baseline,
     );
-    if (!admission.admitted) {
-      this.lifetimeCapacityFull = true;
-      return null;
-    }
-    if (stored === undefined) this.lifetimeCapacityFull = false;
+    if (!admission.admitted) return null;
     const created: LifetimeRepositoryState = {
       baseline,
       active: activeLifetimeMetadata(baseline),
@@ -861,9 +880,8 @@ export class ObservabilityService implements ObservabilityTap {
   ): void {
     if (repoId === undefined || !this.isRegisteredRepoId(repoId)) return;
     const timestamp = this.nowIso();
-    const freshness = this.lifetimeFreshness.get(repoId) ?? emptyFreshness();
+    const freshness = this.getSessionRepository(repoId).freshness;
     for (const section of sections) freshness[section] = timestamp;
-    this.lifetimeFreshness.set(repoId, freshness);
     if (!this.lifetimeWriter || this.lifetimeFrozen) return;
     const state = this.ensureLifetimeRepository(repoId);
     if (state === null) return;
@@ -904,7 +922,7 @@ export class ObservabilityService implements ObservabilityTap {
   }
 
   private responseFreshness(repoId: string): LifetimeFreshness {
-    const freshness = this.lifetimeFreshness.get(repoId) ?? emptyFreshness();
+    const freshness = this.aggregators.get(repoId)?.freshness ?? emptyFreshness();
     return {
       ...freshness,
       pool: this.processFreshness.pool,
@@ -1161,7 +1179,7 @@ export class ObservabilityService implements ObservabilityTap {
         typeof event.nativeMs === "number" && Number.isFinite(event.nativeMs)
           ? event.nativeMs
           : event.latencyMs;
-      for (const aggregator of this.aggregators.values()) {
+      for (const { aggregator } of this.aggregators.values()) {
         aggregator.recordDbLatency(latencyMs);
       }
     } catch (err) {
@@ -1222,7 +1240,7 @@ export class ObservabilityService implements ObservabilityTap {
   packedWire(event: PackedWireTapEvent): void {
     try {
       // packedWire is process-global (no repoId) â€” fan out to every aggregator.
-      for (const aggregator of this.aggregators.values()) {
+      for (const { aggregator } of this.aggregators.values()) {
         aggregator.recordPackedWire(event);
       }
       this.recordLifetimeEvent(event.repoId, ["packed", "tokenEfficiency"], () =>
@@ -1253,7 +1271,7 @@ export class ObservabilityService implements ObservabilityTap {
   poolSample(event: PoolSampleTapEvent): void {
     try {
       // Pool depths are process-global â€” fan out to every aggregator.
-      for (const aggregator of this.aggregators.values()) {
+      for (const { aggregator } of this.aggregators.values()) {
         aggregator.recordPoolSample(event);
       }
       this.recordProcessFreshness("pool");
@@ -1264,7 +1282,7 @@ export class ObservabilityService implements ObservabilityTap {
 
   resourceSample(event: ResourceSampleTapEvent): void {
     try {
-      for (const aggregator of this.aggregators.values()) {
+      for (const { aggregator } of this.aggregators.values()) {
         aggregator.recordResourceSample(event);
       }
       this.recordProcessFreshness("resources");
@@ -1301,7 +1319,7 @@ export class ObservabilityService implements ObservabilityTap {
         return;
       }
       // Legacy unscoped event - fan out to every known aggregator.
-      for (const aggregator of this.aggregators.values()) {
+      for (const { aggregator } of this.aggregators.values()) {
         aggregator.recordIndexPhase({
           phase: event.phase,
           language: event.language,
@@ -1376,7 +1394,7 @@ export class ObservabilityService implements ObservabilityTap {
     try {
       // Audit buffer is process-global; fan out to all aggregators so any
       // active repo's snapshot reflects the same gauge value.
-      for (const aggregator of this.aggregators.values()) {
+      for (const { aggregator } of this.aggregators.values()) {
         aggregator.recordAuditBufferSample({
           depth: event.depth,
           droppedTotal: event.droppedTotal,
@@ -1404,7 +1422,7 @@ export class ObservabilityService implements ObservabilityTap {
         timedOut: event.timedOut,
         endedAt: new Date().toISOString(),
       };
-      for (const aggregator of this.aggregators.values()) {
+      for (const { aggregator } of this.aggregators.values()) {
         aggregator.recordPostIndexSession(rec);
       }
       this.getAggregator("_global").recordPostIndexSession(rec);
