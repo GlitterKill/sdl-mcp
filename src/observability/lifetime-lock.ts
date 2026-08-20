@@ -277,10 +277,7 @@ async function readStableLock(
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { status: "missing" };
-    if (code === "EACCES" || code === "EPERM" || code === "EIO") {
-      return { status: "ioFailure" };
-    }
-    return { status: "invalid" };
+    return typeof code === "string" ? { status: "ioFailure" } : { status: "invalid" };
   }
 }
 

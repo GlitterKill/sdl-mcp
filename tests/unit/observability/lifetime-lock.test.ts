@@ -235,6 +235,10 @@ async function spawnWorker(directory: string, extraArguments: readonly string[] 
   );
   children.add(child);
   const lines = createInterface({ input: child.stdout });
+  let exitState: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined;
+  child.on("exit", (code, signal) => {
+    exitState = { code, signal };
+  });
   const queue: Array<Record<string, unknown>> = [];
   const waiters: Array<(message: Record<string, unknown>) => void> = [];
   lines.on("line", (line) => {
@@ -247,6 +251,11 @@ async function spawnWorker(directory: string, extraArguments: readonly string[] 
     const queued = queue.shift();
     if (queued) {
       resolve(queued);
+      return;
+    }
+    if (exitState) {
+      child.kill();
+      reject(new Error(`lock worker exited ${exitState.code ?? exitState.signal}: ${child.stderr.read() ?? ""}`));
       return;
     }
     let timer: NodeJS.Timeout | undefined;
@@ -263,10 +272,8 @@ async function spawnWorker(directory: string, extraArguments: readonly string[] 
       child.kill();
       reject(error);
     };
-    const onExit = (code: number | null) => {
-      if (code !== null && code !== 0) {
-        fail(new Error(`lock worker exited ${code}: ${child.stderr.read() ?? ""}`));
-      }
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      fail(new Error(`lock worker exited ${code ?? signal}: ${child.stderr.read() ?? ""}`));
     };
     waiters.push(finish);
     child.once("error", fail);
@@ -3078,6 +3085,72 @@ describe("lifetime persistence lock", () => {
     assert.equal(await readFile(anchor, "utf8"), content);
   });
 
+  it("applies the metadata limit to cleanup and normalize auxiliary aliases", async () => {
+    for (const [index, shape] of [
+      [0, "create-cleanup"],
+      [1, "claim-cleanup"],
+      [2, "create-cleanup-next"],
+      [3, "record-normalize"],
+      [4, "release-cleanup"],
+    ] as const) {
+      const directory = await temporaryDirectory();
+      const nonce = (0xb0 + index).toString(16).padStart(32, "0");
+      const source = join(directory, `metadata-source-${index}.json`);
+      await writeFile(source, lockRecord(40_000 + index));
+      const claim = claimRecord(999_999, nonce, await fileSnapshot(source));
+      const baseName = shape.startsWith("create")
+        ? `.sdl-observability-lifetime.create.${nonce}`
+        : shape === "release-cleanup"
+          ? `.sdl-observability-lifetime.release.${nonce}`
+        : shape === "record-normalize"
+          ? `.sdl-observability-lifetime.claim-record.${nonce}.json`
+          : `.sdl-observability-lifetime.claim-cleanup.${nonce}`;
+      const suffix = shape.endsWith("cleanup-next")
+        ? ".cleanup-next"
+        : shape.endsWith("cleanup")
+          ? ".cleanup"
+          : `.normalize.${"f".repeat(32)}`;
+      const path = join(directory, `${baseName}${suffix}`);
+      const content = `${shape.startsWith("create")
+        ? createAnchorRecord(999_999, nonce)
+        : shape === "release-cleanup"
+          ? lockRecord(999_999, nonce)
+          : claim}${" ".repeat(17 * 1024)}`;
+      await writeFile(path, content, { mode: 0o600 });
+      const before = await auxiliaryContents(directory);
+      let aliasOpened = false;
+      let largestRead = 0;
+
+      const result = await acquireLifetimeLease(directory, {
+        isClaimantPidAlive: () => false,
+        fileSystem: {
+          open: async (...args: Parameters<typeof open>) => {
+            const handle = await open(...args);
+            if (String(args[0]) !== path) return handle;
+            aliasOpened = true;
+            return new Proxy(handle, {
+              get(target, property, receiver) {
+                if (property === "read") {
+                  return async (buffer: Buffer, offset: number, length: number, position: number) => {
+                    largestRead = Math.max(largestRead, length);
+                    return target.read(buffer, offset, length, position);
+                  };
+                }
+                const value = Reflect.get(target, property, receiver) as unknown;
+                return typeof value === "function" ? value.bind(target) : value;
+              },
+            });
+          },
+        },
+      });
+
+      assert.deepEqual(result, { mode: "readOnly", reason: "invalidLock" }, shape);
+      assert.equal(aliasOpened, false, shape);
+      assert.equal(largestRead, 0, shape);
+      assert.deepEqual(await auxiliaryContents(directory), before, shape);
+    }
+  });
+
   it("refuses malformed, oversized, and non-regular lock paths", async () => {
     for (const setup of [
       async (path: string) => writeFile(path, "not json"),
@@ -3099,7 +3172,7 @@ describe("lifetime persistence lock", () => {
       reason: "invalidLock",
     });
 
-    for (const code of ["EACCES", "EIO"] as const) {
+    for (const code of ["EACCES", "EIO", "EMFILE", "EBUSY", "UNKNOWN"] as const) {
       const directory = await temporaryDirectory();
       const lockPath = join(directory, LIFETIME_LOCK_FILENAME);
       await writeFile(lockPath, lockRecord(4242));
@@ -3412,5 +3485,14 @@ describe("lifetime persistence lock", () => {
     await assert.rejects(worker.next(25), /timed out/);
     await worker.exited;
     assert.equal(worker.child.killed, true);
+  });
+
+  it("rejects immediately when a worker exits cleanly before its expected message", async () => {
+    const directory = await temporaryDirectory();
+    const started = Date.now();
+    const worker = await spawnWorker(directory, ["exit-zero"]);
+    await assert.rejects(worker.next(750), /exited 0/);
+    assert.ok(Date.now() - started < 500, "clean child exit should not wait for message timeout");
+    await worker.exited;
   });
 });

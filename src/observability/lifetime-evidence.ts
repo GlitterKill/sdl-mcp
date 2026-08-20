@@ -32,8 +32,6 @@ export interface LifetimeEvidenceLabel {
 export interface LifetimeFileSystem {
   readonly open: typeof nodeFs.open;
   readonly lstat: typeof nodeFs.lstat;
-  readonly readFile: typeof nodeFs.readFile;
-  readonly readdir: typeof nodeFs.readdir;
   readonly opendir: typeof nodeFs.opendir;
   readonly realpath: typeof nodeFs.realpath;
   readonly link: typeof nodeFs.link;
@@ -144,8 +142,6 @@ export function resolveLifetimeFileSystem(
   return {
     open: overrides.open ?? nodeFs.open,
     lstat: overrides.lstat ?? nodeFs.lstat,
-    readFile: overrides.readFile ?? nodeFs.readFile,
-    readdir: overrides.readdir ?? nodeFs.readdir,
     opendir: overrides.opendir ?? nodeFs.opendir,
     realpath: overrides.realpath ?? nodeFs.realpath,
     link: overrides.link ?? nodeFs.link,
@@ -648,19 +644,39 @@ async function claimantAlive(
   );
 }
 
+function logicalAuxiliaryName(name: string): string {
+  let logicalName = name;
+  while (true) {
+    const normalization = NORMALIZE_AUXILIARY_SUFFIX.exec(logicalName);
+    if (normalization) {
+      logicalName = logicalName.slice(0, normalization.index);
+      continue;
+    }
+    if (logicalName.endsWith(".cleanup-next")) {
+      logicalName = logicalName.slice(0, -".cleanup-next".length);
+      continue;
+    }
+    if (logicalName.endsWith(".cleanup")) {
+      logicalName = logicalName.slice(0, -".cleanup".length);
+      continue;
+    }
+    return logicalName;
+  }
+}
+
+function auxiliaryReadLimit(name: string): number {
+  const logicalName = logicalAuxiliaryName(name);
+  return logicalName.startsWith(DELETE_AUXILIARY_PREFIX)
+    ? MAX_EVIDENCE_SOURCE_BYTES
+    : MAX_CLAIM_BYTES;
+}
+
 function classifyAuxiliary(
   directory: string,
   name: string,
   source: Awaited<ReturnType<typeof readLifetimeSource>>,
 ): AuxiliaryEntry | null {
-  const normalization = NORMALIZE_AUXILIARY_SUFFIX.exec(name);
-  const logicalName = normalization
-    ? name.slice(0, normalization.index)
-    : name.endsWith(".cleanup-next")
-      ? name.slice(0, -".cleanup-next".length)
-      : name.endsWith(".cleanup")
-        ? name.slice(0, -".cleanup".length)
-        : name;
+  const logicalName = logicalAuxiliaryName(name);
   const create = CREATE_AUXILIARY.exec(logicalName);
   if (create) {
     const createRecord = parseCreateAuxiliary(source.content);
@@ -1012,14 +1028,10 @@ async function recoverStrandedAuxiliaries(
   try {
     for (const name of allNames) {
       const path = directChildPath(directory, resolve(directory, name), "Lifetime auxiliary");
-      const metadataOnly = CREATE_AUXILIARY.test(name) ||
-        CREATE_WITNESS_AUXILIARY.test(name) ||
-        CREATED_LOCK_AUXILIARY.test(name) ||
-        RECORD_AUXILIARY.test(name) || CLAIM_AUXILIARY.test(name);
       const source = await readLifetimeSource(
         path,
         fileSystem,
-        metadataOnly ? MAX_CLAIM_BYTES : MAX_EVIDENCE_SOURCE_BYTES,
+        auxiliaryReadLimit(name),
       );
       if (source.snapshot.ino === "0") return "invalid";
       const entry = classifyAuxiliary(directory, name, source);

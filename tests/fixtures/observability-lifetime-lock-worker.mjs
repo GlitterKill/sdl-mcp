@@ -12,6 +12,8 @@ const directory = process.argv[2];
 if (!directory) throw new Error("trusted directory argument is required");
 const operation = process.argv[3] ?? "lease";
 
+if (operation === "exit-zero") process.exit(0);
+
 if (operation === "create-before-fixed") {
   await acquireLifetimeLease(directory, {
     fileSystem: {
