@@ -1187,15 +1187,10 @@ function admitAtLocation(
 ) {
   return admitDynamicMapEntry(
     root,
-    dynamicMapAt(root, repositoryKey, location),
+    repositoryKey,
+    location,
     rawIdentifier,
     incoming,
-    {
-      location,
-      repositoryKey,
-      replaceMap: (candidateRoot, map) =>
-        replaceDynamicMap(candidateRoot, repositoryKey, location, map),
-    },
   );
 }
 
@@ -1790,6 +1785,8 @@ describe("bounded lifetime accumulator", () => {
       };
       const repository = root.repositories[REPOSITORY_KEY];
       assert.ok(repository?.sections.retrieval);
+      const before = clone(root);
+      const beforeJson = JSON.stringify(root);
       const result = admitAtLocation(
         root,
         REPOSITORY_KEY,
@@ -1800,6 +1797,8 @@ describe("bounded lifetime accumulator", () => {
 
       assert.equal(result.map[storageKey], expected);
       assert.equal(result.reservedBytes, null);
+      assert.deepEqual(root, before);
+      assert.equal(JSON.stringify(root), beforeJson);
       assert.notEqual(result.root, root);
       assert.notEqual(result.root.repositories, root.repositories);
       assert.notEqual(result.root.repositories[REPOSITORY_KEY], repository);
@@ -1826,6 +1825,63 @@ describe("bounded lifetime accumulator", () => {
       -1,
     ));
     assert.deepEqual(invalidRoot, before);
+  });
+
+  it("owns immutable path updates for new real and overflow keys", () => {
+    for (const [rawIdentifier, expectedStorageKey] of [
+      ["new-key", "k:new-key"],
+      ["invalid key", OVERFLOW_KEY],
+    ] as const) {
+      const root = replaceDynamicMap(
+        parseDurableLifetimeRoot(durableRootFixture),
+        REPOSITORY_KEY,
+        "retrieval.byMode",
+        {},
+      );
+      const repository = root.repositories[REPOSITORY_KEY];
+      assert.ok(repository?.sections.retrieval);
+      const before = clone(root);
+      const beforeJson = JSON.stringify(root);
+
+      const result = admitAtLocation(
+        root,
+        REPOSITORY_KEY,
+        "retrieval.byMode",
+        rawIdentifier,
+        2,
+      );
+
+      assert.equal(result.storageKey, expectedStorageKey);
+      assert.equal(result.map[expectedStorageKey], 2);
+      assert.deepEqual(root, before);
+      assert.equal(JSON.stringify(root), beforeJson);
+      assert.notEqual(result.root, root);
+      assert.notEqual(result.root.repositories[REPOSITORY_KEY], repository);
+      assert.equal(
+        result.root.repositories[REPOSITORY_KEY]?.sections.cache,
+        repository.sections.cache,
+      );
+      assert.equal(result.root.processPeaks, root.processPeaks);
+    }
+  });
+
+  it("fails closed when the requested dynamic-map path is unavailable", () => {
+    const root: DurableLifetimeRoot = {
+      schemaVersion: 1,
+      generation: 0,
+      updatedAt: ISO,
+      processPeaks: null,
+      repositories: { [REPOSITORY_KEY]: emptyRepositoryLifetime() },
+    };
+    const before = clone(root);
+    assert.throws(() => admitAtLocation(
+      root,
+      REPOSITORY_KEY,
+      "retrieval.byMode",
+      "new-key",
+      1,
+    ));
+    assert.deepEqual(root, before);
   });
 
   it("aggregates every structured dynamic value shape into overflow", () => {
@@ -2104,30 +2160,20 @@ describe("bounded lifetime accumulator", () => {
     assert.deepEqual(dynamicMapAt(nearLimit.root, nearLimit.repositoryKey, location), beforeMap);
   });
 
-  it("does not permit callers to bypass byte admission", () => {
+  it("internally rejects byte admission without a callback surface", () => {
     const location = "retrieval.byMode" as const;
     const nearLimit = nearLimitDynamicRoot(location);
-    let bypassCalls = 0;
-    const unsafeOptions = {
-      location,
-      repositoryKey: nearLimit.repositoryKey,
-      replaceMap: (candidateRoot: DurableLifetimeRoot, map: Readonly<UnknownMap>) =>
-        replaceDynamicMap(candidateRoot, nearLimit.repositoryKey, location, map),
-      reserve: () => {
-        bypassCalls += 1;
-        return 0;
-      },
-    };
+    const before = clone(nearLimit.root);
     const result = admitDynamicMapEntry(
       nearLimit.root,
-      dynamicMapAt(nearLimit.root, nearLimit.repositoryKey, location),
+      nearLimit.repositoryKey,
+      location,
       "invalid key",
       1,
-      unsafeOptions,
     );
 
-    assert.equal(bypassCalls, 0);
     assert.equal(result.status, "capacityRejected");
     assert.equal(result.root, nearLimit.root);
+    assert.deepEqual(nearLimit.root, before);
   });
 });

@@ -385,25 +385,93 @@ function mergeDynamicValue(
   );
 }
 
+interface LocatedDynamicMap {
+  current: Readonly<Record<string, unknown>>;
+  replace: (
+    replacement: Readonly<Record<string, unknown>>,
+    saturated: boolean,
+  ) => DurableLifetimeRoot;
+}
+
+function locateDynamicMap(
+  root: DurableLifetimeRoot,
+  repositoryKey: string,
+  location: DynamicMapLocation,
+): LocatedDynamicMap {
+  const repository = root.repositories[repositoryKey];
+  if (repository === undefined) throw new Error("Lifetime repository is missing");
+  const [sectionName, field, nestedField] = location.split(".");
+  const sections = repository.sections as unknown as Record<string, unknown>;
+  const section = sections[sectionName];
+  if (!isRecord(section)) throw new Error(`Lifetime section is unavailable for ${location}`);
+
+  const replaceSection = (
+    replacementSection: Record<string, unknown>,
+    saturated: boolean,
+  ): DurableLifetimeRoot => ({
+    ...root,
+    repositories: {
+      ...root.repositories,
+      [repositoryKey]: {
+        ...repository,
+        saturated: repository.saturated || saturated,
+        sections: {
+          ...sections,
+          [sectionName]: replacementSection,
+        } as unknown as DurableLifetimeSections,
+      },
+    },
+  });
+
+  if (nestedField === undefined) {
+    const current = section[field];
+    if (!isRecord(current)) throw new Error(`Lifetime map is unavailable for ${location}`);
+    return {
+      current,
+      replace: (replacement, saturated) => replaceSection(
+        { ...section, [field]: replacement },
+        saturated,
+      ),
+    };
+  }
+
+  const perTool = section[field];
+  if (!isRecord(perTool)) throw new Error(`Lifetime map is unavailable for ${location}`);
+  const toolKey = Object.keys(perTool).filter((key) => key !== OVERFLOW_KEY).sort()[0];
+  if (toolKey === undefined) throw new Error(`Lifetime tool is unavailable for ${location}`);
+  const tool = perTool[toolKey];
+  if (!isRecord(tool)) throw new Error(`Lifetime tool is invalid for ${location}`);
+  const current = tool[nestedField];
+  if (!isRecord(current)) throw new Error(`Lifetime map is unavailable for ${location}`);
+  return {
+    current,
+    replace: (replacement, saturated) => replaceSection(
+      {
+        ...section,
+        [field]: {
+          ...perTool,
+          [toolKey]: { ...tool, [nestedField]: replacement },
+        },
+      },
+      saturated,
+    ),
+  };
+}
+
 export function admitDynamicMapEntry<T>(
   root: DurableLifetimeRoot,
-  current: Readonly<Record<string, T>>,
+  repositoryKey: string,
+  location: DynamicMapLocation,
   rawIdentifier: string,
   incoming: T,
-  options: {
-    location: DynamicMapLocation;
-    repositoryKey: string;
-    replaceMap: (
-      candidateRoot: DurableLifetimeRoot,
-      candidateMap: Readonly<Record<string, T>>,
-    ) => DurableLifetimeRoot;
-  },
 ): DynamicMapAdmission<T> {
-  const validatedIncoming = validateDynamicValue(options.location, incoming) as T;
+  const located = locateDynamicMap(root, repositoryKey, location);
+  const current = located.current as Readonly<Record<string, T>>;
+  const validatedIncoming = validateDynamicValue(location, incoming) as T;
   const requestedKey = canonicalDynamicKey(rawIdentifier);
   const realKeyCount = Object.keys(current).filter((key) => key !== OVERFLOW_KEY).length;
   const isNewRealKey = requestedKey !== OVERFLOW_KEY && !Object.hasOwn(current, requestedKey);
-  const storageKey = isNewRealKey && realKeyCount >= dynamicMapLimit(options.location)
+  const storageKey = isNewRealKey && realKeyCount >= dynamicMapLimit(location)
     ? OVERFLOW_KEY
     : requestedKey;
 
@@ -414,7 +482,7 @@ export function admitDynamicMapEntry<T>(
     if (existing === undefined) {
       next[key] = structuredClone(validatedIncoming);
     } else {
-      const merged = mergeDynamicValue(options.location, existing, validatedIncoming);
+      const merged = mergeDynamicValue(location, existing, validatedIncoming);
       next[key] = merged.value as T;
       saturated = merged.saturated;
     }
@@ -423,10 +491,7 @@ export function admitDynamicMapEntry<T>(
 
   const candidateFor = (key: string, reserveNewKey: boolean) => {
     const merged = mergeAt(key);
-    const candidateRoot = options.replaceMap(root, merged.value);
-    const repository = candidateRoot.repositories[options.repositoryKey];
-    if (repository === undefined) throw new Error("Lifetime repository is missing");
-    if (merged.saturated) repository.saturated = true;
+    const candidateRoot = located.replace(merged.value, merged.saturated);
     const reservedBytes = reserveNewKey ? reservedSerializedBytes(candidateRoot) : null;
     return {
       root: candidateRoot,
