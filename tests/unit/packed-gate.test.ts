@@ -1,5 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { GraphSlice } from "../../dist/domain/types.js";
+import {
+  publishContextWireDecision,
+  serializeContextForWireFormat,
+} from "../../dist/mcp/tools/context-wire-format.js";
+import { serializeSliceForWireFormat } from "../../dist/mcp/tools/slice-wire-format.js";
+import { serializeSymbolSearchForWireFormat } from "../../dist/mcp/tools/symbol-wire-format.js";
 import {
   decideFormat,
   decideFormatDetailed,
@@ -10,6 +17,34 @@ import {
   PACKED_DEFAULT_THRESHOLD,
   PACKED_DEFAULT_TOKEN_THRESHOLD,
 } from "../../dist/mcp/wire/packed/index.js";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PackedWireTapEvent,
+} from "../../dist/observability/event-tap.js";
+
+const MINIMAL_SLICE = {
+  repoId: "payload-repo",
+  versionId: "v1",
+  budget: { maxCards: 1, maxEstimatedTokens: 100 },
+  startSymbols: [],
+  symbolIndex: [],
+  cards: [],
+  edges: [],
+  memories: [],
+  truncation: { truncated: false, droppedCards: 0, droppedEdges: 0 },
+} as GraphSlice;
+
+function capturePackedWireEvents(): PackedWireTapEvent[] {
+  const events: PackedWireTapEvent[] = [];
+  installObservabilityTap(new Proxy({} as ObservabilityTap, {
+    get: (_target, property) => property === "packedWire"
+      ? (event: PackedWireTapEvent) => events.push(event)
+      : () => {},
+  }));
+  return events;
+}
 
 test("default thresholds: bytes 0.10, tokens 0.20", () => {
   assert.equal(PACKED_DEFAULT_THRESHOLD, 0.10);
@@ -115,4 +150,52 @@ test("isPackedEnabled honors env kill switch", () => {
   }
   assert.equal(isPackedEnabled(true), true);
   assert.equal(isPackedEnabled(false), false);
+});
+
+test("context, symbol, and slice packed telemetry carry only explicit repository identity", () => {
+  const events = capturePackedWireEvents();
+  try {
+    const contextPayload = { status: "empty", evidence: [], edges: [], nextActions: [] };
+    const scopedContext = serializeContextForWireFormat(contextPayload, "packed", {
+      packedThreshold: 0,
+      repoId: "repo-a",
+    });
+    publishContextWireDecision(scopedContext, scopedContext.gateDecision ?? "fallback");
+    const unscopedContext = serializeContextForWireFormat(contextPayload, "packed", {
+      packedThreshold: 0,
+      repoId: "",
+    });
+    publishContextWireDecision(unscopedContext, unscopedContext.gateDecision ?? "fallback");
+
+    const symbolPayload = { query: "x", results: [], total: 0 };
+    const scopedSymbol = serializeSymbolSearchForWireFormat(symbolPayload, "packed", {
+      packedThreshold: 0,
+      repoId: "repo-a",
+    });
+    const unscopedSymbol = serializeSymbolSearchForWireFormat(symbolPayload, "packed", {
+      packedThreshold: 0,
+    });
+
+    const scopedSlice = serializeSliceForWireFormat(MINIMAL_SLICE, "packed", undefined, {
+      packedThreshold: 0,
+      repoId: "repo-a",
+    });
+    const unscopedSlice = serializeSliceForWireFormat(MINIMAL_SLICE, "packed", undefined, {
+      packedThreshold: 0,
+    });
+
+    assert.deepEqual(scopedContext.payload, unscopedContext.payload);
+    assert.deepEqual(scopedSymbol.payload, unscopedSymbol.payload);
+    assert.deepEqual(scopedSlice.payload, unscopedSlice.payload);
+    assert.deepEqual(events.map(({ repoId }) => repoId), [
+      "repo-a",
+      undefined,
+      "repo-a",
+      undefined,
+      "repo-a",
+      undefined,
+    ]);
+  } finally {
+    resetObservabilityTap();
+  }
 });

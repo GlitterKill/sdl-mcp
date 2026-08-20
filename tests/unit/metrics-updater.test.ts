@@ -4,6 +4,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { FinalizeIndexingParams } from "../../dist/indexer/metrics-updater.js";
+import { finalizeIndexing } from "../../dist/indexer/metrics-updater.js";
+import { configureWriteConnAcquirer } from "../../dist/db/write-session.js";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PostIndexSessionTapEvent,
+} from "../../dist/observability/event-tap.js";
 
 /**
  * Tests for the metrics-updater module.
@@ -66,6 +74,49 @@ describe("metrics-updater types", () => {
     assert.ok(params.onProgress);
     params.onProgress!({ stage: "metrics", current: 1, total: 10 } as any);
     assert.ok(progressCalled, "onProgress callback should be invocable");
+  });
+});
+
+describe("metrics-updater repository attribution", () => {
+  it("attributes its no-op post-index session to the finalized repository", async () => {
+    const events: PostIndexSessionTapEvent[] = [];
+    configureWriteConnAcquirer(async (body) => body({} as import("kuzu").Connection));
+    installObservabilityTap(new Proxy({} as ObservabilityTap, {
+      get: (_target, property) => property === "postIndexSession"
+        ? (event: PostIndexSessionTapEvent) => events.push(event)
+        : () => {},
+    }));
+    try {
+      await finalizeIndexing({
+        repoId: "metrics-repo",
+        versionId: "v1",
+        appConfig: { repos: [] } as any,
+        changedFileIds: new Set(),
+        hasIndexMutations: false,
+        preFinalize: async () => {},
+        callResolutionTelemetry: {
+          pass2EligibleFileCount: 0,
+          pass2ProcessedFileCount: 0,
+          pass2EdgesCreated: 0,
+          pass2EdgesFailed: 0,
+          pass2Duration: 0,
+        } as any,
+      });
+    } finally {
+      resetObservabilityTap();
+    }
+    assert.deepEqual(events.map(({ repoId }) => repoId), ["metrics-repo"]);
+  });
+
+  it("passes repoId through both post-index session option objects", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/indexer/metrics-updater.ts"),
+      "utf8",
+    );
+    assert.equal(
+      source.match(/\{\s*timeoutMs: postIndexSessionTimeoutMs,\s*repoId,?\s*\}/g)?.length,
+      2,
+    );
   });
 });
 

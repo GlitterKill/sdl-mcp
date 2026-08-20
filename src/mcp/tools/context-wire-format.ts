@@ -14,6 +14,7 @@ export function serializeContextForWireFormat(
   response: Record<string, unknown>,
   wireFormat: "json" | "packed" | "auto" | undefined,
   options?: {
+    repoId?: string;
     packedThreshold?: number;
     packedTokenThreshold?: number;
     packedEnabled?: boolean;

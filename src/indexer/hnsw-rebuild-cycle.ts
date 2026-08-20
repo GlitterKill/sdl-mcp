@@ -24,6 +24,8 @@ export function runHnswRebuildCycle<T>(
   rebuild: () => Promise<T>,
   timeoutMs?: number,
   recordTiming?: (phaseName: string, durationMs: number) => void,
+  /** Validated caller identity forwarded only to post-index telemetry. */
+  repoId?: string,
 ): Promise<T> {
   return withExclusiveLadybugOperation(async () => {
     const measure = async (
@@ -48,6 +50,7 @@ export function runHnswRebuildCycle<T>(
     try {
       result = await withPostIndexWriteSession(async () => rebuild(), {
         timeoutMs,
+        repoId,
       });
     } catch (error) {
       rebuildFailed = true;

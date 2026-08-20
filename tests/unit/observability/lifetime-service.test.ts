@@ -29,6 +29,7 @@ import {
 } from "../../../dist/observability/service.js";
 import {
   getObservabilityTap,
+  installObservabilityTap,
   resetObservabilityTap,
 } from "../../../dist/observability/event-tap.js";
 import { logger } from "../../../dist/util/logger.js";
@@ -347,6 +348,97 @@ describe("ObservabilityService lifetime integration", () => {
     assert.equal(b.freshness.pool, "2026-08-20T12:00:01.000Z");
     assert.equal(a.sections.pool, null);
     assert.equal(h.service.getSnapshot("unregistered").cache.totalHits, 1);
+  });
+
+  it("keeps projected tool output and repository-capable telemetry scoped to one durable repository", async () => {
+    const h = harness();
+    await h.service.start();
+    installObservabilityTap(h.service);
+    const projection = {
+      profile: {
+        projector: "test",
+        observabilityProfile: "standard",
+        defaultDetail: "compact",
+        budgetClass: "small",
+        largeResponseStrategy: "truncate",
+        recoveryPolicy: "none",
+      },
+      effectiveDetail: "compact" as const,
+      diagnosticsIncluded: false,
+      rawBytes: 10,
+      rawTokens: 4,
+      projectedBytes: 5,
+      projectedTokens: 2,
+      removedFieldCount: 1,
+      truncated: false,
+      responseHandled: false,
+      recoveryEmitted: false,
+      invalidRecoveryCount: 0,
+    };
+    const emitProjected = (repoId?: string) => getObservabilityTap()?.toolCall({
+      tool: "sdl.context",
+      repoId,
+      request: {},
+      response: {},
+      durationMs: 2,
+      projection,
+    });
+
+    emitProjected("repo-a");
+    emitProjected();
+    emitProjected("");
+    emitProjected("unregistered");
+    emitProjected("_global");
+    for (const repoId of ["repo-a", undefined, "", "unregistered", "_global"] as const) {
+      h.service.packedWire({
+        repoId,
+        encoderId: "ctx3",
+        jsonBytes: 10,
+        packedBytes: 5,
+        decision: "packed",
+        axisHit: "bytes",
+      });
+      h.service.postIndexSession({
+        repoId,
+        sessionId: "session",
+        durationMs: 3,
+        timedOut: false,
+      });
+    }
+
+    const a = await h.service.getLifetime("repo-a");
+    const b = await h.service.getLifetime("repo-b");
+    assert.notEqual(a.persistenceState, "recoveryRequired");
+    assert.notEqual(b.persistenceState, "recoveryRequired");
+    if (a.persistenceState === "recoveryRequired" || b.persistenceState === "recoveryRequired") return;
+    assert.equal(a.sections.toolOutput?.calls, 1);
+    assert.equal(a.sections.packed?.decisions, 1);
+    assert.equal(a.sections.postIndex?.sessions, 1);
+    assert.equal(b.sections.toolOutput, null);
+    assert.equal(b.sections.packed, null);
+    assert.equal(b.sections.postIndex, null);
+    for (const repoId of ["unregistered", "_global"]) {
+      const unscoped = await h.service.getLifetime(repoId);
+      assert.notEqual(unscoped.persistenceState, "recoveryRequired");
+      if (unscoped.persistenceState === "recoveryRequired") continue;
+      assert.equal(unscoped.sections.toolOutput, null);
+      assert.equal(unscoped.sections.packed, null);
+      assert.equal(unscoped.sections.postIndex, null);
+    }
+    assert.equal(h.service.getSnapshot("").latency.perTool["sdl.context"]?.count, 1);
+    assert.equal(
+      h.service.getSnapshot("unregistered").latency.perTool["sdl.context"]?.count,
+      1,
+    );
+    const checkpointTimer = h.timers.find((entry) => entry.delay === 30_000);
+    assert.ok(checkpointTimer);
+    checkpointTimer.callback();
+    await settle();
+    assert.deepEqual(
+      Object.keys(h.store.checkpoints.at(-1)?.repositories ?? {}),
+      [repositoryStorageKey("repo-a")],
+    );
+    resetObservabilityTap();
   });
 
   it("updates the closed fixed-section freshness set only on accepted events", async () => {

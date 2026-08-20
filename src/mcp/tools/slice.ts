@@ -664,6 +664,7 @@ async function handleSliceBuildInternal(
       requestedWireFormat,
       effectiveWireFormatVersion,
       {
+        repoId: request.repoId,
         includeLegend: request.includeLegend,
         sessionId: context?.sessionId,
         shortIds: config.wire?.shortIds,

@@ -180,6 +180,7 @@ export function serializeSliceForWireFormat(
   wireFormat: SliceBuildWireFormat,
   wireFormatVersion?: number,
   options?: {
+    repoId?: string;
     includeLegend?: boolean;
     packedThreshold?: number;
     packedTokenThreshold?: number;

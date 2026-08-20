@@ -23,6 +23,12 @@ import {
   queryVectorIndexProbe,
   showIndexesStrict,
 } from "../../dist/retrieval/index-lifecycle.js";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PostIndexSessionTapEvent,
+} from "../../dist/observability/event-tap.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -151,6 +157,7 @@ describe("Semantic Embedding Pipeline", () => {
   });
 
   afterEach(async () => {
+    resetObservabilityTap();
     await closeLadybugDb();
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
@@ -461,6 +468,12 @@ describe("Semantic Embedding Pipeline", () => {
   });
 
   it("uses the configured Symbol HNSW name during a normal rebuild", async () => {
+    const events: PostIndexSessionTapEvent[] = [];
+    installObservabilityTap(new Proxy({} as ObservabilityTap, {
+      get: (_target, property) => property === "postIndexSession"
+        ? (event: PostIndexSessionTapEvent) => events.push(event)
+        : () => {},
+    }));
     const { provider } = createRecordingProvider();
     await refreshSymbolEmbeddings({
       repoId,
@@ -484,6 +497,7 @@ describe("Semantic Embedding Pipeline", () => {
     assert.ok(
       !indexes.some(({ name }) => name === "symbol_vec_jina_code_v2"),
     );
+    assert.deepEqual(events.map(({ repoId }) => repoId), [repoId]);
   });
 
   it("does not drop a configured HNSW name owned by another model", async () => {
@@ -874,6 +888,12 @@ describe("Semantic Embedding Pipeline", () => {
   });
 
   it("refreshFileSummaryEmbeddings preserves metadata and vector arrays on rebuild writes", async () => {
+    const events: PostIndexSessionTapEvent[] = [];
+    installObservabilityTap(new Proxy({} as ObservabilityTap, {
+      get: (_target, property) => property === "postIndexSession"
+        ? (event: PostIndexSessionTapEvent) => events.push(event)
+        : () => {},
+    }));
     const conn = await getLadybugConn();
     const summaryUpdatedAt = "2026-05-05T00:00:00Z";
     await upsertStandardFileSummaries(conn, summaryUpdatedAt);
@@ -895,6 +915,7 @@ describe("Semantic Embedding Pipeline", () => {
       missing: 0,
       degraded: false,
     });
+    assert.deepEqual(events.map(({ repoId }) => repoId), [repoId]);
 
     const rows = await readFileSummaryEmbeddingRows(conn, ["file1", "file2"]);
     for (const fileId of ["file1", "file2"]) {

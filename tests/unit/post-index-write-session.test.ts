@@ -302,7 +302,12 @@ describe("withPostIndexWriteSession", () => {
   });
 
   it("forwards postIndexSession event to observability tap on success", async () => {
-    const events: Array<{ durationMs: number; timedOut: boolean; sessionId: string }> = [];
+    const events: Array<{
+      repoId?: string;
+      durationMs: number;
+      timedOut: boolean;
+      sessionId: string;
+    }> = [];
     installObservabilityTap({
       toolCall() {},
       indexEvent() {},
@@ -327,6 +332,7 @@ describe("withPostIndexWriteSession", () => {
       dbLatency() {},
       postIndexSession(e) {
         events.push({
+          repoId: e.repoId,
           durationMs: e.durationMs,
           timedOut: e.timedOut,
           sessionId: e.sessionId,
@@ -336,18 +342,19 @@ describe("withPostIndexWriteSession", () => {
     try {
       await withPostIndexWriteSession(async () => {
         await new Promise((r) => setTimeout(r, 5));
-      });
+      }, { repoId: "repo-a" });
     } finally {
       resetObservabilityTap();
     }
     assert.equal(events.length, 1);
+    assert.equal(events[0].repoId, "repo-a");
     assert.equal(events[0].timedOut, false);
     assert.ok(events[0].durationMs >= 0);
     assert.ok(events[0].sessionId.startsWith("pi-"));
   });
 
   it("forwards postIndexSession with timedOut=true after body settlement", async () => {
-    const events: Array<{ timedOut: boolean }> = [];
+    const events: Array<{ repoId?: string; timedOut: boolean }> = [];
     const releaseBody = deferred();
     const tracking = installTrackingAcquirer();
     installObservabilityTap({
@@ -373,7 +380,7 @@ describe("withPostIndexWriteSession", () => {
       auditBufferSample() {},
       dbLatency() {},
       postIndexSession(e) {
-        events.push({ timedOut: e.timedOut });
+        events.push({ repoId: e.repoId, timedOut: e.timedOut });
       },
     });
     process.env.SDL_POST_INDEX_SESSION_TIMEOUT_MS = "60";
@@ -395,6 +402,7 @@ describe("withPostIndexWriteSession", () => {
       assert.ok(error instanceof Error);
       assert.match(error.message, /timed out/);
       assert.equal(events.length, 1);
+      assert.equal(events[0].repoId, undefined);
       assert.equal(events[0].timedOut, true);
     } finally {
       releaseBody.resolve();

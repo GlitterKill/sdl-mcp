@@ -122,6 +122,7 @@ export async function finalizeIndexing({
     if (preFinalize) {
       await withPostIndexWriteSession(preFinalize, {
         timeoutMs: postIndexSessionTimeoutMs,
+        repoId,
       });
     }
     return { timings };
@@ -239,7 +240,7 @@ export async function finalizeIndexing({
     }
       return metricsResult;
     },
-    { timeoutMs: postIndexSessionTimeoutMs },
+    { timeoutMs: postIndexSessionTimeoutMs, repoId },
   );
 
   let summaryStats: SummaryBatchResult | undefined;

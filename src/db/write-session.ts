@@ -138,6 +138,8 @@ function resolveSessionTimeoutMs(override?: number): number {
  * index runs are not re-entrant.
  */
 export interface WithPostIndexWriteSessionOptions {
+  /** Validated repository identity for telemetry attribution only. */
+  repoId?: string;
   /** Soft deadline in ms; surfaces after the session body actually settles. */
   timeoutMs?: number;
 }
@@ -234,6 +236,7 @@ export function withPostIndexWriteSession<T>(
       }
       try {
         getObservabilityTap()?.postIndexSession({
+          repoId: options.repoId,
           sessionId: session.id,
           durationMs,
           timedOut,

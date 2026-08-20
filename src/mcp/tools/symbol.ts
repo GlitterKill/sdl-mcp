@@ -728,6 +728,7 @@ export async function handleSymbolSearch(
       },
       request.wireFormat,
       {
+        repoId: request.repoId,
         sessionId: context?.sessionId,
         shortIds: config.wire?.shortIds,
       },

@@ -394,6 +394,7 @@ export async function handleAgentContext(
         response,
         request.wireFormat,
         {
+          repoId: request.repoId,
           sessionId: context?.sessionId,
           shortIds: config.wire?.shortIds,
         },

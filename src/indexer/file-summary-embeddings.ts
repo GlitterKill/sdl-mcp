@@ -305,6 +305,8 @@ export async function refreshFileSummaryEmbeddings(params: {
     "filesummary-vector-rebuild-post-create",
     runPersistenceCycle,
     params.postIndexSessionTimeoutMs,
+    undefined,
+    params.repoId,
   );
 }
 

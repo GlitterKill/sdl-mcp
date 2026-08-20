@@ -13,6 +13,12 @@ import {
 import { exec, execDdl } from "../../dist/db/ladybug-core.js";
 import { withPostIndexWriteSession } from "../../dist/db/write-session.js";
 import { runHnswRebuildCycle } from "../../dist/indexer/hnsw-rebuild-cycle.js";
+import {
+  installObservabilityTap,
+  resetObservabilityTap,
+  type ObservabilityTap,
+  type PostIndexSessionTapEvent,
+} from "../../dist/observability/event-tap.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -265,5 +271,27 @@ describe("HNSW rebuild lifecycle", () => {
       );
     });
     assert.equal(bodyRan, false);
+  });
+
+  it("forwards explicit repository identity through the rebuild write session", async () => {
+    const events: PostIndexSessionTapEvent[] = [];
+    installObservabilityTap(new Proxy({} as ObservabilityTap, {
+      get: (_target, property) => property === "postIndexSession"
+        ? (event: PostIndexSessionTapEvent) => events.push(event)
+        : () => {},
+    }));
+    try {
+      await runHnswRebuildCycle(
+        "attributed-hnsw-pre",
+        "attributed-hnsw-post",
+        async () => undefined,
+        undefined,
+        undefined,
+        "repo-hnsw",
+      );
+    } finally {
+      resetObservabilityTap();
+    }
+    assert.deepEqual(events.map(({ repoId }) => repoId), ["repo-hnsw"]);
   });
 });

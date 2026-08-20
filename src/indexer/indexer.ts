@@ -2499,7 +2499,7 @@ async function indexRepoImpl(
           algorithmRefresh: derivedResult.algorithmRefresh,
         };
       },
-      { timeoutMs: postIndexSessionTimeoutMs },
+      { timeoutMs: postIndexSessionTimeoutMs, repoId },
     );
   };
 
@@ -4404,7 +4404,7 @@ async function indexRepoImpl(
           algorithmRefresh: derivedResult.algorithmRefresh,
         };
       },
-      { timeoutMs: postIndexSessionTimeoutMs },
+      { timeoutMs: postIndexSessionTimeoutMs, repoId },
     );
 
     let {

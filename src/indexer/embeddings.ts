@@ -899,5 +899,6 @@ export async function refreshSymbolEmbeddings(params: {
     runPersistenceCycle,
     params.postIndexSessionTimeoutMs,
     params.recordTiming,
+    params.repoId,
   );
 }

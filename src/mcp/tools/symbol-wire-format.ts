@@ -29,6 +29,7 @@ export function serializeSymbolSearchForWireFormat(
   input: SymbolSearchWireInput,
   wireFormat: "json" | "packed" | "auto" | undefined,
   options?: {
+    repoId?: string;
     packedThreshold?: number;
     packedTokenThreshold?: number;
     packedEnabled?: boolean;

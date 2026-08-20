@@ -15,6 +15,7 @@ import { getObservabilityTap } from "../../observability/event-tap.js";
 import { tokenAccumulator } from "../token-accumulator.js";
 
 export interface WireGateResult {
+  repoId?: string;
   format: "json" | "packed";
   payload: unknown;
   encoderId?: string;
@@ -27,6 +28,8 @@ export interface WireGateResult {
 }
 
 export interface WireGateOptions extends PackedShortIdOptions {
+  /** Validated repository identity for telemetry attribution only. */
+  repoId?: string;
   packedThreshold?: number;
   packedTokenThreshold?: number;
   packedEnabled?: boolean;
@@ -56,6 +59,7 @@ export function publishWireDecision(
   );
   try {
     getObservabilityTap()?.packedWire({
+      repoId: wireResult.repoId,
       encoderId: wireResult.encoderId,
       jsonBytes: wireResult.jsonBytes,
       packedBytes: wireResult.packedBytes,
@@ -109,6 +113,7 @@ export function gateWireFormat(
     ? encoder.shortId
     : encoder.id;
   const stats = {
+    repoId: options.repoId || undefined,
     encoderId,
     jsonBytes: json.length,
     packedBytes: packed.length,
