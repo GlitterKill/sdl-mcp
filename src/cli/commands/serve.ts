@@ -19,7 +19,7 @@ import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import { configurePool, getLadybugConn } from "../../db/ladybug.js";
-import { listRepos } from "../../db/ladybug-queries.js";
+import { listAllRepoIds } from "../../db/ladybug-queries.js";
 import { closeLadybugDbAfterDrainingWork } from "../../startup/graceful-database-shutdown.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
 import { createWalCheckpointMaintenance } from "../../db/wal-maintenance.js";
@@ -227,6 +227,14 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   let graphDbAvailable = false;
   let storagePreflightPassed = false;
   const startupReadiness = createStartupReadiness();
+  let observabilityCleanupPromise: Promise<void> | null = null;
+  const stopObservability = (): Promise<void> => {
+    observabilityCleanupPromise ??= (async () => {
+      stopRuntimeProbes();
+      await observabilityService?.stop();
+    })();
+    return observabilityCleanupPromise;
+  };
 
   const shutdownMgr = new ShutdownManager({
     log: (msg) => safeWriteStderr(`[sdl-mcp] ${msg}\n`),
@@ -251,10 +259,6 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   });
   shutdownMgr.addCleanup("walMaintenance", () => {
     walMaintenance?.stop();
-  });
-  shutdownMgr.addCleanup("observability", async () => {
-    stopRuntimeProbes();
-    await observabilityService?.stop();
   });
   shutdownMgr.addCleanup("server", () => stdioServer?.stop());
   shutdownMgr.addCleanup("observabilityDashboard", () =>
@@ -290,6 +294,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     }
   });
   shutdownMgr.addCleanup("graphIntegrityVerifier", stopGraphIntegrityVerifier);
+  shutdownMgr.addCleanup("observability", stopObservability);
   shutdownMgr.addCleanup("db", closeLadybugDbAfterDrainingWork);
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
@@ -446,11 +451,8 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       writeServeStderrLine(message);
     });
 
-    replaceRegisteredRepoIds(
-      (await listRepos(await getLadybugConn(), 10_000)).map(
-        (repo) => repo.repoId,
-      ),
-    );
+    const registeredRepoIds = await listAllRepoIds(await getLadybugConn());
+    replaceRegisteredRepoIds(registeredRepoIds);
 
     await recoverStaleDerivedStateOnStartup(config, (message) => {
       writeServeStderrLine(message);
@@ -707,6 +709,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
         /* best-effort */
       }
     }
+    await stopObservability();
     await closeDbAfterStartupFailure();
     writeServeStderrLine(
       `Fatal error: ${error instanceof Error ? error.message : String(error)}`,

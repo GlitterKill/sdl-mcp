@@ -123,6 +123,10 @@ describe("HTTP shutdown wiring", () => {
     const httpIndex = source.indexOf("await setupHttpTransport(");
 
     assert.ok(bootstrapIndex >= 0 && seedIndex > bootstrapIndex);
+    assert.match(
+      source.slice(bootstrapIndex, seedIndex),
+      /await listAllRepoIds\(await getLadybugConn\(\)\)/,
+    );
     assert.ok(createIndex > seedIndex && startIndex > createIndex);
     assert.ok(tapIndex > startIndex && probeIndex > startIndex);
     assert.ok(sidecarIndex > startIndex && httpIndex > startIndex);
@@ -144,18 +148,58 @@ describe("HTTP shutdown wiring", () => {
     );
     assert.match(
       source,
-      /shutdownMgr\.addCleanup\("observability", async \(\) => \{\s*stopRuntimeProbes\(\);\s*await observabilityService\?\.stop\(\);\s*\}\);/s,
+      /shutdownMgr\.addCleanup\("observability", stopObservability\);/,
     );
 
+    const serverIndex = source.indexOf('shutdownMgr.addCleanup("server"');
+    const dashboardIndex = source.indexOf(
+      'shutdownMgr.addCleanup("observabilityDashboard"',
+    );
+    const httpIndex = source.indexOf('shutdownMgr.addCleanup("httpServer"');
+    const watchersIndex = source.indexOf('shutdownMgr.addCleanup("watchers"');
+    const verifierIndex = source.indexOf(
+      'shutdownMgr.addCleanup("graphIntegrityVerifier"',
+    );
     const observabilityIndex = source.indexOf(
       'shutdownMgr.addCleanup("observability"',
     );
     const dbIndex = source.indexOf('shutdownMgr.addCleanup("db"');
     const loggerIndex = source.indexOf('shutdownMgr.addCleanup("logger"');
     assert.ok(
-      observabilityIndex >= 0 &&
+      serverIndex >= 0 &&
+        dashboardIndex > serverIndex &&
+        httpIndex > dashboardIndex &&
+        watchersIndex > httpIndex &&
+        verifierIndex > watchersIndex &&
+        observabilityIndex > verifierIndex &&
         dbIndex > observabilityIndex &&
         loggerIndex > dbIndex,
+      "all event producers and transports must finish before the final checkpoint",
+    );
+  });
+
+  it("releases lifetime persistence before fatal startup closes the database", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    const fatalCatchIndex = source.lastIndexOf("} catch (error) {");
+    const stopIndex = source.indexOf(
+      "await stopObservability()",
+      fatalCatchIndex,
+    );
+    const closeIndex = source.indexOf(
+      "await closeDbAfterStartupFailure()",
+      fatalCatchIndex,
+    );
+    const exitIndex = source.indexOf("process.exit(1)", fatalCatchIndex);
+
+    assert.ok(fatalCatchIndex >= 0);
+    assert.ok(
+      stopIndex > fatalCatchIndex &&
+        closeIndex > stopIndex &&
+        exitIndex > closeIndex,
+      "fatal setup failure must release the lifetime lock before DB cleanup and exit",
     );
   });
 });

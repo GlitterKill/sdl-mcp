@@ -110,6 +110,42 @@ describe("LadybugDB Repo & File Queries", () => {
   );
 
   it(
+    "listAllRepoIds returns every repository in deterministic order",
+    { skip: !ladybugAvailable },
+    async () => {
+      const { exec: execQuery } = await import(
+        "../../dist/db/ladybug-core.js"
+      );
+      const total = 10_001;
+      const batchSize = 1_000;
+      for (let offset = 0; offset < total; offset += batchSize) {
+        const rows = Array.from(
+          { length: Math.min(batchSize, total - offset) },
+          (_, index) => ({
+            repoId: `repo-${String(offset + index).padStart(5, "0")}`,
+          }),
+        );
+        await execQuery(
+          conn as unknown as import("kuzu").Connection,
+          `UNWIND $rows AS row
+           MERGE (r:Repo {repoId: row.repoId})
+           SET r.rootPath = '',
+               r.configJson = '{}',
+               r.createdAt = '2026-08-20T00:00:00.000Z'`,
+          { rows },
+        );
+      }
+
+      const repoIds = await queries.listAllRepoIds(
+        conn as unknown as import("kuzu").Connection,
+      );
+      assert.strictEqual(repoIds.length, total);
+      assert.strictEqual(repoIds[0], "repo-00000");
+      assert.strictEqual(repoIds.at(-1), "repo-10000");
+    },
+  );
+
+  it(
     "upsertFile/getFilesByRepo/getFileByRepoPath",
     { skip: !ladybugAvailable },
     async () => {

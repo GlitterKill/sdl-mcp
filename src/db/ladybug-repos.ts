@@ -131,6 +131,17 @@ export async function listRepos(
   return rows;
 }
 
+/** Return the complete authoritative repository ID set for process startup. */
+export async function listAllRepoIds(conn: Connection): Promise<string[]> {
+  const rows = await queryAll<{ repoId: string }>(
+    conn,
+    `MATCH (r:Repo)
+     RETURN r.repoId AS repoId
+     ORDER BY repoId ASC`,
+  );
+  return rows.map((row) => row.repoId);
+}
+
 export async function deleteRepo(
   conn: Connection,
   repoId: string,
