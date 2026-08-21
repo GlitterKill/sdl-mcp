@@ -11,10 +11,20 @@ import { z } from "zod";
 import * as recoveryProjection from "../../dist/code-mode/action-reference-projection.js";
 import { ACTION_DEFINITION_BY_ACTION } from "../../dist/code-mode/action-catalog.js";
 import { registerCodeModeTools } from "../../dist/code-mode/index.js";
+import {
+  handleRetrieve,
+  RetrieveRequestSchema,
+} from "../../dist/code-mode/retrieve.js";
 import { parseWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
 import { executeWorkflow } from "../../dist/code-mode/workflow-executor.js";
 import { getActiveFnNameMap } from "../../dist/code-mode/manual-generator.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+import {
+  projectCompatibilityValue,
+  projectToolResultForModelContent,
+  projectWorkflowChildResultForModel,
+  resolveCompatibilityProjectionProfile,
+} from "../../dist/mcp/context-response-projection.js";
 import {
   PolicyDenialError,
   errorToMcpResponse,
@@ -1266,6 +1276,178 @@ describe("generated recovery validation", () => {
     );
   });
 
+  it("keeps displayed retrieve recoveries executable at direct and workflow-child facades", async () => {
+    const range = Object.freeze({
+      startLine: 1,
+      startCol: 0,
+      endLine: 2,
+      endCol: 0,
+    });
+    const directCanonical = Object.freeze({
+      file: "src/example.ts",
+      range,
+      excerpt: "const marker = true;",
+      estimatedTokens: 8,
+      matchedIdentifiers: Object.freeze(["marker"]),
+      matchedLineNumbers: Object.freeze([1]),
+      truncated: true,
+    });
+    const directBefore = JSON.stringify(directCanonical);
+    const directProjected = projectToolResultForModelContent(
+      "sdl.retrieve",
+      directCanonical,
+      {
+        repoId: "direct-repo",
+        op: "codeHotPath",
+        args: {
+          symbolId: "sym",
+          identifiersToFind: ["marker"],
+          maxTokens: 8,
+        },
+      },
+    ) as { nextAction?: RecoveryCall };
+    const directRecovery = directProjected.nextAction;
+    assert.ok(directRecovery);
+    assert.equal(directRecovery.action, "sdl.retrieve");
+    assert.equal(directRecovery.args.repoId, "direct-repo");
+    assert.equal(JSON.stringify(directCanonical), directBefore);
+
+    const nestedRecovery = Object.freeze({
+      action: "sdl.retrieve",
+      args: Object.freeze({
+        op: "codeHotPath",
+        args: Object.freeze({
+          symbolId: "sym",
+          identifiersToFind: Object.freeze(["marker"]),
+          maxTokens: 8,
+        }),
+      }),
+    });
+    const nestedContent = Object.freeze({
+      file: "src/example.ts",
+      range,
+      excerpt: "const marker = true;",
+      matchedIdentifiers: Object.freeze(["marker"]),
+      truncated: true,
+      nextAction: nestedRecovery,
+    });
+    const responseGetCanonical = Object.freeze({
+      handle: "artifact",
+      full: true,
+      complete: true,
+      truncated: false,
+      contentKind: "json",
+      content: nestedContent,
+      metadata: Object.freeze({
+        toolName: "sdl.retrieve",
+        originalBytes: 256,
+        contentKind: "json",
+      }),
+    });
+    const responseBefore = JSON.stringify(responseGetCanonical);
+
+    const compatibilityProjected = projectCompatibilityValue({
+      canonicalResult: responseGetCanonical,
+      action: "sdl.response.get",
+      profile: resolveCompatibilityProjectionProfile("sdl.response.get"),
+      options: { detail: "compact", includeDiagnostics: false },
+      context: {
+        toolName: "sdl.response.get",
+        requestArgs: {
+          repoId: "direct-repo",
+          handle: "artifact",
+          view: "model",
+          full: true,
+        },
+      },
+    }) as { content?: { nextAction?: RecoveryCall } };
+    assert.equal(
+      compatibilityProjected.content?.nextAction?.args.repoId,
+      "direct-repo",
+    );
+    assert.equal(JSON.stringify(responseGetCanonical), responseBefore);
+    const projectResponseGet = (
+      workflowArgs: Record<string, unknown>,
+      childArgs: Record<string, unknown>,
+    ) =>
+      projectWorkflowChildResultForModel(
+        "responseGet",
+        responseGetCanonical,
+        workflowArgs,
+        childArgs,
+      ) as {
+        content?: { nextAction?: RecoveryCall };
+        metadata?: Record<string, unknown>;
+      };
+
+    const childProjected = projectResponseGet(
+      { repoId: "workflow-repo", detail: "compact" },
+      { repoId: "child-repo", handle: "artifact", view: "model", full: true },
+    );
+    const childRecovery = childProjected.content?.nextAction;
+    assert.ok(childRecovery);
+    assert.equal(childRecovery.action, "sdl.retrieve");
+    assert.equal(childRecovery.args.repoId, "child-repo");
+    assert.equal(Object.hasOwn(childProjected, "repoId"), false);
+    assert.equal(Object.hasOwn(childProjected.metadata ?? {}, "repoId"), false);
+
+    const workflowProjected = projectResponseGet(
+      { repoId: "workflow-repo", detail: "compact" },
+      { handle: "artifact", view: "model", full: true },
+    );
+    const workflowRecovery = workflowProjected.content?.nextAction;
+    assert.ok(workflowRecovery);
+    assert.equal(workflowRecovery.args.repoId, "workflow-repo");
+    assert.equal(JSON.stringify(responseGetCanonical), responseBefore);
+
+    const unavailable = projectResponseGet(
+      { detail: "compact" },
+      { handle: "artifact", view: "model", full: true },
+    );
+    assert.equal(unavailable.content?.nextAction, undefined);
+
+    const hotPathDefinition = ACTION_DEFINITION_BY_ACTION["code.getHotPath"];
+    const needWindowDefinition = ACTION_DEFINITION_BY_ACTION["code.needWindow"];
+    assert.ok(hotPathDefinition);
+    assert.ok(needWindowDefinition);
+    const actionMap: ActionMap = {
+      "code.getHotPath": {
+        schema: hotPathDefinition.schema,
+        definition: hotPathDefinition,
+        handler: async () => ({
+          file: "src/example.ts",
+          range,
+          excerpt: "const marker = true;",
+          matchedIdentifiers: ["marker"],
+          truncated: false,
+        }),
+      },
+      "code.needWindow": {
+        schema: needWindowDefinition.schema,
+        definition: needWindowDefinition,
+        handler: async () => ({
+          approved: false,
+          whyDenied: "Fixture policy result.",
+        }),
+      },
+    };
+
+    const directArgs = RetrieveRequestSchema.parse(directRecovery.args);
+    const childArgs = RetrieveRequestSchema.parse(childRecovery.args);
+    const directExecution = await handleRetrieve(directArgs, actionMap);
+    const childExecution = await handleRetrieve(childArgs, actionMap);
+    assert.deepEqual(directExecution, {
+      approved: false,
+      whyDenied: "Fixture policy result.",
+    });
+    assert.deepEqual(childExecution, {
+      file: "src/example.ts",
+      range,
+      excerpt: "const marker = true;",
+      matchedIdentifiers: ["marker"],
+      truncated: false,
+    });
+  });
   it("canonicalizes projected key order and preserves nested detail semantics", () => {
     const first = recoveryProjection.projectExclusiveCodeModeRecovery(
       {

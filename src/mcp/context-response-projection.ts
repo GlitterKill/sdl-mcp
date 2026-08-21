@@ -3,6 +3,7 @@
  * limits. Final MCP text content applies the stricter model projection below.
  */
 
+import { projectExclusiveCodeModeRecovery } from "../code-mode/action-reference-projection.js";
 import {
   getResponseProjectionRule,
   getWorkflowChildAction,
@@ -305,7 +306,7 @@ function buildCompatibilityProjectionInput(
 export function projectCompatibilityValue(
   input: ModelProjectionInput,
 ): unknown {
-  return projectLegacyToolResultForModelContent(
+  const projected = projectLegacyToolResultForModelContent(
     input.action,
     input.canonicalResult,
     {
@@ -314,6 +315,26 @@ export function projectCompatibilityValue(
       includeDiagnostics: input.options.includeDiagnostics,
     },
   );
+  const repoId =
+    Object.hasOwn(input.context.requestArgs, "repoId")
+    && typeof input.context.requestArgs.repoId === "string"
+      ? input.context.requestArgs.repoId
+      : undefined;
+
+  // Artifact model views wrap the original projected value under content.
+  // Restore only validator-approved recovery args without exposing repoId elsewhere.
+  if (
+    (input.action === "response.get" || input.action === "sdl.response.get")
+    && isRecord(projected)
+    && Object.hasOwn(projected, "content")
+  ) {
+    return {
+      ...projected,
+      content: projectExclusiveCodeModeRecovery(projected.content, repoId),
+    };
+  }
+
+  return projected;
 }
 
 function isFullDetail(options: ModelContentProjectionOptions): boolean {
@@ -718,7 +739,7 @@ export function projectWorkflowChildResultForModel(
   childArgs: Record<string, unknown>,
 ): unknown {
   const toolName = getWorkflowChildAction(fn);
-  return projectModelValue(
+  const projected = projectModelValue(
     buildCompatibilityProjectionInput(
       toolName,
       result,
@@ -731,6 +752,30 @@ export function projectWorkflowChildResultForModel(
       childArgs,
     ),
   );
+  const childRepoId =
+    Object.hasOwn(childArgs, "repoId") && typeof childArgs.repoId === "string"
+      ? childArgs.repoId
+      : undefined;
+  const workflowRepoId =
+    Object.hasOwn(workflowArgs, "repoId") &&
+    typeof workflowArgs.repoId === "string"
+      ? workflowArgs.repoId
+      : undefined;
+  const repoId = childRepoId ?? workflowRepoId;
+  if (
+    toolName === "response.get"
+    && isRecord(projected)
+    && Object.hasOwn(projected, "content")
+  ) {
+    return {
+      ...projected,
+      content: projectExclusiveCodeModeRecovery(projected.content, repoId),
+    };
+  }
+  if (fn === "retrieve" || fn === "sdl.retrieve") {
+    return projectExclusiveCodeModeRecovery(projected, repoId);
+  }
+  return projected;
 }
 
 function projectWorkflowResultForModel(
@@ -754,6 +799,7 @@ function projectWorkflowResultForModel(
     const stepArgs = isRecord(item._resolvedArgs)
       ? item._resolvedArgs
       : workflowStepArgsAt(workflowArgs, stepIndex) ?? item.args;
+    const childArgs = isRecord(stepArgs) ? stepArgs : {};
     if (status === "ok") {
       const successStep: Record<string, unknown> = { fn: item.fn };
       if (includeWorkflowTelemetry) {
@@ -763,12 +809,20 @@ function projectWorkflowResultForModel(
         copyIfPresent(item, successStep, "status");
       }
       if ("result" in item) {
-        successStep.result = projectWorkflowStepResultForModel(
-          item.fn,
-          item.result,
-          options,
-          stepArgs,
-        );
+        successStep.result = typeof item.fn === "string"
+          && getWorkflowChildAction(item.fn) === "response.get"
+          ? projectWorkflowChildResultForModel(
+              item.fn,
+              item.result,
+              workflowArgs,
+              childArgs,
+            )
+          : projectWorkflowStepResultForModel(
+              item.fn,
+              item.result,
+              options,
+              stepArgs,
+            );
       }
       if (item.truncatedResponse) {
         successStep.truncatedResponse = item.truncatedResponse;
@@ -786,12 +840,20 @@ function projectWorkflowResultForModel(
       failureStep.failureTrace = projectCompactFailureTrace(item.failureTrace);
     }
     if ("result" in item && item.result !== null && item.result !== undefined) {
-      failureStep.result = projectWorkflowStepResultForModel(
-        item.fn,
-        item.result,
-        options,
-        stepArgs,
-      );
+      failureStep.result = typeof item.fn === "string"
+        && getWorkflowChildAction(item.fn) === "response.get"
+        ? projectWorkflowChildResultForModel(
+            item.fn,
+            item.result,
+            workflowArgs,
+            childArgs,
+          )
+        : projectWorkflowStepResultForModel(
+            item.fn,
+            item.result,
+            options,
+            stepArgs,
+          );
     }
     return failureStep;
   });
@@ -1051,8 +1113,26 @@ export function projectToolResultForModelContent(
   result: unknown,
   args: Record<string, unknown> = {},
 ): unknown {
-  return projectModelValue(
+  const projected = projectModelValue(
     buildCompatibilityProjectionInput(toolName, result, args),
     projectCompatibilityValue,
   );
+  const repoId =
+    Object.hasOwn(args, "repoId") && typeof args.repoId === "string"
+      ? args.repoId
+      : undefined;
+  if (
+    (toolName === "response.get" || toolName === "sdl.response.get")
+    && isRecord(projected)
+    && Object.hasOwn(projected, "content")
+  ) {
+    return {
+      ...projected,
+      content: projectExclusiveCodeModeRecovery(projected.content, repoId),
+    };
+  }
+  if (toolName === "retrieve" || toolName === "sdl.retrieve") {
+    return projectExclusiveCodeModeRecovery(projected, repoId);
+  }
+  return projected;
 }

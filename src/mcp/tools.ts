@@ -4754,30 +4754,37 @@ const ProjectedPRRiskCompactResponseSchema = z
   })
   .strict();
 
-const ProjectedRangeSchema = z
+const CallableRetrieveRecoverySchema = z
   .object({
-    startLine: z.number().int(),
-    startCol: z.number().int(),
-    endLine: z.number().int(),
-    endCol: z.number().int(),
+    action: z.literal("sdl.retrieve"),
+    args: z.record(z.string(), z.unknown()),
   })
   .strict();
 
-const ProjectedCodeSkeletonCompactResponseSchema = z
-  .object({
-    file: z.string(),
-    range: ProjectedRangeSchema,
-    skeleton: z.string(),
-  })
+const ProjectedCodeSkeletonCompactResponseSchema = GetSkeletonPayloadSchema.pick({
+  file: true,
+  skeleton: true,
+  ref: true,
+  unchanged: true,
+  truncation: true,
+  range: true,
+})
+  .extend({ truncated: z.literal(true).optional() })
   .strict();
 
-const ProjectedCodeHotPathCompactResponseSchema = z
-  .object({
-    file: z.string(),
-    range: ProjectedRangeSchema,
-    excerpt: z.string(),
-    matchedIdentifiers: z.array(z.string()),
-    nextAction: ContextLogicalActionSchema.optional(),
+const ProjectedCodeHotPathCompactResponseSchema = GetHotPathPayloadSchema.pick({
+  file: true,
+  excerpt: true,
+  ref: true,
+  unchanged: true,
+  matchedIdentifiers: true,
+  missedIdentifiers: true,
+  missedIdentifierHint: true,
+  range: true,
+})
+  .extend({
+    truncated: z.literal(true).optional(),
+    nextAction: CallableRetrieveRecoverySchema.optional(),
   })
   .strict();
 

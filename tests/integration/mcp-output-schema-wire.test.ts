@@ -72,6 +72,26 @@ interface WireCase {
   errorTextPattern: RegExp;
 }
 
+const LARGE_CODE_SOURCE = [
+  "export function widelySeparatedMarkers(): number {",
+  "  const firstMarker = 1;",
+  ...Array.from(
+    { length: 96 },
+    (_, index) => `  const filler${index} = ${index};`,
+  ),
+  "  const lastMarker = 2;",
+  "  return firstMarker + lastMarker;",
+  "}",
+  "",
+  ...Array.from({ length: 64 }, (_, index) =>
+    [
+      `export function skeletonHelper${index}(value: number): number {`,
+      `  return value + ${index};`,
+      "}",
+      "",
+    ].join("\n"),
+  ),
+].join("\n");
 const GenericStructuredErrorSchema = z
   .object({
     error: z
@@ -105,6 +125,7 @@ function assertConciseText(response: ToolEnvelope, label: string): void {
 async function connect(server: MCPServer): Promise<Client> {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
+  Object.assign(serverTransport, { sessionId: "output-schema-wire" });
   const client = new Client({
     name: `output-schema-wire-${randomUUID()}`,
     version: "1.0.0",
@@ -118,6 +139,7 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
   let server: MCPServer;
   let client: Client;
   let symbolId = "";
+  let largeSymbolId = "";
   const previousEnv = {
     config: process.env.SDL_CONFIG,
     graphDb: process.env.SDL_GRAPH_DB_PATH,
@@ -130,6 +152,11 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     writeFileSync(
       join(REPO_ROOT, "src", "greeting.ts"),
       GREETING_SOURCE,
+      "utf8",
+    );
+    writeFileSync(
+      join(REPO_ROOT, "src", "large-code.ts"),
+      LARGE_CODE_SOURCE,
       "utf8",
     );
     writeFileSync(
@@ -245,6 +272,28 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     symbolId =
       results?.find((result) => result.name === "greet")?.symbolId ?? "";
     assert.ok(symbolId, "expected the indexed greet symbol");
+    const largeSearch = (await client.callTool({
+      name: "sdl.symbol.search",
+      arguments: {
+        repoId: REPO_ID,
+        query: "widelySeparatedMarkers",
+        semantic: false,
+        wireFormat: "json",
+        limit: 5,
+      },
+    })) as ToolEnvelope;
+    assert.notEqual(largeSearch.isError, true);
+    const largeResults = (
+      largeSearch.structuredContent as {
+        results?: Array<{ symbolId?: string; name?: string }>;
+      }
+    )?.results;
+    largeSymbolId =
+      largeResults?.find(
+        (result) => result.name === "widelySeparatedMarkers",
+      )?.symbolId ?? "";
+    assert.ok(largeSymbolId, "expected the indexed large fixture symbol");
+
   });
 
   after(async () => {
@@ -504,6 +553,168 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     });
   }
 
+  it("keeps retrieve code variants schema-valid across inline and handle delivery", async () => {
+    const callRetrieve = async (
+      op: "codeSkeleton" | "codeHotPath",
+      args: Record<string, unknown>,
+      responseMode: "inline" | "handle",
+    ): Promise<ToolEnvelope> =>
+      (await client.callTool({
+        name: "sdl.retrieve",
+        arguments: { repoId: REPO_ID, op, args, responseMode },
+      })) as ToolEnvelope;
+
+    const recoverModelContent = async (
+      response: ToolEnvelope,
+    ): Promise<unknown> => {
+      const artifact = response.structuredContent as
+        | { kind?: string; handle?: string }
+        | undefined;
+      assert.notEqual(response.isError, true, JSON.stringify(response));
+      assert.equal(artifact?.kind, "responseArtifact");
+      assert.ok(artifact?.handle);
+      const recovered = (await client.callTool({
+        name: "sdl.response.get",
+        arguments: {
+          repoId: REPO_ID,
+          handle: artifact.handle,
+          view: "model",
+          full: true,
+        },
+      })) as ToolEnvelope;
+      assert.notEqual(recovered.isError, true, JSON.stringify(recovered));
+      const page = recovered.structuredContent as {
+        complete?: boolean;
+        content?: unknown;
+      };
+      assert.equal(page.complete, true);
+      return page.content;
+    };
+
+    const skeletonArgs = {
+      file: "src/large-code.ts",
+      maxTokens: 64,
+      refsMode: "off",
+    };
+    const hotPathArgs = {
+      symbolId: largeSymbolId,
+      identifiersToFind: ["firstMarker", "absentMarker", "lastMarker"],
+      contextLines: 1,
+      maxTokens: 8,
+      refsMode: "off",
+    };
+    let hotHandle = "";
+    let directHotPath: Record<string, unknown> | undefined;
+
+    for (const [label, op, args] of [
+      ["skeleton", "codeSkeleton", skeletonArgs],
+      ["hot path", "codeHotPath", hotPathArgs],
+    ] as const) {
+      const handled = await callRetrieve(op, args, "handle");
+      const artifact = handled.structuredContent as { handle?: string };
+      const recovered = await recoverModelContent(handled);
+      assert.equal(
+        (recovered as Record<string, unknown>).truncated,
+        true,
+        label,
+      );
+      const inline = await callRetrieve(op, args, "inline");
+      assert.notEqual(
+        inline.isError,
+        true,
+        label + ": " + responseText(inline),
+      );
+      assert.deepStrictEqual(inline.structuredContent, recovered, label);
+      if (op === "codeHotPath") {
+        hotHandle = artifact.handle ?? "";
+        directHotPath = inline.structuredContent as Record<string, unknown>;
+      }
+    }
+
+    assert.ok(directHotPath);
+    assert.deepEqual(directHotPath.matchedIdentifiers, ["firstMarker"]);
+    assert.deepEqual(directHotPath.missedIdentifiers, [
+      "absentMarker",
+      "lastMarker",
+    ]);
+    assert.equal(typeof directHotPath.missedIdentifierHint, "string");
+    const directRecovery = directHotPath.nextAction as
+      | { action?: string; args?: Record<string, unknown> }
+      | undefined;
+    assert.equal(directRecovery?.action, "sdl.retrieve");
+    assert.ok(directRecovery?.args);
+    const directExecution = (await client.callTool({
+      name: directRecovery.action,
+      arguments: directRecovery.args,
+    })) as ToolEnvelope;
+    assert.notEqual(
+      directExecution.isError,
+      true,
+      responseText(directExecution),
+    );
+    assert.doesNotMatch(responseText(directExecution), /repoId.*expected.*string/iu);
+
+    const firstRef = await callRetrieve(
+      "codeHotPath",
+      { ...hotPathArgs, refsMode: "auto" },
+      "inline",
+    );
+    const secondRef = await callRetrieve(
+      "codeHotPath",
+      { ...hotPathArgs, refsMode: "auto" },
+      "inline",
+    );
+    assert.notEqual(firstRef.isError, true, responseText(firstRef));
+    assert.notEqual(secondRef.isError, true, responseText(secondRef));
+    const repeated = secondRef.structuredContent as Record<string, unknown>;
+    assert.equal(repeated.unchanged, true);
+    assert.equal(typeof repeated.ref, "object");
+
+    assert.ok(hotHandle);
+    const workflow = (await client.callTool({
+      name: "sdl.workflow",
+      arguments: {
+        repoId: REPO_ID,
+        detail: "compact",
+        steps: [
+          {
+            fn: "responseGet",
+            args: { handle: hotHandle, view: "model", full: true },
+          },
+        ],
+      },
+    })) as ToolEnvelope;
+    assert.notEqual(workflow.isError, true, responseText(workflow));
+    const workflowRecovery = (
+      workflow.structuredContent as {
+        results?: Array<{
+          result?: {
+            content?: {
+              nextAction?: {
+                action?: string;
+                args?: Record<string, unknown>;
+              };
+            };
+          };
+        }>;
+      }
+    ).results?.[0]?.result?.content?.nextAction;
+    assert.equal(workflowRecovery?.action, "sdl.retrieve");
+    assert.ok(workflowRecovery?.args);
+    const workflowExecution = (await client.callTool({
+      name: workflowRecovery.action,
+      arguments: workflowRecovery.args,
+    })) as ToolEnvelope;
+    assert.notEqual(
+      workflowExecution.isError,
+      true,
+      responseText(workflowExecution),
+    );
+    assert.doesNotMatch(
+      responseText(workflowExecution),
+      /repoId.*expected.*string/iu,
+    );
+  });
   it("returns response.get failures in the generic structured error envelope", async () => {
     const failure = (await client.callTool({
       name: "sdl.response.get",

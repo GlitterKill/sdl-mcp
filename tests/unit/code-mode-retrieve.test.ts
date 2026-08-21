@@ -13,6 +13,7 @@ import {
   buildRetrieveWireSchema,
   handleRetrieve,
   RETRIEVE_ACTION_BY_OP,
+  RetrieveOutputSchema,
   RetrieveRequestSchema,
 } from "../../dist/code-mode/retrieve.js";
 import { projectExclusiveCodeModeRecovery } from "../../dist/code-mode/action-reference-projection.js";
@@ -39,6 +40,105 @@ describe("sdl.retrieve", () => {
       codeHotPath: "code.getHotPath",
       codeNeedWindow: "code.needWindow",
     });
+  });
+
+  it("validates every compact code success shape", () => {
+    const range = { startLine: 1, startCol: 0, endLine: 3, endCol: 0 };
+    const cases = [
+      ["ordinary hot path", {
+        file: "src/example.ts",
+        range,
+        excerpt: "export function example() {}",
+        matchedIdentifiers: ["example"],
+      }],
+      ["truncated hot path", {
+        file: "src/example.ts",
+        range,
+        excerpt: "export function example() {}",
+        matchedIdentifiers: ["example"],
+        truncated: true,
+        nextAction: {
+          action: "sdl.retrieve",
+          args: {
+            repoId: "repo",
+            op: "codeHotPath",
+            args: {
+              symbolId: "sym",
+              identifiersToFind: ["example"],
+              maxTokens: 400,
+            },
+          },
+        },
+      }],
+      ["cached hot path", {
+        file: "src/example.ts",
+        range,
+        ref: { key: "code:hot-path", etag: "etag-1" },
+        unchanged: true,
+        matchedIdentifiers: ["example"],
+      }],
+      ["identifier miss hot path", {
+        file: "src/example.ts",
+        range,
+        excerpt: "",
+        matchedIdentifiers: [],
+        missedIdentifiers: ["absent"],
+        missedIdentifierHint: "No requested identifiers matched.",
+      }],
+      ["ordinary skeleton", {
+        file: "src/example.ts",
+        range,
+        skeleton: "export function example() {}",
+      }],
+      ["truncated skeleton", {
+        file: "src/example.ts",
+        range,
+        skeleton: "export function example() {}",
+        truncated: true,
+        truncation: {
+          truncated: true,
+          droppedCount: 4,
+          howToResume: {
+            type: "cursor",
+            value: 2,
+            parameter: "skeletonOffset",
+            repeatOriginalRequest: true,
+          },
+        },
+      }],
+      ["response handle", {
+        responseMode: "handle",
+        kind: "responseArtifact",
+        handle: "artifact-1",
+        action: "response.get",
+        metadata: {
+          toolName: "sdl.retrieve",
+          originalBytes: 12_000,
+          contentKind: "json",
+        },
+      }],
+    ] as const;
+
+    const failures = cases.flatMap(([name, value]) => {
+      const parsed = RetrieveOutputSchema.safeParse(value);
+      return parsed.success ? [] : [name + ": " + parsed.error.message];
+    });
+    assert.deepEqual(failures, []);
+
+    assert.equal(
+      RetrieveOutputSchema.safeParse({
+        file: "src/example.ts",
+        range,
+        excerpt: "export function example() {}",
+        matchedIdentifiers: ["example"],
+        truncated: true,
+        nextAction: {
+          id: "sdl.retrieve",
+          args: { repoId: "repo", op: "codeHotPath" },
+        },
+      }).success,
+      false,
+    );
   });
 
   it("publishes ordered any-of variants that accept representative args", () => {
