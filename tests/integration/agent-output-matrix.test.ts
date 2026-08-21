@@ -923,6 +923,190 @@ describe("agent retrieval output matrix", () => {
     assert.deepEqual(canonical.evidence, beforeEvidence);
   });
 
+  it("separates semantic context detail from diagnostics", () => {
+    const continuation = {
+      id: "symbol.getCard",
+      args: { symbolIds: ["symbol-beta"] },
+    };
+    const range = { startLine: 12, startCol: 0, endLine: 12, endCol: 25 };
+    const canonical = {
+      status: "budgetLimited",
+      taskType: "debug",
+      retrieval: {
+        level: "hybrid-partial",
+        lanes: [
+          { id: "exactIdentifier", available: true, coveragePermille: 1000 },
+          { id: "symbolVec", available: false, coveragePermille: 375 },
+        ],
+        fusionLatencyMs: 17,
+        strategyMetrics: { vectorWeightPermille: 650 },
+      },
+      evidence: [
+        {
+          symbolId: "symbol-alpha",
+          path: "src/alpha.ts",
+          rank: 1,
+          tier: 0,
+          rung: "card",
+          lanes: ["exactIdentifier"],
+          content: {
+            kind: "function",
+            name: "alpha",
+            estimatedTokens: 5,
+          },
+        },
+        {
+          symbolId: "symbol-beta",
+          path: "src/beta.ts",
+          rank: 2,
+          tier: 1,
+          rung: "hotPath",
+          lanes: ["symbolVec"],
+          content: {
+            excerpt: "export function beta() {}",
+            actualRange: range,
+            estimatedTokens: 12,
+            matchedIdentifiers: ["beta"],
+            matchedLineNumbers: [12],
+            truncated: true,
+          },
+        },
+        {
+          symbolId: "symbol-gamma",
+          path: "src/gamma.ts",
+          rank: 3,
+          tier: 1,
+          rung: "hotPath",
+          lanes: ["symbolVec"],
+          content: {
+            excerpt: "export function gamma() {}",
+            actualRange: range,
+            matchedIdentifiers: ["gamma"],
+            truncated: false,
+          },
+        },
+      ],
+      edges: [{
+        from: "symbol-alpha",
+        to: "symbol-beta",
+        kind: "call",
+        confidencePermille: 950,
+      }],
+      omitted: {
+        total: 1,
+        byReason: { budget: 1 },
+        highestRanked: [{
+          symbolId: "symbol-beta",
+          path: "src/beta.ts",
+          rank: 2,
+          tier: 1,
+          rung: "hotPath",
+          reason: "budget",
+          action: continuation,
+        }],
+      },
+      nextActions: [continuation],
+      sessionDelta: { changedCards: 1, newCards: 2, unchangedRefs: 3 },
+      diagnosticTimings: { selectionMs: 4 },
+      absolutePath: "C:\\private\\repo\\src\\alpha.ts",
+    };
+    const before = clone(canonical);
+    const project = (
+      detail?: "compact" | "standard" | "full",
+      includeDiagnostics = false,
+    ) => projectToolResultForModelContent(
+      "sdl.context",
+      canonical,
+      { detail, includeDiagnostics },
+    ) as Record<string, unknown>;
+    const compact = project("compact");
+    const noise = [
+      "available", "coveragePermille", "rank", "tier", "lanes",
+      "estimatedTokens", "matchedLineNumbers", "confidencePermille",
+      "fusionLatencyMs", "strategyMetrics", "sessionDelta",
+      "diagnosticTimings", "absolutePath",
+    ];
+
+    assert.deepEqual(project(), compact);
+    for (const [detail, projected] of [
+      ["compact", compact],
+      ["standard", project("standard")],
+      ["full", project("full")],
+    ] as const) {
+      visitRecords(projected, (record, path) => {
+        for (const key of noise) {
+          assert.equal(
+            Object.hasOwn(record, key),
+            false,
+            `${detail}:${path}.${key}`,
+          );
+        }
+        if (Object.hasOwn(record, "truncated")) {
+          assert.equal(record.truncated, true, `${detail}:${path}.truncated`);
+        }
+      });
+      const evidence = projected.evidence as Array<Record<string, unknown>>;
+      assert.deepEqual(
+        evidence.map(({ symbolId, path, rung }) => ({ symbolId, path, rung })),
+        canonical.evidence.map(({ symbolId, path, rung }) => ({
+          symbolId,
+          path,
+          rung,
+        })),
+      );
+      assert.deepEqual(evidence[1]!.content, {
+        excerpt: "export function beta() {}",
+        actualRange: range,
+        matchedIdentifiers: ["beta"],
+        truncated: true,
+      });
+      assert.deepEqual(evidence[2]!.content, {
+        excerpt: "export function gamma() {}",
+        actualRange: range,
+        matchedIdentifiers: ["gamma"],
+      });
+      assert.deepEqual(projected.edges, [
+        { from: "symbol-alpha", to: "symbol-beta", kind: "call" },
+      ]);
+      assert.deepEqual(projected.omitted, {
+        total: 1,
+        byReason: { budget: 1 },
+      });
+      assert.deepEqual(recoveryCandidates(projected), [continuation]);
+    }
+
+    const diagnostics = project("full", true);
+    assert.deepEqual(
+      (diagnostics.retrieval as Record<string, unknown>).lanes,
+      canonical.retrieval.lanes,
+    );
+    const evidence = diagnostics.evidence as Array<Record<string, unknown>>;
+    assert.deepEqual(
+      evidence.map(({ rank, tier, lanes }) => ({ rank, tier, lanes })),
+      canonical.evidence.map(({ rank, tier, lanes }) => ({ rank, tier, lanes })),
+    );
+    const beta = evidence[1]!.content as Record<string, unknown>;
+    assert.equal(beta.estimatedTokens, 12);
+    assert.deepEqual(beta.matchedLineNumbers, [12]);
+    assert.equal(
+      (diagnostics.edges as Array<Record<string, unknown>>)[0]!
+        .confidencePermille,
+      950,
+    );
+    assert.deepEqual(diagnostics.sessionDelta, canonical.sessionDelta);
+    assert.deepEqual(diagnostics.diagnosticTimings, canonical.diagnosticTimings);
+    visitRecords(diagnostics, (record, path) => {
+      for (const key of ["strategyMetrics", "absolutePath"]) {
+        assert.equal(Object.hasOwn(record, key), false, `${path}.${key}`);
+      }
+      if (Object.hasOwn(record, "truncated")) {
+        assert.equal(record.truncated, true, `${path}.truncated`);
+      }
+    });
+    assert.deepEqual(recoveryCandidates(diagnostics), [continuation]);
+    assert.deepEqual(canonical, before);
+  });
+
   it("retains degraded retrieval lanes and one primary recovery", () => {
     const canonical = {
       status: "budgetLimited",
@@ -954,7 +1138,6 @@ describe("agent retrieval output matrix", () => {
 
     assert.deepEqual(compact.retrieval, {
       level: "hybrid-partial",
-      lanes: [{ id: "symbolVec", available: false }],
     });
     assert.equal("evidence" in compact, false);
     assert.deepEqual(compact.nextAction, canonical.nextActions[0]);

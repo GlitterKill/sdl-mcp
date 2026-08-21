@@ -2992,9 +2992,46 @@ const AGENT_CONTEXT_V2_OUTPUT_KEYS = [
   "kind",
 ] as const;
 
+const ProjectedContextDiagnosticTimingsSchema = z.record(
+  z.string(),
+  z.number().nonnegative(),
+);
+const ProjectedContextRetrievalSchema = z
+  .object({
+    level: z.enum(["hybrid", "hybrid-partial", "lexical", "graph-only"]),
+    lanes: z
+      .array(
+        z
+          .object({
+            id: ContextLaneIdSchema,
+            available: z.boolean(),
+            coveragePermille: z.number().int().min(0).max(1000).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    fusionLatencyMs: z.number().nonnegative().optional(),
+    diagnosticTimings: ProjectedContextDiagnosticTimingsSchema.optional(),
+  })
+  .strict();
+const ProjectedContextEvidenceSchema = ContextEvidenceSchema.partial({
+  rank: true,
+  tier: true,
+  lanes: true,
+}).strict();
+const ProjectedContextEdgeSchema = ContextEdgeSchema.partial({
+  confidencePermille: true,
+}).strict();
+
 // Keep tools/list object-root while describing the inline payload and wrappers.
 export const AgentContextOutputSchema = AgentContextPayloadSchema.partial()
   .extend({
+    retrieval: ProjectedContextRetrievalSchema.optional(),
+    evidence: z.array(ProjectedContextEvidenceSchema).optional(),
+    edges: z.array(ProjectedContextEdgeSchema).optional(),
+    sessionDelta: ContextSessionDeltaSchema.strict().optional(),
+    diagnosticTimings: ProjectedContextDiagnosticTimingsSchema.optional(),
+    nextAction: ContextLogicalActionSchema.optional(),
     etag: z.string().optional(),
     isError: z.literal(true).optional(),
     error: z
@@ -3007,7 +3044,7 @@ export const AgentContextOutputSchema = AgentContextPayloadSchema.partial()
     action: z.literal("response.get").optional(),
     metadata: ResponseArtifactPublicMetadataSchema.optional(),
   })
-  .passthrough()
+  .strict()
   .refine(
     (value) => AGENT_CONTEXT_V2_OUTPUT_KEYS.some((key) => key in value),
     { message: "Unrecognized sdl.context response shape" },
@@ -5093,16 +5130,17 @@ const ProjectedContextCompactResponseSchema = z
   .object({
     status: z.enum(["complete", "budgetLimited", "empty"]),
     taskType: ContextTaskTypeSchema,
-    retrieval: z
-      .object({
-        level: z.enum(["hybrid", "hybrid-partial", "lexical", "graph-only"]),
-      })
-      .strict()
-      .optional(),
+    retrieval: ProjectedContextRetrievalSchema.optional(),
     evidence: z
-      .array(ContextEvidenceSchema.omit({ rank: true, lanes: true }).strict())
+      .array(
+        ProjectedContextEvidenceSchema,
+      )
       .optional(),
-    edges: z.array(ContextEdgeSchema).optional(),
+    edges: z
+      .array(
+        ProjectedContextEdgeSchema,
+      )
+      .optional(),
     omitted: z
       .object({
         total: z.number().int().nonnegative(),
@@ -5116,6 +5154,8 @@ const ProjectedContextCompactResponseSchema = z
       .strict()
       .optional(),
     nextAction: ContextLogicalActionSchema.optional(),
+    sessionDelta: ContextSessionDeltaSchema.strict().optional(),
+    diagnosticTimings: ProjectedContextDiagnosticTimingsSchema.optional(),
   })
   .strict();
 

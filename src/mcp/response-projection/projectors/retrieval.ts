@@ -66,7 +66,11 @@ function compactDeps(value: unknown): unknown {
   return result;
 }
 
-function compactCard(value: unknown, includeProcesses = false): unknown {
+function compactCard(
+  value: unknown,
+  includeProcesses = false,
+  full = false,
+): unknown {
   if (!isRecord(value)) return value;
   if (value.unchanged === true || isRecord(value.ref)) return { ...value };
   const result = copyPresent(value, [
@@ -85,7 +89,8 @@ function compactCard(value: unknown, includeProcesses = false): unknown {
   if (includeProcesses && Array.isArray(value.processes)) {
     result.processes = value.processes;
   }
-  const deps = compactDeps(value.deps);
+  if (full && isRecord(value.cluster)) result.cluster = value.cluster;
+  const deps = full ? value.deps : compactDeps(value.deps);
   if (isRecord(deps) && Object.keys(deps).length > 0) result.deps = deps;
   if (isRecord(value.version) && value.version.ledgerVersion !== undefined) {
     result.version = { ledgerVersion: value.version.ledgerVersion };
@@ -96,15 +101,16 @@ function compactCard(value: unknown, includeProcesses = false): unknown {
 function compactCards(
   value: Record<string, unknown>,
   includeProcesses: boolean,
+  full: boolean,
 ): unknown {
   const result: Record<string, unknown> = {};
   if (value.card !== undefined) {
-    result.card = compactCard(value.card, includeProcesses);
+    result.card = compactCard(value.card, includeProcesses, full);
   } else if (typeof value.symbolId === "string") {
-    return compactCard(value, includeProcesses);
+    return compactCard(value, includeProcesses, full);
   }
   if (Array.isArray(value.cards)) {
-    result.cards = value.cards.map((card) => compactCard(card, includeProcesses));
+    result.cards = value.cards.map((card) => compactCard(card, includeProcesses, full));
   }
   Object.assign(result, copyPresent(value, [
     "partial", "succeeded", "failed", "failures", "truncation",
@@ -281,8 +287,13 @@ function compactCode(
     "ref", "unchanged", "changedSincePrior", "truncated", "truncation",
     "status", "contentKind", "whyDenied", "nextBestAction",
     "requiredFieldsForNext", "nextAction", "matchedIdentifiers",
-    "missedIdentifiers", "missedIdentifierHint",
+    "missedIdentifiers", "missedIdentifierHint", "actualRange",
   ]);
+  if (input.options.includeDiagnostics) {
+    Object.assign(result, copyPresent(value, [
+      "estimatedTokens", "matchedLineNumbers",
+    ]));
+  }
   if (
     action === "code.getHotPath"
     && value.truncated === true
@@ -312,6 +323,35 @@ function compactItem(value: unknown): unknown {
       || (Array.isArray(field) && field.length === 0)
     ) continue;
     result[key] = field;
+  }
+  return result;
+}
+
+function compactEvidence(
+  value: unknown,
+  input: ModelProjectionInput,
+): unknown {
+  if (!isRecord(value)) return value;
+  const result = copyPresent(value, ["rung", "symbolId", "path"]);
+  if (input.options.includeDiagnostics) {
+    Object.assign(result, copyPresent(value, ["rank", "tier", "lanes"]));
+  }
+
+  // Context evidence embeds card/code payloads, so project that nested owner too.
+  const content = value.rung === "card"
+    ? compactCard(
+      value.content,
+      false,
+      input.options.detail === "full",
+    )
+    : isRecord(value.content)
+    ? compactCode(value.content, input, "context")
+    : value.content;
+  if (
+    content !== undefined
+    && (!isRecord(content) || Object.keys(content).length > 0)
+  ) {
+    result.content = content;
   }
   return result;
 }
@@ -360,18 +400,32 @@ function compactSpillover(value: Record<string, unknown>): unknown {
   return result;
 }
 
-function compactRetrieval(value: unknown): unknown {
+function compactRetrieval(
+  value: unknown,
+  input: ModelProjectionInput,
+): unknown {
   if (!isRecord(value)) return undefined;
   const lanes = Array.isArray(value.lanes) ? value.lanes : [];
   const healthy = value.level === "hybrid"
     && lanes.every((lane) => isRecord(lane) && lane.available === true);
-  if (healthy) return undefined;
+  if (healthy && !input.options.includeDiagnostics) return undefined;
+
   const result: Record<string, unknown> = {};
   if (value.level !== undefined) result.level = value.level;
-  const unavailable = lanes
-    .filter((lane) => isRecord(lane) && lane.available === false)
-    .map((lane) => ({ id: lane.id, available: false }));
-  if (unavailable.length > 0) result.lanes = unavailable;
+  if (input.options.includeDiagnostics) {
+    result.lanes = lanes.filter(isRecord).map((lane) => {
+      const projected: Record<string, unknown> = {};
+      if (typeof lane.id === "string") projected.id = lane.id;
+      if (typeof lane.available === "boolean") projected.available = lane.available;
+      if (typeof lane.coveragePermille === "number") {
+        projected.coveragePermille = lane.coveragePermille;
+      }
+      return projected;
+    });
+    Object.assign(result, copyPresent(value, [
+      "fusionLatencyMs", "diagnosticTimings",
+    ]));
+  }
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
@@ -391,26 +445,45 @@ function compactOmitted(value: unknown): unknown {
   return result;
 }
 
-function compactContext(value: Record<string, unknown>): unknown {
+function compactContext(
+  value: Record<string, unknown>,
+  input: ModelProjectionInput,
+): unknown {
   const result = copyPresent(value, [
-    "status", "taskType", "sessionDelta", "notModified",
+    "status", "taskType", "notModified",
   ]);
-  const retrieval = compactRetrieval(value.retrieval);
+  const retrieval = compactRetrieval(value.retrieval, input);
   if (retrieval !== undefined) result.retrieval = retrieval;
   if (Array.isArray(value.evidence) && value.evidence.length > 0) {
-    result.evidence = value.evidence.map(compactItem).map((item) => {
-      if (!isRecord(item)) return item;
-      const { lanes: _lanes, ...rest } = item;
-      return rest;
-    });
+    result.evidence = value.evidence.map((item) =>
+      compactEvidence(item, input)
+    );
   }
   if (Array.isArray(value.edges) && value.edges.length > 0) {
-    result.edges = value.edges.map(compactItem);
+    result.edges = value.edges.map((edge) => {
+      if (!isRecord(edge)) return edge;
+      const projected = copyPresent(edge, ["from", "to", "kind"]);
+      if (input.options.includeDiagnostics) {
+        Object.assign(projected, copyPresent(edge, ["confidencePermille"]));
+      }
+      return projected;
+    });
   }
   const omitted = compactOmitted(value.omitted);
   if (omitted !== undefined) result.omitted = omitted;
-  const action = primaryAction(value);
+
+  let action = primaryAction(value);
+  if (action === undefined && isRecord(value.omitted)) {
+    const highestRanked = value.omitted.highestRanked;
+    const first = Array.isArray(highestRanked) ? highestRanked[0] : undefined;
+    if (isRecord(first)) action = first.action;
+  }
   if (action !== undefined) result.nextAction = action;
+  if (input.options.includeDiagnostics) {
+    Object.assign(result, copyPresent(value, [
+      "sessionDelta", "diagnosticTimings",
+    ]));
+  }
   Object.assign(result, copyPresent(value, [
     "handle", "action", "responseMode", "kind", "metadata",
   ]));
@@ -435,6 +508,7 @@ function projectCompact(
     return compactCards(
       value,
       input.context.requestArgs.includeProcesses === true,
+      input.options.detail === "full",
     );
   }
   if (action === "symbol.search") return compactSearch(value);
@@ -445,7 +519,7 @@ function projectCompact(
   ) return compactCode(value, input, action);
   if (action === "slice.build") return compactSlice(value);
   if (action === "slice.spillover.get") return compactSpillover(value);
-  if (action === "context") return compactContext(value);
+  if (action === "context") return compactContext(value, input);
   return value;
 }
 
@@ -455,10 +529,6 @@ export function projectRetrievalValue(
   projectCompatibilityValue: ModelValueProjectionDelegate,
 ): unknown {
   const compatibility = projectCompatibilityValue(input);
-  if (input.options.detail === "full" || input.options.includeDiagnostics) {
-    return compatibility;
-  }
-
   const canonical = input.canonicalResult;
   if (!isRecord(canonical)) return compatibility;
   if (isRecord(canonical.error)) {

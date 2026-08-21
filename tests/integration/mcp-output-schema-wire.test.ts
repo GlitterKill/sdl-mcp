@@ -540,6 +540,69 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
       );
       assertConciseText(success, `${wireCase.name} success`);
       wireCase.schema.parse(success.structuredContent);
+      if (wireCase.name === "sdl.context") {
+        type ProjectedContext = {
+          retrieval?: {
+            lanes?: Array<{ available?: unknown }>;
+          };
+          evidence?: Array<Record<string, unknown>>;
+          edges?: Array<Record<string, unknown>>;
+          sessionDelta?: unknown;
+          diagnosticTimings?: unknown;
+        };
+        const defaultContext = success.structuredContent as ProjectedContext;
+
+        assert.equal(defaultContext.retrieval?.lanes, undefined);
+        assert.equal(defaultContext.sessionDelta, undefined);
+        assert.equal(defaultContext.diagnosticTimings, undefined);
+        const executableNextAction = {
+          id: "code.getSkeleton",
+          args: { symbolId },
+        };
+        const parsedWithNextAction = AgentContextOutputSchema.parse({
+          ...(success.structuredContent as Record<string, unknown>),
+          nextAction: executableNextAction,
+        });
+        assert.deepStrictEqual(parsedWithNextAction.nextAction, executableNextAction);
+        assert.equal(
+          AgentContextOutputSchema.safeParse({
+            ...(success.structuredContent as Record<string, unknown>),
+            unexpectedRootField: true,
+          }).success,
+          false,
+        );
+        assert.ok(defaultContext.evidence?.length);
+        for (const evidence of defaultContext.evidence) {
+          assert.equal(evidence.rank, undefined);
+          assert.equal(evidence.tier, undefined);
+          assert.equal(evidence.lanes, undefined);
+        }
+        for (const edge of defaultContext.edges ?? []) {
+          assert.equal(edge.confidencePermille, undefined);
+        }
+
+        const diagnosticsResponse = (await client.callTool({
+          name: wireCase.name,
+          arguments: {
+            ...wireCase.successArgs(),
+            includeDiagnostics: true,
+          },
+        })) as ToolEnvelope;
+        assert.notEqual(
+          diagnosticsResponse.isError,
+          true,
+          responseText(diagnosticsResponse),
+        );
+        wireCase.schema.parse(diagnosticsResponse.structuredContent);
+        const diagnosticsContext =
+          diagnosticsResponse.structuredContent as ProjectedContext;
+        assert.ok(diagnosticsContext.retrieval?.lanes?.length);
+        for (const lane of diagnosticsContext.retrieval.lanes) {
+          assert.equal(typeof lane.available, "boolean");
+        }
+        assert.ok(diagnosticsContext.evidence?.length);
+        assert.equal(typeof diagnosticsContext.evidence[0]?.tier, "number");
+      }
 
       const failure = (await client.callTool({
         name: wireCase.name,
