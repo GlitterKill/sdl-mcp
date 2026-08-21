@@ -294,8 +294,8 @@ describe("response projection inventory", () => {
     const nodeBudgets = new Map([
       ["sdl.file", 1_000],
       ["sdl.retrieve", 1_500],
-      // Both accepted action.search fn spellings share one closed result branch (5,036 nodes).
-      ["sdl.workflow", 5_100],
+      // Successful-truncation recovery duplicates the strict callable-action schema across bound result arms (5,313 nodes).
+      ["sdl.workflow", 5_400],
     ]);
 
     for (const [name, maxNodes] of nodeBudgets) {

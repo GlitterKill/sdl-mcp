@@ -214,6 +214,13 @@ const WorkflowErrorDetailOutputSchema = z
   })
   .strict();
 
+const WorkflowCallableActionOutputSchema = z
+  .object({
+    action: z.string(),
+    args: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
 const WorkflowSuccessStepOutputSchema = z
   .object({
     fn: z.string(),
@@ -223,6 +230,7 @@ const WorkflowSuccessStepOutputSchema = z
     durationMs: z.number().nonnegative().optional(),
     status: z.literal("ok").optional(),
     truncatedResponse: WorkflowTruncatedResponseOutputSchema.optional(),
+    nextAction: WorkflowCallableActionOutputSchema.optional(),
   })
   .strict();
 
@@ -239,13 +247,7 @@ const WorkflowFailureStepOutputSchema = z
     blockedByFn: z.string().optional(),
     blockedByError: z.string().optional(),
     failureTrace: WorkflowFailureTraceOutputSchema.optional(),
-    nextAction: z
-      .object({
-        action: z.string(),
-        args: z.record(z.string(), z.unknown()),
-      })
-      .strict()
-      .optional(),
+    nextAction: WorkflowCallableActionOutputSchema.optional(),
     result: z
       .union([z.string(), WorkflowErrorDetailOutputSchema])
       .optional(),

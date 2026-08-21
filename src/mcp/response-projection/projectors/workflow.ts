@@ -229,6 +229,13 @@ function compactStep(
     const successResult = projectWorkflowSuccessResult(raw.fn, result);
     if (successResult !== undefined) out.result = successResult;
   }
+  if (status === "ok" && isRecord(raw.truncatedResponse)) {
+    out.truncatedResponse = {
+      originalTokens: raw.truncatedResponse.originalTokens,
+      keptTokens: raw.truncatedResponse.keptTokens,
+      continuationHandle: raw.truncatedResponse.continuationHandle,
+    };
+  }
   const error = status === "ok" ? undefined : errorValue(raw);
   if (error !== undefined) out.error = error;
   if (status !== "ok" && typeof raw.blockedByStep === "number") {

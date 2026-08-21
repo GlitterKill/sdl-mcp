@@ -27,6 +27,7 @@ import {
   projectExclusiveCodeModeRecovery,
   withExclusiveCodeModeRecoveryProjection,
 } from "../../dist/code-mode/action-reference-projection.js";
+import { WorkflowOutputSchema } from "../../dist/code-mode/types.js";
 import {
   createPolicyDenial,
   ValidationError,
@@ -1353,6 +1354,40 @@ describe("agent-facing SDL tool contracts", () => {
       },
     );
   });
+  it("keeps successful workflow recovery actions strict and callable", () => {
+    const recovery = {
+      action: "sdl.workflow",
+      args: {
+        repoId: "repo",
+        steps: [{
+          fn: "workflowContinuationGet",
+          args: { handle: "workflow-continuation" },
+        }],
+      },
+    };
+    const output = {
+      results: [{
+        fn: "dataMap",
+        result: [{ id: 1 }],
+        truncatedResponse: {
+          originalTokens: 100,
+          keptTokens: 50,
+          continuationHandle: "workflow-continuation",
+        },
+        nextAction: recovery,
+      }],
+    };
+
+    assert.equal(WorkflowOutputSchema.safeParse(output).success, true);
+    assert.equal(
+      WorkflowOutputSchema.safeParse({
+        ...output,
+        results: [{ ...output.results[0], nextAction: { ...recovery, id: "resume" } }],
+      }).success,
+      false,
+    );
+  });
+
   it("materializes one schema-valid workflow recovery action", () => {
     const context = {
       repoId: "repo",

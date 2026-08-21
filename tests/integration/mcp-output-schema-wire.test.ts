@@ -778,6 +778,86 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
       /repoId.*expected.*string/iu,
     );
   });
+  it("keeps truncated workflow continuations complete and executable", async () => {
+    const completeResult = Array.from({ length: 12 }, (_, index) => ({
+      id: index,
+      payload: `item-${index}-${"x".repeat(160)}`,
+    }));
+    const response = (await client.callTool({
+      name: "sdl.workflow",
+      arguments: {
+        repoId: REPO_ID,
+        steps: [{
+          fn: "dataMap",
+          args: {
+            input: completeResult,
+            fields: { id: "id", payload: "payload" },
+          },
+          maxResponseTokens: 50,
+        }],
+      },
+    })) as ToolEnvelope;
+
+    assert.notEqual(response.isError, true, responseText(response));
+    const step = (
+      response.structuredContent as {
+        results?: Array<{
+          result?: unknown;
+          truncatedResponse?: {
+            originalTokens?: number;
+            keptTokens?: number;
+            continuationHandle?: string;
+          };
+          nextAction?: {
+            action?: string;
+            args?: Record<string, unknown>;
+          };
+        }>;
+      }
+    ).results?.[0];
+    assert.ok(step);
+    assert.ok(
+      JSON.stringify(step.result).length < JSON.stringify(completeResult).length,
+      "model result should be a bounded preview",
+    );
+    assert.ok(step.truncatedResponse?.continuationHandle);
+    assert.equal(Object.hasOwn(step.truncatedResponse, "maxTokens"), false);
+    assert.ok(
+      (step.truncatedResponse.originalTokens ?? 0)
+        > (step.truncatedResponse.keptTokens ?? 0),
+    );
+    assert.equal(step.nextAction?.action, "sdl.workflow");
+    assert.ok(step.nextAction.args);
+    assert.equal(
+      (
+        step.nextAction.args.steps as
+          | Array<{ fn?: string; args?: Record<string, unknown> }>
+          | undefined
+      )?.[0]?.fn,
+      "workflowContinuationGet",
+    );
+
+    const resumed = (await client.callTool({
+      name: step.nextAction.action,
+      arguments: step.nextAction.args,
+    })) as ToolEnvelope;
+    assert.notEqual(resumed.isError, true, responseText(resumed));
+    const resumedResult = (
+      resumed.structuredContent as {
+        results?: Array<{
+          result?: {
+            data?: unknown;
+          };
+        }>;
+      }
+    ).results?.[0]?.result;
+    assert.deepStrictEqual(
+      resumedResult?.data,
+      completeResult,
+      JSON.stringify(resumed.structuredContent),
+    );
+  });
+
   it("returns response.get failures in the generic structured error envelope", async () => {
     const failure = (await client.callTool({
       name: "sdl.response.get",
