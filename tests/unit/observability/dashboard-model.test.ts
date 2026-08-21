@@ -1953,6 +1953,54 @@ test("reset preserves a concurrent committed lifetime in both POST and poll comp
   }
 });
 
+test("reset receipt fences pre-receipt lifetime 404 and 500 outcomes after a committed poll", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  for (const lateStatus of [404, 500]) {
+    const post = deferredResponse();
+    const lifetimeRequests: ReturnType<typeof deferredResponse>[] = [];
+    const requestWaiters = new Map<number, () => void>();
+    const waitForRequest = (count: number) => lifetimeRequests.length >= count
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => { requestWaiters.set(count, resolve); });
+    const client = dashboard.createDashboardClient({
+      now: () => 1_000,
+      buildHeaders: () => ({}),
+      fetchImpl: async (url: string) => {
+        if (url.endsWith("/reset")) return post.promise;
+        const request = deferredResponse();
+        lifetimeRequests.push(request);
+        requestWaiters.get(lifetimeRequests.length)?.();
+        return request.promise;
+      },
+      applySnapshot: () => {},
+      applyLifetime: () => {},
+      applyTimeseries: () => {},
+    });
+    client.switchRepo("repo-a");
+    client.acceptLifetime(readyEnvelope());
+    const reset = client.resetLifetime({ control: null, confirmReset: () => true });
+    const committedPoll = client.fetchLifetime();
+    await waitForRequest(1);
+    lifetimeRequests[0].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+    assert.equal(await committedPoll, true);
+    const latePoll = client.fetchLifetime();
+    await waitForRequest(2);
+
+    post.resolve(Response.json({
+      schemaVersion: 1, repoId: "repo-a", epoch: 2,
+      resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
+      persistenceState: "ready",
+    }));
+    await waitForRequest(3);
+    lifetimeRequests[1].resolve(new Response(null, { status: lateStatus }));
+    assert.equal(await latePoll, false);
+    lifetimeRequests[2].resolve(new Response(null, { status: 500 }));
+
+    assert.equal(await reset, true, `late HTTP ${lateStatus} is fenced by the receipt`);
+    assert.equal(client.getState().lifetime.epoch, 2);
+  }
+});
+
 test("combined same-repository request races keep the newest series and committed lifetime", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const lifetimeRequests: ReturnType<typeof deferredResponse>[] = [];

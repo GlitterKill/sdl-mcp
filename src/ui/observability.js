@@ -323,11 +323,12 @@ export function createDashboardClient(options) {
         if (!sameRepository(resetRequest)) return false;
         if (!response.ok) throw new Error(json?.error?.code ?? `HTTP ${response.status}`);
         lifetimeBarrier = resetBarrierFrom(json, repoId);
+        channels.lifetime.receiptVersion += 1;
         // A poll may publish the committed epoch while the POST is in flight.
-        // Withhold only values that the receipt cannot already prove current.
+        // The receipt fences older negative requests; withhold only values that
+        // it cannot already prove current.
         if (!lifetimeSatisfiesBarrier(value.lifetime)) {
           channels.lifetime.acceptedGeneratedAt = null;
-          channels.lifetime.receiptVersion += 1;
           value = {
             ...value,
             lifetime: null,
