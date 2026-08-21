@@ -7,6 +7,8 @@ import {
   METRIC_DISPOSITIONS,
   sessionPanelState as deriveSessionPanelState,
   TIMESERIES_PANEL_MAP,
+  validObservabilitySnapshot,
+  validTimeseries15mResponse,
 } from "./observability-dashboard-model.js";
 import {
   GRID,
@@ -29,11 +31,6 @@ let dashboardClient = null;
 const els = {};
 
 const DEFAULT_SAMPLE_INTERVAL_MS = 2_000;
-const SNAPSHOT_OBJECT_FIELDS = [
-  "cache", "retrieval", "beam", "delta", "indexing", "tokenEfficiency",
-  "predictiveContext", "health", "latency", "pool", "scip", "packed", "ppr",
-  "resources", "bottleneck", "toolVolume", "auditBuffer", "postIndexSession", "toolOutput",
-];
 
 export function clampDashboardSampleInterval(value) {
   return Number.isFinite(value)
@@ -52,8 +49,13 @@ export function createDashboardClient(options) {
   const onChange = options.onChange ?? (() => {});
   const onError = options.onError ?? (() => {});
   let fallbackTimer = null;
-  let generation = 0;
-  let timeseriesRequestSequence = 0;
+  let pollInFlight = null;
+  let repoGeneration = 0;
+  const channels = {
+    snapshot: { acceptedGeneratedAt: null, receiptVersion: 0 },
+    lifetime: { acceptedGeneratedAt: null, receiptVersion: 0 },
+    timeseries: { requestSequence: 0 },
+  };
   let resetPromise = null;
   let lifetimeBarrier = null;
   let value = {
@@ -105,33 +107,22 @@ export function createDashboardClient(options) {
   const plainRecord = (candidate) =>
     candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
     && Object.getPrototypeOf(candidate) === Object.prototype;
-  const validSnapshotShape = (snapshot) =>
-    plainRecord(snapshot) && snapshot.schemaVersion === 1 &&
-    Number.isFinite(snapshot.uptimeMs) && snapshot.uptimeMs >= 0 &&
-    Object.keys(snapshot).length === SNAPSHOT_OBJECT_FIELDS.length + 4 &&
-    SNAPSHOT_OBJECT_FIELDS.every((field) => plainRecord(snapshot[field]));
   const acceptedTimestamp = (candidate) => lifetimeIsCurrentFor(candidate, {
     repoId: candidate.repoId,
     generatedAt: candidate.generatedAt,
     sampleIntervalMs: value.sampleIntervalMs,
   });
-  const captureRequest = () => ({
+  const captureRequest = (kind) => ({
     repoId: value.repoId,
-    generation,
-    snapshot: value.snapshot,
-    lifetime: value.lifetime,
-    sessionReceivedAtMs: value.sessionReceivedAtMs,
-    lifetimeReceivedAtMs: value.lifetimeReceivedAtMs,
+    repoGeneration,
+    receiptVersion: channels[kind].receiptVersion,
   });
-  const sameGeneration = (request) =>
-    request.repoId === value.repoId && request.generation === generation;
-  const requestStateUnchanged = (request, kind) => sameGeneration(request) && (
-    kind === "snapshot"
-      ? request.snapshot === value.snapshot
-        && request.sessionReceivedAtMs === value.sessionReceivedAtMs
-      : request.lifetime === value.lifetime
-        && request.lifetimeReceivedAtMs === value.lifetimeReceivedAtMs
-  );
+  const sameRepository = (request) =>
+    request.repoId === value.repoId && request.repoGeneration === repoGeneration;
+  // Request-start versions gate only negative outcomes. Valid successes are
+  // ordered against the channel's currently accepted server timestamp.
+  const negativeIsCurrent = (request, kind) =>
+    sameRepository(request) && request.receiptVersion === channels[kind].receiptVersion;
   const lifetimeSatisfiesBarrier = (lifetime, barrier = lifetimeBarrier) =>
     barrier?.repoId === lifetime?.repoId &&
     lifetime?.persistenceState !== "recoveryRequired" &&
@@ -141,15 +132,24 @@ export function createDashboardClient(options) {
 
   const acceptSnapshot = (snapshot) => {
     if (
-      !validSnapshotShape(snapshot) || snapshot.repoId !== value.repoId ||
-      typeof snapshot.generatedAt !== "string" || !acceptedTimestamp(snapshot)
+      !validObservabilitySnapshot(snapshot) || snapshot.repoId !== value.repoId ||
+      !acceptedTimestamp(snapshot)
     ) return false;
-    if (value.snapshot && !lifetimeIsCurrentFor(value.snapshot, {
+    if (channels.snapshot.acceptedGeneratedAt && !lifetimeIsCurrentFor({
+      repoId: value.repoId,
+      generatedAt: channels.snapshot.acceptedGeneratedAt,
+    }, {
       repoId: snapshot.repoId,
       generatedAt: snapshot.generatedAt,
       sampleIntervalMs: value.sampleIntervalMs,
     })) return false;
     const discardLifetime = value.lifetime && !lifetimeIsCurrentFor(snapshot, value.lifetime);
+    channels.snapshot.acceptedGeneratedAt = snapshot.generatedAt;
+    channels.snapshot.receiptVersion += 1;
+    if (discardLifetime) {
+      channels.lifetime.acceptedGeneratedAt = null;
+      channels.lifetime.receiptVersion += 1;
+    }
     replace({
       ...value,
       snapshot,
@@ -173,9 +173,14 @@ export function createDashboardClient(options) {
       !lifetimeSatisfiesBarrier(lifetime)
     ) return false;
     if (value.snapshot && !lifetimeIsCurrentFor(value.snapshot, lifetime)) return false;
-    if (value.lifetime && !lifetimeIsCurrentFor(value.lifetime, lifetime)) return false;
+    if (channels.lifetime.acceptedGeneratedAt && !lifetimeIsCurrentFor({
+      repoId: value.repoId,
+      generatedAt: channels.lifetime.acceptedGeneratedAt,
+    }, lifetime)) return false;
     const interval = clampDashboardSampleInterval(lifetime.sampleIntervalMs);
     const intervalChanged = interval !== value.sampleIntervalMs;
+    channels.lifetime.acceptedGeneratedAt = lifetime.generatedAt;
+    channels.lifetime.receiptVersion += 1;
     replace({
       ...value,
       lifetime,
@@ -188,16 +193,16 @@ export function createDashboardClient(options) {
   };
 
   const fetchSnapshot = async () => {
-    const request = captureRequest();
+    const request = captureRequest("snapshot");
     try {
       const { response, json } = await requestJson(
         getUrl("/api/observability/snapshot", "", request.repoId),
       );
-      if (!requestStateUnchanged(request, "snapshot")) return false;
+      if (!sameRepository(request)) return false;
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return acceptSnapshot(json);
     } catch (error) {
-      if (!requestStateUnchanged(request, "snapshot")) return false;
+      if (!negativeIsCurrent(request, "snapshot")) return false;
       onError("snapshot", error);
       notify();
       return false;
@@ -205,14 +210,17 @@ export function createDashboardClient(options) {
   };
 
   const fetchLifetime = async () => {
-    const request = captureRequest();
+    const request = captureRequest("lifetime");
     try {
       const { response, json } = await requestJson(
         getUrl("/api/observability/lifetime", "", request.repoId),
       );
-      if (!requestStateUnchanged(request, "lifetime")) return false;
+      if (!sameRepository(request)) return false;
       if (response.status === 404) {
+        if (!negativeIsCurrent(request, "lifetime")) return false;
         const intervalChanged = value.sampleIntervalMs !== DEFAULT_SAMPLE_INTERVAL_MS;
+        channels.lifetime.acceptedGeneratedAt = null;
+        channels.lifetime.receiptVersion += 1;
         replace({
           ...value,
           lifetime: null,
@@ -226,7 +234,7 @@ export function createDashboardClient(options) {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return acceptLifetime(json);
     } catch (error) {
-      if (!requestStateUnchanged(request, "lifetime")) return false;
+      if (!negativeIsCurrent(request, "lifetime")) return false;
       onError("lifetime", error);
       notify();
       return false;
@@ -234,10 +242,10 @@ export function createDashboardClient(options) {
   };
 
   const fetchTimeseries = async (windowName = "15m") => {
-    const request = captureRequest();
-    const requestSequence = ++timeseriesRequestSequence;
+    const request = { repoId: value.repoId, repoGeneration };
+    const requestSequence = ++channels.timeseries.requestSequence;
     const isLatestRequest = () =>
-      sameGeneration(request) && requestSequence === timeseriesRequestSequence;
+      sameRepository(request) && requestSequence === channels.timeseries.requestSequence;
     try {
       const { response, json } = await requestJson(
         getUrl(
@@ -248,6 +256,7 @@ export function createDashboardClient(options) {
       );
       if (!isLatestRequest()) return false;
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!validTimeseries15mResponse(json, request.repoId)) return false;
       applyClientTimeseries(json);
       return true;
     } catch (error) {
@@ -257,13 +266,18 @@ export function createDashboardClient(options) {
     }
   };
 
-  const poll = async () => {
+  const poll = () => {
     if (value.streamConnected) {
       notify();
-      return;
+      return Promise.resolve();
     }
-    await Promise.allSettled([fetchSnapshot(), fetchLifetime(), fetchTimeseries("15m")]);
-    notify();
+    if (pollInFlight) return pollInFlight;
+    pollInFlight = Promise.allSettled([
+      fetchSnapshot(), fetchLifetime(), fetchTimeseries("15m"),
+    ]).then(notify).finally(() => {
+      pollInFlight = null;
+    });
+    return pollInFlight;
   };
   const stopFallback = () => {
     if (fallbackTimer !== null) clearIntervalFn(fallbackTimer);
@@ -292,7 +306,7 @@ export function createDashboardClient(options) {
       return restoreFocus(Promise.resolve(false));
     }
     const repoId = value.repoId;
-    const resetGeneration = generation;
+    const resetGeneration = repoGeneration;
     if (!confirmReset(repoId)) return restoreFocus(Promise.resolve(false));
 
     const operation = (async () => {
@@ -305,10 +319,12 @@ export function createDashboardClient(options) {
             confirmation: `RESET REPOSITORY LIFETIME: ${repoId}`,
           }),
         });
-        const resetRequest = { repoId, generation: resetGeneration };
-        if (!sameGeneration(resetRequest)) return false;
+        const resetRequest = { repoId, repoGeneration: resetGeneration };
+        if (!sameRepository(resetRequest)) return false;
         if (!response.ok) throw new Error(json?.error?.code ?? `HTTP ${response.status}`);
         lifetimeBarrier = resetBarrierFrom(json, repoId);
+        channels.lifetime.acceptedGeneratedAt = null;
+        channels.lifetime.receiptVersion += 1;
         value = {
           ...value,
           lifetime: null,
@@ -317,12 +333,12 @@ export function createDashboardClient(options) {
         applyClientLifetime(lifetimePresentation(null, 0), null);
         notify();
         const refreshed = await fetchLifetime();
-        if (!sameGeneration(resetRequest)) return false;
+        if (!sameRepository(resetRequest)) return false;
         return refreshed || lifetimeSatisfiesBarrier(value.lifetime)
           ? true
           : "committed-refresh-failed";
       } catch (error) {
-        if (repoId === value.repoId && resetGeneration === generation) onError("reset", error);
+        if (repoId === value.repoId && resetGeneration === repoGeneration) onError("reset", error);
         return false;
       }
     })();
@@ -335,9 +351,15 @@ export function createDashboardClient(options) {
   const api = {
     getState: () => ({ ...value }),
     switchRepo(repoId) {
+      if (repoId === value.repoId) return false;
       stopFallback();
-      generation += 1;
+      repoGeneration += 1;
       lifetimeBarrier = null;
+      channels.snapshot.acceptedGeneratedAt = null;
+      channels.snapshot.receiptVersion = 0;
+      channels.lifetime.acceptedGeneratedAt = null;
+      channels.lifetime.receiptVersion = 0;
+      channels.timeseries.requestSequence = 0;
       value = {
         repoId,
         snapshot: null,
@@ -350,6 +372,7 @@ export function createDashboardClient(options) {
       applyClientSnapshot(null, repoId);
       applyClientLifetime(lifetimePresentation(null, 0), null);
       notify();
+      return true;
     },
     acceptSnapshot,
     acceptLifetime,

@@ -326,6 +326,20 @@ function clientSnapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function clientTimeseries(value = 1) {
+  const series = Object.fromEntries(
+    Object.keys(TIMESERIES_PANEL_MAP).map((key) => [key, []]),
+  ) as Record<string, Array<Record<string, number>>>;
+  series.cacheHitRate = [{ t: value, hitRate: value }];
+  return {
+    schemaVersion: 1,
+    repoId: "repo-a",
+    window: "15m",
+    resolutionMs: 1_000,
+    series,
+  };
+}
+
 function runtimeLeaves(value: unknown): string[] {
   const leaves: string[] = [];
   function visit(current: unknown, path: string): void {
@@ -348,6 +362,30 @@ function runtimeLeaves(value: unknown): string[] {
   }
   visit(value, "");
   return [...new Set(leaves)];
+}
+
+function replaceClaimedPath(root: Record<string, unknown>, path: string, replacement: unknown): void {
+  const parts = path.split(".");
+  let current: unknown = root;
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    const collection = part.endsWith("[]");
+    const key = collection ? part.slice(0, -2) : part;
+    const record = current as Record<string, unknown>;
+    if (!collection) {
+      if (index === parts.length - 1) record[key] = replacement;
+      else current = record[key];
+      continue;
+    }
+    const values = record[key] as unknown[] | Record<string, unknown>;
+    const first = Array.isArray(values) ? values[0] : values[Object.keys(values)[0]];
+    if (index === parts.length - 1) {
+      if (Array.isArray(values)) values[0] = replacement;
+      else values[Object.keys(values)[0]] = replacement;
+    } else {
+      current = first;
+    }
+  }
 }
 
 function readyEnvelope(persistenceState = "ready") {
@@ -415,6 +453,63 @@ test("disposition map covers the compiler and runtime snapshot contracts", () =>
   }
   assert.ok(Object.isFrozen(METRIC_DISPOSITIONS));
   assert.equal(sourceLeaves.length, 273);
+});
+
+test("browser snapshot validation covers every compiler and runtime leaf and rejects each mutation", async () => {
+  const model = await import("../../../dist/ui/observability-dashboard-model.js");
+  const validate = model.validObservabilitySnapshot as ((value: unknown) => boolean) | undefined;
+  const validatorPaths = model.SNAPSHOT_VALIDATOR_PATHS as readonly string[] | undefined;
+  assert.equal(typeof validate, "function");
+  assert.ok(Array.isArray(validatorPaths));
+
+  const compilerLeaves = snapshotTypeLeaves();
+  const runtime = runtimeSnapshot() as unknown as Record<string, unknown>;
+  const emptyRuntime = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS).getSnapshot("repo-a");
+  assert.deepEqual(new Set(validatorPaths), new Set(compilerLeaves));
+  assert.deepEqual(new Set(validatorPaths), new Set(runtimeLeaves(runtime)));
+  assert.equal(validate?.(runtime), true);
+  assert.equal(validate?.(emptyRuntime), true, "a real fresh server snapshot is accepted");
+  for (const path of compilerLeaves) {
+    const mutated = structuredClone(runtime);
+    replaceClaimedPath(mutated, path, { hostile: true });
+    assert.equal(validate?.(mutated), false, path);
+  }
+  assert.equal(validate?.({ ...runtime, futureField: 1 }), false, "future fields fail closed");
+  assert.equal(validate?.({
+    ...runtime,
+    cache: { ...(runtime.cache as object), hits: "hostile" },
+  }), false, "hostile cache additions fail closed");
+});
+
+test("browser 15m timeseries validation rejects wrong scope, malformed, oversized, nonfinite, and unordered series", async () => {
+  const model = await import("../../../dist/ui/observability-dashboard-model.js");
+  const validate = model.validTimeseries15mResponse as
+    | ((value: unknown, repoId: string) => boolean)
+    | undefined;
+  assert.equal(typeof validate, "function");
+  const baseline = clientTimeseries();
+  assert.equal(validate?.(baseline, "repo-a"), true);
+  assert.equal(validate?.({ ...baseline, repoId: "repo-b" }, "repo-a"), false);
+  assert.equal(validate?.({ ...baseline, window: "1h" }, "repo-a"), false);
+  assert.equal(validate?.({
+    ...baseline,
+    series: { ...baseline.series, cacheHitRate: [{ t: 1, hostile: 1 }] },
+  }, "repo-a"), false);
+  assert.equal(validate?.({
+    ...baseline,
+    series: {
+      ...baseline.series,
+      cacheHitRate: Array.from({ length: 901 }, (_, t) => ({ t, hitRate: 1 })),
+    },
+  }, "repo-a"), false);
+  assert.equal(validate?.({
+    ...baseline,
+    series: { ...baseline.series, cacheHitRate: [{ t: 1, hitRate: Number.POSITIVE_INFINITY }] },
+  }, "repo-a"), false);
+  assert.equal(validate?.({
+    ...baseline,
+    series: { ...baseline.series, cacheHitRate: [{ t: 2, hitRate: 1 }, { t: 1, hitRate: 1 }] },
+  }, "repo-a"), false);
 });
 
 test("compiler oracle includes every discriminated object-union branch once", () => {
@@ -1235,6 +1330,56 @@ test("dashboard client rejects malformed and out-of-order snapshots before rende
   assert.deepEqual(rendered, [null, newer]);
 });
 
+test("dashboard client validates snapshot and 15m wires before clocks or rendering", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  let now = 100;
+  const snapshotRenders: unknown[] = [];
+  const timeseriesRenders: unknown[] = [];
+  const timeseriesResponses = [
+    { ...clientTimeseries(), repoId: "repo-b" },
+    { ...clientTimeseries(), window: "1h" },
+    {
+      ...clientTimeseries(),
+      series: { ...clientTimeseries().series, cacheHitRate: [{ t: 1, hostile: 1 }] },
+    },
+    {
+      ...clientTimeseries(),
+      series: {
+        ...clientTimeseries().series,
+        cacheHitRate: Array.from({ length: 901 }, (_, t) => ({ t, hitRate: 1 })),
+      },
+    },
+    {
+      ...clientTimeseries(),
+      series: { ...clientTimeseries().series, cacheHitRate: [{ t: 1, hitRate: Number.NaN }] },
+    },
+  ];
+  const client = dashboard.createDashboardClient({
+    now: () => now,
+    buildHeaders: () => ({}),
+    fetchImpl: async () => Response.json(timeseriesResponses.shift()),
+    applySnapshot: (snapshot: unknown) => snapshotRenders.push(snapshot),
+    applyLifetime: () => {},
+    applyTimeseries: (response: unknown) => timeseriesRenders.push(response),
+  });
+  client.switchRepo("repo-a");
+  const accepted = clientSnapshot();
+  assert.equal(client.acceptSnapshot(accepted), true);
+  assert.equal(client.getState().sessionReceivedAtMs, 100);
+  now = 200;
+  assert.equal(client.acceptSnapshot({
+    ...accepted,
+    generatedAt: "2026-08-20T12:01:00.000000001Z",
+    cache: { ...accepted.cache, totalHits: "hostile" },
+  }), false);
+  assert.equal(client.getState().sessionReceivedAtMs, 100, "invalid data does not refresh receipt age");
+  assert.deepEqual(snapshotRenders, [null, accepted]);
+  for (let index = 0; index < 5; index += 1) {
+    assert.equal(await client.fetchTimeseries(), false);
+  }
+  assert.deepEqual(timeseriesRenders, []);
+});
+
 test("late REST responses cannot cross repositories or overwrite newer SSE state", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const pending: Array<{ url: string; response: ReturnType<typeof deferredResponse> }> = [];
@@ -1289,10 +1434,51 @@ test("late REST responses cannot cross repositories or overwrite newer SSE state
   assert.deepEqual(errors, [], "superseded REST failures are ignored");
 });
 
+test("same-repository snapshot and lifetime successes are ordered by payload time in both completion orders", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const olderAt = "2026-08-20T12:01:00.000000001Z";
+  const newerAt = "2026-08-20T12:01:00.000000002Z";
+
+  for (const kind of ["snapshot", "lifetime"] as const) {
+    for (const newerFirst of [false, true]) {
+      const requests: ReturnType<typeof deferredResponse>[] = [];
+      const client = dashboard.createDashboardClient({
+        now: () => 100,
+        buildHeaders: () => ({}),
+        fetchImpl: async () => {
+          const request = deferredResponse();
+          requests.push(request);
+          return request.promise;
+        },
+        applySnapshot: () => {},
+        applyLifetime: () => {},
+        applyTimeseries: () => {},
+      });
+      client.switchRepo("repo-a");
+      const olderRequest = kind === "snapshot" ? client.fetchSnapshot() : client.fetchLifetime();
+      const newerRequest = kind === "snapshot" ? client.fetchSnapshot() : client.fetchLifetime();
+      const payload = (generatedAt: string) => kind === "snapshot"
+        ? clientSnapshot({ generatedAt })
+        : { ...readyEnvelope(), generatedAt };
+      const firstIndex = newerFirst ? 1 : 0;
+      const secondIndex = newerFirst ? 0 : 1;
+      requests[firstIndex].resolve(Response.json(payload(newerFirst ? newerAt : olderAt)));
+      assert.equal(await (newerFirst ? newerRequest : olderRequest), true);
+      requests[secondIndex].resolve(Response.json(payload(newerFirst ? olderAt : newerAt)));
+      assert.equal(
+        await (newerFirst ? olderRequest : newerRequest),
+        !newerFirst,
+        `${kind} ${newerFirst ? "older" : "newer"} completion acceptance`,
+      );
+      assert.equal(client.getState()[kind].generatedAt, newerAt);
+    }
+  }
+});
+
 test("only the latest same-repository timeseries request may render", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const requests: ReturnType<typeof deferredResponse>[] = [];
-  const rendered: string[] = [];
+  const rendered: number[] = [];
   const client = dashboard.createDashboardClient({
     now: () => 100,
     buildHeaders: () => ({}),
@@ -1303,16 +1489,18 @@ test("only the latest same-repository timeseries request may render", async () =
     },
     applySnapshot: () => {},
     applyLifetime: () => {},
-    applyTimeseries: (value: { marker: string }) => rendered.push(value.marker),
+    applyTimeseries: (value: ReturnType<typeof clientTimeseries>) => {
+      rendered.push(value.series.cacheHitRate[0].hitRate);
+    },
   });
   client.switchRepo("repo-a");
   const older = client.fetchTimeseries();
   const newer = client.fetchTimeseries();
-  requests[1].resolve(Response.json({ window: "15m", series: {}, marker: "new" }));
+  requests[1].resolve(Response.json(clientTimeseries(2)));
   assert.equal(await newer, true);
-  requests[0].resolve(Response.json({ window: "15m", series: {}, marker: "old" }));
+  requests[0].resolve(Response.json(clientTimeseries(1)));
   assert.equal(await older, false);
-  assert.deepEqual(rendered, ["new"]);
+  assert.deepEqual(rendered, [2]);
 });
 
 test("repository switch clears rendered session values before the next fetch", async () => {
@@ -1535,6 +1723,53 @@ test("one idempotent client timer ages connected views and polls only while disc
   assert.deepEqual(clearedTimers, [1, 2, 3]);
 });
 
+test("disconnected fallback polling is single-flight and releases after settlement", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  let interval: (() => Promise<void>) | null = null;
+  const requests: Array<{ url: string; deferred: ReturnType<typeof deferredResponse> }> = [];
+  const client = dashboard.createDashboardClient({
+    now: () => 100,
+    buildHeaders: () => ({}),
+    fetchImpl: async (url: string) => {
+      const deferred = deferredResponse();
+      requests.push({ url, deferred });
+      return deferred.promise;
+    },
+    setIntervalFn: (callback: () => Promise<void>) => {
+      interval = callback;
+      return 1;
+    },
+    clearIntervalFn: () => {},
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  client.start();
+  const first = interval?.();
+  const joined = interval?.();
+  assert.equal(requests.length, 3, "an unresolved poll owns the only REST batch");
+  for (const request of requests) {
+    request.deferred.resolve(Response.json(
+      request.url.includes("/snapshot") ? clientSnapshot()
+        : request.url.includes("/lifetime") ? readyEnvelope()
+          : clientTimeseries(),
+    ));
+  }
+  await Promise.all([first, joined]);
+
+  const next = interval?.();
+  assert.equal(requests.length, 6, "finally releases the poll guard");
+  for (const request of requests.slice(3)) {
+    request.deferred.resolve(Response.json(
+      request.url.includes("/snapshot") ? clientSnapshot()
+        : request.url.includes("/lifetime") ? readyEnvelope()
+          : clientTimeseries(),
+    ));
+  }
+  await next;
+});
+
 test("dashboard lifetime reset is exact, recovery-safe, and rehydrates before focus returns", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const createClient = dashboard.createDashboardClient as Function;
@@ -1706,7 +1941,7 @@ test("combined same-repository request races keep the newest series and committe
   const dashboard = await import("../../../dist/ui/observability.js");
   const lifetimeRequests: ReturnType<typeof deferredResponse>[] = [];
   const timeseriesRequests: ReturnType<typeof deferredResponse>[] = [];
-  const rendered: string[] = [];
+  const rendered: number[] = [];
   let markResetGetStarted!: () => void;
   const resetGetStarted = new Promise<void>((resolve) => { markResetGetStarted = resolve; });
   const client = dashboard.createDashboardClient({
@@ -1730,7 +1965,9 @@ test("combined same-repository request races keep the newest series and committe
     },
     applySnapshot: () => {},
     applyLifetime: () => {},
-    applyTimeseries: (value: { marker: string }) => rendered.push(value.marker),
+    applyTimeseries: (value: ReturnType<typeof clientTimeseries>) => {
+      rendered.push(value.series.cacheHitRate[0].hitRate);
+    },
   });
   client.switchRepo("repo-a");
   client.acceptLifetime(readyEnvelope());
@@ -1739,15 +1976,15 @@ test("combined same-repository request races keep the newest series and committe
   const olderSeries = client.fetchTimeseries();
   const newerSeries = client.fetchTimeseries();
   const lifetimePoll = client.fetchLifetime();
-  timeseriesRequests[1].resolve(Response.json({ window: "15m", series: {}, marker: "new" }));
+  timeseriesRequests[1].resolve(Response.json(clientTimeseries(2)));
   assert.equal(await newerSeries, true);
-  timeseriesRequests[0].resolve(Response.json({ window: "15m", series: {}, marker: "old" }));
+  timeseriesRequests[0].resolve(Response.json(clientTimeseries(1)));
   assert.equal(await olderSeries, false);
   lifetimeRequests[1].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
   assert.equal(await lifetimePoll, true);
   lifetimeRequests[0].resolve(new Response(null, { status: 500 }));
   assert.equal(await reset, true);
-  assert.deepEqual(rendered, ["new"]);
+  assert.deepEqual(rendered, [2]);
   assert.equal(client.getState().lifetime.epoch, 2);
 });
 
@@ -1788,6 +2025,47 @@ test("reset completion is ignored after a repository generation change", async (
   assert.equal(lifetimeRenders.length, rendersAfterSwitch, "repo-a completion never mutates repo-b UI");
   assert.equal(client.getState().repoId, "repo-b");
   assert.equal(control.focused, true);
+});
+
+test("same-repository reconnect preserves an in-flight reset barrier and accepted metrics", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  let releaseReset!: () => void;
+  const resetGate = new Promise<void>((resolve) => { releaseReset = resolve; });
+  const snapshots: unknown[] = [];
+  const client = dashboard.createDashboardClient({
+    now: () => 1_000,
+    buildHeaders: () => ({}),
+    fetchImpl: async (url: string) => {
+      if (url.endsWith("/reset")) {
+        await resetGate;
+        return Response.json({
+          schemaVersion: 1, repoId: "repo-a", epoch: 2,
+          resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
+          persistenceState: "ready",
+        });
+      }
+      return new Response(null, { status: 500 });
+    },
+    applySnapshot: (snapshot: unknown) => snapshots.push(snapshot),
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  const snapshot = clientSnapshot();
+  client.acceptSnapshot(snapshot);
+  client.acceptLifetime(readyEnvelope());
+  const reset = client.resetLifetime({ control: null, confirmReset: () => true });
+
+  client.switchRepo("repo-a");
+  assert.equal(client.getState().snapshot, snapshot, "CONNECT does not clear same-repo metrics");
+  assert.equal(snapshots.at(-1), snapshot);
+  releaseReset();
+
+  assert.equal(await reset, "committed-refresh-failed");
+  assert.equal(client.acceptLifetime({
+    ...readyEnvelope(), epoch: 1, generatedAt: "2026-08-20T12:01:00.000000001Z",
+  }), false, "a buffered pre-reset envelope remains behind the committed epoch barrier");
+  assert.equal(client.getState().lifetime, null);
 });
 
 test("committed reset with failed refresh withholds old values and reports partial success", async () => {

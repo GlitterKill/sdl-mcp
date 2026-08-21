@@ -450,6 +450,404 @@ function plainRecord(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
+const optional = (schema) => ({ kind: "optional", schema });
+const arrayOf = (schema, maximum = 128) => ({ kind: "array", schema, maximum });
+const recordOf = (schema, maximum = 128) => ({ kind: "record", schema, maximum });
+
+// The same small schema tree drives validation and leaf inventory, so new
+// compiler fields cannot silently bypass the browser trust boundary.
+function validWireValue(value, schema) {
+  if (typeof schema === "function") return schema(value);
+  if (schema.kind === "optional") return value === undefined || validWireValue(value, schema.schema);
+  if (schema.kind === "array") {
+    return Array.isArray(value) && value.length <= schema.maximum
+      && value.every((item) => validWireValue(item, schema.schema));
+  }
+  if (schema.kind === "record") {
+    if (!plainRecord(value)) return false;
+    const entries = Object.entries(value);
+    return entries.length <= schema.maximum && entries.every(([key, item]) =>
+      key.length > 0 && key.length <= 256 && !/[\u0000-\u001f]/.test(key)
+      && validWireValue(item, schema.schema));
+  }
+  if (!plainRecord(value)) return false;
+  const keys = Object.keys(schema);
+  if (Object.keys(value).some((key) => !Object.hasOwn(schema, key))) return false;
+  return keys.every((key) => schema[key].kind === "optional"
+    ? !Object.hasOwn(value, key) || value[key] === undefined
+      || validWireValue(value[key], schema[key].schema)
+    : Object.hasOwn(value, key) && validWireValue(value[key], schema[key]));
+}
+
+function wireLeafPaths(schema, path = "") {
+  if (typeof schema === "function") return [path];
+  if (schema.kind === "optional") return wireLeafPaths(schema.schema, path);
+  if (schema.kind === "array" || schema.kind === "record") {
+    return wireLeafPaths(schema.schema, `${path}[]`);
+  }
+  return Object.entries(schema).flatMap(([key, child]) =>
+    wireLeafPaths(child, path ? `${path}.${key}` : key));
+}
+
+const finiteMetric = (value) =>
+  typeof value === "number" && Number.isFinite(value)
+  && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+const percentage = (value) => finiteMetric(value) && value <= 100;
+const ratio = (value) => finiteMetric(value) && value <= 1;
+const integerMetric = (value) => Number.isSafeInteger(value) && value >= 0;
+const booleanValue = (value) => typeof value === "boolean";
+const boundedString = (value) => typeof value === "string" && value.length <= 4_096;
+const nullableString = (value) => value === null || boundedString(value);
+const timestampString = (value) => timestamp(value) !== null;
+const nullableTimestampString = (value) => value === null || timestampString(value);
+
+const latencyPhaseSchema = {
+  count: integerMetric,
+  avgMs: finiteMetric,
+  p95Ms: finiteMetric,
+  maxMs: finiteMetric,
+};
+const tokenSavingsLayerSchema = {
+  source: boundedString,
+  events: integerMetric,
+  realizedEvents: integerMetric,
+  estimatedTokensAvoided: integerMetric,
+  originalTokens: integerMetric,
+  returnedTokens: integerMetric,
+  savedTokens: integerMetric,
+  opportunities: integerMetric,
+  hits: integerMetric,
+  hitRatePct: percentage,
+  storedBytes: integerMetric,
+};
+const toolOutputMetricSchema = {
+  calls: integerMetric,
+  errors: integerMetric,
+  rawBytesTotal: integerMetric,
+  projectedBytesTotal: integerMetric,
+  rawTokensTotal: integerMetric,
+  projectedTokensTotal: integerMetric,
+  reductionRatio: ratio,
+  removedFieldTotal: integerMetric,
+  handledCount: integerMetric,
+  handledRate: ratio,
+  truncatedCount: integerMetric,
+  truncatedRate: ratio,
+  detailCounts: {
+    summary: optional(integerMetric),
+    compact: optional(integerMetric),
+    standard: optional(integerMetric),
+    full: optional(integerMetric),
+  },
+  profileCounts: recordOf(integerMetric),
+  recoveryEmittedCount: integerMetric,
+  invalidRecoveryCount: integerMetric,
+  p50ProjectedBytes: integerMetric,
+  p95ProjectedBytes: integerMetric,
+  maxProjectedBytes: integerMetric,
+  p50ProjectedTokens: integerMetric,
+  p95ProjectedTokens: integerMetric,
+  maxProjectedTokens: integerMetric,
+};
+
+const OBSERVABILITY_SNAPSHOT_SCHEMA = {
+  schemaVersion: (value) => value === 1,
+  generatedAt: timestampString,
+  repoId: (value) => typeof value === "string" && value.length >= 1 && value.length <= 128,
+  uptimeMs: finiteMetric,
+  cache: {
+    overallHitRatePct: percentage,
+    totalHits: integerMetric,
+    totalMisses: integerMetric,
+    perSource: recordOf({
+      source: boundedString,
+      hits: integerMetric,
+      misses: integerMetric,
+      hitRatePct: percentage,
+      avgLatencyMs: finiteMetric,
+    }),
+    avgLookupLatencyMs: finiteMetric,
+  },
+  retrieval: {
+    totalRetrievals: integerMetric,
+    avgLatencyMs: finiteMetric,
+    p95LatencyMs: finiteMetric,
+    byMode: recordOf(integerMetric),
+    candidateCountPerSource: recordOf(integerMetric),
+    phaseLatencyMs: recordOf(latencyPhaseSchema),
+    byRetrievalType: recordOf(integerMetric),
+    emptyResultCount: integerMetric,
+  },
+  beam: {
+    totalSliceBuilds: integerMetric,
+    avgBuildMs: finiteMetric,
+    p95BuildMs: finiteMetric,
+    avgAccepted: finiteMetric,
+    avgEvicted: finiteMetric,
+    avgRejected: finiteMetric,
+    avgFrontierMaxSize: finiteMetric,
+    p95FrontierMaxSize: finiteMetric,
+    retainedExplainHandles: integerMetric,
+  },
+  delta: {
+    totalBlastRadiusComputations: integerMetric,
+    avgBlastRadiusLatencyMs: finiteMetric,
+    p95BlastRadiusLatencyMs: finiteMetric,
+    avgDbRoundTripsPerChangedSymbol: finiteMetric,
+    avgPathExplanationLatencyMs: finiteMetric,
+    p95PathExplanationLatencyMs: finiteMetric,
+    fallbackPathQueryCount: integerMetric,
+  },
+  indexing: {
+    totalEvents: integerMetric,
+    filesPerMinute: finiteMetric,
+    avgPass1Ms: finiteMetric,
+    avgPass2Ms: finiteMetric,
+    phaseCounts: recordOf(integerMetric),
+    perLanguageAvgMs: recordOf(finiteMetric),
+    engineDispatch: { rust: integerMetric, ts: integerMetric },
+    failures: integerMetric,
+    derivedStateLagMs: (value) => value === null || finiteMetric(value),
+  },
+  tokenEfficiency: {
+    totalUsed: integerMetric,
+    totalSaved: integerMetric,
+    savingsRatio: ratio,
+    avgPerCall: finiteMetric,
+    compressionLayers: {
+      totalEvents: integerMetric,
+      totalRealizedEvents: integerMetric,
+      totalEstimatedTokensAvoided: integerMetric,
+      totalOriginalTokens: integerMetric,
+      totalReturnedTokens: integerMetric,
+      totalSavedTokens: integerMetric,
+      totalStoredBytes: integerMetric,
+      bySource: recordOf(tokenSavingsLayerSchema),
+      byTool: recordOf({ tool: boundedString, ...tokenSavingsLayerSchema }),
+    },
+  },
+  predictiveContext: {
+    policyMode: (value) => ["disabled", "observe", "safe"].includes(value),
+    outcomeSamples: integerMetric,
+    suppressedPrefetch: integerMetric,
+    acceptedPrefetch: integerMetric,
+    hitRatePct: percentage,
+    wasteRatePct: percentage,
+    avgLatencyReductionMs: finiteMetric,
+    topStrategies: arrayOf({
+      strategy: boundedString,
+      resourceKind: boundedString,
+      samples: integerMetric,
+      hitRatePct: percentage,
+      acceptedRatePct: percentage,
+      wasteRatePct: percentage,
+      score: finiteMetric,
+      suppressed: integerMetric,
+    }),
+  },
+  health: {
+    score: percentage,
+    components: {
+      freshness: ratio,
+      coverage: ratio,
+      errorRate: ratio,
+      edgeQuality: ratio,
+      callResolution: ratio,
+    },
+    watcherRunning: booleanValue,
+    watcherProvider: optional(nullableString),
+    watcherConfiguredProvider: optional(nullableString),
+    watcherFallbackReason: optional(nullableString),
+    watcherQueueDepth: integerMetric,
+    watcherStale: booleanValue,
+    watcherErrors: integerMetric,
+    watcherRestartCount: integerMetric,
+    watcherWatchmanWarningCount: optional(integerMetric),
+    watcherWatchmanWarnings: optional(arrayOf(boundedString)),
+    watcherWatchmanVersion: optional(boundedString),
+    watcherWatchmanWatchRoot: optional(boundedString),
+    watcherWatchmanRelativePath: optional(nullableString),
+    watcherWatchmanLastClock: optional(nullableString),
+    watcherWatchmanRecrawlCount: optional(integerMetric),
+    watcherWatchmanFreshInstanceCount: optional(integerMetric),
+  },
+  latency: {
+    avgMs: finiteMetric,
+    p50Ms: finiteMetric,
+    p95Ms: finiteMetric,
+    p99Ms: finiteMetric,
+    maxMs: finiteMetric,
+    perTool: recordOf({
+      count: integerMetric,
+      avgMs: finiteMetric,
+      p95Ms: finiteMetric,
+      errorCount: integerMetric,
+      phases: optional(recordOf(latencyPhaseSchema)),
+    }),
+  },
+  pool: {
+    dispatchActive: integerMetric,
+    dispatchQueued: integerMetric,
+    dispatchMax: integerMetric,
+    maxDispatchActive: integerMetric,
+    maxDispatchQueued: integerMetric,
+    avgWriteQueued: finiteMetric,
+    maxWriteQueued: integerMetric,
+    avgWriteActive: finiteMetric,
+    avgDrainQueueDepth: finiteMetric,
+    maxDrainQueueDepth: integerMetric,
+    totalDrainFailures: integerMetric,
+  },
+  scip: {
+    totalIngests: integerMetric,
+    successCount: integerMetric,
+    failureCount: integerMetric,
+    totalEdgesCreated: integerMetric,
+    totalEdgesUpgraded: integerMetric,
+    avgIngestMs: finiteMetric,
+    lastIngestAt: nullableTimestampString,
+  },
+  packed: {
+    totalDecisions: integerMetric,
+    packedCount: integerMetric,
+    fallbackCount: integerMetric,
+    packedAdoptionPct: percentage,
+    packedBytesTotal: integerMetric,
+    jsonBaselineBytesTotal: integerMetric,
+    bytesSaved: integerMetric,
+    bytesSavedRatio: ratio,
+    packedTokensTotal: integerMetric,
+    jsonBaselineTokensTotal: integerMetric,
+    tokensSaved: integerMetric,
+    tokensSavedRatio: ratio,
+    axisHits: { bytes: integerMetric, tokens: integerMetric, none: integerMetric },
+    perEncoder: recordOf(integerMetric),
+    byEncoder: recordOf({
+      totalDecisions: integerMetric,
+      packedCount: integerMetric,
+      fallbackCount: integerMetric,
+      packedAdoptionPct: percentage,
+      jsonBaselineBytesTotal: integerMetric,
+      packedBytesTotal: integerMetric,
+      bytesSaved: integerMetric,
+      bytesSavedRatio: ratio,
+      jsonBaselineTokensTotal: integerMetric,
+      packedTokensTotal: integerMetric,
+      tokensSaved: integerMetric,
+      tokensSavedRatio: ratio,
+    }),
+  },
+  ppr: {
+    totalRuns: integerMetric,
+    nativeCount: integerMetric,
+    jsCount: integerMetric,
+    fallbackCount: integerMetric,
+    nativeRatio: ratio,
+    avgComputeMs: finiteMetric,
+    p95ComputeMs: finiteMetric,
+    avgTouched: finiteMetric,
+    avgSeedCount: finiteMetric,
+  },
+  resources: {
+    cpuPctAvg: percentage,
+    cpuPctMax: percentage,
+    rssMb: finiteMetric,
+    rssMbMax: finiteMetric,
+    heapUsedMb: finiteMetric,
+    heapTotalMb: finiteMetric,
+    eventLoopLagP95Ms: finiteMetric,
+    eventLoopLagMaxMs: finiteMetric,
+  },
+  bottleneck: {
+    dominant: (value) => [
+      "cpu_bound", "memory_pressure", "db_latency", "indexer_parse", "io_throughput", "balanced",
+    ].includes(value),
+    confidence: ratio,
+    topSignals: arrayOf({
+      name: boundedString,
+      value: finiteMetric,
+      unit: boundedString,
+      weight: finiteMetric,
+    }),
+  },
+  toolVolume: {
+    totalCalls: integerMetric,
+    perTool: recordOf(integerMetric),
+    perToolErrors: recordOf(integerMetric),
+    callsPerMinute: finiteMetric,
+  },
+  auditBuffer: {
+    depth: integerMetric,
+    maxDepth: integerMetric,
+    droppedTotal: integerMetric,
+    sessionActive: booleanValue,
+  },
+  postIndexSession: {
+    totalSessions: integerMetric,
+    avgDurationMs: finiteMetric,
+    p50DurationMs: finiteMetric,
+    p95DurationMs: finiteMetric,
+    p99DurationMs: finiteMetric,
+    maxDurationMs: finiteMetric,
+    timeoutCount: integerMetric,
+    lastDurationMs: finiteMetric,
+    lastTimedOut: booleanValue,
+    lastEndedAt: nullableTimestampString,
+  },
+  toolOutput: {
+    schemaVersion: (value) => value === 1,
+    overall: toolOutputMetricSchema,
+    perTool: arrayOf({ tool: boundedString, ...toolOutputMetricSchema }),
+  },
+};
+
+export const SNAPSHOT_VALIDATOR_PATHS = Object.freeze(
+  wireLeafPaths(OBSERVABILITY_SNAPSHOT_SCHEMA),
+);
+
+export function validObservabilitySnapshot(value) {
+  return validWireValue(value, OBSERVABILITY_SNAPSHOT_SCHEMA);
+}
+
+const TIMESERIES_VALUE_FIELDS = Object.freeze({
+  cacheHitRate: "hitRate",
+  p95LatencyMs: "p95LatencyMs",
+  queueDepth: "queueDepth",
+  drainQueueDepth: "drainQueueDepth",
+  filesPerMinute: "filesPerMinute",
+  errorRate: "errorRate",
+  tokensUsedPerMin: "tokensUsedPerMin",
+  tokensSavedPerMin: "tokensSavedPerMin",
+  toolOutputRawBytes: "rawBytes",
+  toolOutputProjectedBytes: "projectedBytes",
+  toolOutputRawTokens: "rawTokens",
+  toolOutputProjectedTokens: "projectedTokens",
+  cpuPct: "cpuPct",
+  rssMb: "rssMb",
+  heapUsedMb: "heapUsedMb",
+  eventLoopLagMs: "eventLoopLagMs",
+});
+
+export function validTimeseries15mResponse(value, repoId) {
+  if (!plainRecord(value) || value.schemaVersion !== 1 || value.repoId !== repoId
+    || value.window !== "15m" || !Number.isSafeInteger(value.resolutionMs)
+    || value.resolutionMs <= 0 || !plainRecord(value.series)
+    || Object.keys(value).length !== 5
+    || Object.keys(value.series).length !== Object.keys(TIMESERIES_VALUE_FIELDS).length) return false;
+  return Object.entries(TIMESERIES_VALUE_FIELDS).every(([seriesName, valueField]) => {
+    const points = value.series[seriesName];
+    if (!Array.isArray(points) || points.length > 900) return false;
+    let previous = Number.NEGATIVE_INFINITY;
+    return points.every((point) => {
+      if (!plainRecord(point) || Object.keys(point).length !== 2
+        || !Number.isSafeInteger(point.t) || point.t < 0 || point.t < previous
+        || typeof point[valueField] !== "number" || !Number.isFinite(point[valueField])) return false;
+      previous = point.t;
+      return true;
+    });
+  });
+}
+
 function exactRecord(value, validators) {
   if (!plainRecord(value)) return false;
   const keys = Object.keys(validators);
