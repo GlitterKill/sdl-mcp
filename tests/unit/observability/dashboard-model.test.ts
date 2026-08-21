@@ -481,7 +481,7 @@ test("browser snapshot validation covers every compiler and runtime leaf and rej
   }), false, "hostile cache additions fail closed");
 });
 
-test("browser 15m timeseries validation rejects wrong scope, malformed, oversized, nonfinite, and unordered series", async () => {
+test("browser 15m timeseries validation matches the configurable short-ring contract", async () => {
   const model = await import("../../../dist/ui/observability-dashboard-model.js");
   const validate = model.validTimeseries15mResponse as
     | ((value: unknown, repoId: string) => boolean)
@@ -491,6 +491,7 @@ test("browser 15m timeseries validation rejects wrong scope, malformed, oversize
   assert.equal(validate?.(baseline, "repo-a"), true);
   assert.equal(validate?.({ ...baseline, repoId: "repo-b" }, "repo-a"), false);
   assert.equal(validate?.({ ...baseline, window: "1h" }, "repo-a"), false);
+  assert.equal(validate?.({ ...baseline, resolutionMs: 999_999 }, "repo-a"), false);
   assert.equal(validate?.({
     ...baseline,
     series: { ...baseline.series, cacheHitRate: [{ t: 1, hostile: 1 }] },
@@ -499,7 +500,14 @@ test("browser 15m timeseries validation rejects wrong scope, malformed, oversize
     ...baseline,
     series: {
       ...baseline.series,
-      cacheHitRate: Array.from({ length: 901 }, (_, t) => ({ t, hitRate: 1 })),
+      cacheHitRate: Array.from({ length: 3_600 }, (_, t) => ({ t, hitRate: 1 })),
+    },
+  }, "repo-a"), true, "the configured 60-minute short ring is valid server output");
+  assert.equal(validate?.({
+    ...baseline,
+    series: {
+      ...baseline.series,
+      cacheHitRate: Array.from({ length: 3_601 }, (_, t) => ({ t, hitRate: 1 })),
     },
   }, "repo-a"), false);
   assert.equal(validate?.({
@@ -1346,7 +1354,7 @@ test("dashboard client validates snapshot and 15m wires before clocks or renderi
       ...clientTimeseries(),
       series: {
         ...clientTimeseries().series,
-        cacheHitRate: Array.from({ length: 901 }, (_, t) => ({ t, hitRate: 1 })),
+        cacheHitRate: Array.from({ length: 3_601 }, (_, t) => ({ t, hitRate: 1 })),
       },
     },
     {
@@ -1770,6 +1778,49 @@ test("disconnected fallback polling is single-flight and releases after settleme
   await next;
 });
 
+test("a hung old-repository poll cannot own or clear the new repository poll", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  let interval: (() => Promise<void>) | null = null;
+  const requests: Array<{ url: string; deferred: ReturnType<typeof deferredResponse> }> = [];
+  const client = dashboard.createDashboardClient({
+    now: () => 100,
+    buildHeaders: () => ({}),
+    fetchImpl: async (url: string) => {
+      const deferred = deferredResponse();
+      requests.push({ url, deferred });
+      return deferred.promise;
+    },
+    setIntervalFn: (callback: () => Promise<void>) => {
+      interval = callback;
+      return 1;
+    },
+    clearIntervalFn: () => {},
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  client.start();
+  const repoAPoll = interval?.();
+  assert.equal(requests.length, 3);
+
+  client.switchRepo("repo-b");
+  const repoBPoll = interval?.();
+  assert.equal(requests.length, 6, "repo B starts without waiting for repo A");
+
+  for (const request of requests.slice(0, 3)) {
+    request.deferred.resolve(new Response(null, { status: 500 }));
+  }
+  await repoAPoll;
+  const joinedRepoB = interval?.();
+  assert.equal(requests.length, 6, "repo A settlement cannot clear repo B ownership");
+
+  for (const request of requests.slice(3)) {
+    request.deferred.resolve(new Response(null, { status: 500 }));
+  }
+  await Promise.all([repoBPoll, joinedRepoB]);
+});
+
 test("dashboard lifetime reset is exact, recovery-safe, and rehydrates before focus returns", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const createClient = dashboard.createDashboardClient as Function;
@@ -1812,7 +1863,7 @@ test("dashboard lifetime reset is exact, recovery-safe, and rehydrates before fo
   client.acceptLifetime(readyEnvelope());
   assert.equal(await client.resetLifetime({ control, confirmReset: () => false }), false);
   assert.equal(requests.length, 0);
-  nextLifetime = { ...readyEnvelope(), epoch: 2 };
+  nextLifetime = { ...readyEnvelope(), epoch: 2, resetAt: GENERATED_AT };
   assert.equal(await client.resetLifetime({ control, confirmReset: () => true }), true);
   assert.equal(requests.length, 2, "POST is followed immediately by lifetime GET");
   assert.equal(requests[0].url, "/api/observability/lifetime/reset");
@@ -1860,6 +1911,56 @@ test("reset recovery refresh remains visible but cannot satisfy the committed re
   assert.equal(client.getState().lifetime.persistenceState, "recoveryRequired");
   assert.equal(client.view().lifetime.state, "RECOVERY REQUIRED");
   assert.equal(client.view().resetDisabled, true);
+});
+
+test("reset success requires an exact receipt and matching lifetime reset identity", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const exactReceipt = {
+    schemaVersion: 1,
+    repoId: "repo-a",
+    epoch: 2,
+    resetAt: GENERATED_AT,
+    lastCheckpointAt: GENERATED_AT,
+    persistenceState: "ready",
+  };
+  const probes = [
+    {
+      name: "partial receipt",
+      receipt: { repoId: "repo-a", epoch: 1, resetAt: GENERATED_AT },
+      lifetime: readyEnvelope(),
+    },
+    {
+      name: "extra-key receipt",
+      receipt: { ...exactReceipt, extra: true },
+      lifetime: { ...readyEnvelope(), epoch: 2, resetAt: GENERATED_AT },
+    },
+    {
+      name: "mismatched lifetime resetAt",
+      receipt: exactReceipt,
+      lifetime: { ...readyEnvelope(), epoch: 2, resetAt: null },
+    },
+  ];
+
+  for (const probe of probes) {
+    const client = dashboard.createDashboardClient({
+      now: () => 1_000,
+      buildHeaders: () => ({}),
+      fetchImpl: async (url: string) => Response.json(
+        url.endsWith("/reset") ? probe.receipt : probe.lifetime,
+      ),
+      applySnapshot: () => {},
+      applyLifetime: () => {},
+      applyTimeseries: () => {},
+    });
+    client.switchRepo("repo-a");
+    client.acceptLifetime(readyEnvelope());
+    assert.equal(
+      await client.resetLifetime({ control: null, confirmReset: () => true }),
+      "committed-refresh-failed",
+      probe.name,
+    );
+    assert.equal(client.getState().lifetime, null, probe.name);
+  }
 });
 
 test("dashboard lifetime reset exposes a fixed server error and preserves state", async () => {
@@ -1910,7 +2011,7 @@ test("concurrent lifetime resets share one request and restore both controls", a
         });
       }
       gets += 1;
-      return Response.json({ ...readyEnvelope(), epoch: 2 });
+      return Response.json({ ...readyEnvelope(), epoch: 2, resetAt: GENERATED_AT });
     },
     applySnapshot: () => {},
     applyLifetime: () => {},
@@ -1966,7 +2067,9 @@ test("reset preserves a concurrent committed lifetime in both POST and poll comp
     if (pollFirst) {
       poll = client.fetchLifetime();
       await waitForRequest(1);
-      lifetimeRequests[0].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+      lifetimeRequests[0].resolve(Response.json({
+        ...readyEnvelope(), epoch: 2, resetAt: GENERATED_AT,
+      }));
       assert.equal(await poll, true);
     }
     post.resolve(Response.json({
@@ -1978,7 +2081,9 @@ test("reset preserves a concurrent committed lifetime in both POST and poll comp
     if (!pollFirst) {
       poll = client.fetchLifetime();
       await waitForRequest(2);
-      lifetimeRequests[1].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+      lifetimeRequests[1].resolve(Response.json({
+        ...readyEnvelope(), epoch: 2, resetAt: GENERATED_AT,
+      }));
       assert.equal(await poll, true);
     }
     await waitForRequest(2);
@@ -2016,7 +2121,9 @@ test("reset receipt fences pre-receipt lifetime 404 and 500 outcomes after a com
     const reset = client.resetLifetime({ control: null, confirmReset: () => true });
     const committedPoll = client.fetchLifetime();
     await waitForRequest(1);
-    lifetimeRequests[0].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+    lifetimeRequests[0].resolve(Response.json({
+      ...readyEnvelope(), epoch: 2, resetAt: GENERATED_AT,
+    }));
     assert.equal(await committedPoll, true);
     const latePoll = client.fetchLifetime();
     await waitForRequest(2);
@@ -2079,7 +2186,9 @@ test("combined same-repository request races keep the newest series and committe
   assert.equal(await newerSeries, true);
   timeseriesRequests[0].resolve(Response.json(clientTimeseries(1)));
   assert.equal(await olderSeries, false);
-  lifetimeRequests[1].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+  lifetimeRequests[1].resolve(Response.json({
+    ...readyEnvelope(), epoch: 2, resetAt: GENERATED_AT,
+  }));
   assert.equal(await lifetimePoll, true);
   lifetimeRequests[0].resolve(new Response(null, { status: 500 }));
   assert.equal(await reset, true);
@@ -2107,7 +2216,7 @@ test("reset completion is ignored after a repository generation change", async (
         });
       }
       lifetimeGets += 1;
-      return Response.json({ ...readyEnvelope(), epoch: 2 });
+      return Response.json({ ...readyEnvelope(), epoch: 2, resetAt: GENERATED_AT });
     },
     applySnapshot: () => {},
     applyLifetime: (presentation: { state: string }) => lifetimeRenders.push(presentation.state),

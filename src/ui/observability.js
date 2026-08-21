@@ -128,6 +128,12 @@ export function createDashboardClient(options) {
     lifetime?.persistenceState !== "recoveryRequired" &&
     barrier.epoch !== null && Number.isSafeInteger(lifetime?.epoch) &&
     lifetime.epoch >= barrier.epoch &&
+    (lifetime.epoch === barrier.epoch
+      ? lifetime.resetAt === barrier.resetAt
+      : typeof lifetime.resetAt === "string" && lifetimeIsCurrentFor(
+        { repoId: barrier.repoId, generatedAt: barrier.resetAt },
+        { repoId: barrier.repoId, generatedAt: lifetime.resetAt, sampleIntervalMs: value.sampleIntervalMs },
+      )) &&
     lifetimeIsCurrentFor({ repoId: barrier.repoId, generatedAt: barrier.resetAt }, lifetime);
 
   const acceptSnapshot = (snapshot) => {
@@ -271,13 +277,15 @@ export function createDashboardClient(options) {
       notify();
       return Promise.resolve();
     }
-    if (pollInFlight) return pollInFlight;
-    pollInFlight = Promise.allSettled([
+    if (pollInFlight?.repoGeneration === repoGeneration) return pollInFlight.promise;
+    const owner = { repoGeneration, promise: null };
+    owner.promise = Promise.allSettled([
       fetchSnapshot(), fetchLifetime(), fetchTimeseries("15m"),
     ]).then(notify).finally(() => {
-      pollInFlight = null;
+      if (pollInFlight === owner) pollInFlight = null;
     });
-    return pollInFlight;
+    pollInFlight = owner;
+    return owner.promise;
   };
   const stopFallback = () => {
     if (fallbackTimer !== null) clearIntervalFn(fallbackTimer);
@@ -290,9 +298,12 @@ export function createDashboardClient(options) {
 
   const resetBarrierFrom = (receipt, repoId) => {
     if (
-      plainRecord(receipt) && receipt.repoId === repoId &&
+      plainRecord(receipt) && Object.keys(receipt).length === 6 &&
+      receipt.schemaVersion === 1 && receipt.repoId === repoId &&
       Number.isSafeInteger(receipt.epoch) && receipt.epoch >= 0 &&
-      acceptedTimestamp({ repoId, generatedAt: receipt.resetAt })
+      acceptedTimestamp({ repoId, generatedAt: receipt.resetAt }) &&
+      acceptedTimestamp({ repoId, generatedAt: receipt.lastCheckpointAt }) &&
+      receipt.persistenceState === "ready"
     ) return { repoId, epoch: receipt.epoch, resetAt: receipt.resetAt };
     // A successful POST may have committed even if its receipt is unusable.
     // Fail closed for ready envelopes while still allowing recovery state through.

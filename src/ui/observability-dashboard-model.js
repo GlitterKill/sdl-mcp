@@ -831,12 +831,13 @@ const TIMESERIES_VALUE_FIELDS = Object.freeze({
 export function validTimeseries15mResponse(value, repoId) {
   if (!plainRecord(value) || value.schemaVersion !== 1 || value.repoId !== repoId
     || value.window !== "15m" || !Number.isSafeInteger(value.resolutionMs)
-    || value.resolutionMs <= 0 || !plainRecord(value.series)
+    || value.resolutionMs !== 1_000 || !plainRecord(value.series)
     || Object.keys(value).length !== 5
     || Object.keys(value.series).length !== Object.keys(TIMESERIES_VALUE_FIELDS).length) return false;
   return Object.entries(TIMESERIES_VALUE_FIELDS).every(([seriesName, valueField]) => {
     const points = value.series[seriesName];
-    if (!Array.isArray(points) || points.length > 900) return false;
+    // The configurable short ring can retain up to 60 minutes at 1 Hz.
+    if (!Array.isArray(points) || points.length > 3_600) return false;
     let previous = Number.NEGATIVE_INFINITY;
     return points.every((point) => {
       if (!plainRecord(point) || Object.keys(point).length !== 2
