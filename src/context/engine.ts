@@ -1134,6 +1134,9 @@ function sortOmitted(
   return [...omitted].sort(
     (left, right) =>
       left.tier - right.tier ||
+      // A missing card is first coverage; skeleton and hot path are upgrades.
+      (left.rung === "card" ? 0 : 1) -
+        (right.rung === "card" ? 0 : 1) ||
       left.rank - right.rank ||
       left.symbolId.localeCompare(right.symbolId) ||
       left.rung.localeCompare(right.rung),

@@ -4,6 +4,7 @@
  */
 
 import { attachRawContext } from "../../token-usage.js";
+import { extractProjectionRequestOptions } from "../../request-normalization.js";
 import { parseActionHandlerArgs } from "../../../gateway/dispatch-spine.js";
 import {
   SearchEditRequestSchema,
@@ -102,7 +103,10 @@ function compactStoredSummary(
   };
 }
 
-function compactRetrievalEvidence(evidence: RetrievalEvidence): RetrievalEvidence {
+function compactRetrievalEvidence(
+  evidence: RetrievalEvidence,
+  includeDiagnostics: boolean,
+): RetrievalEvidence {
   const topRanksPerSource = Object.fromEntries(
     Object.entries(evidence.topRanksPerSource).map(([source, ranks]) => [
       source,
@@ -110,7 +114,7 @@ function compactRetrievalEvidence(evidence: RetrievalEvidence): RetrievalEvidenc
     ]),
   );
 
-  return {
+  const compacted: RetrievalEvidence = {
     ...evidence,
     topRanksPerSource,
     ...(evidence.feedbackBoosts
@@ -144,11 +148,17 @@ function compactRetrievalEvidence(evidence: RetrievalEvidence): RetrievalEvidenc
         }
       : {}),
   };
+  if (!includeDiagnostics) {
+    delete compacted.fusionLatencyMs;
+    delete compacted.diagnosticTimings;
+  }
+  return compacted;
 }
 
 async function handlePreview(
   request: Extract<SearchEditRequest, { mode: "preview" }>,
   context: ToolContext | undefined,
+  includeDiagnostics: boolean,
 ): Promise<SearchEditResponse> {
   const preview = await planSearchEditPreview({
     repoId: request.repoId,
@@ -199,7 +209,10 @@ async function handlePreview(
     expiresAt: new Date(stored.expiresAt).toISOString(),
     ...(preview.summary.partial ? { partial: true } : {}),
     ...(preview.retrievalEvidence
-      ? { retrievalEvidence: compactRetrievalEvidence(preview.retrievalEvidence) }
+      ? { retrievalEvidence: compactRetrievalEvidence(
+          preview.retrievalEvidence,
+          includeDiagnostics,
+        ) }
       : {}),
   };
   const rawBytes = computeAggregateRawBytes(stored);
@@ -304,9 +317,10 @@ export async function handleSearchEdit(
   args: unknown,
   context?: ToolContext,
 ): Promise<SearchEditResponse> {
+  const { includeDiagnostics = false } = extractProjectionRequestOptions(args);
   const request = parseActionHandlerArgs(SearchEditRequestSchema, args);
   if (request.mode === "preview") {
-    return handlePreview(request, context);
+    return handlePreview(request, context, includeDiagnostics);
   }
   return handleApply(request);
 }

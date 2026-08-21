@@ -981,7 +981,7 @@ export async function handleRepoStatus(
             liveIndexStatus,
           }
         : {}),
-      memories,
+      ...(memories !== undefined ? { memories } : {}),
       derivedState: statusDerivedState,
     };
   };

@@ -1416,6 +1416,26 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       hasSources || hasFallback,
       `retrievalEvidence should expose sources or fallbackReason; got ${JSON.stringify(ev)}`,
     );
+    assert.strictEqual(ev.fusionLatencyMs, undefined);
+    assert.strictEqual(ev.diagnosticTimings, undefined);
+
+    const diagnosticPreview = (await handleSearchEdit({
+      mode: "preview",
+      repoId: REPO_ID,
+      targeting: "text",
+      query: {
+        literal: "oldName",
+        replacement: "newName",
+        global: true,
+      },
+      editMode: "replacePattern",
+      filters: { extensions: [".txt"] },
+      includeDiagnostics: true,
+    })) as SearchEditPreviewResponse;
+
+    assert.ok(
+      diagnosticPreview.retrievalEvidence?.fusionLatencyMs !== undefined,
+    );
   });
 
   it("apply rejects an expired planHandle (fail-closed on TTL)", async () => {

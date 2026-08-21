@@ -41,6 +41,19 @@ describe("repo status health fields", () => {
     assert.ok(source.includes("serverInfo: getServerInfo(),"));
   });
 
+  it("omits memories when repo status has none to surface", () => {
+    // ponytail: source-adjacent guard until repo status dependencies have injection seams.
+    const source = readFileSync(
+      new URL("../../src/mcp/tools/repo.ts", import.meta.url),
+      "utf8",
+    );
+
+    assert.ok(
+      source.includes("...(memories !== undefined ? { memories } : {}),"),
+    );
+    assert.doesNotMatch(source, /^\s{6}memories,$/m);
+  });
+
   it("opens and closes the root without enumerating it", async () => {
     const root = mkdtempSync(join(tmpdir(), "sdl-root-bounded-probe-"));
     let opens = 0;

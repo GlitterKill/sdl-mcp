@@ -978,6 +978,16 @@ describe("ContextEngineV2 pure contracts", () => {
       [[rankOne.symbolId, "card"]],
     );
     assert.equal(result.omitted.byReason.budget, 3);
+    assert.deepEqual(
+      result.omitted.highestRanked.map(({ symbolId, rung }) => [symbolId, rung]),
+      [[rankTwo.symbolId, "card"]],
+    );
+    assert.deepEqual(result.nextActions, [
+      {
+        id: "symbol.getCard",
+        args: { symbolIds: [rankTwo.symbolId] },
+      },
+    ]);
   });
 
   it("canonicalizes evidence, edges, lanes, and recovery actions", () => {
