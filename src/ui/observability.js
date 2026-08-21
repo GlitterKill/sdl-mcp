@@ -29,6 +29,11 @@ let dashboardClient = null;
 const els = {};
 
 const DEFAULT_SAMPLE_INTERVAL_MS = 2_000;
+const SNAPSHOT_OBJECT_FIELDS = [
+  "cache", "retrieval", "beam", "delta", "indexing", "tokenEfficiency",
+  "predictiveContext", "health", "latency", "pool", "scip", "packed", "ppr",
+  "resources", "bottleneck", "toolVolume", "auditBuffer", "postIndexSession", "toolOutput",
+];
 
 export function clampDashboardSampleInterval(value) {
   return Number.isFinite(value)
@@ -47,6 +52,9 @@ export function createDashboardClient(options) {
   const onChange = options.onChange ?? (() => {});
   const onError = options.onError ?? (() => {});
   let fallbackTimer = null;
+  let generation = 0;
+  let resetPromise = null;
+  let lifetimeBarrier = null;
   let value = {
     repoId: "",
     snapshot: null,
@@ -62,8 +70,8 @@ export function createDashboardClient(options) {
     value = next;
     notify();
   };
-  const getUrl = (path, extra = "") =>
-    `${path}?repoId=${encodeURIComponent(value.repoId)}${extra}`;
+  const getUrl = (path, extra = "", repoId = value.repoId) =>
+    `${path}?repoId=${encodeURIComponent(repoId)}${extra}`;
   const requestJson = async (url, init = {}) => {
     const response = await fetchImpl(url, {
       ...init,
@@ -93,11 +101,47 @@ export function createDashboardClient(options) {
       sampleIntervalMs: lifetime.sampleIntervalMs,
     }) !== "FRESHNESS UNAVAILABLE";
 
+  const plainRecord = (candidate) =>
+    candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
+    && Object.getPrototypeOf(candidate) === Object.prototype;
+  const validSnapshotShape = (snapshot) =>
+    plainRecord(snapshot) && snapshot.schemaVersion === 1 &&
+    Number.isFinite(snapshot.uptimeMs) && snapshot.uptimeMs >= 0 &&
+    Object.keys(snapshot).length === SNAPSHOT_OBJECT_FIELDS.length + 4 &&
+    SNAPSHOT_OBJECT_FIELDS.every((field) => plainRecord(snapshot[field]));
+  const acceptedTimestamp = (candidate) => lifetimeIsCurrentFor(candidate, {
+    repoId: candidate.repoId,
+    generatedAt: candidate.generatedAt,
+    sampleIntervalMs: value.sampleIntervalMs,
+  });
+  const captureRequest = () => ({
+    repoId: value.repoId,
+    generation,
+    snapshot: value.snapshot,
+    lifetime: value.lifetime,
+    sessionReceivedAtMs: value.sessionReceivedAtMs,
+    lifetimeReceivedAtMs: value.lifetimeReceivedAtMs,
+  });
+  const sameGeneration = (request) =>
+    request.repoId === value.repoId && request.generation === generation;
+  const requestStateUnchanged = (request, kind) => sameGeneration(request) && (
+    kind === "snapshot"
+      ? request.snapshot === value.snapshot
+        && request.sessionReceivedAtMs === value.sessionReceivedAtMs
+      : request.lifetime === value.lifetime
+        && request.lifetimeReceivedAtMs === value.lifetimeReceivedAtMs
+  );
+
   const acceptSnapshot = (snapshot) => {
     if (
-      !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) ||
-      snapshot.repoId !== value.repoId || typeof snapshot.generatedAt !== "string"
+      !validSnapshotShape(snapshot) || snapshot.repoId !== value.repoId ||
+      typeof snapshot.generatedAt !== "string" || !acceptedTimestamp(snapshot)
     ) return false;
+    if (value.snapshot && !lifetimeIsCurrentFor(value.snapshot, {
+      repoId: snapshot.repoId,
+      generatedAt: snapshot.generatedAt,
+      sampleIntervalMs: value.sampleIntervalMs,
+    })) return false;
     const discardLifetime = value.lifetime && !lifetimeIsCurrentFor(snapshot, value.lifetime);
     replace({
       ...value,
@@ -116,9 +160,21 @@ export function createDashboardClient(options) {
   const acceptLifetime = (lifetime) => {
     const presentation = lifetimePresentation(lifetime, 0);
     if (presentation.state === "UNAVAILABLE" || lifetime.repoId !== value.repoId) return false;
+    if (
+      lifetimeBarrier?.repoId === value.repoId &&
+      lifetime.persistenceState !== "recoveryRequired" && (
+        lifetimeBarrier.epoch === null ||
+        !Number.isSafeInteger(lifetime.epoch) || lifetime.epoch < lifetimeBarrier.epoch ||
+        !lifetimeIsCurrentFor({
+          repoId: lifetimeBarrier.repoId,
+          generatedAt: lifetimeBarrier.resetAt,
+        }, lifetime)
+      )
+    ) return false;
     if (value.snapshot && !lifetimeIsCurrentFor(value.snapshot, lifetime)) return false;
     if (value.lifetime && !lifetimeIsCurrentFor(value.lifetime, lifetime)) return false;
     const interval = clampDashboardSampleInterval(lifetime.sampleIntervalMs);
+    const intervalChanged = interval !== value.sampleIntervalMs;
     replace({
       ...value,
       lifetime,
@@ -126,16 +182,21 @@ export function createDashboardClient(options) {
       sampleIntervalMs: interval,
     });
     applyClientLifetime(presentation, lifetime);
-    if (!value.streamConnected && fallbackTimer !== null) restartFallback();
+    if (intervalChanged && fallbackTimer !== null) restartFallback();
     return true;
   };
 
   const fetchSnapshot = async () => {
+    const request = captureRequest();
     try {
-      const { response, json } = await requestJson(getUrl("/api/observability/snapshot"));
+      const { response, json } = await requestJson(
+        getUrl("/api/observability/snapshot", "", request.repoId),
+      );
+      if (!requestStateUnchanged(request, "snapshot")) return false;
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return acceptSnapshot(json);
     } catch (error) {
+      if (!requestStateUnchanged(request, "snapshot")) return false;
       onError("snapshot", error);
       notify();
       return false;
@@ -143,9 +204,14 @@ export function createDashboardClient(options) {
   };
 
   const fetchLifetime = async () => {
+    const request = captureRequest();
     try {
-      const { response, json } = await requestJson(getUrl("/api/observability/lifetime"));
+      const { response, json } = await requestJson(
+        getUrl("/api/observability/lifetime", "", request.repoId),
+      );
+      if (!requestStateUnchanged(request, "lifetime")) return false;
       if (response.status === 404) {
+        const intervalChanged = value.sampleIntervalMs !== DEFAULT_SAMPLE_INTERVAL_MS;
         replace({
           ...value,
           lifetime: null,
@@ -153,12 +219,13 @@ export function createDashboardClient(options) {
           sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS,
         });
         applyClientLifetime(lifetimePresentation(null, 0), null);
-        if (!value.streamConnected && fallbackTimer !== null) restartFallback();
+        if (intervalChanged && fallbackTimer !== null) restartFallback();
         return false;
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return acceptLifetime(json);
     } catch (error) {
+      if (!requestStateUnchanged(request, "lifetime")) return false;
       onError("lifetime", error);
       notify();
       return false;
@@ -166,20 +233,31 @@ export function createDashboardClient(options) {
   };
 
   const fetchTimeseries = async (windowName = "15m") => {
+    const request = captureRequest();
     try {
       const { response, json } = await requestJson(
-        getUrl("/api/observability/timeseries", `&window=${encodeURIComponent(windowName)}`),
+        getUrl(
+          "/api/observability/timeseries",
+          `&window=${encodeURIComponent(windowName)}`,
+          request.repoId,
+        ),
       );
+      if (!sameGeneration(request)) return false;
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       applyClientTimeseries(json);
       return true;
     } catch (error) {
+      if (!sameGeneration(request)) return false;
       onError("timeseries", error);
       return false;
     }
   };
 
   const poll = async () => {
+    if (value.streamConnected) {
+      notify();
+      return;
+    }
     await Promise.allSettled([fetchSnapshot(), fetchLifetime(), fetchTimeseries("15m")]);
     notify();
   };
@@ -189,13 +267,71 @@ export function createDashboardClient(options) {
   };
   const restartFallback = () => {
     stopFallback();
-    if (!value.streamConnected) fallbackTimer = setIntervalFn(poll, value.sampleIntervalMs);
+    fallbackTimer = setIntervalFn(poll, value.sampleIntervalMs);
+  };
+
+  const resetBarrierFrom = (receipt, repoId) => {
+    if (
+      plainRecord(receipt) && receipt.repoId === repoId &&
+      Number.isSafeInteger(receipt.epoch) && receipt.epoch >= 0 &&
+      acceptedTimestamp({ repoId, generatedAt: receipt.resetAt })
+    ) return { repoId, epoch: receipt.epoch, resetAt: receipt.resetAt };
+    // A successful POST may have committed even if its receipt is unusable.
+    // Fail closed for ready envelopes while still allowing recovery state through.
+    return { repoId, epoch: null, resetAt: null };
+  };
+
+  const resetLifetime = ({ control, confirmReset }) => {
+    const restoreFocus = (promise) => promise.finally(() => control?.focus?.());
+    if (resetPromise) return restoreFocus(resetPromise);
+    if (value.lifetime?.persistenceState === "recoveryRequired") {
+      return restoreFocus(Promise.resolve(false));
+    }
+    const repoId = value.repoId;
+    const resetGeneration = generation;
+    if (!confirmReset(repoId)) return restoreFocus(Promise.resolve(false));
+
+    const operation = (async () => {
+      try {
+        const { response, json } = await requestJson("/api/observability/lifetime/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repoId,
+            confirmation: `RESET REPOSITORY LIFETIME: ${repoId}`,
+          }),
+        });
+        const resetRequest = { repoId, generation: resetGeneration };
+        if (!sameGeneration(resetRequest)) return false;
+        if (!response.ok) throw new Error(json?.error?.code ?? `HTTP ${response.status}`);
+        lifetimeBarrier = resetBarrierFrom(json, repoId);
+        value = {
+          ...value,
+          lifetime: null,
+          lifetimeReceivedAtMs: Number.NEGATIVE_INFINITY,
+        };
+        applyClientLifetime(lifetimePresentation(null, 0), null);
+        notify();
+        const refreshed = await fetchLifetime();
+        if (!sameGeneration(resetRequest)) return false;
+        return refreshed ? true : "committed-refresh-failed";
+      } catch (error) {
+        if (repoId === value.repoId && resetGeneration === generation) onError("reset", error);
+        return false;
+      }
+    })();
+    resetPromise = operation.finally(() => {
+      resetPromise = null;
+    });
+    return restoreFocus(resetPromise);
   };
 
   const api = {
     getState: () => ({ ...value }),
     switchRepo(repoId) {
       stopFallback();
+      generation += 1;
+      lifetimeBarrier = null;
       value = {
         repoId,
         snapshot: null,
@@ -214,13 +350,16 @@ export function createDashboardClient(options) {
     fetchSnapshot,
     fetchLifetime,
     fetchTimeseries,
+    start() {
+      if (fallbackTimer === null) restartFallback();
+    },
+    stop: stopFallback,
     hydrate: () => Promise.allSettled([
       fetchSnapshot(), fetchLifetime(), fetchTimeseries("15m"),
     ]),
     setStreamConnected(connected) {
       value = { ...value, streamConnected: connected };
-      if (connected) stopFallback();
-      else if (fallbackTimer === null) restartFallback();
+      if (fallbackTimer === null) restartFallback();
       notify();
     },
     handleSseEvent(event) {
@@ -268,34 +407,7 @@ export function createDashboardClient(options) {
         sampleIntervalMs: value.sampleIntervalMs,
       });
     },
-    async resetLifetime({ control, confirmReset }) {
-      try {
-        if (value.lifetime?.persistenceState === "recoveryRequired") return false;
-        if (!confirmReset(value.repoId)) return false;
-        const { response, json } = await requestJson("/api/observability/lifetime/reset", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            repoId: value.repoId,
-            confirmation: `RESET REPOSITORY LIFETIME: ${value.repoId}`,
-          }),
-        });
-        if (!response.ok) throw new Error(json?.error?.code ?? `HTTP ${response.status}`);
-        value = {
-          ...value,
-          lifetime: null,
-          lifetimeReceivedAtMs: Number.NEGATIVE_INFINITY,
-        };
-        applyClientLifetime(lifetimePresentation(null, 0), null);
-        notify();
-        return await fetchLifetime() ? true : "committed-refresh-failed";
-      } catch (error) {
-        onError("reset", error);
-        return false;
-      } finally {
-        control?.focus?.();
-      }
-    },
+    resetLifetime,
   };
   return api;
 }
