@@ -337,9 +337,9 @@ export function createDashboardClient(options) {
           applyClientLifetime(lifetimePresentation(null, 0), null);
           notify();
         }
-        const refreshed = await fetchLifetime();
+        await fetchLifetime();
         if (!sameRepository(resetRequest)) return false;
-        return refreshed || lifetimeSatisfiesBarrier(value.lifetime)
+        return lifetimeSatisfiesBarrier(value.lifetime)
           ? true
           : "committed-refresh-failed";
       } catch (error) {

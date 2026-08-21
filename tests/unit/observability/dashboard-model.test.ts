@@ -1827,6 +1827,41 @@ test("dashboard lifetime reset is exact, recovery-safe, and rehydrates before fo
   assert.equal(control.focusCount, 3);
 });
 
+test("reset recovery refresh remains visible but cannot satisfy the committed receipt barrier", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const client = dashboard.createDashboardClient({
+    now: () => 1_000,
+    buildHeaders: () => ({}),
+    fetchImpl: async (url: string) => url.endsWith("/reset")
+      ? Response.json({
+        schemaVersion: 1, repoId: "repo-a", epoch: 2,
+        resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
+        persistenceState: "ready",
+      })
+      : Response.json({
+        schemaVersion: 1,
+        sampleIntervalMs: 2_000,
+        generatedAt: GENERATED_AT,
+        repoId: "repo-a",
+        persistenceState: "recoveryRequired",
+        recoveryReason: "corruptCandidates",
+      }),
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  client.acceptLifetime(readyEnvelope());
+
+  assert.equal(
+    await client.resetLifetime({ control: null, confirmReset: () => true }),
+    "committed-refresh-failed",
+  );
+  assert.equal(client.getState().lifetime.persistenceState, "recoveryRequired");
+  assert.equal(client.view().lifetime.state, "RECOVERY REQUIRED");
+  assert.equal(client.view().resetDisabled, true);
+});
+
 test("dashboard lifetime reset exposes a fixed server error and preserves state", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const errors: Array<{ area: string; message: string }> = [];
