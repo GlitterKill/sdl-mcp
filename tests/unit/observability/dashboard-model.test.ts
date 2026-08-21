@@ -1900,41 +1900,57 @@ test("concurrent lifetime resets share one request and restore both controls", a
   assert.equal(secondControl.focusCount, 1);
 });
 
-test("reset succeeds when a concurrent poll already accepted the committed lifetime", async () => {
+test("reset preserves a concurrent committed lifetime in both POST and poll completion orders", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
-  const lifetimeRequests: ReturnType<typeof deferredResponse>[] = [];
-  let markResetGetStarted!: () => void;
-  const resetGetStarted = new Promise<void>((resolve) => { markResetGetStarted = resolve; });
-  const client = dashboard.createDashboardClient({
-    now: () => 1_000,
-    buildHeaders: () => ({}),
-    fetchImpl: async (url: string) => {
-      if (url.endsWith("/reset")) {
-        return Response.json({
-          schemaVersion: 1, repoId: "repo-a", epoch: 2,
-          resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
-          persistenceState: "ready",
-        });
-      }
-      const request = deferredResponse();
-      lifetimeRequests.push(request);
-      if (lifetimeRequests.length === 1) markResetGetStarted();
-      return request.promise;
-    },
-    applySnapshot: () => {},
-    applyLifetime: () => {},
-    applyTimeseries: () => {},
-  });
-  client.switchRepo("repo-a");
-  client.acceptLifetime(readyEnvelope());
-  const reset = client.resetLifetime({ control: null, confirmReset: () => true });
-  await resetGetStarted;
-  const poll = client.fetchLifetime();
-  lifetimeRequests[1].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
-  assert.equal(await poll, true);
-  lifetimeRequests[0].resolve(new Response(null, { status: 500 }));
-  assert.equal(await reset, true, "accepted barrier-satisfying state makes refresh successful");
-  assert.equal(client.getState().lifetime.epoch, 2);
+  for (const pollFirst of [false, true]) {
+    const post = deferredResponse();
+    const lifetimeRequests: ReturnType<typeof deferredResponse>[] = [];
+    const requestWaiters = new Map<number, () => void>();
+    const waitForRequest = (count: number) => lifetimeRequests.length >= count
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => { requestWaiters.set(count, resolve); });
+    const client = dashboard.createDashboardClient({
+      now: () => 1_000,
+      buildHeaders: () => ({}),
+      fetchImpl: async (url: string) => {
+        if (url.endsWith("/reset")) return post.promise;
+        const request = deferredResponse();
+        lifetimeRequests.push(request);
+        requestWaiters.get(lifetimeRequests.length)?.();
+        return request.promise;
+      },
+      applySnapshot: () => {},
+      applyLifetime: () => {},
+      applyTimeseries: () => {},
+    });
+    client.switchRepo("repo-a");
+    client.acceptLifetime(readyEnvelope());
+    const reset = client.resetLifetime({ control: null, confirmReset: () => true });
+    let poll: Promise<boolean>;
+
+    if (pollFirst) {
+      poll = client.fetchLifetime();
+      await waitForRequest(1);
+      lifetimeRequests[0].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+      assert.equal(await poll, true);
+    }
+    post.resolve(Response.json({
+      schemaVersion: 1, repoId: "repo-a", epoch: 2,
+      resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
+      persistenceState: "ready",
+    }));
+    await waitForRequest(1);
+    if (!pollFirst) {
+      poll = client.fetchLifetime();
+      await waitForRequest(2);
+      lifetimeRequests[1].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+      assert.equal(await poll, true);
+    }
+    await waitForRequest(2);
+    lifetimeRequests[pollFirst ? 1 : 0].resolve(new Response(null, { status: 500 }));
+    assert.equal(await reset, true, `${pollFirst ? "poll" : "POST"}-first reset succeeds`);
+    assert.equal(client.getState().lifetime.epoch, 2);
+  }
 });
 
 test("combined same-repository request races keep the newest series and committed lifetime", async () => {
