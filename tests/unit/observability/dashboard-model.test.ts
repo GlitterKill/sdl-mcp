@@ -1939,6 +1939,16 @@ test("reset success requires an exact receipt and matching lifetime reset identi
       receipt: exactReceipt,
       lifetime: { ...readyEnvelope(), epoch: 2, resetAt: null },
     },
+    {
+      name: "later epoch generated before its own reset",
+      receipt: exactReceipt,
+      lifetime: {
+        ...readyEnvelope(),
+        epoch: 3,
+        resetAt: "2026-08-20T12:03:00.000Z",
+        generatedAt: "2026-08-20T12:02:00.000Z",
+      },
+    },
   ];
 
   for (const probe of probes) {

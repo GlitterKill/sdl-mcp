@@ -134,7 +134,7 @@ export function createDashboardClient(options) {
         { repoId: barrier.repoId, generatedAt: barrier.resetAt },
         { repoId: barrier.repoId, generatedAt: lifetime.resetAt, sampleIntervalMs: value.sampleIntervalMs },
       )) &&
-    lifetimeIsCurrentFor({ repoId: barrier.repoId, generatedAt: barrier.resetAt }, lifetime);
+    lifetimeIsCurrentFor({ repoId: barrier.repoId, generatedAt: lifetime.resetAt }, lifetime);
 
   const acceptSnapshot = (snapshot) => {
     if (
