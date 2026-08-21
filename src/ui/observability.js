@@ -1479,9 +1479,11 @@ export function applySnapshot(snap, repoId) {
     for (const element of dashboard.querySelectorAll(
       "output[data-field], span[data-field], em[data-field]",
     )) setText(element, null);
+    // Only generated SVG children are disposable; the donut reuses its static circles.
     for (const element of dashboard.querySelectorAll(
-      'div[data-field]:not([data-field="content"]):not([data-field="noData"]), ul[data-field], svg[data-field], [data-series]',
+      'div[data-field]:not([data-field="content"]):not([data-field="noData"]), ul[data-field], svg.spark[data-field], [data-series]',
     )) element.replaceChildren();
+    renderDonut(dashboard.querySelector('svg[data-field="engineDonut"]'), 0);
     const confidence = dashboard.querySelector('[data-field="confidenceBar"]');
     confidence?.style?.setProperty("width", "0%");
     const content = dashboard.querySelector('[data-field="content"]');

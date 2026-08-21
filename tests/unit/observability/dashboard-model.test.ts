@@ -1214,7 +1214,7 @@ test("repository switch clears rendered session values before the next fetch", a
   assert.equal(client.sectionState("cache"), "STALE");
 });
 
-test("session renderer removes prior repository values on switch", async () => {
+test("session renderer clears dynamic values without destroying the indexing donut", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const repo = { textContent: "repo-a" };
   const generatedAt = { textContent: GENERATED_AT };
@@ -1223,12 +1223,41 @@ test("session renderer removes prior repository values on switch", async () => {
     children: ["secret-repo-a-row"],
     replaceChildren() { this.children = []; },
   };
+  const spark = {
+    children: ["secret-repo-a-spark"],
+    replaceChildren() { this.children = []; },
+  };
+  const donutBase = { className: "donut-base" };
+  const donutFill = {
+    className: "donut-fill",
+    strokeDasharray: "67 33",
+    setAttribute(name: string, value: string) {
+      if (name === "stroke-dasharray") this.strokeDasharray = value;
+    },
+  };
+  const donut = {
+    children: [donutBase, donutFill],
+    replaceChildren() { this.children = []; },
+    querySelector(selector: string) {
+      return selector === ".donut-fill" && this.children.includes(donutFill) ? donutFill : null;
+    },
+  };
+  const indexingPanel = {
+    querySelector: (selector: string) => selector.includes("engineDonut") ? donut : null,
+  };
   const content = { hidden: false };
   const noData = { hidden: true, textContent: "" };
   const dashboardRoot = {
-    querySelector: (selector: string) => selector === '[data-field="content"]' ? content : noData,
+    querySelector: (selector: string) => {
+      if (selector === '[data-field="content"]') return content;
+      if (selector === '[data-field="noData"]') return noData;
+      if (selector.includes("engineDonut")) return donut;
+      return null;
+    },
     querySelectorAll: (selector: string) => {
       if (selector.includes("output[data-field]")) return [scalar];
+      if (selector.includes("svg.spark[data-field]")) return [dynamic, spark];
+      if (selector.includes("svg[data-field]")) return [dynamic, spark, donut];
       if (selector.startsWith("div[data-field]")) return [dynamic];
       return [];
     },
@@ -1241,8 +1270,10 @@ test("session renderer removes prior repository values on switch", async () => {
         if (selector === "#dashboard") return dashboardRoot;
         if (selector.includes('repoId')) return repo;
         if (selector.includes('generatedAt')) return generatedAt;
+        if (selector === '[data-panel="indexing"]') return indexingPanel;
         return null;
       },
+      querySelectorAll() { return []; },
     },
   });
   try {
@@ -1252,8 +1283,17 @@ test("session renderer removes prior repository values on switch", async () => {
     assert.equal(generatedAt.textContent, "—");
     assert.equal(scalar.textContent, "—");
     assert.deepEqual(dynamic.children, []);
+    assert.deepEqual(spark.children, []);
+    assert.equal(donut.children.length, 2, "clear preserves static donut circles");
+    assert.equal(donutFill.strokeDasharray, "0.00 100.00", "clear resets the visible donut");
     assert.equal(content.hidden, true);
     assert.equal(noData.hidden, false);
+    dashboard.applySnapshot({
+      repoId: "repo-b",
+      generatedAt: GENERATED_AT,
+      indexing: { engineDispatch: { rust: 3, ts: 1 } },
+    });
+    assert.equal(donutFill.strokeDasharray, "75.00 25.00", "the preserved donut remains updateable");
   } finally {
     if (priorDocument) Object.defineProperty(globalThis, "document", priorDocument);
     else Reflect.deleteProperty(globalThis, "document");
