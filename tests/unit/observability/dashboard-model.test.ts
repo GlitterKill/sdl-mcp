@@ -2010,6 +2010,26 @@ test("reset receipts must advance the pre-request lifetime identity", async () =
     lifetime: null,
   });
 
+  const metricSaturated = {
+    ...replayed,
+    saturated: true,
+  };
+  assert.deepEqual(await run(metricSaturated, {
+    schemaVersion: 1,
+    repoId: "repo-a",
+    epoch: 2,
+    resetAt: "2026-08-20T12:02:30.000Z",
+    lastCheckpointAt: "2026-08-20T12:02:30.000Z",
+    persistenceState: "ready",
+  }, {
+    ...metricSaturated,
+    resetAt: "2026-08-20T12:02:30.000Z",
+    generatedAt: "2026-08-20T12:03:00.000Z",
+  }), {
+    result: "committed-refresh-failed",
+    lifetime: null,
+  });
+
   const saturatedEpoch = Number.MAX_SAFE_INTEGER;
   const saturatedBefore = {
     ...readyEnvelope(),

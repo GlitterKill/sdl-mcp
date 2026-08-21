@@ -311,7 +311,7 @@ export function createDashboardClient(options) {
       );
       const advances = previous === null || resetAtNotOlder && (
         receipt.epoch > previous.epoch ||
-        previous.saturated && receipt.epoch === previous.epoch && previous.resetAt !== null &&
+        previous.epoch === Number.MAX_SAFE_INTEGER && receipt.epoch === previous.epoch && previous.resetAt !== null &&
           !lifetimeIsCurrentFor(
             { repoId, generatedAt: receipt.resetAt },
             { repoId, generatedAt: previous.resetAt, sampleIntervalMs: value.sampleIntervalMs },
