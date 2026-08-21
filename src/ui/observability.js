@@ -53,6 +53,7 @@ export function createDashboardClient(options) {
   const onError = options.onError ?? (() => {});
   let fallbackTimer = null;
   let generation = 0;
+  let timeseriesRequestSequence = 0;
   let resetPromise = null;
   let lifetimeBarrier = null;
   let value = {
@@ -131,6 +132,12 @@ export function createDashboardClient(options) {
       : request.lifetime === value.lifetime
         && request.lifetimeReceivedAtMs === value.lifetimeReceivedAtMs
   );
+  const lifetimeSatisfiesBarrier = (lifetime, barrier = lifetimeBarrier) =>
+    barrier?.repoId === lifetime?.repoId &&
+    lifetime?.persistenceState !== "recoveryRequired" &&
+    barrier.epoch !== null && Number.isSafeInteger(lifetime?.epoch) &&
+    lifetime.epoch >= barrier.epoch &&
+    lifetimeIsCurrentFor({ repoId: barrier.repoId, generatedAt: barrier.resetAt }, lifetime);
 
   const acceptSnapshot = (snapshot) => {
     if (
@@ -162,14 +169,8 @@ export function createDashboardClient(options) {
     if (presentation.state === "UNAVAILABLE" || lifetime.repoId !== value.repoId) return false;
     if (
       lifetimeBarrier?.repoId === value.repoId &&
-      lifetime.persistenceState !== "recoveryRequired" && (
-        lifetimeBarrier.epoch === null ||
-        !Number.isSafeInteger(lifetime.epoch) || lifetime.epoch < lifetimeBarrier.epoch ||
-        !lifetimeIsCurrentFor({
-          repoId: lifetimeBarrier.repoId,
-          generatedAt: lifetimeBarrier.resetAt,
-        }, lifetime)
-      )
+      lifetime.persistenceState !== "recoveryRequired" &&
+      !lifetimeSatisfiesBarrier(lifetime)
     ) return false;
     if (value.snapshot && !lifetimeIsCurrentFor(value.snapshot, lifetime)) return false;
     if (value.lifetime && !lifetimeIsCurrentFor(value.lifetime, lifetime)) return false;
@@ -234,6 +235,9 @@ export function createDashboardClient(options) {
 
   const fetchTimeseries = async (windowName = "15m") => {
     const request = captureRequest();
+    const requestSequence = ++timeseriesRequestSequence;
+    const isLatestRequest = () =>
+      sameGeneration(request) && requestSequence === timeseriesRequestSequence;
     try {
       const { response, json } = await requestJson(
         getUrl(
@@ -242,12 +246,12 @@ export function createDashboardClient(options) {
           request.repoId,
         ),
       );
-      if (!sameGeneration(request)) return false;
+      if (!isLatestRequest()) return false;
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       applyClientTimeseries(json);
       return true;
     } catch (error) {
-      if (!sameGeneration(request)) return false;
+      if (!isLatestRequest()) return false;
       onError("timeseries", error);
       return false;
     }
@@ -314,7 +318,9 @@ export function createDashboardClient(options) {
         notify();
         const refreshed = await fetchLifetime();
         if (!sameGeneration(resetRequest)) return false;
-        return refreshed ? true : "committed-refresh-failed";
+        return refreshed || lifetimeSatisfiesBarrier(value.lifetime)
+          ? true
+          : "committed-refresh-failed";
       } catch (error) {
         if (repoId === value.repoId && resetGeneration === generation) onError("reset", error);
         return false;

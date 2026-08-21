@@ -1289,6 +1289,32 @@ test("late REST responses cannot cross repositories or overwrite newer SSE state
   assert.deepEqual(errors, [], "superseded REST failures are ignored");
 });
 
+test("only the latest same-repository timeseries request may render", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const requests: ReturnType<typeof deferredResponse>[] = [];
+  const rendered: string[] = [];
+  const client = dashboard.createDashboardClient({
+    now: () => 100,
+    buildHeaders: () => ({}),
+    fetchImpl: async () => {
+      const request = deferredResponse();
+      requests.push(request);
+      return request.promise;
+    },
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: (value: { marker: string }) => rendered.push(value.marker),
+  });
+  client.switchRepo("repo-a");
+  const older = client.fetchTimeseries();
+  const newer = client.fetchTimeseries();
+  requests[1].resolve(Response.json({ window: "15m", series: {}, marker: "new" }));
+  assert.equal(await newer, true);
+  requests[0].resolve(Response.json({ window: "15m", series: {}, marker: "old" }));
+  assert.equal(await older, false);
+  assert.deepEqual(rendered, ["new"]);
+});
+
 test("repository switch clears rendered session values before the next fetch", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const sessionRenders: unknown[] = [];
@@ -1637,6 +1663,92 @@ test("concurrent lifetime resets share one request and restore both controls", a
   assert.equal(gets, 1);
   assert.equal(firstControl.focusCount, 1);
   assert.equal(secondControl.focusCount, 1);
+});
+
+test("reset succeeds when a concurrent poll already accepted the committed lifetime", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const lifetimeRequests: ReturnType<typeof deferredResponse>[] = [];
+  let markResetGetStarted!: () => void;
+  const resetGetStarted = new Promise<void>((resolve) => { markResetGetStarted = resolve; });
+  const client = dashboard.createDashboardClient({
+    now: () => 1_000,
+    buildHeaders: () => ({}),
+    fetchImpl: async (url: string) => {
+      if (url.endsWith("/reset")) {
+        return Response.json({
+          schemaVersion: 1, repoId: "repo-a", epoch: 2,
+          resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
+          persistenceState: "ready",
+        });
+      }
+      const request = deferredResponse();
+      lifetimeRequests.push(request);
+      if (lifetimeRequests.length === 1) markResetGetStarted();
+      return request.promise;
+    },
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: () => {},
+  });
+  client.switchRepo("repo-a");
+  client.acceptLifetime(readyEnvelope());
+  const reset = client.resetLifetime({ control: null, confirmReset: () => true });
+  await resetGetStarted;
+  const poll = client.fetchLifetime();
+  lifetimeRequests[1].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+  assert.equal(await poll, true);
+  lifetimeRequests[0].resolve(new Response(null, { status: 500 }));
+  assert.equal(await reset, true, "accepted barrier-satisfying state makes refresh successful");
+  assert.equal(client.getState().lifetime.epoch, 2);
+});
+
+test("combined same-repository request races keep the newest series and committed lifetime", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const lifetimeRequests: ReturnType<typeof deferredResponse>[] = [];
+  const timeseriesRequests: ReturnType<typeof deferredResponse>[] = [];
+  const rendered: string[] = [];
+  let markResetGetStarted!: () => void;
+  const resetGetStarted = new Promise<void>((resolve) => { markResetGetStarted = resolve; });
+  const client = dashboard.createDashboardClient({
+    now: () => 1_000,
+    buildHeaders: () => ({}),
+    fetchImpl: async (url: string) => {
+      if (url.endsWith("/reset")) {
+        return Response.json({
+          schemaVersion: 1, repoId: "repo-a", epoch: 2,
+          resetAt: GENERATED_AT, lastCheckpointAt: GENERATED_AT,
+          persistenceState: "ready",
+        });
+      }
+      const request = deferredResponse();
+      if (url.includes("/timeseries")) timeseriesRequests.push(request);
+      else {
+        lifetimeRequests.push(request);
+        if (lifetimeRequests.length === 1) markResetGetStarted();
+      }
+      return request.promise;
+    },
+    applySnapshot: () => {},
+    applyLifetime: () => {},
+    applyTimeseries: (value: { marker: string }) => rendered.push(value.marker),
+  });
+  client.switchRepo("repo-a");
+  client.acceptLifetime(readyEnvelope());
+  const reset = client.resetLifetime({ control: null, confirmReset: () => true });
+  await resetGetStarted;
+  const olderSeries = client.fetchTimeseries();
+  const newerSeries = client.fetchTimeseries();
+  const lifetimePoll = client.fetchLifetime();
+  timeseriesRequests[1].resolve(Response.json({ window: "15m", series: {}, marker: "new" }));
+  assert.equal(await newerSeries, true);
+  timeseriesRequests[0].resolve(Response.json({ window: "15m", series: {}, marker: "old" }));
+  assert.equal(await olderSeries, false);
+  lifetimeRequests[1].resolve(Response.json({ ...readyEnvelope(), epoch: 2 }));
+  assert.equal(await lifetimePoll, true);
+  lifetimeRequests[0].resolve(new Response(null, { status: 500 }));
+  assert.equal(await reset, true);
+  assert.deepEqual(rendered, ["new"]);
+  assert.equal(client.getState().lifetime.epoch, 2);
 });
 
 test("reset completion is ignored after a repository generation change", async () => {
