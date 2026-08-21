@@ -1973,6 +1973,85 @@ test("reset success requires an exact receipt and matching lifetime reset identi
   }
 });
 
+test("reset receipts must advance the pre-request lifetime identity", async () => {
+  const dashboard = await import("../../../dist/ui/observability.js");
+  const run = async (before: Record<string, unknown>, receipt: Record<string, unknown>, after: Record<string, unknown>) => {
+    const client = dashboard.createDashboardClient({
+      now: () => 1_000,
+      buildHeaders: () => ({}),
+      fetchImpl: async (url: string) => Response.json(url.endsWith("/reset") ? receipt : after),
+      applySnapshot: () => {},
+      applyLifetime: () => {},
+      applyTimeseries: () => {},
+    });
+    client.switchRepo("repo-a");
+    client.acceptLifetime(before);
+    return {
+      result: await client.resetLifetime({ control: null, confirmReset: () => true }),
+      lifetime: client.getState().lifetime,
+    };
+  };
+  const replayed = {
+    ...readyEnvelope(),
+    epoch: 2,
+    resetAt: "2026-08-20T12:01:00.000Z",
+    generatedAt: "2026-08-20T12:02:00.000Z",
+    sessionCount: 5,
+  };
+  assert.deepEqual(await run(replayed, {
+    schemaVersion: 1,
+    repoId: "repo-a",
+    epoch: 2,
+    resetAt: "2026-08-20T12:01:00.000Z",
+    lastCheckpointAt: "2026-08-20T12:01:00.000Z",
+    persistenceState: "ready",
+  }, replayed), {
+    result: "committed-refresh-failed",
+    lifetime: null,
+  });
+
+  const saturatedEpoch = Number.MAX_SAFE_INTEGER;
+  const saturatedBefore = {
+    ...readyEnvelope(),
+    epoch: saturatedEpoch,
+    resetAt: "2026-08-20T12:01:00.000Z",
+    generatedAt: "2026-08-20T12:01:30.000Z",
+    saturated: true,
+  };
+  const saturatedAfter = {
+    ...saturatedBefore,
+    resetAt: "2026-08-20T12:02:00.000Z",
+    generatedAt: "2026-08-20T12:02:30.000Z",
+  };
+  const saturated = await run(saturatedBefore, {
+    schemaVersion: 1,
+    repoId: "repo-a",
+    epoch: saturatedEpoch,
+    resetAt: saturatedAfter.resetAt,
+    lastCheckpointAt: saturatedAfter.resetAt,
+    persistenceState: "ready",
+  }, saturatedAfter);
+  assert.equal(saturated.result, true);
+  assert.equal(saturated.lifetime.epoch, saturatedEpoch);
+  assert.equal(saturated.lifetime.resetAt, saturatedAfter.resetAt);
+
+  const concurrent = await run(replayed, {
+    schemaVersion: 1,
+    repoId: "repo-a",
+    epoch: 3,
+    resetAt: "2026-08-20T12:03:00.000Z",
+    lastCheckpointAt: "2026-08-20T12:03:00.000Z",
+    persistenceState: "ready",
+  }, {
+    ...readyEnvelope(),
+    epoch: 4,
+    resetAt: "2026-08-20T12:04:00.000Z",
+    generatedAt: "2026-08-20T12:05:00.000Z",
+  });
+  assert.equal(concurrent.result, true);
+  assert.equal(concurrent.lifetime.epoch, 4);
+});
+
 test("dashboard lifetime reset exposes a fixed server error and preserves state", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
   const errors: Array<{ area: string; message: string }> = [];

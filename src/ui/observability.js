@@ -296,7 +296,7 @@ export function createDashboardClient(options) {
     fallbackTimer = setIntervalFn(poll, value.sampleIntervalMs);
   };
 
-  const resetBarrierFrom = (receipt, repoId) => {
+  const resetBarrierFrom = (receipt, repoId, previous) => {
     if (
       plainRecord(receipt) && Object.keys(receipt).length === 6 &&
       receipt.schemaVersion === 1 && receipt.repoId === repoId &&
@@ -304,7 +304,21 @@ export function createDashboardClient(options) {
       acceptedTimestamp({ repoId, generatedAt: receipt.resetAt }) &&
       acceptedTimestamp({ repoId, generatedAt: receipt.lastCheckpointAt }) &&
       receipt.persistenceState === "ready"
-    ) return { repoId, epoch: receipt.epoch, resetAt: receipt.resetAt };
+    ) {
+      const resetAtNotOlder = previous === null || previous.resetAt === null || lifetimeIsCurrentFor(
+        { repoId, generatedAt: previous.resetAt },
+        { repoId, generatedAt: receipt.resetAt, sampleIntervalMs: value.sampleIntervalMs },
+      );
+      const advances = previous === null || resetAtNotOlder && (
+        receipt.epoch > previous.epoch ||
+        previous.saturated && receipt.epoch === previous.epoch && previous.resetAt !== null &&
+          !lifetimeIsCurrentFor(
+            { repoId, generatedAt: receipt.resetAt },
+            { repoId, generatedAt: previous.resetAt, sampleIntervalMs: value.sampleIntervalMs },
+          )
+      );
+      if (advances) return { repoId, epoch: receipt.epoch, resetAt: receipt.resetAt };
+    }
     // A successful POST may have committed even if its receipt is unusable.
     // Fail closed for ready envelopes while still allowing recovery state through.
     return { repoId, epoch: null, resetAt: null };
@@ -318,6 +332,12 @@ export function createDashboardClient(options) {
     }
     const repoId = value.repoId;
     const resetGeneration = repoGeneration;
+    const resetBaseline = value.lifetime === null || value.lifetime.persistenceState === "recoveryRequired"
+      ? null : {
+        epoch: value.lifetime.epoch,
+        resetAt: value.lifetime.resetAt,
+        saturated: value.lifetime.saturated,
+      };
     if (!confirmReset(repoId)) return restoreFocus(Promise.resolve(false));
 
     const operation = (async () => {
@@ -333,7 +353,7 @@ export function createDashboardClient(options) {
         const resetRequest = { repoId, repoGeneration: resetGeneration };
         if (!sameRepository(resetRequest)) return false;
         if (!response.ok) throw new Error(json?.error?.code ?? `HTTP ${response.status}`);
-        lifetimeBarrier = resetBarrierFrom(json, repoId);
+        lifetimeBarrier = resetBarrierFrom(json, repoId, resetBaseline);
         channels.lifetime.receiptVersion += 1;
         // A poll may publish the committed epoch while the POST is in flight.
         // The receipt fences older negative requests; withhold only values that
