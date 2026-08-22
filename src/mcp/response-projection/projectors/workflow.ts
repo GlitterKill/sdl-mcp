@@ -176,9 +176,15 @@ function compactStep(
   const resolvedArgs = stepArgs(input, stepIndex, raw);
   const usesChildOptions = options.detail !== input.options.detail
     || options.includeDiagnostics !== input.options.includeDiagnostics;
+  const childAction = typeof raw.fn === "string"
+    ? getWorkflowChildAction(raw.fn)
+    : undefined;
   const visibleResult = status === "ok" && usesChildOptions
     ? projectChildValue(input, raw, stepIndex, projectCompatibilityValue)
-    : visible.result;
+    : status === "ok"
+        && (childAction === "usage.stats" || raw.fn === "usage.stats")
+      ? visible.result
+      : raw.result;
   let result = sanitizeWorkflowStepValue(
     visibleResult,
     options.includeDiagnostics,

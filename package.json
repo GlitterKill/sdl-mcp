@@ -112,7 +112,7 @@
     "ladybug:openssl:pack": "npm pack ./ladybug-openssl/npm/win32-x64 --json",
     "qa:isolated": "npm run build && node scripts/run-isolated-mutating-qa.mjs",
     "qualify:ladybug": "npm run build && node scripts/qualify-ladybug-driver.mjs",
-    "test:tool-output-contract": "node --experimental-strip-types --test-concurrency=1 --test tests/unit/response-projection-inventory.test.ts tests/unit/tool-output-doc-contract.test.ts tests/integration/response-artifact-recovery.test.ts tests/integration/agent-output-matrix.test.ts"
+    "test:tool-output-contract": "node --experimental-strip-types --test-concurrency=1 --test tests/unit/response-projection-inventory.test.ts tests/unit/tool-output-doc-contract.test.ts tests/integration/response-artifact-recovery.test.ts tests/integration/agent-output-matrix.test.ts tests/integration/mcp-output-schema-wire.test.ts"
   },
   "keywords": [
     "mcp",

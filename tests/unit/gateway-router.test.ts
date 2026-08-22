@@ -4,6 +4,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createActionMap, routeGatewayCall } from "../../dist/gateway/router.js";
+import {
+  CodeGatewaySchema,
+  QueryGatewaySchema,
+} from "../../dist/gateway/schemas.js";
+import { withProjectionRequestOptions } from "../../dist/mcp/response-projection/request-options.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
@@ -106,6 +111,65 @@ describe("Gateway router", () => {
           routeGatewayCall({ action: "unknown.action", repoId: "test" }, map),
         /Unknown gateway action/,
       );
+    });
+
+    it("retains public projection options outside child handler args", async () => {
+      const map = createActionMap();
+      let receivedArgs: unknown;
+      map["code.getSkeleton"] = {
+        ...map["code.getSkeleton"],
+        handler: async (args: unknown) => {
+          receivedArgs = args;
+          return args;
+        },
+      };
+
+      const parsed = withProjectionRequestOptions(CodeGatewaySchema).parse({
+        repoId: "test",
+        action: "code.getSkeleton",
+        symbolId: "symbol",
+        detail: "standard",
+        includeDiagnostics: true,
+        refsMode: "off",
+      });
+      assert.strictEqual(parsed.detail, "standard");
+      assert.strictEqual(parsed.includeDiagnostics, true);
+      assert.strictEqual(parsed.refsMode, "off");
+
+      await routeGatewayCall(parsed, map);
+
+      assert.deepStrictEqual(receivedArgs, {
+        repoId: "test",
+        symbolId: "symbol",
+        refsMode: "off",
+      });
+    });
+
+    it("routes symbol.getCard refsMode off to the child handler", async () => {
+      const map = createActionMap();
+      let receivedArgs: unknown;
+      map["symbol.getCard"] = {
+        ...map["symbol.getCard"],
+        handler: async (args: unknown) => {
+          receivedArgs = args;
+          return args;
+        },
+      };
+
+      const parsed = QueryGatewaySchema.parse({
+        repoId: "test",
+        action: "symbol.getCard",
+        symbolId: "symbol",
+        refsMode: "off",
+      });
+
+      await routeGatewayCall(parsed, map);
+
+      assert.deepStrictEqual(receivedArgs, {
+        repoId: "test",
+        symbolId: "symbol",
+        refsMode: "off",
+      });
     });
 
     it("merges repoId into action params", async () => {

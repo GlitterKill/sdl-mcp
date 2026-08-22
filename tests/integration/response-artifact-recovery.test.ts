@@ -150,6 +150,7 @@ describe("response artifact recovery", () => {
     configureArtifacts(baseDir);
 
     for (const [name, fixture] of Object.entries(DETAIL_FIXTURES)) {
+      const source = structuredClone(fixture);
       const stored = await maybeStoreLargeResponse({
         repoId: "repo-a",
         toolName: "runtime.execute",
@@ -161,12 +162,72 @@ describe("response artifact recovery", () => {
       if (stored.responseMode !== "handle") assert.fail("expected handle");
 
       const recovered = await exhaustArtifact("repo-a", stored.payload.handle);
+      assert.deepStrictEqual(fixture, source, `${name} source mutated`);
+      assert.deepStrictEqual(
+        JSON.parse(recovered.toString("utf-8")),
+        source,
+        `${name} reconstructed projection`,
+      );
       assert.deepStrictEqual(
         recovered,
-        Buffer.from(JSON.stringify(fixture), "utf-8"),
+        Buffer.from(JSON.stringify(source), "utf-8"),
         name,
       );
     }
+  });
+
+  it("returns terminal pages at and beyond the response byte boundary", async () => {
+    const baseDir = makeTempDir();
+    configureArtifacts(baseDir);
+    const payload = "exact boundary";
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "runtime.execute",
+      payload,
+      responseMode: "handle",
+      contentKind: "text",
+      artifactBaseDir: baseDir,
+    });
+    assert.equal(stored.responseMode, "handle");
+    if (stored.responseMode !== "handle") assert.fail("expected handle");
+
+    const totalBytes = Buffer.byteLength(payload, "utf-8");
+    for (const offsetBytes of [totalBytes, totalBytes + 7]) {
+      const page = ResponseGetResponseSchema.parse(
+        await handleResponseGet({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          cursor: { offsetBytes },
+          maxBytes: 4,
+        }),
+      );
+      assert.equal(page.content, "");
+      assert.equal(page.complete, true);
+      assert.equal(page.truncated, false);
+      assert.equal(page.range?.offsetBytes, totalBytes);
+      assert.equal(page.range?.returnedBytes, 0);
+      assert.equal(page.range?.totalBytes, totalBytes);
+      assert.equal(page.nextAction, undefined);
+    }
+  });
+
+  it("rejects invalid response.get cursors with typed validation details", async () => {
+    await assert.rejects(
+      () =>
+        handleResponseGet({
+          repoId: "repo-a",
+          handle: "response-repo-a-1778234400000-0123456789abcdef",
+          cursor: { offsetBytes: -1 },
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof z.ZodError);
+        assert.deepStrictEqual(
+          error.issues.map(({ code, path }) => ({ code, path })),
+          [{ code: "too_small", path: ["cursor", "offsetBytes"] }],
+        );
+        return true;
+      },
+    );
   });
 
   it("keeps UTF-8 pages valid when the requested boundary falls inside a character", async () => {

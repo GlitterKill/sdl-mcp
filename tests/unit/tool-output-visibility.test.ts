@@ -8,6 +8,13 @@ import {
   buildToolResponseEnvelope,
   MCPServer,
 } from "../../dist/server.js";
+import {
+  projectCompatibilityValue,
+  projectToolResultForModelContent,
+  projectWorkflowChildResultForModel,
+  resolveCompatibilityProjectionProfile,
+} from "../../dist/mcp/context-response-projection.js";
+import { projectModelValue } from "../../dist/mcp/response-projection/projectors/index.js";
 import { formatToolCallForUser } from "../../dist/mcp/tool-call-formatter.js";
 import { formatCliToolOutput } from "../../dist/cli/commands/tool-dispatch.js";
 import { estimateTokens } from "../../dist/util/tokenize.js";
@@ -88,6 +95,46 @@ function buildVisibleEnvelope(
 }
 
 describe("visible tool output", () => {
+  it("preserves conditional not-modified symbol card responses", () => {
+    const conditional = {
+      notModified: true,
+      etag: "card-etag",
+      ledgerVersion: "v1",
+    };
+
+    assert.deepEqual(
+      projectModelValue(
+        {
+          canonicalResult: conditional,
+          action: "symbol.getCard",
+          profile: resolveCompatibilityProjectionProfile("symbol.getCard"),
+          options: { detail: "compact", includeDiagnostics: false },
+          context: {
+            toolName: "symbol.getCard",
+            requestArgs: { detail: "compact" },
+          },
+        },
+        projectCompatibilityValue,
+      ),
+      conditional,
+    );
+    assert.deepEqual(
+      projectToolResultForModelContent("symbol.getCard", conditional, {
+        detail: "compact",
+      }),
+      conditional,
+    );
+    assert.deepEqual(
+      projectWorkflowChildResultForModel(
+        "symbolGetCard",
+        conditional,
+        { repoId: "sdl-mcp" },
+        { detail: "compact" },
+      ),
+      conditional,
+    );
+  });
+
   it("suppresses token-meter footer output by default", () => {
     const footer = "100 / 1.0k tokens (SDL/raw-equiv)";
     const envelope = buildToolResponseEnvelope(
@@ -226,6 +273,29 @@ describe("visible tool output", () => {
     assert.equal(evidence[0]?.symbolId, "symbol:1");
   });
 
+  it("omits memory hints from generic structured content", () => {
+    const envelope = buildToolResponseEnvelope(
+      {
+        repoId: "repo",
+        memories: [],
+        total: 0,
+        hasMore: false,
+        nextOffset: null,
+        _memoryHint: {
+          suggestedType: "bugfix",
+          message: "Consider storing context about this debugging session.",
+          pattern: "deep_debugging",
+        },
+      },
+      null,
+      "",
+      "sdl.memory.query",
+      {},
+    );
+
+    assert.equal(envelope.structuredContent?._memoryHint, undefined);
+  });
+
   it("omits workflow etag cache from agent-visible output", () => {
     const envelope = buildToolResponseEnvelope(
       {
@@ -285,7 +355,7 @@ describe("visible tool output", () => {
         status: "complete",
         taskType: "debug",
         evidence: [],
-        diagnostics: { timings: { totalMs: 12 } },
+        diagnosticTimings: { totalMs: 12 },
         _packedStats: { savedRatio: 0.5 },
       },
       null,
@@ -296,9 +366,12 @@ describe("visible tool output", () => {
       },
     );
 
-    assert.deepEqual(envelope.structuredContent?.diagnostics, { timings: { totalMs: 12 } });
+    assert.deepEqual(envelope.structuredContent?.diagnosticTimings, { totalMs: 12 });
     assert.equal(envelope.structuredContent?._packedStats, undefined);
-    assert.doesNotMatch(envelope.content[0]?.text ?? "", /diagnostics|_packedStats/);
+    assert.doesNotMatch(
+      envelope.content[0]?.text ?? "",
+      /totalMs|diagnosticTimings|_packedStats/,
+    );
   });
 
   it("preserves requested timing diagnostics for generic tools", () => {
@@ -318,6 +391,35 @@ describe("visible tool output", () => {
     assert.deepEqual(envelope.structuredContent?.diagnostics, {
       timings: { totalMs: 12, phases: { dispatch: 10 } },
     });
+  });
+
+  it("omits the slice refresh lease without mutating the canonical result", () => {
+    const canonical = {
+      sliceHandle: "slice-1",
+      currentVersion: "version-2",
+      delta: null,
+      lease: {
+        expiresAt: "2026-08-22T12:00:00.000Z",
+        minVersion: "version-1",
+        maxVersion: "version-2",
+      },
+    };
+    const snapshot = structuredClone(canonical);
+
+    const envelope = buildToolResponseEnvelope(
+      canonical,
+      null,
+      "",
+      "sdl.slice.refresh",
+      {},
+    );
+
+    assert.deepEqual(envelope.structuredContent, {
+      sliceHandle: "slice-1",
+      currentVersion: "version-2",
+      delta: null,
+    });
+    assert.deepEqual(canonical, snapshot);
   });
 
   it("formats every representative tool with non-JSON visible text", () => {
@@ -401,16 +503,18 @@ describe("visible tool output", () => {
     const envelope = buildVisibleEnvelope("sdl.runtime.execute", {}, payload);
 
     assert.equal(summary, full);
-    assert.equal(envelope.content[0]?.text, "runtime.execute -> complete");
-    assert.doesNotMatch(envelope.content[0]?.text ?? "", /diff-looking text/);
+    assert.equal(
+      envelope.content[0]?.text,
+      "runtime.execute -> complete (exit 0)\n"
+        + "  stdout:\n"
+        + "    diff-looking text: --- before and +++ after",
+    );
   });
 
   it("projects sdl.context structured fields after compact visible projection", () => {
     const result = buildVisibleEnvelope(
       "sdl.context",
-      {
-        includeDiagnostics: true,
-      },
+      {},
       {
         status: "complete",
         taskType: "debug",
@@ -423,7 +527,7 @@ describe("visible tool output", () => {
     const content = result.content as Array<Record<string, unknown>>;
     const structuredContent = result.structuredContent as Record<string, unknown>;
     assert.equal(structuredContent.etag, undefined);
-    assert.ok(structuredContent.diagnostics);
+    assert.equal(structuredContent.diagnostics, undefined);
     assert.doesNotMatch(String(content[0]?.text), /totalMs/);
     assert.doesNotMatch(String(content[0]?.text), /context-etag/);
   });
@@ -1059,7 +1163,7 @@ describe("visible tool output", () => {
     const compactJson =
       '{"status":"complete","taskType":"debug","evidence":[{"symbolId":"symbol:control","rung":"card"}]}';
     const fullJson =
-      '{"status":"complete","taskType":"debug","durationMs":41,"exitCode":0,"evidence":[{"symbolId":"symbol:control","rung":"card"}],"source":"canonical-source"}';
+      '{"status":"complete","taskType":"debug","evidence":[{"symbolId":"symbol:control","rung":"card"}]}';
 
     assert.deepEqual(capture("compact"), {
       contentText: "Sdl context\n\nstatus: complete\ntaskType: debug\nevidence: 1 item",
@@ -1073,14 +1177,7 @@ describe("visible tool output", () => {
       contentText: "Sdl context\n\nstatus: complete\ntaskType: debug\nevidence: 1 item",
       structuredJson: fullJson,
       structuredBytes: Buffer.byteLength(fullJson, "utf8"),
-      keyOrder: [
-        "status",
-        "taskType",
-        "durationMs",
-        "exitCode",
-        "evidence",
-        "source",
-      ],
+      keyOrder: ["status", "taskType", "evidence"],
       isError: undefined,
       recovery: undefined,
     });

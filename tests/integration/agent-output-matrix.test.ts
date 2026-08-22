@@ -17,6 +17,7 @@ import {
 import {
   buildValidatedRecoveryAction,
 } from "../../dist/mcp/response-projection/recovery.js";
+import { PAGE_SIZE_MAX } from "../../dist/config/constants.js";
 import { estimateTokens } from "../../dist/util/tokenize.js";
 import {
   AGENT_OUTPUT_CASES,
@@ -186,7 +187,15 @@ describe("agent retrieval output matrix", () => {
         );
       }
 
-      for (const profileCase of AGENT_OUTPUT_PROFILE_CASES) {
+      for (const profileCase of [
+        ...AGENT_OUTPUT_PROFILE_CASES,
+        {
+          name: "standard",
+          detail: "standard",
+          includeDiagnostics: false,
+          budgetClass: "standard",
+        },
+      ] as const) {
         const args = {
           ...fixture.publicRequest,
           detail: profileCase.detail,
@@ -283,6 +292,86 @@ describe("agent retrieval output matrix", () => {
 
     assert.deepEqual(failures, [], failures.join("\n"));
   });
+  it("keeps non-context diagnostics on exact family allowlists", () => {
+    const runtimeFixture = AGENT_OUTPUT_CASES.find(
+      ({ action }) => action === "runtime.execute",
+    );
+    const repoFixture = AGENT_OUTPUT_CASES.find(
+      ({ action }) => action === "repo.status",
+    );
+    assert.ok(runtimeFixture);
+    assert.ok(repoFixture);
+
+    const runtimeCanonical = runtimeFixture.canonicalResultFactory();
+    assert.ok(isRecord(runtimeCanonical));
+    const runtimeBefore = clone(runtimeCanonical);
+    const runtimeCompact = projectToolResultForModelContent(
+      "sdl.runtime.execute",
+      runtimeCanonical,
+      { ...runtimeFixture.publicRequest, detail: "compact" },
+    );
+    const runtimeDiagnostic = projectToolResultForModelContent(
+      "sdl.runtime.execute",
+      runtimeCanonical,
+      {
+        ...runtimeFixture.publicRequest,
+        detail: "compact",
+        includeDiagnostics: true,
+      },
+    );
+    assert.ok(isRecord(runtimeCompact));
+    assert.ok(isRecord(runtimeDiagnostic));
+    assert.deepEqual(
+      Object.keys(runtimeDiagnostic),
+      [...Object.keys(runtimeCompact), "durationMs"],
+    );
+    assert.equal(runtimeDiagnostic.durationMs, runtimeCanonical.durationMs);
+    assert.deepEqual(runtimeCanonical, runtimeBefore);
+
+    const repoBase = repoFixture.canonicalResultFactory();
+    assert.ok(isRecord(repoBase));
+    const repoCanonical = {
+      ...repoBase,
+      rootPath: ".",
+      healthScore: 99,
+      healthComponents: { graph: "ok" },
+      prefetchStats: { hitCount: 1 },
+      serverInfo: { mode: "fixture" },
+      liveIndexStatus: { state: "idle" },
+      ignoredOperational: "private",
+    };
+    const repoBefore = clone(repoCanonical);
+    const repoCompact = projectToolResultForModelContent(
+      "sdl.repo.status",
+      repoCanonical,
+      { ...repoFixture.publicRequest, detail: "compact" },
+    );
+    const repoDiagnostic = projectToolResultForModelContent(
+      "sdl.repo.status",
+      repoCanonical,
+      {
+        ...repoFixture.publicRequest,
+        detail: "compact",
+        includeDiagnostics: true,
+      },
+    );
+    assert.ok(isRecord(repoCompact));
+    assert.ok(isRecord(repoDiagnostic));
+    assert.deepEqual(
+      Object.keys(repoDiagnostic).filter((key) => !Object.hasOwn(repoCompact, key)),
+      [
+        "rootPath",
+        "healthScore",
+        "healthComponents",
+        "prefetchStats",
+        "serverInfo",
+        "liveIndexStatus",
+      ],
+    );
+    assert.equal(Object.hasOwn(repoDiagnostic, "ignoredOperational"), false);
+    assert.deepEqual(repoCanonical, repoBefore);
+  });
+
   it("suppresses private data, validates recovery, diagnostics, and workflow parity", () => {
     const workflowFnByAction = new Map(
       Object.entries(WORKFLOW_CHILD_ACTION_BINDINGS)
@@ -733,7 +822,8 @@ describe("agent retrieval output matrix", () => {
   });
 
   it("preserves compact spillover paging across direct and workflow projection", () => {
-    const symbols = Array.from({ length: 2 }, (_, index) => ({
+    for (const symbolCount of [1, PAGE_SIZE_MAX, PAGE_SIZE_MAX + 1]) {
+      const symbols = Array.from({ length: symbolCount }, (_, index) => ({
       symbolId: `symbol-${index}`,
       repoId: "repo",
       file: `src/${index}.ts`,
@@ -757,7 +847,7 @@ describe("agent retrieval output matrix", () => {
     }));
     const canonical = {
       spilloverHandle: "spillover-a",
-      cursor: "2",
+      cursor: String(symbolCount),
       hasMore: true,
       symbols,
     };
@@ -784,7 +874,7 @@ describe("agent retrieval output matrix", () => {
       "symbols",
     ]);
     assert.equal(compact.spilloverHandle, "spillover-a");
-    assert.equal(compact.cursor, "2");
+      assert.equal(compact.cursor, String(symbolCount));
     assert.equal(compact.hasMore, true);
     assert.equal(compactSymbols.length, symbols.length);
     assert.equal("repoId" in compactSymbols[0]!, false);
@@ -797,6 +887,14 @@ describe("agent retrieval output matrix", () => {
       (compactSymbols[0]!.deps as Record<string, unknown>).imports,
       symbols[0]!.deps.imports.slice(0, 8),
     );
+      assert.deepEqual(
+        projectToolResultForModelContent(
+          "sdl.slice.spillover.get",
+          canonical,
+          args,
+        ),
+        compact,
+      );
     assert.deepEqual(
       projectToolResultForModelContent(
         "sdl.slice.spillover.get",
@@ -834,8 +932,9 @@ describe("agent retrieval output matrix", () => {
         }],
       },
     ) as { results: Array<{ fn: string; result: unknown }> };
-    assert.deepEqual(workflow.results[0]!.result, compact);
-    assert.deepEqual(canonical, before);
+      assert.deepEqual(workflow.results[0]!.result, compact);
+      assert.deepEqual(canonical, before);
+    }
   });
 
   it("preserves terminal and empty spillover states", () => {
@@ -1174,14 +1273,36 @@ describe("agent retrieval output matrix", () => {
         ],
       },
     };
-    assert.deepEqual(
-      projectToolResultForModelContent(
-        "sdl.slice.build",
-        unavailable,
-        { detail: "compact" },
-      ),
+    const before = clone(unavailable);
+    const args = { detail: "standard" as const };
+    const first = projectToolResultForModelContent(
+      "sdl.slice.build",
       unavailable,
+      args,
     );
+    const repeated = projectToolResultForModelContent(
+      "sdl.slice.build",
+      unavailable,
+      args,
+    );
+    assert.deepEqual(first, unavailable);
+    assert.deepEqual(repeated, first);
+    assert.ok(isRecord(first));
+    assert.equal(first.isError, true);
+    assert.ok(isRecord(first.error));
+    assert.equal(first.error.code, "GRAPH_RETRIEVAL_UNAVAILABLE");
+    assert.doesNotMatch(JSON.stringify(first), /internal error/i);
+
+    const envelope = buildToolResponseEnvelope(
+      unavailable,
+      null,
+      "",
+      "sdl.slice.build",
+      args,
+    );
+    assert.equal(envelope.isError, true);
+    assert.deepEqual(envelope.structuredContent, first);
+    assert.deepEqual(unavailable, before);
 
     const healthy = projectToolResultForModelContent(
       "sdl.slice.build",

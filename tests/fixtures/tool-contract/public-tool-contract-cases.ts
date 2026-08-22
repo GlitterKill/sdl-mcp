@@ -4,7 +4,158 @@ export type PublicToolContractSurface =
   | "gateway"
   | "workflow";
 
-export type WireFixtureContext = Readonly<Record<string, unknown>>;
+export interface WireFixtureContext {
+  readonly repoId: string;
+  readonly knownFile: string;
+  readonly symbolId: string;
+  readonly fromVersion: string;
+  readonly toVersion: string;
+  readonly responseHandle: string;
+  readonly runtimeHandle: string;
+  readonly workflowHandle: string;
+  readonly sliceHandle: string;
+  readonly editPreviewHandle: string;
+}
+
+function buildArgsForAction(
+  action: string,
+  context: WireFixtureContext,
+): Record<string, unknown> {
+  const {
+    repoId,
+    knownFile,
+    symbolId,
+    fromVersion,
+    toVersion,
+    responseHandle,
+    runtimeHandle,
+    workflowHandle,
+    sliceHandle,
+  } = context;
+
+  switch (action) {
+    case "action.search":
+      return { query: "repo.status", limit: 2 };
+    case "agent":
+      return {
+        repoId,
+        action: "agent.feedback.query",
+        limit: 1,
+        detail: "full",
+      };
+    case "agent.feedback.query":
+      return { repoId, detail: "full" };
+    case "buffer.status":
+    case "memory.query":
+    case "policy.get":
+    case "repo.status":
+    case "semantic.enrichment.status":
+      return { repoId };
+    case "code":
+      return { repoId, action: "code.getSkeleton", symbolId, refsMode: "off" };
+    case "code.getHotPath":
+      return {
+        repoId,
+        symbolId,
+        identifiersToFind: ["greet"],
+        refsMode: "off",
+      };
+    case "code.getSkeleton":
+      return { repoId, symbolId, refsMode: "off" };
+    case "code.needWindow":
+      return {
+        repoId,
+        symbolId,
+        reason: "Verify the disposable wire fixture",
+        expectedLines: 8,
+        identifiersToFind: ["greet"],
+      };
+    case "context":
+      return {
+        repoId,
+        taskType: "explain",
+        taskText: "Explain greet",
+        budget: { maxTokens: 512 },
+        focusSymbols: [symbolId],
+        responseMode: "inline",
+        refsMode: "off",
+        wireFormat: "json",
+      };
+    case "dataFilter":
+      return {
+        input: [{ name: "greet", kind: "function" }, { name: "value", kind: "variable" }],
+        clauses: [{ path: "kind", op: "eq", value: "function" }],
+      };
+    case "dataMap":
+      return {
+        input: [{ name: "greet", kind: "function" }],
+        fields: { name: "name", kind: "kind" },
+      };
+    case "dataPick":
+      return {
+        input: { name: "greet", kind: "function" },
+        fields: { name: "name" },
+      };
+    case "dataSort":
+      return {
+        input: [{ name: "zeta" }, { name: "alpha" }],
+        by: { path: "name", direction: "asc" },
+      };
+    case "dataTemplate":
+      return {
+        input: [{ name: "greet", kind: "function" }],
+        template: "{{name}}:{{kind}}",
+      };
+    case "delta.get":
+      return { repoId, fromVersion, toVersion };
+    case "file.read":
+      return { repoId, filePath: knownFile };
+    case "info":
+      return { redactPaths: true };
+    case "manual":
+      return { actions: ["info"], format: "json" };
+    case "pr.risk.analyze":
+      return { repoId, fromVersion, toVersion };
+    case "query":
+      return { repoId, action: "symbol.search", query: "greet", limit: 2 };
+    case "repo":
+      return { repoId, action: "repo.status" };
+    case "repo.overview":
+      return { repoId, level: "stats" };
+    case "response.get":
+      return { repoId, handle: responseHandle, full: true };
+    case "retrieve":
+      return {
+        repoId,
+        op: "symbolSearch",
+        args: { query: "greet", limit: 2 },
+        responseMode: "inline",
+      };
+    case "runtime.queryOutput":
+      return { repoId, artifactHandle: runtimeHandle, queryTerms: ["wire-output"] };
+    case "slice.build":
+      return {
+        repoId,
+        taskText: "Explain greet",
+        entrySymbols: [symbolId],
+        budget: { maxCards: 8 },
+      };
+    case "slice.refresh":
+      return { repoId, sliceHandle };
+    case "slice.spillover.get":
+      return { repoId, sliceHandle };
+    case "symbol.getCard":
+      return { repoId, symbolId, refsMode: "off" };
+    case "symbol.search":
+      return { repoId, query: "greet", limit: 2 };
+    case "usage.stats":
+      return {};
+    case "workflowContinuationGet":
+      return { handle: workflowHandle };
+    default:
+      return {};
+  }
+}
 
 export interface PublicToolContractCase {
   readonly id: string;
@@ -67,7 +218,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.action.search",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("action.search", context),
     mutation: "none",
   },
   {
@@ -81,7 +232,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.codeMode:sdl.action.search",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("action.search", context),
     mutation: "none",
   },
   {
@@ -96,7 +247,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.gateway:sdl.agent",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("agent", context),
     mutation: "none",
   },
   {
@@ -136,7 +287,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.agent.feedback",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("agent.feedback", context),
     mutation: "isolated",
   },
   {
@@ -149,7 +300,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:agent.feedback",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("agent.feedback", context),
     mutation: "isolated",
   },
   {
@@ -162,7 +313,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:agent.feedback",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("agent.feedback", context),
     mutation: "isolated",
   },
   {
@@ -193,7 +344,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.agent.feedback.query",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("agent.feedback.query", context),
     mutation: "none",
   },
   {
@@ -206,7 +357,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:agent.feedback.query",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("agent.feedback.query", context),
     mutation: "none",
   },
   {
@@ -219,7 +370,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:agent.feedback.query",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("agent.feedback.query", context),
     mutation: "none",
   },
   {
@@ -248,7 +399,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.buffer.checkpoint",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.checkpoint", context),
     mutation: "isolated",
   },
   {
@@ -261,7 +412,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:buffer.checkpoint",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.checkpoint", context),
     mutation: "isolated",
   },
   {
@@ -274,7 +425,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:buffer.checkpoint",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.checkpoint", context),
     mutation: "isolated",
   },
   {
@@ -323,7 +474,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.buffer.push",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.push", context),
     mutation: "isolated",
   },
   {
@@ -336,7 +487,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:buffer.push",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.push", context),
     mutation: "isolated",
   },
   {
@@ -349,7 +500,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:buffer.push",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.push", context),
     mutation: "isolated",
   },
   {
@@ -377,7 +528,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.buffer.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.status", context),
     mutation: "none",
   },
   {
@@ -390,7 +541,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:buffer.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.status", context),
     mutation: "none",
   },
   {
@@ -403,7 +554,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:buffer.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("buffer.status", context),
     mutation: "none",
   },
   {
@@ -418,7 +569,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.gateway:sdl.code",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code", context),
     mutation: "none",
   },
   {
@@ -461,7 +612,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.code.getHotPath",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.getHotPath", context),
     mutation: "none",
   },
   {
@@ -474,7 +625,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:code.getHotPath",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.getHotPath", context),
     mutation: "none",
   },
   {
@@ -487,7 +638,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:code.getHotPath",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.getHotPath", context),
     mutation: "none",
   },
   {
@@ -532,7 +683,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.code.getSkeleton",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.getSkeleton", context),
     mutation: "none",
   },
   {
@@ -545,7 +696,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:code.getSkeleton",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.getSkeleton", context),
     mutation: "none",
   },
   {
@@ -558,7 +709,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:code.getSkeleton",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.getSkeleton", context),
     mutation: "none",
   },
   {
@@ -619,7 +770,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.code.needWindow",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.needWindow", context),
     mutation: "none",
   },
   {
@@ -632,7 +783,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:code.needWindow",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.needWindow", context),
     mutation: "none",
   },
   {
@@ -645,7 +796,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:code.needWindow",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("code.needWindow", context),
     mutation: "none",
   },
   {
@@ -698,7 +849,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.codeMode:sdl.context",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("context", context),
     mutation: "none",
   },
   {
@@ -736,12 +887,12 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "profile:dataFilter",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataFilter", context),
     mutation: "none",
   },
   {
     id: "workflow-dataFilter-input-contract",
-    action: "dataFilter.input",
+    action: "dataFilter",
     surface: "workflow",
     outcome: "success",
     covers: {
@@ -749,7 +900,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "dataFilter.input.input:required",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataFilter", context),
     mutation: "none",
   },
   {
@@ -769,12 +920,12 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "profile:dataMap",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataMap", context),
     mutation: "none",
   },
   {
     id: "workflow-dataMap-input-contract",
-    action: "dataMap.input",
+    action: "dataMap",
     surface: "workflow",
     outcome: "success",
     covers: {
@@ -782,7 +933,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "dataMap.input.input:required",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataMap", context),
     mutation: "none",
   },
   {
@@ -802,12 +953,12 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "profile:dataPick",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataPick", context),
     mutation: "none",
   },
   {
     id: "workflow-dataPick-input-contract",
-    action: "dataPick.input",
+    action: "dataPick",
     surface: "workflow",
     outcome: "success",
     covers: {
@@ -815,7 +966,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "dataPick.input.input:required",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataPick", context),
     mutation: "none",
   },
   {
@@ -850,12 +1001,12 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "profile:dataSort",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataSort", context),
     mutation: "none",
   },
   {
     id: "workflow-dataSort-input-contract",
-    action: "dataSort.input",
+    action: "dataSort",
     surface: "workflow",
     outcome: "success",
     covers: {
@@ -863,7 +1014,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "dataSort.input.input:required",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataSort", context),
     mutation: "none",
   },
   {
@@ -884,12 +1035,12 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "profile:dataTemplate",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataTemplate", context),
     mutation: "none",
   },
   {
     id: "workflow-dataTemplate-input-contract",
-    action: "dataTemplate.input",
+    action: "dataTemplate",
     surface: "workflow",
     outcome: "success",
     covers: {
@@ -901,7 +1052,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "dataTemplate.input.input.union:record(type(string)=>type(unknown))",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("dataTemplate", context),
     mutation: "none",
   },
   {
@@ -941,7 +1092,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.delta.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("delta.get", context),
     mutation: "none",
   },
   {
@@ -954,7 +1105,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:delta.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("delta.get", context),
     mutation: "none",
   },
   {
@@ -967,7 +1118,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:delta.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("delta.get", context),
     mutation: "none",
   },
   {
@@ -1212,7 +1363,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.codeMode:sdl.file",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("file", context),
     mutation: "isolated",
   },
   {
@@ -1257,7 +1408,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.file.read",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("file.read", context),
     mutation: "none",
   },
   {
@@ -1270,7 +1421,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:file.read",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("file.read", context),
     mutation: "none",
   },
   {
@@ -1283,7 +1434,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:file.read",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("file.read", context),
     mutation: "none",
   },
   {
@@ -1329,7 +1480,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.file.write",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("file.write", context),
     mutation: "isolated",
   },
   {
@@ -1342,7 +1493,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:file.write",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("file.write", context),
     mutation: "isolated",
   },
   {
@@ -1355,7 +1506,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:file.write",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("file.write", context),
     mutation: "isolated",
   },
   {
@@ -1388,7 +1539,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.index.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("index.refresh", context),
     mutation: "isolated",
   },
   {
@@ -1401,7 +1552,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:index.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("index.refresh", context),
     mutation: "isolated",
   },
   {
@@ -1414,7 +1565,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:index.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("index.refresh", context),
     mutation: "isolated",
   },
   {
@@ -1435,7 +1586,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.info",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("info", context),
     mutation: "none",
   },
   {
@@ -1448,7 +1599,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:info",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("info", context),
     mutation: "none",
   },
   {
@@ -1483,7 +1634,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.codeMode:sdl.manual",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("manual", context),
     mutation: "none",
   },
   {
@@ -1522,7 +1673,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.memory.query",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.query", context),
     mutation: "none",
   },
   {
@@ -1535,7 +1686,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:memory.query",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.query", context),
     mutation: "none",
   },
   {
@@ -1548,7 +1699,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:memory.query",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.query", context),
     mutation: "none",
   },
   {
@@ -1578,7 +1729,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.memory.remove",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.remove", context),
     mutation: "isolated",
   },
   {
@@ -1591,7 +1742,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:memory.remove",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.remove", context),
     mutation: "isolated",
   },
   {
@@ -1604,7 +1755,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:memory.remove",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.remove", context),
     mutation: "isolated",
   },
   {
@@ -1649,7 +1800,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.memory.store",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.store", context),
     mutation: "isolated",
   },
   {
@@ -1662,7 +1813,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:memory.store",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.store", context),
     mutation: "isolated",
   },
   {
@@ -1675,7 +1826,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:memory.store",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.store", context),
     mutation: "isolated",
   },
   {
@@ -1715,7 +1866,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.memory.surface",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.surface", context),
     mutation: "isolated",
   },
   {
@@ -1728,7 +1879,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:memory.surface",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.surface", context),
     mutation: "isolated",
   },
   {
@@ -1741,7 +1892,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:memory.surface",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("memory.surface", context),
     mutation: "isolated",
   },
   {
@@ -1770,7 +1921,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.policy.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("policy.get", context),
     mutation: "none",
   },
   {
@@ -1783,7 +1934,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:policy.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("policy.get", context),
     mutation: "none",
   },
   {
@@ -1796,7 +1947,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:policy.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("policy.get", context),
     mutation: "none",
   },
   {
@@ -1844,7 +1995,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.policy.set",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("policy.set", context),
     mutation: "isolated",
   },
   {
@@ -1857,7 +2008,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:policy.set",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("policy.set", context),
     mutation: "isolated",
   },
   {
@@ -1870,7 +2021,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:policy.set",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("policy.set", context),
     mutation: "isolated",
   },
   {
@@ -1911,7 +2062,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.pr.risk.analyze",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("pr.risk.analyze", context),
     mutation: "none",
   },
   {
@@ -1924,7 +2075,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:pr.risk.analyze",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("pr.risk.analyze", context),
     mutation: "none",
   },
   {
@@ -1937,7 +2088,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:pr.risk.analyze",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("pr.risk.analyze", context),
     mutation: "none",
   },
   {
@@ -1952,7 +2103,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.gateway:sdl.query",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("query", context),
     mutation: "none",
   },
   {
@@ -1967,7 +2118,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.gateway:sdl.repo",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo", context),
     mutation: "none",
   },
   {
@@ -2005,7 +2156,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.repo.overview",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.overview", context),
     mutation: "none",
   },
   {
@@ -2018,7 +2169,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:repo.overview",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.overview", context),
     mutation: "none",
   },
   {
@@ -2031,7 +2182,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:repo.overview",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.overview", context),
     mutation: "none",
   },
   {
@@ -2065,7 +2216,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.repo.register",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.register", context),
     mutation: "isolated",
   },
   {
@@ -2078,7 +2229,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:repo.register",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.register", context),
     mutation: "isolated",
   },
   {
@@ -2091,7 +2242,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:repo.register",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.register", context),
     mutation: "isolated",
   },
   {
@@ -2122,7 +2273,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.repo.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.status", context),
     mutation: "none",
   },
   {
@@ -2135,7 +2286,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:repo.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.status", context),
     mutation: "none",
   },
   {
@@ -2148,7 +2299,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:repo.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.status", context),
     mutation: "none",
   },
   {
@@ -2179,7 +2330,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.repo.unregister",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.unregister", context),
     mutation: "isolated",
   },
   {
@@ -2192,7 +2343,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:repo.unregister",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.unregister", context),
     mutation: "isolated",
   },
   {
@@ -2205,7 +2356,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:repo.unregister",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("repo.unregister", context),
     mutation: "isolated",
   },
   {
@@ -2247,7 +2398,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.response.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("response.get", context),
     mutation: "none",
   },
   {
@@ -2260,7 +2411,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:response.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("response.get", context),
     mutation: "none",
   },
   {
@@ -2273,7 +2424,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:response.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("response.get", context),
     mutation: "none",
   },
   {
@@ -2317,12 +2468,12 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.codeMode:sdl.retrieve",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("retrieve", context),
     mutation: "none",
   },
   {
     id: "workflow-retrieve-output-union-union-required-card-object-truncation-droppedCount-number-truncation-howToResume-type-enum-cursor-token-truncation-howToResume-value-string-number-truncation-howToResume-object-truncation-truncated-boolean-fields-card-object-truncation-droppedCount-number-truncation-howToResume-type-enum-cursor-token-truncation-howToResume-value-string-number-truncation-howToResume-object-truncation-truncated-boolean-truncation-object-required-cards-object-failures-input-string-failures-message-string-fields-cards-object-failed-string-failures-candidates-Record-string-unknown-failures-classification-string-failures-code-string-failures-fallbackRationale-string-failures-fallbackTools-string-failures-contract",
-    action: "retrieve.output.union:union(required(card:object,truncation.droppedCount:number,truncation.howToResume.type:enum(cursor|token),truncation.howToResume.value:string | number,truncation.howToResume:object,truncation.truncated:boolean);fields(card:object,truncation.droppedCount:number,truncation.howToResume.type:enum(cursor|token),truncation.howToResume.value:string | number,truncation.howToResume:object,truncation.truncated:boolean,truncation:object)||required(cards:object[],failures.input:string,failures.message:string);fields(cards:object[],failed:string[],failures.candidates:Record<string, unknown>[],failures.classification:string,failures.code:string,failures.fallbackRationale:string,failures.fallbackTools:string[],failures",
+    action: "symbol.search",
     surface: "workflow",
     outcome: "success",
     covers: {
@@ -2330,7 +2481,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "retrieve.output.union:union(required(card:object,truncation.droppedCount:number,truncation.howToResume.type:enum(cursor|token),truncation.howToResume.value:string | number,truncation.howToResume:object,truncation.truncated:boolean);fields(card:object,truncation.droppedCount:number,truncation.howToResume.type:enum(cursor|token),truncation.howToResume.value:string | number,truncation.howToResume:object,truncation.truncated:boolean,truncation:object)||required(cards:object[],failures.input:string,failures.message:string);fields(cards:object[],failed:string[],failures.candidates:Record<string, unknown>[],failures.classification:string,failures.code:string,failures.fallbackRationale:string,failures.fallbackTools:string[],failures.input:string,failures.message:string,failures.retryable:boolean,failures:object[],partial:boolean,succeeded:string[])||required(etag:string,ledgerVersion:string,notModified:literal(true));fields(etag:string,ledgerVersion:string,notModified:literal(true)))",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.search", context),
     mutation: "none",
   },
   {
@@ -2393,7 +2544,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.runtime.execute",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("runtime.execute", context),
     mutation: "isolated",
   },
   {
@@ -2406,7 +2557,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:runtime.execute",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("runtime.execute", context),
     mutation: "isolated",
   },
   {
@@ -2419,7 +2570,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:runtime.execute",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("runtime.execute", context),
     mutation: "isolated",
   },
   {
@@ -2470,7 +2621,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.runtime.queryOutput",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("runtime.queryOutput", context),
     mutation: "none",
   },
   {
@@ -2483,7 +2634,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:runtime.queryOutput",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("runtime.queryOutput", context),
     mutation: "none",
   },
   {
@@ -2496,7 +2647,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:runtime.queryOutput",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("runtime.queryOutput", context),
     mutation: "none",
   },
   {
@@ -2661,7 +2812,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.search.edit",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("search.edit", context),
     mutation: "isolated",
   },
   {
@@ -2674,7 +2825,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:search.edit",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("search.edit", context),
     mutation: "isolated",
   },
   {
@@ -2687,7 +2838,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:search.edit",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("search.edit", context),
     mutation: "isolated",
   },
   {
@@ -2719,7 +2870,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.semantic.enrichment.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("semantic.enrichment.refresh", context),
     mutation: "isolated",
   },
   {
@@ -2732,7 +2883,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:semantic.enrichment.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("semantic.enrichment.refresh", context),
     mutation: "isolated",
   },
   {
@@ -2745,7 +2896,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:semantic.enrichment.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("semantic.enrichment.refresh", context),
     mutation: "isolated",
   },
   {
@@ -2776,7 +2927,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.semantic.enrichment.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("semantic.enrichment.status", context),
     mutation: "none",
   },
   {
@@ -2789,7 +2940,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:semantic.enrichment.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("semantic.enrichment.status", context),
     mutation: "none",
   },
   {
@@ -2802,7 +2953,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:semantic.enrichment.status",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("semantic.enrichment.status", context),
     mutation: "none",
   },
   {
@@ -2867,7 +3018,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.slice.build",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.build", context),
     mutation: "none",
   },
   {
@@ -2880,7 +3031,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:slice.build",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.build", context),
     mutation: "none",
   },
   {
@@ -2893,7 +3044,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:slice.build",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.build", context),
     mutation: "none",
   },
   {
@@ -2922,7 +3073,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.slice.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.refresh", context),
     mutation: "none",
   },
   {
@@ -2935,7 +3086,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:slice.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.refresh", context),
     mutation: "none",
   },
   {
@@ -2948,7 +3099,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:slice.refresh",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.refresh", context),
     mutation: "none",
   },
   {
@@ -2981,7 +3132,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.slice.spillover.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.spillover.get", context),
     mutation: "none",
   },
   {
@@ -2994,7 +3145,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:slice.spillover.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.spillover.get", context),
     mutation: "none",
   },
   {
@@ -3007,7 +3158,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:slice.spillover.get",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("slice.spillover.get", context),
     mutation: "none",
   },
   {
@@ -3066,7 +3217,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.symbol.edit",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.edit", context),
     mutation: "isolated",
   },
   {
@@ -3079,7 +3230,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:symbol.edit",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.edit", context),
     mutation: "isolated",
   },
   {
@@ -3092,7 +3243,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:symbol.edit",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.edit", context),
     mutation: "isolated",
   },
   {
@@ -3141,7 +3292,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.symbol.getCard",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.getCard", context),
     mutation: "none",
   },
   {
@@ -3154,7 +3305,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:symbol.getCard",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.getCard", context),
     mutation: "none",
   },
   {
@@ -3167,12 +3318,12 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:symbol.getCard",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.getCard", context),
     mutation: "none",
   },
   {
     id: "workflow-symbol-getCard-output-union-required-cards-object-failures-input-string-failures-message-string-fields-cards-object-failed-string-failures-candidates-Record-string-unknown-failures-classification-string-failures-code-string-failures-fallbackRationale-string-failures-fallbackTools-string-failures-contract",
-    action: "symbol.getCard.output.union:required(cards:object[],failures.input:string,failures.message:string);fields(cards:object[],failed:string[],failures.candidates:Record<string, unknown>[],failures.classification:string,failures.code:string,failures.fallbackRationale:string,failures.fallbackTools:string[],failures",
+    action: "symbol.getCard",
     surface: "workflow",
     outcome: "success",
     covers: {
@@ -3180,7 +3331,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "symbol.getCard.output.union:required(cards:object[],failures.input:string,failures.message:string);fields(cards:object[],failed:string[],failures.candidates:Record<string, unknown>[],failures.classification:string,failures.code:string,failures.fallbackRationale:string,failures.fallbackTools:string[],failures.input:string,failures.message:string,failures.retryable:boolean,failures:object[],partial:boolean,succeeded:string[])",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.getCard", context),
     mutation: "none",
   },
   {
@@ -3226,7 +3377,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.symbol.search",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.search", context),
     mutation: "none",
   },
   {
@@ -3239,7 +3390,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:symbol.search",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.search", context),
     mutation: "none",
   },
   {
@@ -3252,7 +3403,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:symbol.search",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("symbol.search", context),
     mutation: "none",
   },
   {
@@ -3290,7 +3441,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.flat:sdl.usage.stats",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("usage.stats", context),
     mutation: "none",
   },
   {
@@ -3303,7 +3454,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.codeMode:usage.stats",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("usage.stats", context),
     mutation: "none",
   },
   {
@@ -3316,7 +3467,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "action.workflow:usage.stats",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("usage.stats", context),
     mutation: "none",
   },
   {
@@ -3374,7 +3525,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "tool.codeMode:sdl.workflow",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("workflow", context),
     mutation: "isolated",
   },
   {
@@ -3398,7 +3549,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
         "profile:workflowContinuationGet",
       ],
     },
-    buildArgs: () => ({}),
+    buildArgs: (context) => buildArgsForAction("workflowContinuationGet", context),
     mutation: "none",
   },
 ];

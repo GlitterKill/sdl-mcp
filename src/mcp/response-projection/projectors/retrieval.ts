@@ -332,7 +332,7 @@ function compactEvidence(
   input: ModelProjectionInput,
 ): unknown {
   if (!isRecord(value)) return value;
-  const result = copyPresent(value, ["rung", "symbolId", "path"]);
+  const result = copyPresent(value, ["symbolId", "rung", "path"]);
   if (input.options.includeDiagnostics) {
     Object.assign(result, copyPresent(value, ["rank", "tier", "lanes"]));
   }
@@ -539,7 +539,6 @@ export function projectRetrievalValue(
       : compatibility;
   }
   const action = actionForInput(input);
-  if (action === "slice.refresh") return canonical;
   if (![
     "symbol.getCard",
     "symbol.search",

@@ -280,11 +280,18 @@ describe("toAgentGraphSlice", () => {
     const { events, uninstall } = capturePackedWireEvents();
     t.after(uninstall);
     for (const wireFormat of ["readable", "packed"] as const) {
-      const response = await handleSliceBuild({
+      const request = {
         repoId: slice.repoId,
         entrySymbols: [slice.startSymbols[0]],
         wireFormat,
-      });
+      };
+      const response = await handleSliceBuild(request);
+      if (wireFormat === "readable") {
+        const repeatedResponse = await handleSliceBuild(request);
+        assert.ok("sliceHandle" in response);
+        assert.ok("sliceHandle" in repeatedResponse);
+        assert.equal(repeatedResponse.sliceHandle, response.sliceHandle);
+      }
       const payload = JSON.parse(
         JSON.stringify(
           toStructuredContent("sdl.slice.build", response, {

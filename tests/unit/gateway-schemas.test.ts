@@ -28,8 +28,10 @@ describe("Gateway schemas", () => {
         repoId: "test-repo",
         action: "symbol.getCard",
         symbolId: "src/server.ts::MCPServer",
+        refsMode: "off",
       });
       assert.strictEqual(result.success, true);
+      if (result.success) assert.strictEqual(result.data.refsMode, "off");
     });
 
     it("validates symbol.getCard action with symbolRef", () => {
@@ -129,8 +131,10 @@ describe("Gateway schemas", () => {
         repoId: "test-repo",
         action: "code.getSkeleton",
         file: "src/server.ts",
+        refsMode: "off",
       });
       assert.strictEqual(result.success, true);
+      if (result.success) assert.strictEqual(result.data.refsMode, "off");
     });
 
     it("validates code.getHotPath action", () => {
@@ -139,8 +143,10 @@ describe("Gateway schemas", () => {
         action: "code.getHotPath",
         symbolId: "sym1",
         identifiersToFind: ["handleRequest"],
+        refsMode: "off",
       });
       assert.strictEqual(result.success, true);
+      if (result.success) assert.strictEqual(result.data.refsMode, "off");
     });
   });
 

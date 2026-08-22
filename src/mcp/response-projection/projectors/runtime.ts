@@ -281,6 +281,15 @@ function projectRuntimeExecute(input: ModelProjectionInput): unknown {
     typeof value.artifactHandle === "string" && value.artifactHandle.length > 0
       ? value.artifactHandle
       : undefined;
+  const action = input.action.startsWith("sdl.") ? input.action.slice(4) : input.action;
+  const allowed =
+    RUNTIME_DIAGNOSTIC_FIELDS_BY_PROFILE[
+      action as keyof typeof RUNTIME_DIAGNOSTIC_FIELDS_BY_PROFILE
+    ];
+  const diagnostics =
+    input.options.includeDiagnostics && allowed?.includes("durationMs")
+      ? { durationMs: observability.durationMs }
+      : {};
 
   if (captureTruncated) {
     return {
@@ -297,6 +306,7 @@ function projectRuntimeExecute(input: ModelProjectionInput): unknown {
           "Runtime output exceeded capture limits; discarded bytes are not recoverable.",
         retryable: false,
       },
+      ...diagnostics,
     };
   }
 
@@ -309,6 +319,7 @@ function projectRuntimeExecute(input: ModelProjectionInput): unknown {
         : { message: "Captured output is available through runtime.queryOutput." },
       artifactHandle,
       ...(nextAction ? { nextAction } : {}),
+      ...diagnostics,
     };
   }
 
@@ -322,6 +333,7 @@ function projectRuntimeExecute(input: ModelProjectionInput): unknown {
           "Captured runtime output exceeded the inline limit but could not be persisted within the configured artifact limits.",
         retryable: false,
       },
+      ...diagnostics,
     };
   }
 
@@ -334,14 +346,7 @@ function projectRuntimeExecute(input: ModelProjectionInput): unknown {
     projected.artifactHandle = artifactHandle;
     if (nextAction) projected.nextAction = nextAction;
   }
-  const allowed =
-    RUNTIME_DIAGNOSTIC_FIELDS_BY_PROFILE[
-      input.action as keyof typeof RUNTIME_DIAGNOSTIC_FIELDS_BY_PROFILE
-    ];
-  if (input.options.includeDiagnostics && allowed?.includes("durationMs")) {
-    projected.durationMs = observability.durationMs;
-  }
-  return projected;
+  return { ...projected, ...diagnostics };
 }
 
 /** Project runtime responses while leaving compatibility actions intact. */

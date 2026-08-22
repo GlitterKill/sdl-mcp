@@ -107,13 +107,24 @@ function clampInt(value: number, min: number, max: number): number {
 }
 
 /**
- * Generates a unique slice handle identifier.
+ * Generates a stable slice handle from the persisted slice identity.
  *
+ * @param sliceHash - Stable hash of canonical slice content
+ * @param spilloverRef - Stored spillover payload variant
+ * @param cardDetail - Stored card-detail variant
  * @returns 32-character hex string representing the slice handle
  * @internal
  */
-function generateSliceHandle(): SliceHandle {
-  return crypto.randomBytes(16).toString("hex");
+function generateSliceHandle(
+  sliceHash: string,
+  spilloverRef: string | null,
+  cardDetail: string | null,
+): SliceHandle {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ sliceHash, spilloverRef, cardDetail }))
+    .digest("hex")
+    .slice(0, 32);
 }
 
 /**
@@ -479,14 +490,8 @@ async function handleSliceBuildInternal(
         : slice.cards.slice(0, 12).map((card) => card.symbolId);
     prefetchSliceFrontier(repoId, frontierSeeds, context);
 
-    const handle = generateSliceHandle();
     const sliceHash = generateSliceHash(slice);
     const lease = createLease(latestVersion.versionId);
-    const sliceEtag = createSliceEtag(
-      handle,
-      latestVersion.versionId,
-      sliceHash,
-    );
 
     // Fix #4: if the slice was truncated (by tokens, cards, or anything
     // else), surface the frontier as a reachable spillover payload so
@@ -505,6 +510,17 @@ async function handleSliceBuildInternal(
         })),
       );
     }
+
+    const handle = generateSliceHandle(
+      sliceHash,
+      spilloverPayload,
+      cardDetail ?? null,
+    );
+    const sliceEtag = createSliceEtag(
+      handle,
+      latestVersion.versionId,
+      sliceHash,
+    );
 
     const handleRow: ladybugDb.SliceHandleRow = {
       handle,

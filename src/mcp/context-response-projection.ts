@@ -96,6 +96,7 @@ const ALWAYS_INTERNAL_MODEL_FIELDS = new Set([
   "_displayFooter",
   "_packedPayload",
   "_packedStats",
+  "_memoryHint",
   "_rawContext",
   "_tokenUsage",
   "actionsTaken",

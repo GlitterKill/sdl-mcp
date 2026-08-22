@@ -692,6 +692,7 @@ export function buildToolResponseEnvelope(
       profileDefault: projectionProfile.defaultDetail,
     }),
   boundaryOverrides: ResponseProjectionBoundaryOverrides = {},
+  projectionAction = toolName,
 ): ToolResponseEnvelope {
   const visibleFooterText = shouldIncludeDisplayFooter(toolArgs) ? footerText : "";
   let projection: ModelProjection;
@@ -699,7 +700,7 @@ export function buildToolResponseEnvelope(
     projection = projectModelResponse(
       {
         canonicalResult: primaryPayload,
-        action: toolName,
+        action: projectionAction,
         profile: projectionProfile,
         options: projectionOptions,
         context: {
@@ -1189,6 +1190,16 @@ export class MCPServer {
             tool.inputSchema,
             parseResult.data,
           );
+          const effectiveProjectionAction = READ_ONLY_GATEWAY_TOOLS.has(toolName)
+            ? extractStringField(parsedArgs, "action") ?? toolName
+            : toolName;
+          const effectiveProjectionProfile =
+            this.resolveProjectionProfile(effectiveProjectionAction)
+            ?? tool.projectionProfile;
+          const effectiveProjectionOptions = resolveProjectionRequestOptions({
+            direct: normalizedArgs,
+            profileDefault: effectiveProjectionProfile.defaultDetail,
+          });
           const centralizesHandlerArtifacts =
             isRecordValue(parsedArgs) &&
             (parsedArgs.responseMode === "auto" ||
@@ -1446,15 +1457,16 @@ export class MCPServer {
               normalizedArgs as Record<string, unknown>,
               responseForProjection,
               true,
-              tool.projectionProfile,
-              projectionOptions,
+              effectiveProjectionProfile,
+              effectiveProjectionOptions,
               this.responseProjectionBoundaryOverrides,
+              effectiveProjectionAction,
             );
             const responseEnvelope = await enforceProjectedResponseMode(
               projectedResponseEnvelope,
               toolName,
               normalizedArgs as Record<string, unknown>,
-              tool.projectionProfile,
+              effectiveProjectionProfile,
               toolContext.sessionId,
             );
 
@@ -1491,7 +1503,7 @@ export class MCPServer {
               diagnostics: extractTimingDiagnostics(responseForProjection),
               projection: responseEnvelope.projectionStats,
               operationalStats: extractProjectionOperationalStats(
-                tool.projectionProfile,
+                effectiveProjectionProfile,
                 canonicalResult,
               ),
             };
@@ -1520,9 +1532,10 @@ export class MCPServer {
               normalizedArgs as Record<string, unknown>,
               responseForLog,
               true,
-              tool.projectionProfile,
-              projectionOptions,
+              effectiveProjectionProfile,
+              effectiveProjectionOptions,
               this.responseProjectionBoundaryOverrides,
+              effectiveProjectionAction,
             );
             errorEnvelope.isError = true;
             logToolCall({

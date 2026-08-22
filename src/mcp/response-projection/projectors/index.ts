@@ -164,6 +164,21 @@ export function projectModelValue(
   input: ModelProjectionInput,
   projectCompatibilityValue: ModelValueProjectionDelegate,
 ): unknown {
+  const { canonicalResult } = input;
+  // Conditional arms require their ETag; ordinary payloads still use family redaction.
+  if (
+    isRecord(canonicalResult)
+    && canonicalResult.notModified === true
+    && typeof canonicalResult.etag === "string"
+  ) {
+    return typeof canonicalResult.ledgerVersion === "string"
+      ? {
+        notModified: true,
+        etag: canonicalResult.etag,
+        ledgerVersion: canonicalResult.ledgerVersion,
+      }
+      : { notModified: true, etag: canonicalResult.etag };
+  }
   return projectFamilyValue(input, projectCompatibilityValue);
 }
 

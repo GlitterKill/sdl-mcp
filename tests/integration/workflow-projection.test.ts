@@ -14,6 +14,8 @@ import {
   projectWorkflowChildResultForModel,
 } from "../../dist/mcp/context-response-projection.js";
 import { buildToolResponseEnvelope } from "../../dist/server.js";
+import { buildWorkflowPublicOutputSchema } from "../../dist/code-mode/types.js";
+import { BufferStatusResponseSchema } from "../../dist/mcp/tools.js";
 
 const config: CodeModeConfig = {
   enabled: true,
@@ -144,6 +146,101 @@ describe("workflow projection", () => {
     assert.deepEqual(steps[1].result, {
       received: "2026-08-10T00:00:00.000Z",
     });
+  });
+
+  it("keeps compact bufferStatus workflow children schema-valid", () => {
+    const workflowArgs = {
+      repoId: "repo",
+      onlyFinalResult: true,
+      steps: [{ fn: "bufferStatus", args: {} }],
+    };
+    const child = projectWorkflowChildResultForModel(
+      "bufferStatus",
+      {
+        repoId: "repo",
+        enabled: true,
+        pendingBuffers: 0,
+        dirtyBuffers: 0,
+        parseQueueDepth: 0,
+      },
+      workflowArgs,
+      {},
+    );
+    const projected = projectWorkflow(
+      {
+        results: [{
+          stepIndex: 0,
+          fn: "bufferStatus",
+          result: child,
+          tokens: 1,
+          durationMs: 1,
+          status: "ok",
+        }],
+        totalTokens: 1,
+        durationMs: 1,
+        truncated: false,
+      },
+      workflowArgs,
+    );
+    const validation = buildWorkflowPublicOutputSchema({
+      bufferStatus: BufferStatusResponseSchema,
+    }).safeParse(projected);
+
+    assert.equal(
+      validation.success,
+      true,
+      validation.success
+        ? undefined
+        : JSON.stringify({ projected, issues: validation.error.issues }),
+    );
+  });
+
+  it("keeps compact usageStats children at the outer public projection", () => {
+    const canonical = {
+      formattedSummary: "1 call saved 900 tokens",
+      aggregate: {
+        totalSdlTokens: 100,
+        totalRawEquivalent: 1_000,
+        totalSavedTokens: 900,
+        savingsPercent: 90,
+        callCount: 1,
+      },
+      topTools: [{ tool: "sdl.context", savedTokens: 900 }],
+      session: {
+        sessionId: "volatile-session",
+        startedAt: "2026-08-22T00:00:00.000Z",
+      },
+    };
+    const before = structuredClone(canonical);
+    const workflowArgs = {
+      repoId: "repo",
+      detail: "compact" as const,
+      steps: [{ fn: "usageStats", args: {} }],
+    };
+    const projected = projectWorkflow(
+      {
+        results: [{
+          stepIndex: 0,
+          fn: "usageStats",
+          result: canonical,
+          tokens: 1,
+          durationMs: 1,
+          status: "ok",
+        }],
+        totalTokens: 1,
+        durationMs: 1,
+        truncated: false,
+      },
+      workflowArgs,
+    );
+    const result = (
+      projected.results as Array<Record<string, unknown>>
+    )[0].result;
+
+    assert.deepEqual(result, {
+      formattedSummary: "1 call saved 900 tokens",
+    });
+    assert.deepEqual(canonical, before);
   });
 
   it("pipes canonical runtime status while omitting minimal success output", async () => {
@@ -734,7 +831,7 @@ describe("workflow projection", () => {
       /generatedAt|secret-timestamp|durationMs/,
     );
     assert.match(serialized, /processes|processId|proc-1/);
-    assert.match(serialized, /diagnostics|totalMs/);
+    assert.doesNotMatch(serialized, /diagnostics|totalMs/);
     assert.doesNotMatch(
       serialized,
       /generatedAt|secret-timestamp|durationMs/,

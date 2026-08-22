@@ -39,6 +39,12 @@ function schemaOwnsOption(
   if (input instanceof z.ZodObject) {
     return Object.hasOwn(input.shape, key);
   }
+  if (input instanceof z.ZodIntersection) {
+    return (
+      schemaOwnsOption(input.def.left as z.ZodType, key)
+      || schemaOwnsOption(input.def.right as z.ZodType, key)
+    );
+  }
   if (input instanceof z.ZodDiscriminatedUnion) {
     return input.options.some((option) =>
       schemaOwnsOption(option as z.ZodType, key),
@@ -61,6 +67,12 @@ function extendProjectionInput(schema: z.ZodType): z.ZodType {
           }),
     });
   }
+  if (input instanceof z.ZodIntersection) {
+    return z.intersection(
+      extendProjectionInput(input.def.left as z.ZodType),
+      extendProjectionInput(input.def.right as z.ZodType),
+    );
+  }
   if (input instanceof z.ZodDiscriminatedUnion) {
     const options = input.options.map((option) => {
       const extended = extendProjectionInput(option as z.ZodType);
@@ -72,7 +84,7 @@ function extendProjectionInput(schema: z.ZodType): z.ZodType {
     return z.discriminatedUnion(input.def.discriminator, options);
   }
   throw new Error(
-    "Projection options require an object, object pipe, or discriminated union schema",
+    "Projection options require an object, object pipe, discriminated union, or intersection schema",
   );
 }
 

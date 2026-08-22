@@ -17,6 +17,7 @@ import {
   RUNTIME_DEFAULT_MAX_RESPONSE_LINES,
 } from "../config/constants.js";
 import { LanguageSchema } from "../config/types.js";
+import { ProjectionRequestOptionShape } from "../mcp/response-projection/request-options.js";
 import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import { MAX_RESPONSE_EXCERPT_BYTES } from "../runtime/response-artifacts.js";
 
@@ -53,6 +54,7 @@ const SymbolGetCardAction = z
     symbolId: z.string().optional(),
     symbolRef: SymbolRefFields.optional(),
     ifNoneMatch: z.string().optional(),
+    refsMode: z.enum(["auto", "off"]).optional(),
     minCallConfidence: z.number().min(0).max(1).optional(),
     includeResolutionMetadata: z.boolean().optional(),
   })
@@ -278,6 +280,7 @@ const GetSkeletonAction = z.object({
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),
   identifiersToFind: z.array(z.string()).max(50).optional(),
+  refsMode: z.enum(["auto", "off"]).optional(),
   ifNoneMatch: z.string().optional(),
 });
 
@@ -288,12 +291,14 @@ const GetHotPathAction = z.object({
   maxLines: z.number().int().min(1).optional(),
   maxTokens: z.number().int().min(1).optional(),
   contextLines: z.number().int().min(0).optional(),
+  refsMode: z.enum(["auto", "off"]).optional(),
   ifNoneMatch: z.string().optional(),
 });
 
 export const CodeGatewaySchema = z
   .object({
     repoId: z.string().min(1),
+    ...ProjectionRequestOptionShape,
   })
   .and(
     z.discriminatedUnion("action", [

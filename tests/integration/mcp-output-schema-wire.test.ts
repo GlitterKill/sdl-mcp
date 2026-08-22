@@ -17,11 +17,14 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+import { buildCatalog } from "../../dist/code-mode/action-catalog.js";
+import { buildFlatToolDescriptors } from "../../dist/mcp/tools/tool-descriptors.js";
 import {
   closeLadybugDb,
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import { resetSearchEditPlanStore } from "../../dist/mcp/tools/search-edit/plan-store.js";
+import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
 import {
   AgentFeedbackQueryResponseSchema,
   AgentContextOutputSchema,
@@ -40,11 +43,18 @@ import {
   SemanticEnrichmentStatusResponseSchema,
   SymbolEditResponseSchema,
   SymbolGetCardResponseSchema,
+  withProjectionSuccessOutputSchema,
 } from "../../dist/mcp/tools.js";
 import {
+  buildToolResponseEnvelope,
   createMCPServer,
   type MCPServer,
 } from "../../dist/server.js";
+import {
+  PUBLIC_TOOL_CONTRACT_CASES,
+  type PublicToolContractCase,
+  type WireFixtureContext,
+} from "../fixtures/tool-contract/public-tool-contract-cases.ts";
 
 const TEMP_BASE =
   process.platform === "win32" ? join(homedir(), ".codex", "tmp") : tmpdir();
@@ -229,6 +239,405 @@ function assertStableDefaultReport(
   return firstResult;
 }
 
+const RETRIEVE_OP_BY_ACTION = new Map<string, string>([
+  ["symbol.search", "symbolSearch"],
+  ["symbol.getCard", "symbolGetCard"],
+  ["slice.build", "sliceBuild"],
+  ["code.getSkeleton", "codeSkeleton"],
+  ["code.getHotPath", "codeHotPath"],
+  ["code.needWindow", "codeNeedWindow"],
+]);
+
+const DIRECT_CODE_MODE_TOOL_BY_ACTION = new Map<string, string>([
+  ["action.search", "sdl.action.search"],
+  ["context", "sdl.context"],
+  ["info", "sdl.info"],
+  ["manual", "sdl.manual"],
+  ["retrieve", "sdl.retrieve"],
+]);
+
+function findStringProperty(value: unknown, key: string): string | undefined {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = findStringProperty(entry, key);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  for (const [entryKey, entry] of Object.entries(value)) {
+    if (entryKey === key && typeof entry === "string") return entry;
+    const found = findStringProperty(entry, key);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function withoutRepoId(args: Record<string, unknown>): Record<string, unknown> {
+  const { repoId: _repoId, ...rest } = args;
+  return rest;
+}
+
+function resolveContractCall(
+  wireCase: PublicToolContractCase,
+  args: Record<string, unknown>,
+  workflowFn: string | undefined,
+  repoId: string,
+): { name: string; arguments: Record<string, unknown> } {
+  if (wireCase.surface === "flat" || wireCase.surface === "gateway") {
+    return { name: `sdl.${wireCase.action}`, arguments: args };
+  }
+  if (wireCase.surface === "codeMode") {
+    const directTool = DIRECT_CODE_MODE_TOOL_BY_ACTION.get(wireCase.action);
+    if (directTool !== undefined) return { name: directTool, arguments: args };
+    const retrieveOp = RETRIEVE_OP_BY_ACTION.get(wireCase.action);
+    if (retrieveOp !== undefined) {
+      return {
+        name: "sdl.retrieve",
+        arguments: {
+          repoId,
+          op: retrieveOp,
+          args: withoutRepoId(args),
+          responseMode: "inline",
+        },
+      };
+    }
+    if (wireCase.action === "file.read") {
+      return { name: "sdl.file", arguments: { op: "read", ...args } };
+    }
+  }
+  assert.ok(
+    workflowFn,
+    `${wireCase.id}: action ${wireCase.action} is not in the public catalog`,
+  );
+  return {
+    name: "sdl.workflow",
+    arguments: {
+      repoId,
+      onlyFinalResult: true,
+      steps: [{ fn: workflowFn, args: withoutRepoId(args) }],
+    },
+  };
+}
+
+function assertWireProjection(
+  response: ToolEnvelope,
+  advertisedOutputSchema: z.ZodType,
+  call: { name: string; arguments?: Record<string, unknown> },
+  label: string,
+): Record<string, unknown> {
+  assert.equal(
+    response.isError,
+    undefined,
+    `${label}: ${responseText(response)} structured=${JSON.stringify(response.structuredContent)}`,
+  );
+  const textBlock = response.content?.[0];
+  assert.equal(textBlock?.type, "text", `${label}: expected one text block`);
+  assert.ok(response.structuredContent, `${label}: missing structured content`);
+  const expectedEnvelope = buildToolResponseEnvelope(
+    response.structuredContent,
+    null,
+    "",
+    call.name,
+    call.arguments,
+    response.structuredContent,
+    true,
+    undefined,
+    undefined,
+    undefined,
+    typeof call.arguments.action === "string"
+      ? call.arguments.action
+      : call.name,
+  );
+  assert.deepEqual(
+    expectedEnvelope.structuredContent,
+    response.structuredContent,
+    `${label}: declared projector changed the structured projection`,
+  );
+  assert.equal(
+    textBlock?.text,
+    expectedEnvelope.content[0]?.text,
+    `${label}: text and structured content diverged`,
+  );
+  if ((textBlock?.text ?? "").trimStart().startsWith("{")) {
+    assert.deepEqual(
+      JSON.parse(textBlock?.text ?? ""),
+      response.structuredContent,
+      `${label}: JSON text and structured content diverged`,
+    );
+  }
+  const advertisedParse = advertisedOutputSchema.safeParse(
+    response.structuredContent,
+  );
+  assert.equal(
+    advertisedParse.success,
+    true,
+    `${label}: advertised output schema rejected result=${JSON.stringify(response.structuredContent)} issues=${JSON.stringify(advertisedParse.error?.issues)}`,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(response.structuredContent),
+    /An internal error occurred/iu,
+    `${label}: generic internal error leaked through success`,
+  );
+  assertNoDefaultVolatility(response.structuredContent, label, false, true);
+  return response.structuredContent as Record<string, unknown>;
+}
+
+async function setupWireFixtureContext(
+  client: Client,
+  symbolId: string,
+): Promise<WireFixtureContext> {
+  // Named setup: produce every result-dependent handle before any case consumes it.
+  const status = (await client.callTool({
+    name: "sdl.repo.status",
+    arguments: { repoId: REPO_ID },
+  })) as ToolEnvelope;
+  const versionId = findStringProperty(
+    status.structuredContent,
+    "latestVersionId",
+  );
+  assert.ok(versionId, "setup: expected the indexed version");
+
+  const storedResponse = (await client.callTool({
+    name: "sdl.file",
+    arguments: {
+      op: "read",
+      repoId: REPO_ID,
+      filePath: "notes.txt",
+      responseMode: "handle",
+    },
+  })) as ToolEnvelope;
+  const responseHandle = findStringProperty(
+    storedResponse.structuredContent,
+    "handle",
+  );
+  assert.ok(
+    responseHandle,
+    `setup: expected a response handle: ${responseText(storedResponse)}`,
+  );
+
+  const runtime = (await client.callTool({
+    name: "sdl.runtime.execute",
+    arguments: {
+      repoId: REPO_ID,
+      runtime: "node",
+      args: ["-e", "process.stdout.write('wire-output')"],
+      outputMode: "minimal",
+      persistOutput: true,
+      detail: "full",
+    },
+  })) as ToolEnvelope;
+  const runtimeHandle = findStringProperty(
+    runtime.structuredContent,
+    "artifactHandle",
+  );
+  assert.ok(
+    runtimeHandle,
+    `setup: expected a runtime artifact handle: ${responseText(runtime)}`,
+  );
+
+  const slice = (await client.callTool({
+    name: "sdl.slice.build",
+    arguments: {
+      repoId: REPO_ID,
+      taskText: "Explain greet",
+      entrySymbols: [symbolId],
+      budget: { maxCards: 8 },
+    },
+  })) as ToolEnvelope;
+  const sliceHandle = findStringProperty(slice.structuredContent, "sliceHandle");
+  assert.ok(sliceHandle, "setup: expected a slice handle");
+
+  const continued = (await client.callTool({
+    name: "sdl.workflow",
+    arguments: {
+      repoId: REPO_ID,
+      steps: [{
+        fn: "dataMap",
+        args: {
+          input: Array.from({ length: 12 }, (_, index) => ({
+            id: index,
+            payload: `item-${index}-${"x".repeat(160)}`,
+          })),
+          fields: { id: "id", payload: "payload" },
+        },
+        maxResponseTokens: 50,
+      }],
+    },
+  })) as ToolEnvelope;
+  const workflowHandle = findStringProperty(
+    continued.structuredContent,
+    "continuationHandle",
+  );
+  assert.ok(workflowHandle, "setup: expected a workflow continuation handle");
+
+  const preview = (await client.callTool({
+    name: "sdl.file",
+    arguments: {
+      op: "searchEditPreview",
+      repoId: REPO_ID,
+      targeting: "text",
+      query: { literal: "Hello", replacement: "Hi" },
+      filters: { include: ["src/greeting.ts"] },
+      editMode: "replacePattern",
+      createBackup: false,
+    },
+  })) as ToolEnvelope;
+  const editPreviewHandle = findStringProperty(
+    preview.structuredContent,
+    "planHandle",
+  );
+  assert.ok(editPreviewHandle, "setup: expected an edit preview handle");
+
+  return {
+    repoId: REPO_ID,
+    knownFile: "notes.txt",
+    symbolId,
+    fromVersion: versionId,
+    toVersion: versionId,
+    responseHandle,
+    runtimeHandle,
+    workflowHandle,
+    sliceHandle,
+    editPreviewHandle,
+  };
+}
+async function executePublicContractCases(
+  client: Client,
+  flatClient: Client,
+  context: WireFixtureContext,
+): Promise<void> {
+  const expectedCases = PUBLIC_TOOL_CONTRACT_CASES.filter(
+    ({ mutation }) => mutation === "none",
+  );
+  const advertised = new Map(
+    (await client.listTools()).tools.map((tool) => [tool.name, tool]),
+  );
+  const flatAdvertised = new Map(
+    (await flatClient.listTools()).tools.map((tool) => [tool.name, tool]),
+  );
+  const flatOutputSchemas = new Map(
+    buildFlatToolDescriptors({}).flatMap((descriptor) =>
+      descriptor.outputSchema
+        ? [
+            [
+              descriptor.name,
+              withProjectionSuccessOutputSchema(
+                descriptor.name.slice(4),
+                descriptor.outputSchema,
+              ),
+            ] as const,
+          ]
+        : [],
+    ),
+  );
+  const catalog = new Map(
+    buildCatalog({ memoryVisible: true, infoVisible: true }).map((entry) => [
+      entry.action,
+      entry,
+    ]),
+  );
+  const executedCaseIds: string[] = [];
+  const projectedByCaseId = new Map<string, unknown>();
+
+  for (const [caseIndex, wireCase] of expectedCases.entries()) {
+    const caseLabel = `${wireCase.id} [${wireCase.surface}:${wireCase.action}] case ${caseIndex + 1}/${expectedCases.length}`;
+    const catalogEntry = catalog.get(wireCase.action);
+    if (wireCase.surface !== "gateway") {
+      assert.ok(
+        catalogEntry,
+        `${caseLabel}: action is not in the public catalog`,
+      );
+    }
+    const surfaceClient = wireCase.surface === "flat" ? flatClient : client;
+    const surfaceAdvertised =
+      wireCase.surface === "flat" ? flatAdvertised : advertised;
+    const call = resolveContractCall(
+      wireCase,
+      wireCase.buildArgs(context),
+      catalogEntry?.fn,
+      context.repoId,
+    );
+    assert.ok(
+      surfaceAdvertised.has(call.name),
+      `${caseLabel}: ${call.name} is not advertised on its declared surface`,
+    );
+    let schemaToolName = call.name;
+    if (wireCase.surface === "gateway") {
+      assert.equal(
+        typeof call.arguments.action,
+        "string",
+        `${caseLabel}: gateway call must declare its routed child action`,
+      );
+      schemaToolName = `sdl.${call.arguments.action}`;
+    }
+    const advertisedJsonSchema = surfaceAdvertised.get(schemaToolName)?.outputSchema;
+    const advertisedOutputSchema = advertisedJsonSchema
+      ? z.fromJSONSchema(advertisedJsonSchema)
+      : flatOutputSchemas.get(schemaToolName);
+    assert.ok(
+      advertisedOutputSchema,
+      `${caseLabel}: ${schemaToolName} has no registered output schema`,
+    );
+
+    const first = (await surfaceClient.callTool(call)) as ToolEnvelope;
+    const firstProjection = assertWireProjection(
+      first,
+      advertisedOutputSchema,
+      call,
+      caseLabel,
+    );
+    const second = (await surfaceClient.callTool(call)) as ToolEnvelope;
+    const secondProjection = assertWireProjection(
+      second,
+      advertisedOutputSchema,
+      call,
+      `${caseLabel} repeat`,
+    );
+    assert.deepEqual(
+      secondProjection,
+      firstProjection,
+      `${wireCase.id}: repeated call changed key or array order`,
+    );
+    wireCase.assertResult?.(firstProjection, context);
+    executedCaseIds.push(wireCase.id);
+    projectedByCaseId.set(wireCase.id, firstProjection);
+  }
+
+  assert.deepEqual(executedCaseIds, expectedCases.map(({ id }) => id));
+  for (const [surfaceId, flatId] of [
+    ["gateway-agent-contract", "flat-agent-feedback-query-contract"],
+    ["gateway-code-contract", "flat-code-getSkeleton-contract"],
+    ["gateway-query-contract", "flat-symbol-search-contract"],
+    ["gateway-repo-contract", "flat-repo-status-contract"],
+    ["codeMode-symbol-search-contract", "flat-symbol-search-contract"],
+    ["workflow-symbol-search-contract", "flat-symbol-search-contract"],
+    ["codeMode-symbol-getCard-contract", "flat-symbol-getCard-contract"],
+    ["workflow-symbol-getCard-contract", "flat-symbol-getCard-contract"],
+
+
+    ["codeMode-code-getSkeleton-contract", "flat-code-getSkeleton-contract"],
+    ["workflow-code-getSkeleton-contract", "flat-code-getSkeleton-contract"],
+    ["codeMode-code-getHotPath-contract", "flat-code-getHotPath-contract"],
+    ["workflow-code-getHotPath-contract", "flat-code-getHotPath-contract"],
+
+
+  ] as const) {
+    const surfaceProjection = projectedByCaseId.get(surfaceId);
+    const comparableProjection = surfaceId.startsWith("workflow-")
+      ? (
+          surfaceProjection as
+            | { results?: Array<{ result?: unknown }> }
+            | undefined
+        )?.results?.[0]?.result
+      : surfaceProjection;
+    assert.deepEqual(
+      comparableProjection,
+      projectedByCaseId.get(flatId),
+      `${surfaceId}: projected result diverged from ${flatId}`,
+    );
+  }
+}
 async function connect(server: MCPServer): Promise<Client> {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -245,6 +654,8 @@ async function connect(server: MCPServer): Promise<Client> {
 describe("MCP output-schema wire contracts", { concurrency: false }, () => {
   let server: MCPServer;
   let client: Client;
+  let flatServer: MCPServer;
+  let flatClient: Client;
   let symbolId = "";
   let largeSymbolId = "";
   const previousEnv = {
@@ -302,7 +713,7 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
             autoRunOnIndexRefresh: false,
           },
           prefetch: { enabled: false, warmTopN: 0 },
-          memory: { enabled: false },
+          memory: { enabled: true },
           scip: { enabled: false, generator: { enabled: false } },
           observability: { enabled: false },
           security: { allowedRepoRoots: [REPO_ROOT] },
@@ -323,7 +734,7 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     await closeLadybugDb();
     await initLadybugDb(DB_PATH);
     server = await createMCPServer({
-      gatewayConfig: { enabled: false, emitLegacyTools: true },
+      gatewayConfig: { enabled: true, emitLegacyTools: true },
       codeModeConfig: {
         enabled: true,
         exclusive: false,
@@ -336,6 +747,9 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     });
     client = await connect(server);
     await client.listTools();
+    flatServer = await createMCPServer();
+    flatClient = await connect(flatServer);
+    await flatClient.listTools();
 
     for (const setupCall of [
       {
@@ -404,7 +818,9 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
   });
 
   after(async () => {
+    await flatClient?.close();
     await client?.close();
+    await flatServer?.stop();
     await server?.stop();
     resetSearchEditPlanStore();
     await closeLadybugDb();
@@ -425,6 +841,11 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     if (existsSync(TEST_ROOT)) {
       rmSync(TEST_ROOT, { recursive: true, force: true });
     }
+  });
+
+  it("executes every non-mutating public contract case through the wire", async () => {
+    const context = await setupWireFixtureContext(client, symbolId);
+    await executePublicContractCases(client, flatClient, context);
   });
 
   it("preserves the optional test-case facet in card schema order", () => {
@@ -635,7 +1056,8 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
 
   for (const wireCase of cases) {
     it(`${wireCase.name} returns schema-valid success and generic error envelopes`, async () => {
-      const success = (await client.callTool({
+      const wireClient = wireCase.name === "sdl.context" ? client : flatClient;
+      const success = (await wireClient.callTool({
         name: wireCase.name,
         arguments: wireCase.successArgs(),
       })) as ToolEnvelope;
@@ -688,7 +1110,7 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
           assert.equal(edge.confidencePermille, undefined);
         }
 
-        const diagnosticsResponse = (await client.callTool({
+        const diagnosticsResponse = (await wireClient.callTool({
           name: wireCase.name,
           arguments: {
             ...wireCase.successArgs(),
@@ -711,7 +1133,7 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
         assert.equal(typeof diagnosticsContext.evidence[0]?.tier, "number");
       }
 
-      const failure = (await client.callTool({
+      const failure = (await wireClient.callTool({
         name: wireCase.name,
         arguments: wireCase.errorArgs(),
       })) as ToolEnvelope;
@@ -723,11 +1145,11 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     });
   }
 
-  it("keeps retrieve code variants schema-valid across inline and handle delivery", async () => {
+  it("keeps retrieve code variants schema-valid across inline, auto, and handle delivery", async () => {
     const callRetrieve = async (
       op: "codeSkeleton" | "codeHotPath",
       args: Record<string, unknown>,
-      responseMode: "inline" | "handle",
+      responseMode: "inline" | "auto" | "handle",
     ): Promise<ToolEnvelope> =>
       (await client.callTool({
         name: "sdl.retrieve",
@@ -818,6 +1240,21 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
         label + ": " + responseText(inline),
       );
       assert.deepStrictEqual(inline.structuredContent, recovered, label);
+      const automatic = await callRetrieve(op, args, "auto");
+      assert.notEqual(
+        automatic.isError,
+        true,
+        label + " auto: " + responseText(automatic),
+      );
+      const automaticContent =
+        (
+          automatic.structuredContent as
+            | { kind?: string }
+            | undefined
+        )?.kind === "responseArtifact"
+          ? await recoverModelContent(automatic)
+          : automatic.structuredContent;
+      assert.deepStrictEqual(automaticContent, recovered, label + " auto");
       if (op === "codeHotPath") {
         hotHandle = artifact.handle ?? "";
         directHotPath = inline.structuredContent as Record<string, unknown>;
@@ -1029,7 +1466,7 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
       assert.equal(response.isError, true);
       assert.ok(results?.some((result) => result.status === "error"));
     } finally {
-      const restore = (await client.callTool({
+      const restore = (await flatClient.callTool({
         name: "sdl.file.write",
         arguments: {
           repoId: REPO_ID,
@@ -1098,7 +1535,7 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
         interveningSource,
       );
     } finally {
-      const restore = (await client.callTool({
+      const restore = (await flatClient.callTool({
         name: "sdl.file.write",
         arguments: {
           repoId: REPO_ID,
@@ -1298,7 +1735,7 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
       detail: "full",
     };
     const callQuery = async (): Promise<ToolEnvelope> =>
-      (await client.callTool({
+      (await flatClient.callTool({
         name: "sdl.runtime.queryOutput",
         arguments: queryArgs,
       })) as ToolEnvelope;
@@ -1366,6 +1803,233 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
       "Only one ledger version exists — delta is empty. Run index.refresh after making changes to create a new version.",
     );
     assert.equal(result.nextAction, undefined);
+  });
+
+  it("keeps symbol-card refsMode off/auto repeat semantics through flat wire", async () => {
+    const callCard = async (
+      refsMode: "off" | "auto",
+      label: string,
+    ): Promise<Record<string, unknown>> => {
+      const call = {
+        name: "sdl.symbol.getCard",
+        arguments: {
+          repoId: REPO_ID,
+          symbolId,
+          detail: "full",
+          refsMode,
+        },
+      };
+      const response = (await flatClient.callTool(call)) as ToolEnvelope;
+      return assertWireProjection(
+        response,
+        withProjectionSuccessOutputSchema(
+          "symbol.getCard",
+          SymbolGetCardResponseSchema,
+        ),
+        call,
+        label,
+      );
+    };
+
+    const firstOff = await callCard("off", "symbol.getCard refs off first");
+    const secondOff = await callCard("off", "symbol.getCard refs off repeat");
+    assert.deepStrictEqual(secondOff, firstOff);
+    const secondOffCard = (
+      secondOff as { card?: { ref?: unknown; unchanged?: boolean } }
+    ).card;
+    assert.ok(secondOffCard);
+    assert.equal(secondOffCard.unchanged, undefined);
+    assert.equal(secondOffCard.ref, undefined);
+
+    // refsMode:off does not populate the session-ref cache, so the first auto
+    // call is the named setup and the second call consumes that exact entry.
+    const firstAuto = await callCard("auto", "symbol.getCard refs auto setup");
+    const secondAuto = await callCard("auto", "symbol.getCard refs auto repeat");
+    const firstAutoCard = (
+      firstAuto as { card?: { ref?: unknown; unchanged?: boolean } }
+    ).card;
+    assert.ok(firstAutoCard);
+    assert.equal(firstAutoCard.unchanged, undefined);
+    assert.equal(firstAutoCard.ref, undefined);
+    const secondAutoCard = (
+      secondAuto as {
+        card?: {
+          ref?: { etag?: string; key?: string };
+          unchanged?: boolean;
+        };
+      }
+    ).card;
+    assert.equal(secondAutoCard?.unchanged, true);
+    assert.equal(secondAutoCard?.ref?.key, `card:${REPO_ID}:${symbolId}`);
+    assert.equal(typeof secondAutoCard?.ref?.etag, "string");
+  });
+
+  it("round-trips ifNoneMatch through the flat symbol-card wire", async () => {
+    // Normal model projections hide ETags, so seed the conditional request from
+    // the canonical handler result and validate only the real wire response.
+    const canonical = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolId,
+      detail: "full",
+      refsMode: "off",
+    });
+    const canonicalCard = (
+      canonical as {
+        card?: {
+          etag?: string;
+          version?: { ledgerVersion?: string };
+        };
+      }
+    ).card;
+    const etag = canonicalCard?.etag;
+    const ledgerVersion = canonicalCard?.version?.ledgerVersion;
+    assert.ok(etag);
+    assert.ok(ledgerVersion);
+
+    const conditionalCall = {
+      name: "sdl.symbol.getCard",
+      arguments: {
+        repoId: REPO_ID,
+        symbolId,
+        detail: "full",
+        refsMode: "off",
+        ifNoneMatch: etag,
+      },
+    };
+    const conditional = (await flatClient.callTool(
+      conditionalCall,
+    )) as ToolEnvelope;
+    const projected = assertWireProjection(
+      conditional,
+      withProjectionSuccessOutputSchema(
+        "symbol.getCard",
+        SymbolGetCardResponseSchema,
+      ),
+      conditionalCall,
+      "symbol.getCard conditional response",
+    );
+    assert.deepStrictEqual(projected, {
+      notModified: true,
+      etag,
+      ledgerVersion,
+    });
+  });
+
+  it("preserves symbol-search model equality across json, packed, and auto fallback", async () => {
+    const callSearch = async (
+      wireFormat: "json" | "packed" | "auto",
+    ): Promise<ToolEnvelope> =>
+      (await flatClient.callTool({
+        name: "sdl.symbol.search",
+        arguments: {
+          repoId: REPO_ID,
+          query: "no-such-symbol-wire-format-crosscut",
+          semantic: false,
+          limit: 1,
+          wireFormat,
+        },
+      })) as ToolEnvelope;
+
+    const json = await callSearch("json");
+    const packed = await callSearch("packed");
+    const automatic = await callSearch("auto");
+    for (const response of [json, packed, automatic]) {
+      assert.notEqual(response.isError, true, responseText(response));
+    }
+
+    const jsonModel = json.structuredContent as Record<string, unknown>;
+    assert.deepStrictEqual(packed.structuredContent, jsonModel);
+    assert.deepStrictEqual(automatic.structuredContent, jsonModel);
+    assert.strictEqual(responseText(packed), responseText(json));
+    assert.strictEqual(responseText(automatic), responseText(json));
+    assert.ok(
+      Array.isArray(
+        (automatic.structuredContent as { results?: unknown }).results,
+      ),
+      "small auto response should fall back to JSON",
+    );
+  });
+
+  it("keeps workflow controls executable through the SDK wire", async () => {
+    const callWorkflow = async (
+      options: Record<string, unknown>,
+    ): Promise<ToolEnvelope> =>
+      (await client.callTool({
+        name: "sdl.workflow",
+        arguments: { repoId: REPO_ID, ...options },
+      })) as ToolEnvelope;
+    const successfulSteps = [
+      {
+        fn: "dataPick",
+        args: { input: { value: "first" }, fields: { value: "value" } },
+      },
+      {
+        fn: "dataPick",
+        args: { input: { value: "final" }, fields: { value: "value" } },
+      },
+    ];
+
+    const onlyFinal = await callWorkflow({
+      steps: successfulSteps,
+      onlyFinalResult: true,
+    });
+    assert.notEqual(onlyFinal.isError, true, responseText(onlyFinal));
+    const finalResults = (
+      onlyFinal.structuredContent as {
+        results?: Array<{ stepIndex?: number; result?: unknown }>;
+      }
+    ).results;
+    assert.equal(finalResults?.length, 1);
+    assert.deepEqual(finalResults?.[0]?.result, { value: "final" });
+
+    const dryRun = await callWorkflow({
+      steps: successfulSteps,
+      dryRun: true,
+    });
+    assert.notEqual(dryRun.isError, true, responseText(dryRun));
+    const dryRunResult = dryRun.structuredContent as {
+      results?: Array<{ status?: string }>;
+      dryRun?: { valid?: boolean; stepCount?: number };
+    };
+    assert.equal(dryRunResult.dryRun?.valid, true);
+    assert.equal(dryRunResult.dryRun?.stepCount, 2);
+    assert.deepEqual(
+      dryRunResult.results?.map(({ status }) => status),
+      ["skipped", "skipped"],
+    );
+
+    const failingSteps = [
+      {
+        fn: "dataMap",
+        args: { input: { value: "not-an-array" }, fields: { value: "value" } },
+      },
+      {
+        fn: "dataPick",
+        args: { input: { value: "independent" }, fields: { value: "value" } },
+      },
+      {
+        fn: "dataPick",
+        args: { input: "$0", fields: { value: "value" } },
+      },
+    ];
+    for (const [onError, expectedStatuses] of [
+      ["stop", ["error", "skipped", "skipped"]],
+      ["continue", ["error", undefined, "skipped"]],
+      ["continueAll", ["error", undefined, "error"]],
+    ] as const) {
+      const response = await callWorkflow({ steps: failingSteps, onError });
+      assert.equal(response.isError, true, onError);
+      const results = (
+        response.structuredContent as {
+          results?: Array<{ status?: string }>;
+        }
+      ).results;
+      assert.deepEqual(
+        results?.map(({ status }) => status),
+        expectedStatuses,
+        onError,
+      );
+    }
   });
 
   it("returns the exact static no-op checkpoint payload through the SDK wire", async () => {
