@@ -93,6 +93,12 @@ The public contract ledger derives action, field, enum, discriminator, union-arm
 
 Mutation coverage runs only against runner-owned disposable repositories and databases. Before and after each scenario, the runner captures content-complete snapshots of the active worktree and the entire active database family, including sidecars, and fails if the active state changes. A disposable `index.refresh` scenario requires explicit approval before execution, and QA never refreshes the active `sdl-mcp` registration.
 
+### Diagnostic fixture exclusions
+
+Default determinism fixtures stay diagnostic-free. Any fixture that opts into diagnostics must name and justify each exclusion; it still enforces the allowlist, bounds, redaction, and public schema. Never use an exclusion to admit default telemetry or discard semantic recovery.
+
+### Workflow envelope semantics
+
 Successful workflow steps omit `status`; the absence of an error is the success signal. A successful minimal `runtimeExecute` step also omits `result`, while non-minimal modes expose only the requested runtime data and bounded recovery metadata. Failed steps retain `status: "error"` and `error`. Canonical executor results keep status, exit code, and accounting fields for `$N` references; directly called `runtime.execute` responses retain their own status because they have no workflow envelope.
 
 ## Contributor checks

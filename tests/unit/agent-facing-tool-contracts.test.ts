@@ -1569,7 +1569,11 @@ describe("runtime agent-facing projection", () => {
         repoId: "repo-a",
         artifactHandle: "runtime-artifact",
         view: "model",
-        queryTerms: ["error", "failed", "exception"],
+        queryTerms: [],
+        cursor: {
+          stream: "stdout",
+          afterLine: 0,
+        },
         stream: "stdout",
         maxExcerpts: 10,
         contextLines: 3,
