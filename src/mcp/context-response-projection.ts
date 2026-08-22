@@ -775,6 +775,9 @@ export function projectWorkflowChildResultForModel(
   if (fn === "retrieve" || fn === "sdl.retrieve") {
     return projectExclusiveCodeModeRecovery(projected, repoId);
   }
+  if (toolName === "runtime.queryOutput") {
+    return projectExclusiveCodeModeRecovery(projected, repoId);
+  }
   return projected;
 }
 
@@ -810,7 +813,9 @@ function projectWorkflowResultForModel(
       }
       if ("result" in item) {
         successStep.result = typeof item.fn === "string"
-          && getWorkflowChildAction(item.fn) === "response.get"
+          && ["response.get", "runtime.queryOutput"].includes(
+            getWorkflowChildAction(item.fn),
+          )
           ? projectWorkflowChildResultForModel(
               item.fn,
               item.result,
@@ -841,7 +846,9 @@ function projectWorkflowResultForModel(
     }
     if ("result" in item && item.result !== null && item.result !== undefined) {
       failureStep.result = typeof item.fn === "string"
-        && getWorkflowChildAction(item.fn) === "response.get"
+        && ["response.get", "runtime.queryOutput"].includes(
+            getWorkflowChildAction(item.fn),
+          )
         ? projectWorkflowChildResultForModel(
             item.fn,
             item.result,
@@ -872,7 +879,10 @@ function projectWorkflowResultForModel(
   if (options.includeDiagnostics) {
     copyIfPresent(result, projected, "diagnostics");
   }
-  return projected;
+  return projectExclusiveCodeModeRecovery(
+    projected,
+    typeof workflowArgs.repoId === "string" ? workflowArgs.repoId : undefined,
+  );
 }
 
 function projectUsageStatsForModel(result: unknown): Record<string, unknown> {

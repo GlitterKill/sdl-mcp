@@ -870,8 +870,8 @@ export const AGENT_OUTPUT_CASES = [
         totalStderrBytes: 0,
       },
     }),
-    expectedCompactKeys: ["status"],
-    requiredActionabilityKeys: ["status"],
+    expectedCompactKeys: ["status", "artifactHandle", "nextAction"],
+    requiredActionabilityKeys: ["status", "artifactHandle", "nextAction"],
     executionMode: "synthetic-handler-free",
   }),
   compactCase({
@@ -902,9 +902,9 @@ export const AGENT_OUTPUT_CASES = [
       "artifactHandle",
       "excerpts",
       "matchStatus",
-      "nextCursor",
+      "nextAction",
     ],
-    requiredActionabilityKeys: ["artifactHandle", "excerpts"],
+    requiredActionabilityKeys: ["artifactHandle", "excerpts", "nextAction"],
     executionMode: "read-only",
   }),
   compactCase({

@@ -1,4 +1,11 @@
 import { spawnSync } from "node:child_process";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
@@ -199,6 +206,40 @@ describe("default executable lookup", () => {
     const expected = process.platform === "win32" ? "cmd.exe" : "bash";
     assert.strictEqual(getRuntimeDefaultExecutable("shell"), expected);
   });
+});
+
+describe("buildCommand — PowerShell source isolation", () => {
+  it(
+    "keeps user code in the temporary script path and preserves script args",
+    { skip: process.platform !== "win32" },
+    () => {
+      const runtime = getRuntime("powershell");
+      assert.ok(runtime);
+      const tempDir = mkdtempSync(join(tmpdir(), "sdl-runtime-builder-"));
+      const codePath = join(tempDir, "source.ps1");
+      const source = "Write-Output 'USER_SOURCE_MARKER'\n";
+      writeFileSync(codePath, source, "utf-8");
+
+      try {
+        const command = runtime.buildCommand(["arg one"], {
+          codePath,
+          executable: "pwsh.exe",
+        });
+
+        assert.equal(command.executable, "pwsh.exe");
+        assert.equal(
+          command.args.filter((arg) => arg === codePath).length,
+          1,
+        );
+        assert.equal(command.args.at(-1), "arg one");
+        assert.ok(
+          command.args.every((arg) => !arg.includes("USER_SOURCE_MARKER")),
+        );
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("normalizeExecutableName", () => {

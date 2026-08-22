@@ -682,16 +682,20 @@ export async function queryArtifactContent(
       if (streamContent === null) return;
       const lines = streamContent.split("\n");
       if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) return;
-      const end = Math.min(lines.length - 1, maxExcerpts - 1);
+      const start =
+        options.cursor?.stream === source ? options.cursor.afterLine : 0;
+      if (start >= lines.length) return;
+      const end = Math.min(lines.length, start + maxExcerpts);
+      const page = lines.slice(start, end);
       excerpts.push({
-        lineStart: 1,
-        lineEnd: end + 1,
-        content: lines
-          .slice(0, end + 1)
-          .map(truncLine)
-          .join("\n"),
+        lineStart: start + 1,
+        lineEnd: end,
+        content: (lowerTerms.length === 0 ? page : page.map(truncLine)).join("\n"),
         source,
       });
+      if (end < lines.length) {
+        nextCursor = { stream: source, afterLine: end };
+      }
     };
     fallbackStream(stdout, "stdout");
     if (excerpts.length === 0) fallbackStream(stderr, "stderr");
@@ -705,6 +709,8 @@ export async function queryArtifactContent(
     searchedStreams,
     matchStatus: matchCount > 0 ? "matched" : "noMatchFallback",
     matchCount,
-    ...(matchCount > emittedMatchCount && nextCursor ? { nextCursor } : {}),
+    ...(nextCursor && (matchCount === 0 || matchCount > emittedMatchCount)
+      ? { nextCursor }
+      : {}),
   };
 }

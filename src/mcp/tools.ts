@@ -3450,11 +3450,11 @@ export const RuntimeQueryOutputRequestSchema = withProjectionRequestOptions(z
       .describe("Which output stream(s) to search"),
   })
   .superRefine((val, ctx) => {
-    if (val.queryTerms.length === 0 && !val.lineRange) {
+    if (val.queryTerms.length === 0 && !val.cursor && !val.lineRange) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["queryTerms"],
-        message: "queryTerms are required unless lineRange is provided",
+        message: "queryTerms are required unless cursor or lineRange is provided",
       });
     }
     if (val.cursor && val.stream !== "both" && val.stream !== val.cursor.stream) {
@@ -4860,13 +4860,7 @@ export const WorkflowRuntimeExecuteResponseSchema = z
     excerpts: z.array(RuntimeProjectedExcerptSchema).optional(),
     preview: RuntimeProjectedPreviewSchema.optional(),
     artifactHandle: z.string().optional(),
-    nextAction: z
-      .object({
-        action: z.literal("runtime.queryOutput"),
-        args: z.record(z.string(), z.unknown()),
-      })
-      .strict()
-      .optional(),
+    nextAction: PublicRecoveryActionSchema.optional(),
     incompleteCapture: z
       .object({
         stdoutTruncated: z.boolean(),
@@ -4890,8 +4884,9 @@ const ProjectedRuntimeQueryCompactResponseSchema =
     artifactHandle: true,
     excerpts: true,
     matchStatus: true,
-    nextCursor: true,
-  }).strict();
+  })
+    .extend({ nextAction: PublicRecoveryActionSchema.optional() })
+    .strict();
 
 const ProjectedResponseMetadataSchema =
   ResponseArtifactPublicMetadataSchema.extend({

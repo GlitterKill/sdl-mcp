@@ -20,6 +20,12 @@ import {
   RuntimeExecuteResponseSchema,
   RuntimeQueryOutputResponseSchema,
 } from "../../dist/mcp/tools.js";
+import { CodeModeConfigSchema } from "../../dist/config/types.js";
+import { registerTools } from "../../dist/mcp/tools/index.js";
+import {
+  MCPServer,
+  type ToolResponseEnvelope,
+} from "../../dist/server.js";
 
 /**
  * Integration tests for the sdl.runtime.execute MCP tool handler.
@@ -355,6 +361,390 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
         query.excerpts.map((excerpt) => excerpt.content.replace(/\r$/, "")),
         ["SDL_NATIVE_OK", "EXIT:0"],
       );
+    },
+  );
+
+  it(
+    "propagates final native-child exits and preserves PowerShell error records",
+    { skip: process.platform !== "win32" },
+    async () => {
+      const { handleRuntimeExecute } =
+        await import("../../dist/mcp/tools/runtime.js");
+      const missingPath = `sdl-mcp-missing-cmdlet-path-${process.pid}`;
+      const cases = [
+        {
+          name: "native exit 0",
+          code: "& cmd.exe /d /c exit 0",
+          status: "success",
+          exitCode: 0,
+        },
+        {
+          name: "native exit 23",
+          code: "& cmd.exe /d /c exit 23",
+          status: "failure",
+          exitCode: 23,
+        },
+        {
+          name: "stale native exit followed by a successful cmdlet",
+          code: "& cmd.exe /d /c exit 23; Write-Output 'RECOVERED'",
+          status: "success",
+          exitCode: 0,
+        },
+        {
+          name: "non-terminating cmdlet error",
+          code: `Get-Item -LiteralPath (Join-Path $env:TEMP '${missingPath}'); Write-Output 'AFTER_ERROR'`,
+          status: "failure",
+          exitCode: 0,
+        },
+      ] as const;
+
+      for (const expected of cases) {
+        const result = await handleRuntimeExecute({
+          repoId,
+          runtime: "powershell",
+          executable:
+            expected.name === "non-terminating cmdlet error"
+              ? "powershell.exe"
+              : "pwsh.exe",
+          code: expected.code,
+          persistOutput: false,
+          outputMode: "minimal",
+        });
+
+        assert.equal(result.status, expected.status, expected.name);
+        assert.equal(result.exitCode, expected.exitCode, expected.name);
+      }
+    },
+  );
+
+  it("anchors persisted large-output recovery at the selected stream byte zero", async () => {
+    const server = new MCPServer();
+    registerTools(
+      server,
+      {},
+      undefined,
+      CodeModeConfigSchema.parse({ enabled: true, exclusive: true }),
+    );
+    const sdkServer = server.getServer() as unknown as {
+      _requestHandlers: Map<
+        string,
+        (
+          request: {
+            method: "tools/call";
+            params: {
+              name: string;
+              arguments?: Record<string, unknown>;
+            };
+          },
+          extra: {
+            _meta: Record<string, unknown>;
+            sendNotification: () => Promise<void>;
+            signal: AbortSignal;
+          },
+        ) => Promise<ToolResponseEnvelope>
+      >;
+    };
+    const handler = sdkServer._requestHandlers.get("tools/call");
+    assert.ok(handler);
+    const cases = [
+      {
+        name: "stderr",
+        code: `process.stderr.write("E".repeat(32_000));`,
+        expectedCursor: "stderr/0",
+      },
+      {
+        name: "stdout",
+        code: `process.stdout.write("O".repeat(32_000));`,
+        expectedCursor: "stdout/0",
+      },
+    ] as const;
+
+    for (const expected of cases) {
+      const response = await handler(
+        {
+          method: "tools/call",
+          params: {
+            name: "sdl.workflow",
+            arguments: {
+              repoId,
+              steps: [
+                {
+                  fn: "runtimeExecute",
+                  args: {
+                    runtime: "node",
+                    code: expected.code,
+                    persistOutput: true,
+                    outputMode: "minimal",
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
+          _meta: {},
+          sendNotification: async () => {},
+          signal: new AbortController().signal,
+        },
+      );
+      const wire = response.structuredContent as {
+        results?: Array<{
+          result?: {
+            artifactHandle?: string;
+            nextAction?: {
+              action?: string;
+              args?: {
+                steps?: Array<{
+                  fn?: string;
+                  args?: {
+                    cursor?: { stream?: string; afterLine?: number };
+                  };
+                }>;
+              };
+            };
+          };
+        }>;
+      };
+      const runtimeResult = wire.results?.[0]?.result;
+      const nextAction = runtimeResult?.nextAction;
+      const recoveryStep = nextAction?.args?.steps?.[0];
+      const cursor = recoveryStep?.args?.cursor;
+      assert.equal(nextAction?.action, "sdl.workflow");
+      assert.equal(recoveryStep?.fn, "runtimeQueryOutput");
+      assert.equal(
+        `${cursor?.stream}/${cursor?.afterLine}`,
+        expected.expectedCursor,
+        `${expected.name} ${JSON.stringify(response)}`,
+      );
+      assert.ok(runtimeResult?.artifactHandle, expected.name);
+    }
+  });
+
+  it("keeps hidden minimal output recoverable with exact UTF-8 paging", async () => {
+    const exclusiveServer = new MCPServer();
+    registerTools(exclusiveServer, {}, undefined, { enabled: true, exclusive: true });
+
+    type CallToolResponse = {
+      isError?: boolean;
+      structuredContent?: unknown;
+      content?: Array<{ type: string; text?: string }>;
+    };
+    type RecoveryAction = {
+      action: string;
+      args: {
+        repoId: string;
+        steps: Array<{
+          fn: string;
+          args: Record<string, unknown>;
+        }>;
+      };
+    };
+
+    const requestHandler = (
+      exclusiveServer.server as unknown as {
+        _requestHandlers: Map<
+          string,
+          (request: {
+            method: "tools/call";
+            params: {
+              name: string;
+              arguments: Record<string, unknown>;
+              _meta: Record<string, unknown>;
+            };
+          }, extra: {
+            signal: AbortSignal;
+            sendNotification: () => Promise<void>;
+          }) => Promise<CallToolResponse>
+        >;
+      }
+    )._requestHandlers.get("tools/call");
+    assert.ok(requestHandler);
+
+    const callTool = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<Record<string, unknown>> => {
+      const response = await requestHandler({
+        method: "tools/call",
+        params: { name, arguments: args, _meta: {} },
+      }, {
+        signal: new AbortController().signal,
+        sendNotification: async () => {},
+      });
+      assert.equal(response.isError, undefined);
+      if (
+        response.structuredContent &&
+        typeof response.structuredContent === "object"
+      ) {
+        return response.structuredContent as Record<string, unknown>;
+      }
+      const text = response.content?.find(
+        (item) => item.type === "text" && typeof item.text === "string",
+      )?.text;
+      assert.ok(text);
+      return JSON.parse(text) as Record<string, unknown>;
+    };
+
+    const firstStep = (payload: Record<string, unknown>) => {
+      const results = payload.results as Array<{
+        result: Record<string, unknown>;
+        nextAction?: RecoveryAction;
+      }>;
+      assert.equal(results.length, 1);
+      return results[0]!;
+    };
+
+    const runRuntime = async (
+      args: Record<string, unknown>,
+    ): Promise<Record<string, unknown>> =>
+      firstStep(
+        await callTool("sdl.workflow", {
+          repoId,
+          steps: [{ fn: "runtimeExecute", args: { repoId, ...args } }],
+        }),
+      ).result;
+
+    const expectedOutput = Array.from(
+      { length: 25 },
+      (_, index) =>
+        index === 12
+          ? `PAGE-12-error-${"π🙂".repeat(300)}`
+          : `PAGE-${String(index).padStart(2, "0")}-π🙂`,
+    ).join("\n");
+    const projected = await runRuntime({
+      runtime: "node",
+      code: `process.stdout.write(${JSON.stringify(expectedOutput)});`,
+      outputMode: "minimal",
+      persistOutput: true,
+    });
+    assert.ok(projected.artifactHandle);
+    assert.ok(projected.nextAction);
+
+    let recovery = projected.nextAction as RecoveryAction;
+    assert.equal(recovery.action, "sdl.workflow");
+    const emittedRecovery = structuredClone(recovery);
+    assert.deepEqual(emittedRecovery.args.steps[0]?.args.queryTerms, []);
+    const firstPage = firstStep(
+      await callTool(emittedRecovery.action, emittedRecovery.args),
+    );
+
+    let page = firstPage.result;
+    let nextAction = firstPage.nextAction;
+    let pageCount = 0;
+    const recovered: string[] = [];
+    while (true) {
+      pageCount += 1;
+      assert.ok(pageCount <= 3);
+      const excerpts = page.excerpts as Array<{ content: string }>;
+      recovered.push(...excerpts.map((excerpt) => excerpt.content));
+      if (!nextAction) {
+        break;
+      }
+      recovery = nextAction;
+      const nextPage = firstStep(await callTool(recovery.action, recovery.args));
+      page = nextPage.result;
+      nextAction = nextPage.nextAction;
+    }
+
+    assert.ok(pageCount >= 2, JSON.stringify(firstPage));
+    assert.deepEqual(
+      Buffer.from(recovered.join("\n"), "utf8"),
+      Buffer.from(expectedOutput, "utf8"),
+    );
+
+    const summary = await runRuntime({
+      runtime: "node",
+      code: 'process.stdout.write("VISIBLE SUMMARY");',
+      outputMode: "summary",
+      persistOutput: true,
+    });
+    assert.equal(summary.artifactHandle, undefined);
+    assert.equal(summary.nextAction, undefined);
+    assert.ok(summary.stdoutSummary);
+
+    const digest = await runRuntime({
+      runtime: "node",
+      code: 'process.stdout.write("VISIBLE DIGEST");',
+      outputMode: "digest",
+      persistOutput: true,
+    });
+    assert.equal(digest.artifactHandle, undefined);
+    assert.equal(digest.nextAction, undefined);
+    assert.ok(digest.excerpts);
+  });
+
+  it(
+    "propagates a final native-child exit through a workflow step",
+    { skip: process.platform !== "win32" },
+    async () => {
+      const server = new MCPServer();
+      registerTools(
+        server,
+        {},
+        undefined,
+        CodeModeConfigSchema.parse({ enabled: true, exclusive: true }),
+      );
+      const sdkServer = server.getServer() as unknown as {
+        _requestHandlers: Map<
+          string,
+          (
+            request: {
+              method: "tools/call";
+              params: {
+                name: string;
+                arguments?: Record<string, unknown>;
+              };
+            },
+            extra: {
+              _meta: Record<string, unknown>;
+              sendNotification: () => Promise<void>;
+              signal: AbortSignal;
+            },
+          ) => Promise<ToolResponseEnvelope>
+        >;
+      };
+      const handler = sdkServer._requestHandlers.get("tools/call");
+      assert.ok(handler);
+
+      const response = await handler(
+        {
+          method: "tools/call",
+          params: {
+            name: "sdl.workflow",
+            arguments: {
+              repoId,
+              onError: "continueAll",
+              steps: [
+                {
+                  fn: "runtimeExecute",
+                  args: {
+                    runtime: "powershell",
+                    executable: "pwsh.exe",
+                    code: "& cmd.exe /d /c exit 23",
+                    persistOutput: false,
+                    outputMode: "minimal",
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
+          _meta: {},
+          sendNotification: async () => {},
+          signal: new AbortController().signal,
+        },
+      );
+      const result = response.structuredContent as {
+        results?: Array<{ status?: string; error?: string }>;
+      };
+
+      assert.equal(
+        result.results?.[0]?.status,
+        "error",
+        JSON.stringify(response),
+      );
+      assert.match(result.results?.[0]?.error ?? "", /exit code 23/u);
     },
   );
 

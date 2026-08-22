@@ -388,6 +388,20 @@ describe("agent retrieval output matrix", () => {
 
       const workflowFn = workflowFnByAction.get(fixture.action);
       if (workflowFn) {
+        if (fixture.action === "runtime.queryOutput") {
+          // Workflow children expose continuations through the exclusive public tool.
+          const [recoveryAction] = recoveryCandidates(
+            projectWorkflowChildResultForModel(
+              workflowFn,
+              canonical,
+              { repoId: "projection-fixture", detail: "compact" },
+              fixture.publicRequest,
+            ),
+          );
+          assert.ok(isRecord(recoveryAction));
+          assert.equal(recoveryAction.action, "sdl.workflow");
+          continue;
+        }
         assert.deepEqual(
           projectWorkflowChildResultForModel(
             workflowFn,

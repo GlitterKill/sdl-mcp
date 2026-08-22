@@ -35,8 +35,8 @@ function integer(value: unknown): number {
 export function extractRuntimeObservability(
   value: unknown,
 ): RuntimeObservability | undefined {
-  if (!isRecord(value)) return undefined;
-  const truncation = isRecord(value.truncation) ? value.truncation : {};
+  if (!isRecord(value) || !isRecord(value.truncation)) return undefined;
+  const truncation = value.truncation;
   return {
     exitCode:
       typeof value.exitCode === "number" && Number.isInteger(value.exitCode)
@@ -212,8 +212,9 @@ function boundedPreview(selected: Record<string, unknown>): Record<string, unkno
 }
 
 function streamFor(
-  observability: RuntimeObservability,
+  observability: RuntimeObservability | undefined,
 ): "stdout" | "stderr" | "both" {
+  if (!observability) return "both";
   if (observability.totalStdoutBytes > 0 && observability.totalStderrBytes === 0) {
     return "stdout";
   }
@@ -226,7 +227,8 @@ function streamFor(
 function recovery(
   input: ModelProjectionInput,
   artifactHandle: string,
-  observability: RuntimeObservability,
+  observability: RuntimeObservability | undefined,
+  cursor?: { stream: "stdout" | "stderr"; afterLine: number },
 ): { action: "runtime.queryOutput"; args: Record<string, unknown> } | undefined {
   const repoId = input.context.requestArgs.repoId;
   if (typeof repoId !== "string" || repoId.length === 0) return undefined;
@@ -235,17 +237,21 @@ function recovery(
         (term): term is string => typeof term === "string" && term.length > 0,
       )
     : [];
+  const queryOutput = input.action === "runtime.queryOutput"
+    || input.action === "sdl.runtime.queryOutput";
   return {
     action: "runtime.queryOutput",
     args: {
       repoId,
       artifactHandle,
       view: "model",
-      queryTerms:
-        queryTerms.length > 0
-          ? queryTerms
-          : ["error", "failed", "exception"],
-      stream: streamFor(observability),
+      queryTerms: queryOutput ? queryTerms : [],
+      cursor: cursor ?? {
+        stream:
+          observability?.totalStderrBytes ? "stderr" : "stdout",
+        afterLine: 0,
+      },
+      stream: cursor?.stream ?? streamFor(observability),
       maxExcerpts: 10,
       contextLines:
         typeof input.context.requestArgs.contextLines === "number"
@@ -320,6 +326,14 @@ function projectRuntimeExecute(input: ModelProjectionInput): unknown {
   }
 
   const projected: Record<string, unknown> = { status, ...selected };
+  const capturedOutputHidden =
+    Object.keys(selected).length === 0 &&
+    observability.totalStdoutBytes + observability.totalStderrBytes > 0;
+  if (capturedOutputHidden && artifactHandle) {
+    const nextAction = recovery(input, artifactHandle, observability);
+    projected.artifactHandle = artifactHandle;
+    if (nextAction) projected.nextAction = nextAction;
+  }
   const allowed =
     RUNTIME_DIAGNOSTIC_FIELDS_BY_PROFILE[
       input.action as keyof typeof RUNTIME_DIAGNOSTIC_FIELDS_BY_PROFILE
@@ -365,6 +379,46 @@ export function projectFileReadValue(
   };
 }
 
+function projectRuntimeQueryOutput(
+  input: ModelProjectionInput,
+  projectCompatibilityValue: ModelValueProjectionDelegate,
+): unknown {
+  const projected = projectCompatibilityValue(input);
+  if (!isRecord(projected) || !isRecord(input.canonicalResult)) {
+    return projected;
+  }
+  const compact = {
+    artifactHandle: projected.artifactHandle,
+    excerpts: projected.excerpts,
+    matchStatus: projected.matchStatus,
+    ...(isRecord(input.canonicalResult.nextAction)
+      ? { nextAction: input.canonicalResult.nextAction }
+      : {}),
+  };
+
+  const cursor = input.canonicalResult.nextCursor;
+  const artifactHandle = input.canonicalResult.artifactHandle;
+  if (
+    !isRecord(cursor)
+    || (cursor.stream !== "stdout" && cursor.stream !== "stderr")
+    || typeof cursor.afterLine !== "number"
+    || !Number.isInteger(cursor.afterLine)
+    || cursor.afterLine < 0
+    || typeof artifactHandle !== "string"
+    || artifactHandle.length === 0
+  ) {
+    return compact;
+  }
+
+  const nextAction = recovery(
+    input,
+    artifactHandle,
+    extractRuntimeObservability(input.canonicalResult),
+    { stream: cursor.stream, afterLine: cursor.afterLine },
+  );
+  return nextAction ? { ...compact, nextAction } : compact;
+}
+
 export function projectRuntimeValue(
   input: ModelProjectionInput,
   projectCompatibilityValue: ModelValueProjectionDelegate,
@@ -380,6 +434,12 @@ export function projectRuntimeValue(
     || input.action === "sdl.runtime.execute"
   ) {
     return projectRuntimeExecute(input);
+  }
+  if (
+    input.action === "runtime.queryOutput"
+    || input.action === "sdl.runtime.queryOutput"
+  ) {
+    return projectRuntimeQueryOutput(input, projectCompatibilityValue);
   }
   if (input.action === "file.read" || input.action === "sdl.file.read") {
     return projectFileReadValue(input, projectCompatibilityValue);

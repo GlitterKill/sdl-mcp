@@ -1,4 +1,5 @@
 import { execFileSync } from "child_process";
+import { appendFileSync } from "fs";
 import { basename } from "path";
 import type { RuntimeDescriptor, RuntimeDetectionResult } from "./types.js";
 import { ValidationError } from "../domain/errors.js";
@@ -365,9 +366,28 @@ function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
         }
         if (entry.name === "powershell") {
           const ps = opts.executable ?? candidates[0];
+          // Keep user source in the temporary script and append only the fixed
+          // footer that propagates its final command state to PowerShell.
+          const exitFooter = [
+            "",
+            "$sdlScriptSucceeded = $?",
+            "$sdlNativeExitCode = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue",
+            "if (-not $sdlScriptSucceeded) {",
+            "  if ($null -ne $sdlNativeExitCode -and $sdlNativeExitCode -ne 0) { exit $sdlNativeExitCode }",
+            "  exit 1",
+            "}",
+          ].join("\n");
+          appendFileSync(opts.codePath, exitFooter, "utf-8");
           return {
             executable: ps,
-            args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", opts.codePath, ...args],
+            args: [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              opts.codePath,
+              ...args,
+            ],
           };
         }
         if (IS_WINDOWS) {
