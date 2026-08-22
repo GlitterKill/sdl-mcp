@@ -2067,6 +2067,7 @@ const AmplifierSummaryItemSchema = z.object({
 
 export const DeltaGetResponseSchema = z.object({
   delta: DeltaPackSchema,
+  hint: z.string().optional(),
   amplifiers: z.array(AmplifierSummaryItemSchema).optional(),
   blastRadiusTruncated: z.boolean().optional(),
   cursor: z

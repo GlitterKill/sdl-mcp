@@ -23,13 +23,18 @@ import {
 } from "../../dist/db/ladybug.js";
 import { resetSearchEditPlanStore } from "../../dist/mcp/tools/search-edit/plan-store.js";
 import {
+  AgentFeedbackQueryResponseSchema,
   AgentContextOutputSchema,
   BufferCheckpointResponseSchema,
+  BufferStatusResponseSchema,
+  DeltaGetResponseSchema,
   CodeNeedWindowResponseSchema,
   FileReadResponseSchema,
   FileWriteResponseSchema,
   InfoResponseSchema,
   RepoOverviewResponseSchema,
+  RepoStatusResponseSchema,
+  RuntimeQueryOutputResponseSchema,
   SearchEditResponseSchema,
   SemanticEnrichmentRefreshResponseSchema,
   SemanticEnrichmentStatusResponseSchema,
@@ -120,6 +125,108 @@ function assertConciseText(response: ToolEnvelope, label: string): void {
   const text = responseText(response);
   assert.ok(text.length > 0, `${label}: expected non-empty text`);
   assert.ok(text.length <= 4_000, `${label}: text should remain concise`);
+}
+
+
+function assertNoDefaultVolatility(
+  value: unknown,
+  label: string,
+  allowVolatileFields = false,
+  allowRecoveryFields = false,
+): void {
+  if (typeof value === "string") {
+    assert.equal(
+      /(?:^|[\s"'=:(])(?:[a-z]:[\\/]|\\\\[^\\/\s]+[\\/]|\/(?:Applications|Library|System|Users|etc|home|mnt|opt|private|root|tmp|usr|var|workspace)(?:\/|$))/iu.test(
+        value,
+      ),
+      false,
+      label + ": absolute path leaked: " + value,
+    );
+    if (!allowVolatileFields) {
+      assert.doesNotMatch(
+        value,
+        /(?:\(\d+(?:\.\d+)?\s*ms\)|\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b|\bsession[-_ ]?id\s*[:=]\s*[a-z0-9][\w.-]*)/iu,
+        label + ": volatile default text: " + value,
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) =>
+      assertNoDefaultVolatility(
+        entry,
+        label,
+        allowVolatileFields,
+        allowRecoveryFields,
+      ),
+    );
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+
+  for (const [key, entry] of Object.entries(value)) {
+    assert.equal(
+      !allowRecoveryFields && (key === "nextAction" || key === "nextActions"),
+      false,
+      label + ": phantom recovery field " + key,
+    );
+    if (!allowVolatileFields) {
+      assert.doesNotMatch(
+        key,
+        /^(?:timestamp|.*(?:Duration|Elapsed)Ms|totalMs|session(?:Id|Count|Delta)|lastIndexedAt|createdAt|updatedAt|expiresAt)$/iu,
+        label + ": volatile default field " + key,
+      );
+    }
+    assertNoDefaultVolatility(
+      entry,
+      label,
+      allowVolatileFields,
+      allowRecoveryFields,
+    );
+  }
+}
+
+it("rejects embedded machine paths and volatile default text", () => {
+  for (const value of [
+    "Config: F:\\secret",
+    "Share: \\\\server\\secret",
+    "Config: /home/agent/.sdl/config.json",
+    "done (39ms)",
+    "indexed 2026-08-21T12:34:56.789Z",
+    "session-id: output-schema-wire-42",
+  ]) {
+    assert.throws(() => assertNoDefaultVolatility(value, "self-check"), value);
+  }
+
+  for (const value of [
+    "src/mcp/tools.ts",
+    "https://example.com/home/agent",
+    "/results/0/path",
+  ]) {
+    assert.doesNotThrow(() => assertNoDefaultVolatility(value, "self-check"));
+  }
+});
+
+function assertStableDefaultReport(
+  first: ToolEnvelope,
+  second: ToolEnvelope,
+  schema: z.ZodType,
+  label: string,
+): Record<string, unknown> {
+  const firstText = responseText(first);
+  const secondText = responseText(second);
+  assert.notEqual(first.isError, true, firstText);
+  assert.notEqual(second.isError, true, secondText);
+  assert.strictEqual(secondText, firstText, label);
+  const firstResult = schema.parse(first.structuredContent) as Record<string, unknown>;
+  const secondResult = schema.parse(second.structuredContent) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(secondResult), Object.keys(firstResult), label);
+  assert.strictEqual(JSON.stringify(secondResult), JSON.stringify(firstResult), label);
+  assert.equal(Object.hasOwn(firstResult, "nextAction"), false, label);
+  assert.equal(Object.hasOwn(firstResult, "nextActions"), false, label);
+  assertNoDefaultVolatility(firstResult, label);
+  assertNoDefaultVolatility(firstText, label);
+  return firstResult;
 }
 
 async function connect(server: MCPServer): Promise<Client> {
@@ -636,20 +743,43 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
       assert.notEqual(response.isError, true, JSON.stringify(response));
       assert.equal(artifact?.kind, "responseArtifact");
       assert.ok(artifact?.handle);
-      const recovered = (await client.callTool({
-        name: "sdl.response.get",
-        arguments: {
-          repoId: REPO_ID,
-          handle: artifact.handle,
-          view: "model",
-          full: true,
-        },
-      })) as ToolEnvelope;
+      const recoveryArgs = {
+        repoId: REPO_ID,
+        handle: artifact.handle,
+        view: "model" as const,
+        full: true,
+      };
+      const recover = async (): Promise<ToolEnvelope> =>
+        (await client.callTool({
+          name: "sdl.response.get",
+          arguments: recoveryArgs,
+        })) as ToolEnvelope;
+      const recovered = await recover();
+      const repeated = await recover();
       assert.notEqual(recovered.isError, true, JSON.stringify(recovered));
-      const page = recovered.structuredContent as {
+      assert.notEqual(repeated.isError, true, JSON.stringify(repeated));
+      assert.strictEqual(responseText(repeated), responseText(recovered));
+      assertNoDefaultVolatility(
+        responseText(recovered),
+        "fresh response.get text",
+        false,
+        true,
+      );
+      assert.ok(recovered.structuredContent);
+      assert.ok(repeated.structuredContent);
+      const page = recovered.structuredContent as Record<string, unknown> & {
         complete?: boolean;
         content?: unknown;
       };
+      const repeatedPage = repeated.structuredContent as Record<
+        string,
+        unknown
+      >;
+      assert.deepEqual(Object.keys(repeatedPage), Object.keys(page));
+      assert.strictEqual(JSON.stringify(repeatedPage), JSON.stringify(page));
+      assert.equal(Object.hasOwn(page, "nextAction"), false);
+      assert.equal(Object.hasOwn(page, "nextActions"), false);
+      assertNoDefaultVolatility(page, "fresh response.get", false, true);
       assert.equal(page.complete, true);
       return page.content;
     };
@@ -1062,6 +1192,180 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     assert.deepEqual(summaryStep?.result, {
       stdoutSummary: "summary-visible",
     });
+  });
+
+  it("keeps stable read-only reports schema-valid and recovery-free", async () => {
+    const call = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<ToolEnvelope> =>
+      (await client.callTool({ name, arguments: args })) as ToolEnvelope;
+
+    for (const detail of ["compact", "standard", "full"] as const) {
+      const args = { repoId: REPO_ID, detail };
+      const result = assertStableDefaultReport(
+        await call("sdl.repo.status", args),
+        await call("sdl.repo.status", args),
+        RepoStatusResponseSchema,
+        "repo.status " + detail,
+      );
+      assert.equal(result.repoId, REPO_ID);
+      assert.equal(Object.hasOwn(result, "diagnostics"), false);
+    }
+
+    const diagnosticArgs = {
+      repoId: REPO_ID,
+      detail: "full",
+      includeDiagnostics: true,
+    };
+    const diagnosticFirst = await call("sdl.repo.status", diagnosticArgs);
+    const diagnosticSecond = await call("sdl.repo.status", diagnosticArgs);
+    assert.notEqual(diagnosticFirst.isError, true, responseText(diagnosticFirst));
+    assert.notEqual(diagnosticSecond.isError, true, responseText(diagnosticSecond));
+    const firstDiagnostic = RepoStatusResponseSchema.parse(
+      diagnosticFirst.structuredContent,
+    ) as Record<string, unknown>;
+    const secondDiagnostic = RepoStatusResponseSchema.parse(
+      diagnosticSecond.structuredContent,
+    ) as Record<string, unknown>;
+    const firstDiagnosticText = responseText(diagnosticFirst);
+    assert.deepEqual(Object.keys(secondDiagnostic), Object.keys(firstDiagnostic));
+    assert.strictEqual(
+      JSON.stringify(secondDiagnostic),
+      JSON.stringify(firstDiagnostic),
+    );
+    assert.strictEqual(responseText(diagnosticSecond), firstDiagnosticText);
+    assert.equal(Object.hasOwn(firstDiagnostic, "nextAction"), false);
+    assertNoDefaultVolatility(
+      firstDiagnostic,
+      "repo.status diagnostics",
+      true,
+    );
+    assertNoDefaultVolatility(
+      firstDiagnosticText,
+      "repo.status diagnostics",
+      true,
+    );
+
+    const feedbackArgs = { repoId: REPO_ID, detail: "full" };
+    const feedback = assertStableDefaultReport(
+      await call("sdl.agent.feedback.query", feedbackArgs),
+      await call("sdl.agent.feedback.query", feedbackArgs),
+      AgentFeedbackQueryResponseSchema,
+      "empty agent.feedback.query",
+    );
+    assert.deepEqual(feedback.feedback, []);
+    assert.deepEqual(feedback.aggregatedStats, {
+      totalFeedback: 0,
+      topUsefulSymbols: [],
+      topMissingSymbols: [],
+    });
+    assert.equal(feedback.hasMore, false);
+
+    const bufferArgs = { repoId: REPO_ID, detail: "full" };
+    const buffer = assertStableDefaultReport(
+      await call("sdl.buffer.status", bufferArgs),
+      await call("sdl.buffer.status", bufferArgs),
+      BufferStatusResponseSchema,
+      "empty buffer.status",
+    );
+    assert.equal(buffer.pendingBuffers, 0);
+  });
+
+  it("round-trips fresh runtime output deterministically without phantom recovery", async () => {
+    const executed = (await client.callTool({
+      name: "sdl.runtime.execute",
+      arguments: {
+        repoId: REPO_ID,
+        runtime: "node",
+        args: ["-e", "process.stdout.write('task5-fresh-output')"],
+        outputMode: "minimal",
+        persistOutput: true,
+        detail: "full",
+      },
+    })) as ToolEnvelope;
+    assert.notEqual(executed.isError, true, responseText(executed));
+    const artifactHandle = (
+      executed.structuredContent as { artifactHandle?: string }
+    ).artifactHandle;
+    assert.ok(artifactHandle);
+
+    const queryArgs = {
+      repoId: REPO_ID,
+      artifactHandle,
+      queryTerms: ["task5-fresh-output"],
+      contextLines: 0,
+      detail: "full",
+    };
+    const callQuery = async (): Promise<ToolEnvelope> =>
+      (await client.callTool({
+        name: "sdl.runtime.queryOutput",
+        arguments: queryArgs,
+      })) as ToolEnvelope;
+    const result = assertStableDefaultReport(
+      await callQuery(),
+      await callQuery(),
+      RuntimeQueryOutputResponseSchema.pick({
+        artifactHandle: true,
+        excerpts: true,
+        matchStatus: true,
+      }).strict(),
+      "fresh runtime.queryOutput",
+    );
+    assert.match(JSON.stringify(result.excerpts), /task5-fresh-output/u);
+  });
+
+  it("returns a same-version delta as a schema-valid deterministic empty success", async () => {
+    const status = (await client.callTool({
+      name: "sdl.repo.status",
+      arguments: { repoId: REPO_ID },
+    })) as ToolEnvelope;
+    assert.notEqual(status.isError, true, responseText(status));
+    const latestVersionId = (
+      status.structuredContent as { latestVersionId?: string }
+    ).latestVersionId;
+    assert.ok(latestVersionId);
+
+    const callDelta = async (): Promise<ToolEnvelope> =>
+      (await client.callTool({
+        name: "sdl.delta.get",
+        arguments: {
+          repoId: REPO_ID,
+          fromVersion: latestVersionId,
+          toVersion: latestVersionId,
+          detail: "full",
+        },
+      })) as ToolEnvelope;
+
+    const first = await callDelta();
+    const second = await callDelta();
+
+    assert.notEqual(first.isError, true, responseText(first));
+    assert.notEqual(second.isError, true, responseText(second));
+    DeltaGetResponseSchema.parse(first.structuredContent);
+    assert.strictEqual(
+      JSON.stringify(second.structuredContent),
+      JSON.stringify(first.structuredContent),
+    );
+    const result = first.structuredContent as {
+      delta?: {
+        fromVersion?: string;
+        toVersion?: string;
+        changedSymbols?: unknown[];
+        blastRadius?: unknown[];
+      };
+      hint?: string;
+      nextAction?: unknown;
+    };
+    assert.equal(result.delta?.fromVersion, latestVersionId);
+    assert.equal(result.delta?.toVersion, latestVersionId);
+    assert.deepEqual(result.delta?.changedSymbols, []);
+    assert.deepEqual(result.delta?.blastRadius, []);
+    assert.equal(
+      result.hint,
+      "Only one ledger version exists — delta is empty. Run index.refresh after making changes to create a new version.",
+    );
+    assert.equal(result.nextAction, undefined);
   });
 
   it("returns the exact static no-op checkpoint payload through the SDK wire", async () => {

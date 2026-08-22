@@ -32,6 +32,7 @@ type DeltaPage = {
     trimmedSet?: unknown;
     truncation?: unknown;
   };
+  hint?: string;
   cursor?: {
     fromVersion: string;
     toVersion: string;
@@ -214,6 +215,22 @@ describe("delta paging contract", () => {
         expectedCount,
       );
     }
+  });
+
+  it("returns the same-version handler hint with deterministic empty ordering", async () => {
+    const versionId = "same-version";
+    await seedVersion(versionId, ["anchor"]);
+    const versions = { fromVersion: versionId, toVersion: versionId };
+
+    const first = await getPage(versions);
+    const second = await getPage(versions);
+
+    assert.deepEqual(second, first);
+    assert.deepEqual(first.delta.changedSymbols, []);
+    assert.equal(
+      first.hint,
+      "Only one ledger version exists — delta is empty. Run index.refresh after making changes to create a new version.",
+    );
   });
 
   it("materializes resolved defaults in the response and continuation", async () => {
