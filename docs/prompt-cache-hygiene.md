@@ -77,7 +77,21 @@ One ModelProjection boundary projects both MCP content and structured content. I
 
 Projection fails closed for malformed output, unrecognized profiles, unsafe recovery, and artifact sanitization failures. SDL-MCP validates recovery actions before it returns them and sanitizes artifacts before model access.
 
-Diagnostics remain separate from normal model context. `includeDiagnostics: true` is an explicit per-call prompt-cache opt-out; default compact, standard, and full output stays content-shaped and cache-stable. Diagnostic fixture exclusions must identify the allowlisted volatile field and explain why no deterministic substitute exists.
+### Semantic detail and diagnostics
+
+`detail` controls semantic breadth, not diagnostics. `compact`, `standard`, and `full` responses remain deterministic and diagnostic-free; `full` means semantically complete, not a raw canonical dump. `includeDiagnostics: true` opts into the bounded, allowlisted diagnostic profile and marks the call as a prompt-cache opt-out. Volatile timings such as runtime `durationMs` are permitted only in that diagnostic profile; they never appear by default. Where supported, `includeTelemetry: true` is a separate explicit opt-in for operational and volatile status fields.
+
+### Recovery and delivery
+
+An executable recovery uses `nextAction: { action, args }`. A recommendation list uses `{ id, args }`; the two shapes have different contracts, and a recommendation is not automatically callable. `responseMode: "inline"`, `"auto"`, and `"handle"` change how the same projected result is delivered, not its payload semantics or schema obligations. Inline results and model views recovered from handles must satisfy the same strict public schema.
+
+Compact filtering removes ordinary nested fields such as `repoId` only where the projection contract allows it. A validated executable recovery call preserves required arguments, including `repoId`, inside `nextAction.args`; filtering never exposes `repoId` globally and never turns an otherwise callable action into an incomplete recommendation.
+
+### Schema-derived coverage and isolated mutation
+
+The public contract ledger derives action, field, enum, discriminator, union-arm, output-arm, and projection-option obligations from registered schemas and generated inventory. Each derived node must have an exercising case or a narrow, named exclusion with its proof; generated counts are informative and cannot replace exact set comparisons.
+
+Mutation coverage runs only against runner-owned disposable repositories and databases. Before and after each scenario, the runner captures content-complete snapshots of the active worktree and the entire active database family, including sidecars, and fails if the active state changes. A disposable `index.refresh` scenario requires explicit approval before execution, and QA never refreshes the active `sdl-mcp` registration.
 
 Successful workflow steps omit `status`; the absence of an error is the success signal. A successful minimal `runtimeExecute` step also omits `result`, while non-minimal modes expose only the requested runtime data and bounded recovery metadata. Failed steps retain `status: "error"` and `error`. Canonical executor results keep status, exit code, and accounting fields for `$N` references; directly called `runtime.execute` responses retain their own status because they have no workflow envelope.
 
