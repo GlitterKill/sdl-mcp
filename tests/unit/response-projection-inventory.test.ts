@@ -7,12 +7,17 @@ import { isDeepStrictEqual } from "node:util";
 
 import { z, type ZodType } from "zod";
 
-import { auditOutputContractObligations } from "../../scripts/generate-tool-inventory.ts";
+import {
+  auditOutputContractObligations,
+  buildInventory,
+  compareCodeUnits,
+} from "../../scripts/generate-tool-inventory.ts";
 
 import {
   ACTION_DEFINITION_BY_ACTION,
   INTERNAL_TRANSFORM_OUTPUT_SCHEMA_BY_ACTION,
   buildCatalog,
+  zodToSchemaSummary,
 } from "../../dist/code-mode/action-catalog.js";
 import { getActiveFnNameMap } from "../../dist/code-mode/manual-generator.js";
 import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
@@ -36,6 +41,10 @@ import {
   AGENT_OUTPUT_TOKEN_BUDGETS,
   DEFERRED_FAMILY_ASSERTIONS,
 } from "../fixtures/response-projection/agent-output-cases.ts";
+import {
+  PUBLIC_TOOL_CONTRACT_CASES,
+  PUBLIC_TOOL_CONTRACT_EXCLUSIONS,
+} from "../fixtures/tool-contract/public-tool-contract-cases.ts";
 
 const MUTATING_ACTIONS = new Set([
   "symbol.edit",
@@ -59,6 +68,7 @@ const MUTATING_ACTIONS = new Set([
 
 interface PublicToolRegistration {
   readonly name: string;
+  readonly inputSchema: ZodType;
   readonly outputSchema: ZodType | undefined;
   readonly validationOutputSchema: ZodType | undefined;
 }
@@ -73,14 +83,19 @@ function capturePublicToolRegistrations(
     registerTool(
       name: string,
       _description: string,
-      _inputSchema: ZodType,
+      inputSchema: ZodType,
       _handler: (args: unknown) => unknown,
       _wireSchema?: Record<string, unknown>,
       _presentation?: { title?: string },
       outputSchema?: ZodType,
       validationOutputSchema?: ZodType,
     ): void {
-      registrations.push({ name, outputSchema, validationOutputSchema });
+      registrations.push({
+        name,
+        inputSchema,
+        outputSchema,
+        validationOutputSchema,
+      });
     },
   } as unknown as Parameters<typeof registerTools>[0];
 
@@ -171,32 +186,161 @@ function injectObjectSentinel(value: unknown, path: ObjectPath): unknown {
   return { ...record, [head]: injectObjectSentinel(record[head], tail) };
 }
 
+function outputArmSignature(schema: ZodType): string {
+  if (
+    schema instanceof z.ZodUnion ||
+    schema instanceof z.ZodDiscriminatedUnion
+  ) {
+    const children = schema.options
+      .map((child) => outputArmSignature(child as ZodType))
+      .sort(compareCodeUnits);
+    return `union(${children.join("||")})`;
+  }
+
+  if (schema instanceof z.ZodLiteral) {
+    return `literal(${[...schema.values]
+      .map((value) => JSON.stringify(value))
+      .sort(compareCodeUnits)
+      .join(",")})`;
+  }
+  if (schema instanceof z.ZodEnum) {
+    return `enum(${[...schema.options].sort(compareCodeUnits).join(",")})`;
+  }
+  if (schema instanceof z.ZodArray) {
+    return `array(${outputArmSignature(schema.element)})`;
+  }
+  if (schema instanceof z.ZodRecord) {
+    return `record(${outputArmSignature(schema.def.keyType as ZodType)}=>${outputArmSignature(schema.def.valueType as ZodType)})`;
+  }
+
+  const requiredFields: string[] = [];
+  const discriminators: string[] = [];
+  const allFields: string[] = [];
+  const visit = (
+    fields: ReturnType<typeof zodToSchemaSummary>["fields"],
+    parentPath: string,
+  ): void => {
+    for (const field of fields) {
+      const path = parentPath ? `${parentPath}.${field.name}` : field.name;
+      allFields.push(`${path}:${field.type}`);
+      if (field.required) requiredFields.push(`${path}:${field.type}`);
+      for (const variant of field.variants ?? []) {
+        discriminators.push(
+          `${path}#${field.discriminator ?? field.name}=${variant.value}`,
+        );
+      }
+      if (field.type.startsWith("literal(")) {
+        for (const value of field.enumValues ?? []) {
+          discriminators.push(`${path}=${value}`);
+        }
+      }
+      visit(field.subFields ?? [], path);
+    }
+  };
+
+  visit(zodToSchemaSummary(schema).fields, "");
+  if (allFields.length === 0) return `type(${schema.type})`;
+
+  const required = requiredFields.sort(compareCodeUnits);
+  const distinguishing = discriminators.sort(compareCodeUnits);
+  return [
+    `required(${required.join(",")})`,
+    `fields(${allFields.sort(compareCodeUnits).join(",")})`,
+    ...(distinguishing.length > 0
+      ? [`discriminators(${distinguishing.join(",")})`]
+      : []),
+  ].join(";");
+}
+
+function isGenericErrorOutputArm(schema: ZodType): boolean {
+  return (
+    zodToSchemaSummary(schema).fields
+      .map(({ name }) => name)
+      .sort(compareCodeUnits)
+      .join(",") === "error,nextAction"
+  );
+}
+
 function outputSchemaStats(schema: ZodType): {
   readonly arbitraryRecordNodes: number;
   readonly genericErrorArms: number;
   readonly nodes: number;
+  readonly plainUnionArms: readonly string[];
+  readonly rootSuccessUnionArms: readonly string[];
 } {
   let arbitraryRecordNodes = 0;
   let genericErrorArms = 0;
   let nodes = 0;
-  const visit = (current: ZodType): void => {
+  const plainUnionArms = new Set<string>();
+  const rootSuccessUnionArms = new Set<string>();
+  const visit = (
+    current: ZodType,
+    unionState: "seek" | "nested" = "nested",
+    schemaPath = "",
+  ): void => {
     nodes++;
     if (current instanceof z.ZodObject) {
-      if (Object.keys(current.shape).sort().join(",") === "error,nextAction") {
-        genericErrorArms++;
+      const isGenericError =
+        Object.keys(current.shape).sort(compareCodeUnits).join(",") ===
+        "error,nextAction";
+      if (isGenericError) genericErrorArms++;
+      for (const [name, child] of Object.entries(current.shape)) {
+        const childPath = schemaPath ? `${schemaPath}.${name}` : name;
+        visit(child, "nested", childPath);
       }
-      for (const child of Object.values(current.shape)) visit(child);
       return;
     }
     if (
       current instanceof z.ZodUnion
       || current instanceof z.ZodDiscriminatedUnion
     ) {
-      for (const child of current.options) visit(child as ZodType);
+      const children = current.options as readonly ZodType[];
+      if (
+        current instanceof z.ZodUnion &&
+        !(current instanceof z.ZodDiscriminatedUnion)
+      ) {
+        const unionPath = schemaPath || "$";
+        const signatures = children
+          .map((child) => outputArmSignature(child))
+          .sort(compareCodeUnits);
+        const duplicate = signatures.find(
+          (signature, index) => signature === signatures[index - 1],
+        );
+        assert.equal(
+          duplicate,
+          undefined,
+          `indistinguishable plain union arms at ${unionPath}: ${duplicate}`,
+        );
+        for (const signature of signatures) {
+          plainUnionArms.add(`${unionPath}.union:${signature}`);
+        }
+      }
+      if (unionState === "seek") {
+        const successChildren = children.filter(
+          (child) => !isGenericErrorOutputArm(child),
+        );
+        if (
+          successChildren.length === 1 &&
+          (successChildren[0] instanceof z.ZodUnion ||
+            successChildren[0] instanceof z.ZodDiscriminatedUnion)
+        ) {
+          visit(successChildren[0], "seek", schemaPath);
+        } else {
+          for (const child of successChildren) {
+            rootSuccessUnionArms.add(outputArmSignature(child));
+            visit(child, "nested", schemaPath);
+          }
+        }
+        for (const child of children.filter(isGenericErrorOutputArm)) {
+          visit(child, "nested", schemaPath);
+        }
+        return;
+      }
+      for (const child of children) visit(child, "nested", schemaPath);
       return;
     }
     if (current instanceof z.ZodArray) {
-      visit(current.element);
+      visit(current.element, "nested", `${schemaPath}[]`);
       return;
     }
     if (
@@ -204,27 +348,37 @@ function outputSchemaStats(schema: ZodType): {
       || current instanceof z.ZodNullable
       || current instanceof z.ZodDefault
     ) {
-      visit(current.unwrap());
+      visit(current.unwrap(), unionState, schemaPath);
       return;
     }
     if (current instanceof z.ZodRecord) {
       arbitraryRecordNodes++;
-      visit(current.def.keyType as ZodType);
-      visit(current.def.valueType as ZodType);
+      visit(current.def.keyType as ZodType, "nested", `${schemaPath}{key}`);
+      visit(current.def.valueType as ZodType, "nested", `${schemaPath}{value}`);
       return;
     }
     if (current instanceof z.ZodPipe) {
-      visit(current.def.in as ZodType);
-      visit(current.def.out as ZodType);
+      visit(current.def.in as ZodType, unionState, schemaPath);
+      visit(current.def.out as ZodType, unionState, schemaPath);
       return;
     }
     if (current instanceof z.ZodTuple) {
-      for (const child of current.def.items) visit(child as ZodType);
-      if (current.def.rest) visit(current.def.rest as ZodType);
+      current.def.items.forEach((child, index) =>
+        visit(child as ZodType, "nested", `${schemaPath}[${index}]`),
+      );
+      if (current.def.rest) {
+        visit(current.def.rest as ZodType, "nested", `${schemaPath}[]`);
+      }
     }
   };
-  visit(schema);
-  return { arbitraryRecordNodes, genericErrorArms, nodes };
+  visit(schema, "seek");
+  return {
+    arbitraryRecordNodes,
+    genericErrorArms,
+    nodes,
+    plainUnionArms: [...plainUnionArms].sort(compareCodeUnits),
+    rootSuccessUnionArms: [...rootSuccessUnionArms].sort(compareCodeUnits),
+  };
 }
 
 function derivePublicActions(): readonly string[] {
@@ -237,6 +391,144 @@ function derivePublicActions(): readonly string[] {
   return [
     ...new Set([...flatActions, ...codeModeActions, ...workflowActions]),
   ].sort();
+}
+
+
+type PublicCoverageCategory =
+  | "fields"
+  | "enumValues"
+  | "unionArms"
+  | "outputArms"
+  | "options";
+
+type PublicCoverageKeys = Record<PublicCoverageCategory, Set<string>>;
+
+function createPublicCoverageKeys(): PublicCoverageKeys {
+  return {
+    fields: new Set(),
+    enumValues: new Set(),
+    unionArms: new Set(),
+    outputArms: new Set(),
+    options: new Set(),
+  };
+}
+
+function addSchemaSummaryCoverage(
+  coverage: PublicCoverageKeys,
+  action: string,
+  direction: "input" | "output",
+  schema: ZodType,
+): void {
+  const visit = (
+    fields: ReturnType<typeof zodToSchemaSummary>["fields"],
+    parentPath: string,
+  ): void => {
+    for (const field of fields) {
+      const path = parentPath ? `${parentPath}.${field.name}` : field.name;
+      coverage.fields.add(
+        `${action}.${direction}.${path}:${field.required ? "required" : "optional"}`,
+      );
+      for (const value of field.enumValues ?? []) {
+        coverage.enumValues.add(
+          `${action}.${direction}.${path}=${value}`,
+        );
+      }
+      for (const variant of field.variants ?? []) {
+        const key = `${action}.${direction}.${path}#${field.discriminator ?? field.name}=${variant.value}`;
+        coverage[
+          direction === "output" ? "outputArms" : "unionArms"
+        ].add(key);
+      }
+      visit(field.subFields ?? [], path);
+    }
+  };
+
+  visit(zodToSchemaSummary(schema).fields, "");
+}
+
+function deriveRequiredPublicCoverage(): PublicCoverageKeys {
+  const coverage = createPublicCoverageKeys();
+  const flatRegistrations = capturePublicToolRegistrations();
+  const codeModeRegistrations = capturePublicToolRegistrations({
+    enabled: true,
+    exclusive: true,
+  });
+  const inputSchemaByAction = new Map<string, ZodType>(
+    Object.values(ACTION_DEFINITION_BY_ACTION).map(({ action, schema }) => [
+      action,
+      schema,
+    ]),
+  );
+  const outputSchemaByAction = new Map<string, ZodType>(
+    Object.entries(INTERNAL_TRANSFORM_OUTPUT_SCHEMA_BY_ACTION),
+  );
+
+  for (const registration of [...flatRegistrations, ...codeModeRegistrations]) {
+    const action = canonicalFlatAction(registration.name);
+    inputSchemaByAction.set(action, registration.inputSchema);
+    const outputSchema = exhaustiveOutputSchema(registration);
+    if (outputSchema) outputSchemaByAction.set(action, outputSchema);
+  }
+
+  for (const action of derivePublicActions()) {
+    const inputSchema = inputSchemaByAction.get(action);
+    const outputSchema = outputSchemaByAction.get(action);
+    assert.ok(inputSchema, `${action}: missing public input schema`);
+    assert.ok(outputSchema, `${action}: missing public output schema`);
+    addSchemaSummaryCoverage(coverage, action, "input", inputSchema);
+    for (const signature of outputSchemaStats(inputSchema).plainUnionArms) {
+      coverage.unionArms.add(`${action}.input.${signature}`);
+    }
+    addSchemaSummaryCoverage(coverage, action, "output", outputSchema);
+    for (const signature of outputSchemaStats(outputSchema).rootSuccessUnionArms) {
+      coverage.outputArms.add(`${action}.output.union:${signature}`);
+    }
+  }
+
+  const inventory = buildInventory("1970-01-01T00:00:00.000Z");
+  for (const name of inventory.flatToolNames) {
+    coverage.options.add(`tool.flat:${name}`);
+  }
+  for (const name of inventory.universalToolNames) {
+    coverage.options.add(`tool.flat:${name}`);
+  }
+  for (const name of inventory.codeModeToolNames) {
+    coverage.options.add(`tool.codeMode:${name}`);
+  }
+  for (const name of inventory.gatewayToolNames) {
+    coverage.options.add(`tool.gateway:${name}`);
+  }
+  for (const { action } of inventory.outputProfiles) {
+    coverage.options.add(`profile:${action}`);
+  }
+  for (const action of buildCatalog({ memoryVisible: true, infoVisible: true }).map(
+    ({ action }) => action,
+  )) {
+    coverage.options.add(`action.codeMode:${action}`);
+  }
+  for (const action of Object.values(getActiveFnNameMap(true))) {
+    coverage.options.add(`action.workflow:${action}`);
+  }
+  for (const { name } of flatRegistrations) {
+    coverage.options.add(`action.flat:${canonicalFlatAction(name)}`);
+  }
+  for (const name of inventory.gatewayToolNames) {
+    coverage.options.add(`action.gateway:${canonicalFlatAction(name)}`);
+  }
+
+  return coverage;
+}
+
+function coveredPublicContractKeys(): PublicCoverageKeys {
+  const covered = createPublicCoverageKeys();
+  for (const fixture of PUBLIC_TOOL_CONTRACT_CASES) {
+    for (const category of Object.keys(covered) as PublicCoverageCategory[]) {
+      for (const key of fixture.covers[category] ?? []) {
+        covered[category].add(key);
+      }
+    }
+  }
+  return covered;
 }
 
 describe("response projection inventory", () => {
@@ -1031,6 +1323,136 @@ describe("response projection inventory", () => {
         assert.notEqual(fixture.executionMode, "read-only", fixture.action);
       }
     }
+  });
+
+
+
+
+  it("derives every distinguishable plain input union arm", () => {
+    const unionArms = deriveRequiredPublicCoverage().unionArms;
+    const count = (prefix: string): number =>
+      [...unionArms].filter((key) => key.startsWith(prefix)).length;
+
+    assert.equal(count("dataSort.input.by.union:"), 2);
+    assert.equal(count("dataTemplate.input.input.union:"), 2);
+  });
+
+  it("distinguishes success arms that differ only by optional fields", () => {
+    const schema = z.union([
+      z.object({ id: z.string(), alpha: z.string().optional() }),
+      z.object({ id: z.string(), beta: z.number().optional() }),
+    ]);
+
+    assert.equal(outputSchemaStats(schema).rootSuccessUnionArms.length, 2);
+  });
+
+  it("distinguishes primitive plain union arm signatures", () => {
+    const signatures = [z.string(), z.number()]
+      .map((schema) => outputArmSignature(schema))
+      .sort(compareCodeUnits);
+
+    assert.deepEqual(signatures, ["type(number)", "type(string)"]);
+  });
+
+  it("collects root plain input unions at a deterministic root path", () => {
+    assert.deepEqual(
+      outputSchemaStats(z.union([z.literal("left"), z.literal("right")]))
+        .plainUnionArms,
+      [
+        '$.union:literal("left")',
+        '$.union:literal("right")',
+      ],
+    );
+  });
+
+  it("rejects indistinguishable union arms before Set deduplication", () => {
+    assert.throws(
+      () =>
+        outputSchemaStats(
+          z.union([
+            z.tuple([z.string()]),
+            z.tuple([z.number()]),
+          ]),
+        ),
+      /indistinguishable plain union arms at \$/,
+    );
+  });
+
+  it("derives every distinguishable root success output union arm", () => {
+    const outputArms = deriveRequiredPublicCoverage().outputArms;
+    const arms = (action: string): string[] =>
+      [...outputArms]
+        .filter((key) => key.startsWith(`${action}.output.union:`))
+        .sort(compareCodeUnits);
+
+    assert.equal(arms("retrieve").length, 6, JSON.stringify(arms("retrieve")));
+    assert.equal(arms("context").length, 2, JSON.stringify(arms("context")));
+    assert.equal(arms("file").length, 5, JSON.stringify(arms("file")));
+  });
+
+  it("requires coverage for every registered public contract node", () => {
+    const required = deriveRequiredPublicCoverage();
+    const covered = coveredPublicContractKeys();
+    const allRequired = new Set(
+      (Object.keys(required) as PublicCoverageCategory[]).flatMap((category) =>
+        [...required[category]].map((key) => `${category}:${key}`),
+      ),
+    );
+    const excluded = new Set<string>();
+
+    for (const exclusion of PUBLIC_TOOL_CONTRACT_EXCLUSIONS) {
+      assert.ok(exclusion.key.trim(), "exclusion key must be non-empty");
+      assert.ok(exclusion.reason.trim(), `${exclusion.key}: missing reason`);
+      assert.ok(exclusion.proof.trim(), `${exclusion.key}: missing proof`);
+      if (/hard to test|covered elsewhere|internal/i.test(exclusion.reason)) {
+        assert.match(
+          exclusion.proof,
+          /(?:tests|src|docs)\/.+(?::\d+|\.test\.ts)/,
+          `${exclusion.key}: weak exclusion reason requires named file/test proof`,
+        );
+      }
+      excluded.add(exclusion.key);
+    }
+
+    const staleFixtureKeys = (
+      Object.keys(covered) as PublicCoverageCategory[]
+    )
+      .flatMap((category) =>
+        [...covered[category]]
+          .filter((key) => !required[category].has(key))
+          .map((key) => `${category}:${key}`),
+      )
+      .sort();
+    const staleExclusions = [...excluded]
+      .filter((key) => !allRequired.has(key))
+      .sort();
+    const missing = (Object.keys(required) as PublicCoverageCategory[])
+      .flatMap((category) =>
+        [...required[category]]
+          .filter(
+            (key) =>
+              !covered[category].has(key) &&
+              !excluded.has(`${category}:${key}`),
+          )
+          .map((key) => `${category}:${key}`),
+      )
+      .sort();
+
+    assert.deepEqual(
+      staleFixtureKeys,
+      [],
+      `Stale public contract coverage:\n${staleFixtureKeys.join("\n")}`,
+    );
+    assert.deepEqual(
+      staleExclusions,
+      [],
+      `Stale public contract exclusions:\n${staleExclusions.join("\n")}`,
+    );
+    assert.deepEqual(
+      missing,
+      [],
+      `Missing public contract coverage:\n${missing.join("\n")}`,
+    );
   });
 
   it("keeps later family RED assertions separate from global parity", () => {
