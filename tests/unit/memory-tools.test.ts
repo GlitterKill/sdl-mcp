@@ -662,12 +662,12 @@ describe("handleMemoryRemove", () => {
     );
   });
 
-  it("deleteFile=false still soft-deletes the DB record", async () => {
+  it("pattern memory with deleteFile=false returns ok and soft-deletes the DB record", async () => {
     const stored = await handleMemoryStore({
       repoId: REPO_ID,
-      type: "decision",
-      title: "Keep file but delete DB",
-      content: "Content unique_keepfile_test",
+      type: "pattern",
+      title: "Keep pattern file but delete DB",
+      content: "Content unique_pattern_keepfile_test",
     });
 
     const result = await handleMemoryRemove({
@@ -678,6 +678,11 @@ describe("handleMemoryRemove", () => {
 
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.memoryId, stored.memoryId);
+
+    const conn = await getLadybugConn();
+    const removed = await ladybugDb.getMemory(conn, stored.memoryId);
+    assert.ok(removed);
+    assert.strictEqual(removed.deleted, true);
   });
 });
 

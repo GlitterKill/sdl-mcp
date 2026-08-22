@@ -47,7 +47,7 @@ describe("isolated mutating QA runner", () => {
         assert.match(error.message, /isError=true/);
         assert.match(error.message, /code=VALIDATION_ERROR/);
         assert.match(error.message, /classification=invalid_input/);
-        assert.match(error.message, /Invalid tool arguments/);
+        assert.doesNotMatch(error.message, /Invalid tool arguments/);
         assert.doesNotMatch(error.message, /ignored/);
         return true;
       },
@@ -63,6 +63,74 @@ describe("isolated mutating QA runner", () => {
         assert.ok(error instanceof Error);
         assert.equal(error.message, "QA tool failed: sdl.file");
         assert.doesNotMatch(error.message, /undefined/);
+        return true;
+      },
+    );
+  });
+
+  it("bounds failure diagnostics and omits arbitrary tool text", async () => {
+    const {
+      assertToolSucceeded,
+      QA_TOOL_FAILURE_MESSAGE_MAX_CHARS,
+    } = await loadRunner();
+    const sentinel = "SENTINEL_SECRET_MUST_NOT_LEAK";
+    const arbitraryText = `${"x".repeat(5_000)}${sentinel}`;
+
+    assert.throws(
+      () =>
+        assertToolSucceeded("sdl.workflow", {
+          isError: true,
+          content: [{ type: "text", text: arbitraryText }],
+          structuredContent: {
+            results: [
+              {
+                stepIndex: 0,
+                fn: "fileWrite",
+                status: "error",
+                error: "child exploded",
+              },
+            ],
+          },
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.ok(error.message.length <= 2_000);
+        assert.doesNotMatch(error.message, new RegExp(sentinel));
+        assert.match(error.message, /QA tool failed: sdl\.workflow/);
+        assert.match(error.message, /isError=true/);
+        assert.match(error.message, /structured=/);
+        assert.match(error.message, /"fn":"fileWrite"/);
+        assert.match(error.message, /child exploded/);
+        assert.equal(QA_TOOL_FAILURE_MESSAGE_MAX_CHARS, 2_000);
+        return true;
+      },
+    );
+
+    assert.throws(
+      () =>
+        assertToolSucceeded("sdl.file", {
+          isError: true,
+          content: [{ type: "text", text: arbitraryText }],
+          structuredContent: {
+            error: {
+              message: "safe structured failure",
+              code: "VALIDATION_ERROR",
+              classification: "invalid_input",
+              details: { field: "content" },
+            },
+          },
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.ok(
+          error.message.length <= QA_TOOL_FAILURE_MESSAGE_MAX_CHARS,
+        );
+        assert.doesNotMatch(error.message, new RegExp(sentinel));
+        assert.match(error.message, /QA tool failed: sdl\.file/);
+        assert.match(error.message, /isError=true/);
+        assert.match(error.message, /structured=/);
+        assert.match(error.message, /safe structured failure/);
+        assert.match(error.message, /"details":\{"field":"content"\}/);
         return true;
       },
     );

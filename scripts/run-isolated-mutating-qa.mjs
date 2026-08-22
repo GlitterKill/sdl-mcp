@@ -183,21 +183,15 @@ function extractActiveDbPath(result) {
   return activePath;
 }
 
+export const QA_TOOL_FAILURE_MESSAGE_MAX_CHARS = 2_000;
+const QA_TOOL_FAILURE_STRUCTURED_MAX_CHARS = 1_500;
+
 export function assertToolSucceeded(tool, result) {
   const structuredError = result.structuredContent?.error;
   if (!result.isError && !structuredError) {
     return;
   }
 
-  const firstText = result.content
-    ?.find(
-      (item) =>
-        item?.type === "text" &&
-        typeof item.text === "string" &&
-        item.text.trim().length > 0,
-    )
-    ?.text.trim()
-    .replace(/\s+/g, " ");
   const details = [`QA tool failed: ${tool}`];
   if (result.isError === true) details.push("isError=true");
   if (typeof structuredError?.code === "string") {
@@ -210,8 +204,24 @@ export function assertToolSucceeded(tool, result) {
   if (typeof classification === "string") {
     details.push(`classification=${classification}`);
   }
-  if (firstText) details.push(`text=${firstText}`);
-  throw new Error(details.join(" | "));
+  const childFailure = Array.isArray(result.structuredContent?.results)
+    ? result.structuredContent.results.find((entry) => entry?.status === "error")
+    : undefined;
+  const structuredFailureDetail =
+    childFailure ??
+    (structuredError && Object.keys(structuredError).length > 0
+      ? structuredError
+      : undefined);
+  if (structuredFailureDetail) {
+    const serialized = JSON.stringify(structuredFailureDetail);
+    if (typeof serialized === "string") {
+      details.push(
+        `structured=${serialized.slice(0, QA_TOOL_FAILURE_STRUCTURED_MAX_CHARS)}`,
+      );
+    }
+  }
+  const message = details.join(" | ");
+  throw new Error(message.slice(0, QA_TOOL_FAILURE_MESSAGE_MAX_CHARS));
 }
 
 export function assertScenarioToolsAvailable(listToolsResult, scenario) {

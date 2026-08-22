@@ -42,6 +42,21 @@ export function typeToDir(type: string): string {
     case "task_context":
       dir = "task_context";
       break;
+    case "pattern":
+      dir = "patterns";
+      break;
+    case "convention":
+      dir = "conventions";
+      break;
+    case "architecture":
+      dir = "architecture";
+      break;
+    case "performance":
+      dir = "performance";
+      break;
+    case "security":
+      dir = "security";
+      break;
     default:
       throw new Error(`Unknown memory type for directory mapping: ${type}`);
   }
