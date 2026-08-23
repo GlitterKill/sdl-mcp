@@ -425,7 +425,7 @@ export async function executeWorkflow(
               prepareActionEntryArgs(
                 step.action,
                 entry,
-                step.args,
+                { repoId: request.repoId, ...step.args },
                 { kind: "workflow" },
               );
             } catch (error) {

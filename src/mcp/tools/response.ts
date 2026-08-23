@@ -76,9 +76,7 @@ export async function handleResponseGet(
       estimatedReturnedTokens: _estimatedReturnedTokens,
       ...publicRange
     } = range;
-    const pagingApplies =
-      !response.full &&
-      (request.jsonPath === undefined || response.pagination !== undefined);
+    const rangeApplies = !response.full;
     const nextAction = response.complete
       ? undefined
       : {
@@ -119,7 +117,7 @@ export async function handleResponseGet(
       contentKind: response.contentKind,
       content: response.content,
       metadata: publicMetadata,
-      ...(pagingApplies ? { range: publicRange } : {}),
+      ...(rangeApplies ? { range: publicRange } : {}),
       ...(response.pagination ? { pagination: response.pagination } : {}),
       ...(nextAction ? { nextAction } : {}),
     };

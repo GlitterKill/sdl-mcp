@@ -1,7 +1,36 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
-import { diffSignature, diffArray } from "../../dist/delta/diff.js";
+import {
+  createMissingSnapshotError,
+  diffSignature,
+  diffArray,
+} from "../../dist/delta/diff.js";
+
+describe("createMissingSnapshotError", () => {
+  it("tells callers to verify an unknown version ID", () => {
+    const error = createMissingSnapshotError(
+      "fromVersion",
+      "missing-version",
+      false,
+    );
+
+    assert.match(error.message, /Unknown fromVersion missing-version/);
+    assert.match(error.message, /Verify the requested version ID/);
+    assert.doesNotMatch(error.message, /Run indexing/);
+  });
+
+  it("explains how to recover an existing version without snapshots", () => {
+    const error = createMissingSnapshotError("toVersion", "empty-version", true);
+
+    assert.match(
+      error.message,
+      /No symbol snapshots found for toVersion empty-version/,
+    );
+    assert.match(error.message, /matching repository revision/);
+    assert.doesNotMatch(error.message, /Run indexing/);
+  });
+});
 
 describe("diffSignature", () => {
   it("returns undefined when before and after are identical strings", () => {

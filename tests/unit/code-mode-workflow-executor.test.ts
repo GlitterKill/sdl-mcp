@@ -1552,6 +1552,27 @@ describe("code-mode workflow executor", () => {
     assert.deepStrictEqual(stored.emptyList, []);
   });
 
+  it("dryRun validates workflow-injected repoId", async () => {
+    const actionMap = {
+      ...createMockActionMap(),
+      "repo.status": {
+        schema: z.object({ repoId: z.string() }),
+        handler: async () => assert.fail("dryRun must not execute handlers"),
+      },
+    };
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [{ fn: "repoStatus", action: "repo.status", args: {} }],
+      onError: "continue",
+      dryRun: true,
+    };
+
+    const result = await executeWorkflow(request, actionMap, testConfig);
+
+    assert.strictEqual(result.dryRun?.valid, true);
+    assert.deepStrictEqual(result.dryRun?.validation[0].issues, []);
+  });
+
   it("dryRun validates static args and marks ref-backed schemas pending", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",

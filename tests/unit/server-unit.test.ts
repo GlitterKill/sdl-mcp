@@ -282,6 +282,7 @@ describe("MCPServer", () => {
     it("publishes SDL-MCP Agent Workflow instructions for session start", () => {
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl-mcp-agent-workflow/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /repo\.status/);
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.workflow[^\n]*repoStatus/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.action\.search/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.context/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /usageStats/);
@@ -305,6 +306,8 @@ describe("MCPServer", () => {
         SDL_MCP_SERVER_INSTRUCTIONS,
         /sdl\.file[^\n]*op[^\n]*read[^\n]*other files/i,
       );
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.workflow[^\n]*responseGet/);
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.file[^\n]*op[^\n]*write/);
       assert.match(
         SDL_MCP_SERVER_INSTRUCTIONS,
         /build[^\n]*test[^\n]*lint[^\n]*compiler/i,

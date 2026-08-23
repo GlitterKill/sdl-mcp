@@ -24,6 +24,22 @@ async function getSymbolVersions(
   return ladybugDb.getSymbolVersionsAtVersion(conn, versionId);
 }
 
+export function createMissingSnapshotError(
+  role: "fromVersion" | "toVersion",
+  versionId: VersionId,
+  versionExists: boolean,
+): IndexError {
+  if (!versionExists) {
+    return new IndexError(
+      `Unknown ${role} ${versionId}. Verify the requested version ID.`,
+    );
+  }
+
+  return new IndexError(
+    `No symbol snapshots found for ${role} ${versionId}. Recreate the snapshot from the matching repository revision before retrying.`,
+  );
+}
+
 export async function computeDelta(
   repoId: string,
   fromVersion: VersionId,
@@ -34,14 +50,20 @@ export async function computeDelta(
   const toVersions = await getSymbolVersions(conn, toVersion);
 
   if (fromVersions.length === 0) {
-    throw new IndexError(
-      `No symbol snapshots found for fromVersion ${fromVersion}. Run indexing to create snapshots.`,
+    const version = await ladybugDb.getVersion(conn, fromVersion);
+    throw createMissingSnapshotError(
+      "fromVersion",
+      fromVersion,
+      version?.repoId === repoId,
     );
   }
 
   if (toVersions.length === 0) {
-    throw new IndexError(
-      `No symbol snapshots found for toVersion ${toVersion}. Run indexing to create snapshots.`,
+    const version = await ladybugDb.getVersion(conn, toVersion);
+    throw createMissingSnapshotError(
+      "toVersion",
+      toVersion,
+      version?.repoId === repoId,
     );
   }
 
@@ -308,14 +330,20 @@ export async function computeDeltaWithTiers(
   const toVersions = await getSymbolVersions(conn, toVersion);
 
   if (fromVersions.length === 0) {
-    throw new IndexError(
-      `No symbol snapshots found for fromVersion ${fromVersion}. Run indexing to create snapshots.`,
+    const version = await ladybugDb.getVersion(conn, fromVersion);
+    throw createMissingSnapshotError(
+      "fromVersion",
+      fromVersion,
+      version?.repoId === repoId,
     );
   }
 
   if (toVersions.length === 0) {
-    throw new IndexError(
-      `No symbol snapshots found for toVersion ${toVersion}. Run indexing to create snapshots.`,
+    const version = await ladybugDb.getVersion(conn, toVersion);
+    throw createMissingSnapshotError(
+      "toVersion",
+      toVersion,
+      version?.repoId === repoId,
     );
   }
 

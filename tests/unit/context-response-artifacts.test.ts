@@ -252,6 +252,22 @@ describe("sdl.context response artifacts", () => {
     assert.equal(retry.results[0].status, "ok");
     assert.equal((retry.results[0].result as Record<string, unknown>).handle, handle);
 
+    const atomicRequest: ParsedWorkflowRequest = {
+      ...invalidRequest,
+      steps: [{
+        fn: "responseGet",
+        action: "response.get",
+        args: { handle, jsonPath: "evidence[0]" },
+      }],
+    };
+    const atomic = await executeWorkflow(atomicRequest, actionMap, workflowConfig);
+    const projectedAtomic = projectToolResultForModelContent(
+      "sdl.workflow",
+      atomic,
+      { repoId: "repo-a", steps: atomicRequest.steps },
+    ) as { results: Array<{ result: { range?: unknown } }> };
+    assert.ok(projectedAtomic.results[0].result.range);
+
     const boundedFailure = await executeWorkflow(
       {
         ...invalidRequest,
