@@ -86,21 +86,8 @@ function projectChildValue(
 
 function errorValue(step: Record<string, unknown>): unknown {
   if (typeof step.error === "string") return step.error;
-  if (
-    isRecord(step.error)
-    && typeof step.error.message === "string"
-    && typeof step.error.code === "string"
-    && typeof step.error.classification === "string"
-    && typeof step.error.retryable === "boolean"
-  ) {
-    // Preserve only the stable generic error fields; recovery remains once-only
-    // at the workflow-step level.
-    return {
-      message: step.error.message,
-      code: step.error.code,
-      classification: step.error.classification,
-      retryable: step.error.retryable,
-    };
+  if (isRecord(step.error) && typeof step.error.message === "string") {
+    return sanitizeWorkflowStepValue(step.error, false, false);
   }
   if (isRecord(step.result)) {
     if (typeof step.result.error === "string") return step.result.error;
@@ -244,7 +231,14 @@ function compactStep(
   }
   out.fn = raw.fn;
   if (status !== "ok") out.status = status;
-  if (status === "ok" && "result" in raw) {
+  if (
+    "result" in raw
+    && result !== null
+    && (
+      status === "ok"
+      || (typeof raw.fn === "string" && getWorkflowChildAction(raw.fn) === "runtime.execute")
+    )
+  ) {
     const successResult = projectWorkflowSuccessResult(raw.fn, result);
     if (successResult !== undefined) out.result = successResult;
   }

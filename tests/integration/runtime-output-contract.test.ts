@@ -641,17 +641,21 @@ describe("runtime output contract", () => {
             canonical,
             { outputMode },
           ).value as Record<string, unknown>;
-          assert.deepEqual(Object.keys(minimal), [
-            "status",
-            "incompleteCapture",
-            "handlingError",
-          ]);
+          assert.deepEqual(Object.keys(minimal), persistOutput
+            ? [
+                "status",
+                "incompleteCapture",
+                "handlingError",
+                "artifactHandle",
+                "nextAction",
+              ]
+            : ["status", "incompleteCapture", "handlingError"]);
           assert.equal("preview" in minimal, false);
-          assert.equal("artifactHandle" in minimal, false);
-          assert.equal("nextAction" in minimal, false);
+          assert.equal("artifactHandle" in minimal, persistOutput);
+          assert.equal("nextAction" in minimal, persistOutput);
           assert.equal(
             JSON.stringify(minimal).includes("runtime.queryOutput"),
-            false,
+            persistOutput,
           );
           assert.deepEqual(minimal.incompleteCapture, {
             stdoutTruncated: true,
@@ -664,16 +668,20 @@ describe("runtime output contract", () => {
           canonical,
           { outputMode: "summary" },
         ).value as Record<string, unknown>;
-        assert.deepEqual(Object.keys(projected), [
-          "status",
-          "preview",
-          "incompleteCapture",
-          "handlingError",
-        ]);
+        assert.deepEqual(Object.keys(projected), persistOutput
+          ? [
+              "status",
+              "preview",
+              "incompleteCapture",
+              "handlingError",
+              "artifactHandle",
+              "nextAction",
+            ]
+          : ["status", "preview", "incompleteCapture", "handlingError"]);
         assert.match(JSON.stringify(projected.preview), /x{16}/);
         assert.equal(
           JSON.stringify(projected).includes("runtime.queryOutput"),
-          false,
+          persistOutput,
         );
         assert.deepEqual(projected.incompleteCapture, {
           stdoutTruncated: true,
@@ -686,8 +694,8 @@ describe("runtime output contract", () => {
             "Runtime output exceeded capture limits; discarded bytes are not recoverable.",
           retryable: false,
         });
-        assert.equal("artifactHandle" in projected, false);
-        assert.equal("nextAction" in projected, false);
+        assert.equal("artifactHandle" in projected, persistOutput);
+        assert.equal("nextAction" in projected, persistOutput);
         assert.ok(
           Buffer.byteLength(JSON.stringify(projected), "utf8") <
             canonical.truncation.totalStdoutBytes,

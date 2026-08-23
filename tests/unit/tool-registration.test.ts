@@ -550,6 +550,14 @@ describe("MCP tool registration", () => {
         "full",
       ]);
       assert.strictEqual(properties.detail?.default, "compact");
+      if (name === "sdl.action.search") {
+        assert.deepStrictEqual(properties.maxTokens, {
+          type: "integer",
+          minimum: 500,
+          maximum: 32000,
+          default: 4000,
+        });
+      }
     }
   });
 

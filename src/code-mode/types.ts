@@ -249,7 +249,11 @@ const WorkflowFailureStepOutputSchema = z
     failureTrace: WorkflowFailureTraceOutputSchema.optional(),
     nextAction: WorkflowCallableActionOutputSchema.optional(),
     result: z
-      .union([z.string(), WorkflowErrorDetailOutputSchema])
+      .union([
+        z.string(),
+        WorkflowErrorDetailOutputSchema,
+        z.record(z.string(), z.unknown()),
+      ])
       .optional(),
   })
   .strict();

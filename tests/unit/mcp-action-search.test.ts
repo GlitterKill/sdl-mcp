@@ -339,7 +339,7 @@ describe("sdl.action.search behavior", () => {
           .find((entry) => entry.action === action)
           ?.schemaSummary?.fields.find((field) => field.name === "detail");
         assert.ok(detail, `expected ${action} detail schema field`);
-        assert.deepStrictEqual(detail.enumValues, ["compact", "full"]);
+        assert.deepStrictEqual(detail.enumValues, ["compact", "standard", "full"]);
         assert.strictEqual(detail.default, "compact");
       }
     });

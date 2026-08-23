@@ -601,6 +601,12 @@ export function registerActionSearchTool(
         query: { type: "string", minLength: 1 },
         limit: { type: "integer", minimum: 1, maximum: 50 },
         offset: { type: "integer", minimum: 0 },
+        maxTokens: {
+          type: "integer",
+          minimum: 500,
+          maximum: 32000,
+          default: 4000,
+        },
         includeSchemas: { type: "boolean" },
         includeExamples: { type: "boolean" },
         summaryOnly: {

@@ -34,7 +34,7 @@ export const META_ACTION_SEARCH_SCHEMA = z.object({
   includeExamples: z.boolean().optional(),
   excludeDisabled: z.boolean().optional(),
   summaryOnly: z.boolean().optional(),
-  detail: z.enum(["compact", "full"]).optional().default("compact"),
+  detail: z.enum(["compact", "standard", "full"]).optional().default("compact"),
   maxTokens: z.number().int().min(500).max(32000).optional().default(4000),
 });
 const META_MANUAL_SCHEMA = z.object({
@@ -43,7 +43,7 @@ const META_MANUAL_SCHEMA = z.object({
   actions: z.array(z.string()).optional(),
   includeSchemas: z.boolean().optional(),
   includeExamples: z.boolean().optional(),
-  detail: z.enum(["compact", "full"]).optional().default("compact"),
+  detail: z.enum(["compact", "standard", "full"]).optional().default("compact"),
 });
 
 const META_TOOL_SCHEMAS: Record<string, z.ZodType> = {

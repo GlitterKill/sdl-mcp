@@ -547,7 +547,7 @@ describe("response artifact storage", () => {
     );
   });
 
-  it("omits token savings from response.get output", async () => {
+  it("omits token savings while retaining response range metadata", async () => {
     const baseDir = makeTempDir();
     const configPath = join(baseDir, "sdl.config.json");
     writeFileSync(
@@ -578,7 +578,11 @@ describe("response artifact storage", () => {
     assert.ok(internalUsage.sdlTokens > 0);
     assert.ok(internalUsage.rawEquivalent > internalUsage.sdlTokens);
     assert.equal("estimatedOriginalTokens" in response.metadata, false);
-    assert.equal(response.range, undefined);
+    assert.deepEqual(response.range, {
+      offsetBytes: 0,
+      returnedBytes: 28,
+      totalBytes: 48,
+    });
     assert.equal("_tokenUsage" in JSON.parse(serialized), false);
     assert.equal("savings" in response, false);
     assert.equal(serialized.includes("estimatedOriginalTokens"), false);

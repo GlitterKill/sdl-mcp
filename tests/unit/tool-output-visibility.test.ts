@@ -349,6 +349,32 @@ describe("visible tool output", () => {
     assert.equal(successfulEnvelope.isError, undefined);
   });
 
+  it("preserves failed runtime artifacts for executable recovery", () => {
+    const envelope = buildToolResponseEnvelope(
+      {
+        results: [{
+          fn: "runtimeExecute",
+          status: "error",
+          result: {
+            status: "failure",
+            stderrSummary: "boom",
+            artifactHandle: "runtime-test",
+          },
+        }],
+      },
+      null,
+      "",
+      "sdl.workflow",
+    );
+
+    assert.deepEqual(envelope.structuredContent?.results, [{
+      stepIndex: 0,
+      fn: "runtimeExecute",
+      status: "error",
+      result: { stderrSummary: "boom", artifactHandle: "runtime-test" },
+    }]);
+  });
+
   it("keeps requested diagnostics in structured content without adding them to visible text", () => {
     const envelope = buildToolResponseEnvelope(
       {
@@ -490,7 +516,7 @@ describe("visible tool output", () => {
     assert.match(output, /\+\+\+ after[\s\S]*newCliValue/);
   });
 
-  it("leaves non-edit formatting unchanged in summary presentation", () => {
+  it("keeps non-edit runtime output compact in summary presentation", () => {
     const payload = {
       status: "complete",
       exitCode: 0,
@@ -503,12 +529,7 @@ describe("visible tool output", () => {
     const envelope = buildVisibleEnvelope("sdl.runtime.execute", {}, payload);
 
     assert.equal(summary, full);
-    assert.equal(
-      envelope.content[0]?.text,
-      "runtime.execute -> complete (exit 0)\n"
-        + "  stdout:\n"
-        + "    diff-looking text: --- before and +++ after",
-    );
+    assert.equal(envelope.content[0]?.text, "runtime.execute -> complete");
   });
 
   it("projects sdl.context structured fields after compact visible projection", () => {

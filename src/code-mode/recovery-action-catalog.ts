@@ -142,7 +142,7 @@ const RECOVERY_META_ACTION_SEARCH_SCHEMA = z.object({
   includeExamples: z.boolean().optional(),
   excludeDisabled: z.boolean().optional(),
   summaryOnly: z.boolean().optional(),
-  detail: z.enum(["compact", "full"]).optional().default("compact"),
+  detail: z.enum(["compact", "standard", "full"]).optional().default("compact"),
   maxTokens: z.number().int().min(500).max(32000).optional().default(4000),
 });
 
@@ -152,7 +152,7 @@ const RECOVERY_META_MANUAL_SCHEMA = z.object({
   actions: z.array(z.string()).optional(),
   includeSchemas: z.boolean().optional(),
   includeExamples: z.boolean().optional(),
-  detail: z.enum(["compact", "full"]).optional().default("compact"),
+  detail: z.enum(["compact", "standard", "full"]).optional().default("compact"),
 });
 
 const RECOVERY_META_ACTION_SCHEMAS = [

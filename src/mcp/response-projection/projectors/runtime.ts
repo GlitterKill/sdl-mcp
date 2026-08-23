@@ -305,6 +305,9 @@ function projectRuntimeExecute(input: ModelProjectionInput): unknown {
       : {};
 
   if (captureTruncated) {
+    const nextAction = artifactHandle
+      ? recovery(input, artifactHandle, observability)
+      : undefined;
     return {
       status,
       ...(hasPreview ? { preview } : {}),
@@ -319,6 +322,8 @@ function projectRuntimeExecute(input: ModelProjectionInput): unknown {
           "Runtime output exceeded capture limits; discarded bytes are not recoverable.",
         retryable: false,
       },
+      ...(artifactHandle ? { artifactHandle } : {}),
+      ...(nextAction ? { nextAction } : {}),
       ...diagnostics,
     };
   }
