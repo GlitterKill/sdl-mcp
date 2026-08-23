@@ -736,6 +736,68 @@ describe("response projection inventory", () => {
     }
   });
 
+  it("validates repoStatus when workflow and child both request full detail", () => {
+    const workflowRegistration = capturePublicToolRegistrations({
+      enabled: true,
+      exclusive: true,
+    }).find(({ name }) => name === "sdl.workflow");
+    const repoStatus = AGENT_OUTPUT_CASES.find(
+      ({ action }) => action === "repo.status",
+    );
+    assert.ok(workflowRegistration);
+    assert.ok(repoStatus);
+    const workflowOutputSchema = exhaustiveOutputSchema(workflowRegistration);
+    assert.ok(workflowOutputSchema);
+
+    const request = {
+      repoId: "sdl-mcp",
+      detail: "full" as const,
+      includeDiagnostics: false,
+      steps: [{
+        fn: "repoStatus",
+        args: repoStatus.publicRequest,
+        detail: "full" as const,
+      }],
+    };
+    const projected = projectToolResultForModelContent(
+      "sdl.workflow",
+      {
+        results: [{
+          stepIndex: 0,
+          fn: "repoStatus",
+          status: "ok",
+          result: {
+            ...repoStatus.canonicalResultFactory(),
+            derivedState: {
+              stale: false,
+              structuralStale: false,
+              semanticStale: false,
+              clustersDirty: false,
+              processesDirty: false,
+              algorithmsDirty: false,
+              summariesDirty: false,
+              embeddingsDirty: false,
+              targetVersionId: "v2",
+              computedVersionId: "v2",
+              graphIntegrityState: "verified",
+              graphIntegrityVersionId: "v2",
+              graphIntegrityRevision: 2,
+              graphIntegrityVerifiedRevision: 2,
+              graphIntegrityDigest: "a".repeat(64),
+              graphIntegrityFilelessPruningSupported: true,
+              graphIntegrityManifestEstablished: true,
+              nextBestAction: "No recovery required.",
+            },
+          },
+          _resolvedArgs: repoStatus.publicRequest,
+        }],
+      },
+      request,
+    );
+
+    assert.deepEqual(workflowOutputSchema.parse(projected), projected);
+  });
+
   it("rejects arbitrary response content schemas and incoherent continuations", () => {
     const registrations = capturePublicToolRegistrations();
     const responseRegistration = registrations.find(

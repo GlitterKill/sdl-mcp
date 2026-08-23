@@ -194,7 +194,7 @@ function compactStep(
   const visibleResult = status === "ok" && usesChildOptions
     ? projectChildValue(input, raw, stepIndex, projectCompatibilityValue)
     : status === "ok" && usesFamilyProjection
-      ? visible.result
+      ? projectChildValue(input, raw, stepIndex, projectCompatibilityValue)
       : status === "ok"
         ? raw.result
         : visible.result;
