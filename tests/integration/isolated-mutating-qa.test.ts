@@ -178,9 +178,18 @@ function snapshotActiveDatabaseFamily(): {
   assert.notEqual(dirname(dbPath), dbPath, "refusing a filesystem root DB path");
 
   const dbName = basename(dbPath);
-  const family = readdirSync(dirname(dbPath))
-    .filter((name) => name === dbName || name.startsWith(`${dbName}.`))
-    .sort();
+  const familyRoot = dirname(dbPath);
+  const family = existsSync(familyRoot)
+    ? readdirSync(familyRoot)
+      .filter((name) => name === dbName || name.startsWith(`${dbName}.`))
+      .sort()
+    : [];
+
+  // A clean checkout has no active database family yet; absence must remain stable.
+  if (family.length === 0) {
+    return { dbPath, digest: "absent" };
+  }
+
   assert.ok(
     family.includes(dbName),
     `active DB path could not be resolved safely: ${dbPath}`,
@@ -189,7 +198,6 @@ function snapshotActiveDatabaseFamily(): {
   // Plain read-only file handles hash the active DB bytes without opening it
   // through LadybugDB or following symlinks outside the DB family.
   const digest = createHash("sha256");
-  const familyRoot = dirname(dbPath);
   for (const entry of family) {
     updateDigestWithPath(digest, join(familyRoot, entry), entry);
   }

@@ -24,7 +24,7 @@ describe("context-response-projection", () => {
       evidence: [{
         symbolId: "sym:1",
         rung: "card",
-        card: {
+        content: {
           symbolId: "sym:1",
           name: "example",
           file: "src/example.ts",

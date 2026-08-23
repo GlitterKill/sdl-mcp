@@ -1,5 +1,6 @@
 import type { OutputExcerpt } from "../../../runtime/types.js";
 import { boundResponseTextUtf8 } from "../../../runtime/response-artifacts.js";
+import { ProjectedRuntimeExecuteResponseSchema } from "../../tools.js";
 import type {
   ModelProjectionInput,
   ModelValueProjectionDelegate,
@@ -264,8 +265,20 @@ function recovery(
 function projectRuntimeExecute(input: ModelProjectionInput): unknown {
   if (!isRecord(input.canonicalResult)) return input.canonicalResult;
   const value = input.canonicalResult;
-  const observability = extractRuntimeObservability(value);
-  if (!observability) return value;
+  // Workflow projection may pass a validated public runtime envelope through again.
+  if (ProjectedRuntimeExecuteResponseSchema.safeParse(value).success) return value;
+  const observability = extractRuntimeObservability(value) ?? {
+    exitCode:
+      typeof value.exitCode === "number" && Number.isInteger(value.exitCode)
+        ? value.exitCode
+        : null,
+    signal: typeof value.signal === "string" ? value.signal : null,
+    // A projected artifact proves captured output exists even after raw metrics are removed.
+    totalStdoutBytes: typeof value.artifactHandle === "string" ? 1 : 0,
+    totalStderrBytes: 0,
+    ...(value.digest !== undefined ? { digest: value.digest } : {}),
+    durationMs: integer(value.durationMs),
+  };
   const status = typeof value.status === "string" ? value.status : "failure";
   const selected = selectOutput(value, input);
   const preview = boundedPreview(selected);

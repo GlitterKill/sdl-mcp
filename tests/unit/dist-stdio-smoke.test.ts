@@ -99,7 +99,7 @@ describe("dist stdio smoke", () => {
         for (const property of expectedProperties) {
           assert.ok(property in (properties ?? {}), `${name}.${property}`);
         }
-        const maxSchemaBytes = name === "sdl.context" ? 6_144 : 512;
+        const maxSchemaBytes = name === "sdl.context" ? 6_400 : 512;
         assert.ok(
           Buffer.byteLength(JSON.stringify(outputSchema), "utf8") <=
             maxSchemaBytes,

@@ -3,7 +3,11 @@ import {
   sanitizeWorkflowStepValue,
   truncateStepResult,
 } from "../../../code-mode/workflow-truncation.js";
-import { getWorkflowChildAction } from "../../context-response-projection-registry.js";
+import {
+  COMPATIBILITY_WORKFLOW_CHILD_ACTIONS,
+  getWorkflowChildAction,
+  getWorkflowProjectionAction,
+} from "../../context-response-projection-registry.js";
 import { resolveProjectionRequestOptions } from "../../request-normalization.js";
 import { buildValidatedRecoveryAction } from "../recovery.js";
 import type {
@@ -58,7 +62,10 @@ function projectChildValue(
 ): unknown {
   if (typeof step.fn !== "string") return step.result;
   const options = effectiveChildOptions(input, index, step);
-  const action = getWorkflowChildAction(step.fn);
+  const action =
+    getWorkflowProjectionAction(step.fn)
+    ?? COMPATIBILITY_WORKFLOW_CHILD_ACTIONS[step.fn];
+  if (!action) return step.result;
   return projectCompatibilityValue({
     ...input,
     canonicalResult: step.result,
@@ -179,12 +186,18 @@ function compactStep(
   const childAction = typeof raw.fn === "string"
     ? getWorkflowChildAction(raw.fn)
     : undefined;
+  // These families have volatile fields beyond the generic workflow sanitizer.
+  const usesFamilyProjection =
+    childAction === "repo.status"
+    || childAction === "semantic.enrichment.status"
+    || childAction === "usage.stats";
   const visibleResult = status === "ok" && usesChildOptions
     ? projectChildValue(input, raw, stepIndex, projectCompatibilityValue)
-    : status === "ok"
-        && (childAction === "usage.stats" || raw.fn === "usage.stats")
+    : status === "ok" && usesFamilyProjection
       ? visible.result
-      : raw.result;
+      : status === "ok"
+        ? raw.result
+        : visible.result;
   let result = sanitizeWorkflowStepValue(
     visibleResult,
     options.includeDiagnostics,
@@ -231,7 +244,7 @@ function compactStep(
   }
   out.fn = raw.fn;
   if (status !== "ok") out.status = status;
-  if (status === "ok" && "result" in visible) {
+  if (status === "ok" && "result" in raw) {
     const successResult = projectWorkflowSuccessResult(raw.fn, result);
     if (successResult !== undefined) out.result = successResult;
   }

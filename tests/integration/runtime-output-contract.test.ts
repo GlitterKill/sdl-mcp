@@ -211,7 +211,11 @@ describe("runtime output contract", () => {
       repoId: "repo-a",
       artifactHandle: "runtime-large",
       view: "model",
-      queryTerms: ["error", "failed", "exception"],
+      queryTerms: [],
+          cursor: {
+            stream: "stdout",
+            afterLine: 0,
+          },
       stream: "stdout",
       maxExcerpts: 10,
       contextLines: 3,
@@ -241,6 +245,22 @@ describe("runtime output contract", () => {
         "Captured runtime output exceeded the inline limit but could not be persisted within the configured artifact limits.",
       retryable: false,
     });
+  });
+
+  it("keeps projected runtime envelopes byte-stable", () => {
+    const first = projectRuntime(
+      runtimeFixture({
+        stdoutSummary: "captured output",
+        totalStdoutBytes: 100_000,
+        artifactHandle: "runtime-output-1",
+      }),
+      { outputMode: "summary" },
+    ).value;
+
+    const second = projectRuntime(first, { outputMode: "summary" }).value;
+
+    assert.deepEqual(second, first);
+    assert.equal(JSON.stringify(second), JSON.stringify(first));
   });
 
   it("preserves outputMode selection without duplicating canonical excerpts", () => {

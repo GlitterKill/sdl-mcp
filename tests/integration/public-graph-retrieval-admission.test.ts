@@ -187,11 +187,8 @@ function serializeWithStableSliceHandle(response: unknown, label: string): strin
   const [handle] = handles;
   assert.match(handle, /^[0-9a-f]{32}$/, `${label}: generated slice handle`);
 
-  // slice.build intentionally uses crypto.randomBytes(16). Replace only that
-  // exact handle and the formatter's exact eight-character display prefix.
-  return JSON.stringify(response)
-    .replaceAll(handle, "<generated-slice-handle>")
-    .replaceAll(handle.slice(0, 8), "<generated-slice-handle-prefix>");
+  // Slice handles are content-derived and must remain stable for identical calls.
+  return JSON.stringify(response);
 }
 
 function assertNoAdmissionFields(response: unknown, label: string): void {
@@ -1353,11 +1350,6 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
       assertNoAdmissionFields(first, label);
       assertNoAdmissionFields(second, label);
       if (isSliceBuildCall(call)) {
-        assert.notEqual(
-          [...findSliceHandles(second)][0],
-          [...findSliceHandles(first)][0],
-          `${label}: random handle exception remains explicit`,
-        );
         assert.equal(
           serializeWithStableSliceHandle(second, label),
           serializeWithStableSliceHandle(first, label),

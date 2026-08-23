@@ -691,7 +691,7 @@ describe("release regression guards", () => {
 
     assert.match(
       packageSource,
-      /"test:tool-output-contract":\s*"[^"]*response-projection-inventory\.test\.ts[^"]*tool-output-doc-contract\.test\.ts[^"]*response-artifact-recovery\.test\.ts[^"]*agent-output-matrix\.test\.ts"/,
+      /"test:tool-output-contract":\s*"[^"]*response-projection-inventory\.test\.ts[^"]*tool-output-doc-contract\.test\.ts[^"]*response-artifact-recovery\.test\.ts[^"]*agent-output-matrix\.test\.ts tests\/integration\/mcp-output-schema-wire\.test\.ts"/,
       "package.json should expose the focused output-contract test command",
     );
     assert.match(

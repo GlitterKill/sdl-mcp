@@ -205,12 +205,15 @@ function smartTruncate(result: unknown, maxTokens: number): unknown {
  * Otherwise, stores the full result for continuation retrieval and returns a truncated version.
  */
 function isEmptyTruncationPreview(value: unknown): boolean {
-  if (Array.isArray(value)) return value.length === 0;
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    Object.keys(value as Record<string, unknown>).length === 0
-  );
+  if (value === undefined) return true;
+  if (Array.isArray(value)) {
+    return value.length === 0 || value.every(isEmptyTruncationPreview);
+  }
+  if (isRecordValue(value)) {
+    const fields = Object.values(value);
+    return fields.length === 0 || fields.every(isEmptyTruncationPreview);
+  }
+  return false;
 }
 
 function truncationMarker(): Record<string, unknown> {
@@ -334,7 +337,9 @@ export function truncateStepResult(
     upsertContinuation(continuationHandle, json);
   }
 
-  if (originalTokens <= maxTokens) {
+  const needsVisiblePreview =
+    continuationHandle !== undefined && isEmptyTruncationPreview(result);
+  if (!needsVisiblePreview && originalTokens <= maxTokens) {
     return {
       truncated: result,
       handle: "",

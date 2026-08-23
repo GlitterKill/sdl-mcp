@@ -4875,7 +4875,7 @@ export const WorkflowRuntimeExecuteResponseSchema = z
   })
   .strict();
 
-const ProjectedRuntimeExecuteResponseSchema =
+export const ProjectedRuntimeExecuteResponseSchema =
   WorkflowRuntimeExecuteResponseSchema.extend({
     status: z.enum(["success", "failure", "timeout", "cancelled", "denied"]),
   }).strict();
