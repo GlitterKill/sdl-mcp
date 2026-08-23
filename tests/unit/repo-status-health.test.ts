@@ -14,6 +14,7 @@ import { after, before, describe, it } from "node:test";
 import {
   RepoStatusRequestSchema,
   RepoStatusResponseSchema,
+  withProjectionSuccessOutputSchema,
 } from "../../dist/mcp/tools.js";
 
 describe("repo status health fields", () => {
@@ -551,6 +552,35 @@ describe("repo status root availability", { concurrency: 1 }, () => {
     for (const detail of ["minimal", "standard", "full"] as const) {
       const status = await handleRepoStatus({ repoId: "available", detail });
       assert.deepStrictEqual(status.rootAvailability, { status: "available" });
+    }
+  });
+
+  it("keeps active watcher internals out of full public status", async () => {
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+    const watcher = await import("../../dist/indexer/watcher.js");
+    watcher._setWatcherHealthForTesting("available", {
+      provider: "watchman",
+      filesWatched: 7,
+      watchmanWatchRoot: availableRoot,
+    });
+
+    try {
+      const status = await handleRepoStatus({
+        repoId: "available",
+        detail: "full",
+      });
+
+      assert.ok(status.watcherHealth);
+      assert.equal("filesWatched" in status.watcherHealth, false);
+      assert.equal("watchmanWatchRoot" in status.watcherHealth, false);
+      assert.doesNotThrow(() =>
+        withProjectionSuccessOutputSchema(
+          "repo.status",
+          RepoStatusResponseSchema,
+        ).parse(status),
+      );
+    } finally {
+      watcher._clearWatcherHealthForTesting("available");
     }
   });
 

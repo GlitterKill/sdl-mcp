@@ -8,6 +8,7 @@ import {
   RepoUnregisterResponse,
   type RepoStatusRequest,
   RepoStatusResponse,
+  RepoStatusResponseSchema,
   type IndexRefreshRequest,
   IndexRefreshResponse,
   type RepoOverviewRequest,
@@ -912,7 +913,7 @@ export async function handleRepoStatus(
       }
     }
 
-    return {
+    return RepoStatusResponseSchema.parse({
       repoId,
       ...(includeTelemetry ? { rootPath: repo.rootPath } : {}),
       rootAvailability,
@@ -983,7 +984,7 @@ export async function handleRepoStatus(
         : {}),
       ...(memories !== undefined ? { memories } : {}),
       derivedState: statusDerivedState,
-    };
+    });
   };
 
   if (isTracingEnabled()) {
