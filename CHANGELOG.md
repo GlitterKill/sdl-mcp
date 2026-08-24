@@ -19,16 +19,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Model-facing tool-output contract**: Added deterministic profile projection for compact, standard, and full responses, explicit diagnostic opt-in, combined response budgets, sanitized artifact handles, and validated recovery. Large reads and results return handles when their projected payload exceeds the inline budget.
+- **Model-facing output contracts**: Added deterministic `compact`, `standard`, and `full` projections, combined response budgets, explicit diagnostic opt-in, sanitized artifact handles, and public-schema validation.
+- **Tool-output observability**: Added projection telemetry, bounded health aggregation, and dashboard visibility for response size, truncation, artifact use, and contract failures.
+- **Durable lifetime metrics**: Added repository-scoped cumulative sessions, bounded capacity and overflow accounting, locked generation persistence, crash recovery, read-only reload, coordinated checkpoints, and shutdown persistence.
+- **Accessible dashboard editing**: Added deterministic persisted layouts, keyboard and pointer panel editing, safe cancellation/reset behavior, metric scope and freshness modeling, and durable lifetime panels.
 
 ### Changed
 
-- **Output-contract migration**: Replace repo.status `detail:"minimal"` with `detail:"compact"`; minimal is invalid. Omitted `file.read` `responseMode` now parses as `auto` instead of former `inline`. Small reads remain inline, and large reads may return handles. Use `detail:"full"` when compact omits a semantic field and `includeDiagnostics: true` only for diagnosis.
-- **Workflow success projection**: Successful workflow steps no longer repeat a success status. Minimal runtime steps omit their empty result, non-minimal runtime steps return only requested output, and failures keep explicit error status and details. Canonical results remain unchanged for workflow piping and accounting; direct runtime calls retain status.
+- **Compact responses by default**: Status, usage, action discovery, retrieval, workflow, and runtime surfaces now favor bounded model-facing output. Large file reads, deltas, and response artifacts use recoverable paging handles.
+- **Workflow and runtime projection**: Removed redundant success metadata while preserving canonical results for piping and accounting. Failures now propagate explicit error details and recoverable output.
+- **Agent safety boundaries**: Index refresh requires explicit approval, repository inspection is routed away from runtime commands, and structural versus semantic staleness now produces safer recovery guidance.
+- **Context and retrieval behavior**: Refined context coverage, separated semantic detail from diagnostics, aligned projected code output, clarified PR-risk output, and made same-version deltas explicit successes.
 
 ### Fixed
 
-- **Non-blocking readiness guidance**: Split repository derived-state reporting into structural and semantic staleness while retaining the legacy aggregate. Semantic-only summary or embedding lag now directs agents to continue with available retrieval lanes instead of incremental indexing, and parser-provenance failures default to file-based fallback unless AST/provenance-dependent behavior is required.
+- **Recovery and paging**: Recovery actions are executable, typed, registered, and preserved through cyclic or deeply nested errors. Workflow truncation, response paging, runtime output, file reads, and deltas retain usable recovery paths.
+- **Lifetime observability correctness**: Hardened admission bounds, repository attribution, locking, crash cleanup, publication generations, aliases, checkpoints, HTTP/SSE delivery, and shutdown races.
+- **Dashboard correctness**: Hardened malformed-envelope handling, timestamp ordering, layout coordinates, nested controls, reset barriers, replay protection, polling, and same-repository client races.
+- **CI, installation, and runtime reliability**: Restored packed Windows FTS verification, isolated memory-test repositories, added native-crash retry diagnostics, verified LadybugDB after global installation, fixed Kotlin grammar-wrapper loading, and repaired workflow argument injection and family projections.
+
+### Engineering
+
+- **Public contract verification**: Added schema-node coverage and executable verification across every public non-mutating action, isolated mutating-tool checks, deterministic inventory enforcement, and LF-stable generated documentation.
+- **HNSW benchmarking**: Added the reviewed scalar-quantization benchmark design, aggregation protocol, compatibility requirements, and implementation plan.
+- **Agent workflow maintenance**: Preserved benchmark and slice-projection compatibility, updated synchronized workflow expectations, and removed the obsolete skill-loading hook.
+
+_166 commits from 1 contributor_
 
 ## [0.13.3] - 2026-08-08
 
