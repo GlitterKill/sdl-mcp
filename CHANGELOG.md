@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.13.4] - 2026-08-24
+
+### Added
+
 - **Model-facing tool-output contract**: Added deterministic profile projection for compact, standard, and full responses, explicit diagnostic opt-in, combined response budgets, sanitized artifact handles, and validated recovery. Large reads and results return handles when their projected payload exceeds the inline budget.
 
 ### Changed
