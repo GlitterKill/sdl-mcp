@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -9,7 +9,22 @@ import {
   MCPServer,
   type ToolResponseEnvelope,
 } from "../../dist/server.js";
-import { maybeStoreLargeResponse } from "../../dist/runtime/response-artifacts.js";
+import {
+  getResponseArtifactBaseDir,
+  maybeStoreLargeResponse,
+} from "../../dist/runtime/response-artifacts.js";
+import {
+  handleRetrieve,
+  RetrieveRequestSchema,
+} from "../../dist/code-mode/retrieve.js";
+import { withExclusiveCodeModeRecoveryProjection } from "../../dist/code-mode/action-reference-projection.js";
+import { ACTION_DEFINITION_BY_ACTION } from "../../dist/code-mode/action-catalog.js";
+import { errorToMcpResponse } from "../../dist/mcp/errors.js";
+import {
+  beginRepoRemoval,
+  replaceRegisteredRepoIds,
+  resetRepoLifecycleForTests,
+} from "../../dist/services/repo-lifecycle.js";
 import {
   _setResponseRepoExistsForTesting,
   handleResponseGet,
@@ -30,6 +45,7 @@ type CallToolHandler = (
     _meta: Record<string, unknown>;
     sendNotification: () => Promise<void>;
     signal: AbortSignal;
+    sessionId?: string;
   },
 ) => Promise<ToolResponseEnvelope>;
 
@@ -767,5 +783,348 @@ describe("response artifact recovery", () => {
         assert.deepStrictEqual(restored, request.fixture);
       }
     }
+  });
+});
+
+function registerResponseContinuationTools(server: MCPServer): void {
+  const responseActions = {
+    "response.get": {
+      schema: ResponseGetRequestSchema,
+      definition: ACTION_DEFINITION_BY_ACTION["response.get"],
+      handler: handleResponseGet,
+    },
+  };
+  server.clearTools();
+  server.registerTool(
+    "sdl.response.get",
+    "Response artifact test tool",
+    ResponseGetRequestSchema,
+    handleResponseGet,
+  );
+  server.registerTool(
+    "sdl.retrieve",
+    "Response continuation test tool",
+    RetrieveRequestSchema,
+    async (request, context) =>
+      withExclusiveCodeModeRecoveryProjection(
+        true,
+        () => handleRetrieve(request, responseActions as never, context),
+        request,
+      ),
+  );
+}
+
+async function callStoredResponse(
+  handler: CallToolHandler,
+  name: "sdl.response.get" | "sdl.retrieve",
+  args: Record<string, unknown>,
+  sessionId?: string,
+): Promise<ToolResponseEnvelope> {
+  return handler(
+    {
+      method: "tools/call",
+      params: { name, arguments: args },
+    },
+    {
+      _meta: {},
+      sendNotification: async () => {},
+      signal: new AbortController().signal,
+      ...(sessionId ? { sessionId } : {}),
+    },
+  );
+}
+
+interface CanonicalErrorEnvelope {
+  code?: string;
+  classification?: string;
+  message?: string;
+}
+
+function canonicalErrorEnvelopeFrom(value: unknown): CanonicalErrorEnvelope {
+  const candidate = value as {
+    code?: unknown;
+    classification?: unknown;
+    message?: unknown;
+    error?: {
+      code?: unknown;
+      classification?: unknown;
+      message?: unknown;
+    };
+  };
+  const detail = candidate.error ?? candidate;
+  return {
+    ...(typeof detail.code === "string" ? { code: detail.code } : {}),
+    ...(typeof detail.classification === "string"
+      ? { classification: detail.classification }
+      : {}),
+    ...(typeof detail.message === "string" ? { message: detail.message } : {}),
+  };
+}
+
+async function canonicalErrorEnvelope(
+  call: () => Promise<unknown>,
+): Promise<CanonicalErrorEnvelope> {
+  try {
+    return canonicalErrorEnvelopeFrom(await call());
+  } catch (error) {
+    return canonicalErrorEnvelopeFrom(errorToMcpResponse(error));
+  }
+}
+
+describe("sdl.retrieve responseGet artifact continuation", () => {
+  it("returns page-native content for auto and handle modes and replays to completion", async () => {
+    const baseDir = makeTempDir();
+    configureArtifacts(baseDir);
+    const payload = {
+      rows: Array.from({ length: 1_000 }, (_, index) => ({
+        index,
+        value: `row-${index}-${"x".repeat(32)}`,
+      })),
+    };
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      sessionId: "session-a",
+      requiresSameSession: true,
+    });
+    assert.equal(stored.responseMode, "handle");
+    if (stored.responseMode !== "handle") assert.fail("expected handle");
+
+    const server = new MCPServer();
+    registerResponseContinuationTools(server);
+    const handler = getCallToolHandler(server);
+    const firstArgs = {
+      repoId: "repo-a",
+      op: "responseGet",
+      args: {
+        handle: stored.payload.handle,
+        cursor: { offsetBytes: 0 },
+        maxBytes: 8192,
+      },
+    };
+
+    const first = await callStoredResponse(
+      handler,
+      "sdl.retrieve",
+      { ...firstArgs, responseMode: "auto" },
+      "session-a",
+    );
+    const firstPage = first.structuredContent as {
+      kind?: string;
+      content?: string;
+      complete?: boolean;
+      nextAction?: {
+        action?: string;
+        args?: Record<string, unknown>;
+      };
+    };
+    assert.equal(first.isError, undefined);
+    assert.equal(firstPage.kind, undefined);
+    assert.equal(typeof firstPage.content, "string");
+    assert.equal(firstPage.complete, false);
+
+    const chunks = [firstPage.content ?? ""];
+    let nextAction = firstPage.nextAction;
+    for (let pages = 1; nextAction && pages < 100; pages += 1) {
+      assert.equal(nextAction.action, "sdl.retrieve");
+      assert.equal(
+        typeof nextAction.args?.repoId,
+        "string",
+        JSON.stringify(nextAction),
+      );
+      const response = await callStoredResponse(
+        handler,
+        "sdl.retrieve",
+        nextAction.args ?? {},
+        "session-a",
+      );
+      const page = response.structuredContent as {
+        content?: string;
+        complete?: boolean;
+        nextAction?: {
+          action?: string;
+          args?: Record<string, unknown>;
+        };
+      };
+      assert.equal(response.isError, undefined);
+      assert.equal(typeof page.content, "string");
+      chunks.push(page.content ?? "");
+      nextAction = page.nextAction;
+      if (page.complete) {
+        assert.equal(nextAction, undefined);
+        break;
+      }
+    }
+    assert.deepEqual(JSON.parse(chunks.join("")), payload);
+
+    const explicitHandle = await callStoredResponse(
+      handler,
+      "sdl.retrieve",
+      { ...firstArgs, responseMode: "handle" },
+      "session-a",
+    );
+    const handlePage = explicitHandle.structuredContent as {
+      kind?: string;
+      handle?: string;
+      content?: string;
+      complete?: boolean;
+    };
+    assert.equal(explicitHandle.isError, undefined);
+    assert.equal(handlePage.kind, undefined);
+    assert.equal(handlePage.handle, stored.payload.handle);
+    assert.equal(typeof handlePage.content, "string");
+    assert.equal(handlePage.complete, false);
+  });
+
+  it("preserves response.get security and lifecycle error codes", async () => {
+    const baseDir = makeTempDir();
+    configureArtifacts(baseDir);
+    const responseActions = {
+      "response.get": {
+        schema: ResponseGetRequestSchema,
+        definition: ACTION_DEFINITION_BY_ACTION["response.get"],
+        handler: handleResponseGet,
+      },
+    };
+
+    const store = async (
+      entropy: string,
+      options: Record<string, unknown> = {},
+    ) => {
+      const stored = await maybeStoreLargeResponse({
+        repoId: "repo-a",
+        toolName: "sdl.context",
+        payload: "A".repeat(2048),
+        responseMode: "handle",
+        contentKind: "text",
+        artifactBaseDir: baseDir,
+        entropy: () => entropy,
+        ...options,
+      });
+      assert.equal(stored.responseMode, "handle");
+      if (stored.responseMode !== "handle") assert.fail("expected handle");
+      return stored.payload.handle;
+    };
+    const compare = async (
+      direct: Record<string, unknown>,
+      retrieve: Record<string, unknown>,
+      sessionId?: string,
+    ) => {
+      const context = {
+        _meta: {},
+        sendNotification: async () => {},
+        signal: new AbortController().signal,
+        ...(sessionId ? { sessionId } : {}),
+      };
+      const flatError = await canonicalErrorEnvelope(
+        () => handleResponseGet(direct, context),
+      );
+      const retrieveError = await canonicalErrorEnvelope(
+        () => handleRetrieve(retrieve, responseActions as never, context),
+      );
+      assert.notDeepStrictEqual(flatError, {});
+      assert.deepStrictEqual(retrieveError, flatError);
+    };
+    const argsFor = (repoId: string, handle: string) => ({
+      repoId,
+      handle,
+      view: "model",
+      cursor: { offsetBytes: 0 },
+      maxBytes: 8192,
+    });
+    const retrieveFor = (repoId: string, handle: string) => ({
+      repoId,
+      op: "responseGet",
+      args: {
+        handle,
+        cursor: { offsetBytes: 0 },
+        maxBytes: 8192,
+      },
+    });
+
+    const wrongRepo = await store("1111111111111111");
+    await compare(
+      argsFor("repo-b", wrongRepo),
+      retrieveFor("repo-b", wrongRepo),
+    );
+
+    const wrongSession = await store("2222222222222222", {
+      sessionId: "session-a",
+      requiresSameSession: true,
+    });
+    await compare(
+      argsFor("repo-a", wrongSession),
+      retrieveFor("repo-a", wrongSession),
+      "session-b",
+    );
+
+    const expiredDirect = await store("3333333333333333", {
+      artifactTtlHours: 1,
+      now: () => new Date("2020-01-01T00:00:00.000Z"),
+    });
+    const expiredRetrieve = await store("4444444444444444", {
+      artifactTtlHours: 1,
+      now: () => new Date("2020-01-01T00:00:00.000Z"),
+    });
+    await compare(
+      argsFor("repo-a", expiredDirect),
+      retrieveFor("repo-a", expiredRetrieve),
+    );
+
+    replaceRegisteredRepoIds(["repo-a"]);
+    const epochDirect = await store("5555555555555555");
+    const epochRetrieve = await store("6666666666666666");
+    const removal = await beginRepoRemoval("repo-a");
+    removal.commitTombstone();
+    await compare(
+      argsFor("repo-a", epochDirect),
+      retrieveFor("repo-a", epochRetrieve),
+    );
+    resetRepoLifecycleForTests();
+
+    const corrupt = async (entropy: string) => {
+      const handle = await store(entropy);
+      const manifestPath = join(
+        getResponseArtifactBaseDir(baseDir),
+        handle,
+        "manifest.json",
+      );
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<
+        string,
+        unknown
+      >;
+      manifest.originalBytes = "invalid";
+      writeFileSync(manifestPath, JSON.stringify(manifest), "utf-8");
+      return handle;
+    };
+    const corruptDirect = await corrupt("7777777777777777");
+    const corruptRetrieve = await corrupt("8888888888888888");
+    await compare(
+      argsFor("repo-a", corruptDirect),
+      retrieveFor("repo-a", corruptRetrieve),
+    );
+
+    const boundedDirect = await store("9999999999999999", {
+      maxArtifactBytes: 4096,
+    });
+    const boundedRetrieve = await store("aaaaaaaaaaaaaaaa", {
+      maxArtifactBytes: 4096,
+    });
+    writeFileSync(
+      join(baseDir, "sdl.config.json"),
+      JSON.stringify({
+        repos: [],
+        policy: {},
+        runtime: { artifactBaseDir: baseDir, maxArtifactBytes: 1024 },
+      }),
+    );
+    invalidateConfigCache();
+    await compare(
+      argsFor("repo-a", boundedDirect),
+      retrieveFor("repo-a", boundedRetrieve),
+    );
   });
 });

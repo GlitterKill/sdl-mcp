@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { buildCatalog } from "../../dist/code-mode/action-catalog.js";
+import { RetrieveOutputSchema } from "../../dist/code-mode/retrieve.js";
 import { buildFlatToolDescriptors } from "../../dist/mcp/tools/tool-descriptors.js";
 import {
   closeLadybugDb,
@@ -1425,18 +1426,58 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     );
   });
 
-  it("returns response.get failures in the generic structured error envelope", async () => {
+  it("returns response.get and responseGet failures in the generic structured error envelope", async () => {
+    const handle = `response-${REPO_ID}-1784866000000-deadbeefdeadbeef`;
     const failure = (await client.callTool({
       name: "sdl.response.get",
       arguments: {
         repoId: REPO_ID,
-        handle: `response-${REPO_ID}-1784866000000-deadbeefdeadbeef`,
+        handle,
+      },
+    })) as ToolEnvelope;
+    const retrieveFailure = (await client.callTool({
+      name: "sdl.retrieve",
+      arguments: {
+        repoId: REPO_ID,
+        op: "responseGet",
+        args: {
+          handle,
+          cursor: { offsetBytes: 0 },
+          maxBytes: 8192,
+        },
       },
     })) as ToolEnvelope;
 
-    assert.equal(failure.isError, true);
-    GenericStructuredErrorSchema.parse(failure.structuredContent);
-    assert.match(responseText(failure), /Response artifact not found/u);
+    for (const response of [failure, retrieveFailure]) {
+      assert.equal(response.isError, true);
+      GenericStructuredErrorSchema.parse(response.structuredContent);
+      assert.match(responseText(response), /Response artifact not found/u);
+    }
+
+    const projectedSuccess = {
+      handle,
+      full: false,
+      complete: true,
+      truncated: false,
+      contentKind: "json",
+      content: "{}",
+      metadata: {
+        toolName: "sdl.context",
+        originalBytes: 2,
+        contentKind: "json",
+      },
+      range: {
+        offsetBytes: 0,
+        returnedBytes: 2,
+        totalBytes: 2,
+      },
+    };
+    const parsed = RetrieveOutputSchema.safeParse(projectedSuccess);
+    assert.equal(
+      parsed.success,
+      true,
+      parsed.success ? undefined : parsed.error.message,
+    );
   });
 
   it("marks an invalid indexed fileWrite workflow step as an MCP error", async () => {

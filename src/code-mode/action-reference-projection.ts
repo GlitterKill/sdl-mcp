@@ -2,6 +2,7 @@ import {
   resolveRecoveryActionDefinition,
   resolveRecoveryWorkflowFunction,
 } from "./action-catalog.js";
+import { RetrieveRequestSchema } from "./retrieve.js";
 import {
   buildValidatedRecoveryAction,
   _recoveryValidationTesting,
@@ -32,6 +33,7 @@ const EXCLUSIVE_GATEWAY_REFERENCES: Readonly<Record<string, GatewayReference>> =
     "sdl.code.getSkeleton": { tool: "sdl.retrieve", op: "codeSkeleton" },
     "sdl.code.getHotPath": { tool: "sdl.retrieve", op: "codeHotPath" },
     "sdl.code.needWindow": { tool: "sdl.retrieve", op: "codeNeedWindow" },
+    "sdl.response.get": { tool: "sdl.retrieve", op: "responseGet" },
     "sdl.policy.set": { tool: "sdl.workflow", fn: "policySet" },
   });
 
@@ -211,6 +213,45 @@ function projectNextAction(
     ...(failedCall ? { failedCall } : {}),
     ...(continuation ? { continuation } : {}),
   });
+  if (validated.validatedAction?.action === "response.get") {
+    const validatedArgs = validated.validatedAction.args;
+    const repoId =
+      fallbackRepoId
+      ?? (typeof validatedArgs.repoId === "string"
+        ? validatedArgs.repoId
+        : undefined);
+    if (!repoId) return undefined;
+
+    const childArgs = copyRecord(validatedArgs);
+    delete childArgs.repoId;
+    const parsedEnvelope = RetrieveRequestSchema.safeParse({
+      repoId,
+      op: "responseGet",
+      args: canonicalRecord(childArgs),
+    });
+    if (!parsedEnvelope.success) return undefined;
+
+    const projectedChildArgs = copyRecord(parsedEnvelope.data.args);
+    for (const [key, defaultValue] of [
+      ["detail", "compact"],
+      ["full", false],
+      ["includeDiagnostics", false],
+      ["offsetBytes", 0],
+      ["raw", false],
+      ["view", "model"],
+    ] as const) {
+      if (projectedChildArgs[key] === defaultValue) {
+        delete projectedChildArgs[key];
+      }
+    }
+    const projectedEnvelope = copyRecord(parsedEnvelope.data);
+    defineOwn(projectedEnvelope, "args", canonicalRecord(projectedChildArgs));
+
+    const projected = copyRecord(value);
+    defineOwn(projected, referenceKey, "sdl.retrieve");
+    defineOwn(projected, "args", canonicalRecord(projectedEnvelope));
+    return canonicalRecord(projected);
+  }
   if (!validated.nextAction) return undefined;
 
   const projected = copyRecord(value);

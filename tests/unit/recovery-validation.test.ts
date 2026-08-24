@@ -47,6 +47,7 @@ interface RecoveryCall {
 
 interface RecoveryBuildResult {
   nextAction?: RecoveryCall;
+  validatedAction?: RecoveryCall;
   invalidRecoveryCount: number;
 }
 
@@ -1512,5 +1513,69 @@ describe("generated recovery validation", () => {
         nestedDetail: "after",
       },
     );
+  });
+});
+
+describe("validated recovery rematerialization", () => {
+  const handle = "response-repo-1784866000000-deadbeefdeadbeef";
+  const candidate = {
+    action: "sdl.response.get",
+    args: {
+      repoId: "repo",
+      handle,
+      view: "model",
+      cursor: { offsetBytes: 8192 },
+      maxBytes: 8192,
+    },
+  };
+
+  it("preserves one schema-parsed logical response.get call across public adapters", () => {
+    const build = recoveryBuilder();
+    const direct = build(candidate, {
+      repoId: "repo",
+      advertisedTools: ["sdl.response.get"],
+    });
+    const workflow = build(candidate, {
+      repoId: "repo",
+      advertisedTools: ["sdl.workflow"],
+      activeWorkflowFunctions: ["responseGet"],
+    });
+
+    assert.deepEqual(direct.validatedAction, {
+      action: "response.get",
+      args: {
+        cursor: { offsetBytes: 8192 },
+        full: false,
+        handle,
+        maxBytes: 8192,
+        offsetBytes: 0,
+        raw: false,
+        repoId: "repo",
+        view: "model",
+      },
+    });
+    assert.deepEqual(workflow.validatedAction, direct.validatedAction);
+    assert.equal(direct.nextAction?.action, "sdl.response.get");
+    assert.equal(workflow.nextAction?.action, "sdl.workflow");
+  });
+
+  it("does not expose a validated or public action for invalid recovery", () => {
+    const invalid = recoveryBuilder()(
+      {
+        action: "sdl.response.get",
+        args: {
+          repoId: "repo",
+          handle: "../invalid",
+          view: "model",
+          cursor: { offsetBytes: 0 },
+          maxBytes: 8192,
+        },
+      },
+      { repoId: "repo", advertisedTools: ["sdl.response.get"] },
+    );
+
+    assert.equal(invalid.validatedAction, undefined);
+    assert.equal(invalid.nextAction, undefined);
+    assert.equal(invalid.invalidRecoveryCount, 1);
   });
 });

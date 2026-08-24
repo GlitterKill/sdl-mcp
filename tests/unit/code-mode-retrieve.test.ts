@@ -1143,3 +1143,108 @@ describe("sdl.retrieve", () => {
     assert.doesNotMatch(schemaSummary, /includeDiagnostics/);
   });
 });
+
+describe("response.get exclusive recovery projection", () => {
+  const handle = "response-repo-1784866000000-deadbeefdeadbeef";
+
+  it("materializes validated response.get recovery as direct sdl.retrieve", () => {
+    const result = projectExclusiveCodeModeRecovery(
+      {
+        nextAction: {
+          action: "sdl.response.get",
+          args: {
+            repoId: "child-repo",
+            handle,
+            cursor: { offsetBytes: 8192 },
+            maxBytes: 8192,
+          },
+        },
+      },
+      "repo",
+    );
+
+    assert.deepEqual(result, {
+      nextAction: {
+        action: "sdl.retrieve",
+        args: {
+          args: {
+            cursor: { offsetBytes: 8192 },
+            handle,
+            maxBytes: 8192,
+          },
+          op: "responseGet",
+          repoId: "repo",
+        },
+      },
+    });
+    assert.equal(
+      JSON.stringify(result),
+      `{"nextAction":{"action":"sdl.retrieve","args":{"args":{"cursor":{"offsetBytes":8192},"handle":"${handle}","maxBytes":8192},"op":"responseGet","repoId":"repo"}}}`,
+    );
+  });
+
+  it("removes only invalid response recovery and preserves existing mappings", () => {
+    const result = projectExclusiveCodeModeRecovery(
+      {
+        status: "error",
+        nextAction: {
+          action: "sdl.response.get",
+          args: {
+            handle: "../invalid",
+            cursor: { offsetBytes: 0 },
+            maxBytes: 8192,
+          },
+        },
+        nextCalls: [
+          {
+            tool: "sdl.code.getSkeleton",
+            args: { symbolId: "sym" },
+          },
+        ],
+      },
+      "repo",
+    );
+
+    assert.equal(result.status, "error");
+    assert.equal(result.nextAction, undefined);
+    assert.equal(result.nextCalls[0]?.tool, "sdl.workflow");
+    assert.equal(
+      (result.nextCalls[0]?.args as { steps?: Array<{ fn?: string }> }).steps?.[0]?.fn,
+      "codeSkeleton",
+    );
+  });
+});
+
+it("restores the fallback repoId on an already-projected responseGet continuation", () => {
+  const candidate = {
+    nextAction: {
+      action: "sdl.retrieve",
+      args: {
+        args: {
+          cursor: { offsetBytes: 8192 },
+          handle: "response-repo-1784866000000-deadbeefdeadbeef",
+          maxBytes: 8192,
+        },
+        op: "responseGet",
+      },
+    },
+  };
+
+  assert.deepStrictEqual(
+    projectExclusiveCodeModeRecovery(candidate, "repo-a"),
+    {
+      nextAction: {
+        action: "sdl.retrieve",
+        args: {
+          args: {
+            cursor: { offsetBytes: 8192 },
+            handle: "response-repo-1784866000000-deadbeefdeadbeef",
+            maxBytes: 8192,
+          },
+          op: "responseGet",
+          repoId: "repo-a",
+        },
+      },
+    },
+  );
+});

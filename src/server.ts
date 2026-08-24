@@ -51,6 +51,7 @@ import {
   type ToolPresentation,
 } from "./mcp/tool-presentation.js";
 import { getPackageVersion } from "./util/package-info.js";
+import { projectExclusiveCodeModeRecovery } from "./code-mode/action-reference-projection.js";
 import {
   projectCompatibilityValue,
   projectResultForUsageAccounting,
@@ -717,6 +718,21 @@ export function buildToolResponseEnvelope(
         ...boundaryOverrides,
       },
     );
+    if (toolName === "sdl.retrieve") {
+      const repoId =
+        typeof toolArgs.repoId === "string" ? toolArgs.repoId : undefined;
+      const value = projectExclusiveCodeModeRecovery(projection.value, repoId);
+      const measurement = measureProjectionValue(value);
+      projection = {
+        ...projection,
+        value,
+        stats: {
+          ...projection.stats,
+          projectedBytes: measurement.bytes,
+          projectedTokens: measurement.tokens,
+        },
+      };
+    }
   } catch (error) {
     if (error instanceof ModelOutputBoundaryError) {
       return buildBoundaryFailureEnvelope(
@@ -754,10 +770,14 @@ const PAGE_NATIVE_RESPONSE_MODE_TOOLS = new Set([
   "sdl.file",
 ]);
 
-function ownsPageNativeResponseMode(toolName: string): boolean {
+function ownsPageNativeResponseMode(
+  toolName: string,
+  toolArgs: Readonly<Record<string, unknown>>,
+): boolean {
   // These tools own byte, line, or plan continuations; the generic artifact
   // boundary must not replace their executable paging semantics.
-  return PAGE_NATIVE_RESPONSE_MODE_TOOLS.has(toolName);
+  return PAGE_NATIVE_RESPONSE_MODE_TOOLS.has(toolName)
+    || (toolName === "sdl.retrieve" && toolArgs.op === "responseGet");
 }
 
 function combinedEnvelopeTokens(envelope: ToolResponseEnvelope): number {
@@ -833,7 +853,7 @@ async function enforceProjectedResponseMode(
   }
   if (
     requestedMode !== "inline" &&
-    ownsPageNativeResponseMode(toolName)
+    ownsPageNativeResponseMode(toolName, toolArgs)
   ) {
     return envelope;
   }
@@ -1204,7 +1224,7 @@ export class MCPServer {
             isRecordValue(parsedArgs) &&
             (parsedArgs.responseMode === "auto" ||
               parsedArgs.responseMode === "handle") &&
-            !ownsPageNativeResponseMode(toolName);
+            !ownsPageNativeResponseMode(toolName, parsedArgs);
           try {
             if (
               !writeReady &&

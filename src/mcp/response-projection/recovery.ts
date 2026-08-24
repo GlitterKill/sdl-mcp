@@ -437,12 +437,15 @@ function invalidRecovery(
   return { invalidRecoveryCount: 1 };
 }
 
-function boundedResult(nextAction: RecoveryActionCall): RecoveryBuildResult {
+function boundedResult(
+  nextAction: RecoveryActionCall,
+  validatedAction: RecoveryActionCall,
+): RecoveryBuildResult {
   const serialized = JSON.stringify(nextAction);
   if (new TextEncoder().encode(serialized).byteLength > MAX_RECOVERY_BYTES) {
     return invalidRecovery("serialized recovery exceeds the byte bound", nextAction.action);
   }
-  return { nextAction, invalidRecoveryCount: 0 };
+  return { nextAction, validatedAction, invalidRecoveryCount: 0 };
 }
 
 function normalizeWorkflowArgsForActiveSurface(
@@ -532,9 +535,9 @@ export function buildValidatedRecoveryAction(
     );
   }
 
-  const logicalCandidate: RecoveryActionCall = {
+  const validatedAction: RecoveryActionCall = {
     action: definition.action,
-    args: activeArgs,
+    args: stableRecord(activeArgs),
   };
   if (context.failedCall) {
     const failedSignature = logicalCallSignature(
@@ -542,7 +545,7 @@ export function buildValidatedRecoveryAction(
       contextRepoId(context),
     );
     const candidateSignature = logicalCallSignature(
-      logicalCandidate,
+      validatedAction,
       contextRepoId(context),
     );
     if (
@@ -576,7 +579,7 @@ export function buildValidatedRecoveryAction(
         definition.action,
       );
     }
-    return boundedResult(nextAction);
+    return boundedResult(nextAction, validatedAction);
   }
 
   if (!advertisedTools.has("sdl.workflow")) {
@@ -631,10 +634,13 @@ export function buildValidatedRecoveryAction(
     );
   }
 
-  return boundedResult({
-    action: "sdl.workflow",
-    args: stableRecord(workflowParsed.data),
-  });
+  return boundedResult(
+    {
+      action: "sdl.workflow",
+      args: stableRecord(workflowParsed.data),
+    },
+    validatedAction,
+  );
 }
 
 export const _recoveryValidationTesting = {

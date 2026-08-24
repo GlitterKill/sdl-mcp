@@ -87,6 +87,7 @@ export interface RecoveryValidationContext {
 
 export interface RecoveryBuildResult {
   readonly nextAction?: RecoveryActionCall;
+  readonly validatedAction?: RecoveryActionCall;
   readonly invalidRecoveryCount: number;
 }
 
