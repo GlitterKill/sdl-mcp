@@ -5253,20 +5253,9 @@ const PROJECTED_SUCCESS_SCHEMA_BY_ACTION: Readonly<
   context: [ProjectedContextCompactResponseSchema],
 });
 
-const PublicRecordKeySchema = z.string().refine(
-  (key) => !key.startsWith("__"),
-  { message: "Public record output contains a reserved private field" },
-);
-const PublicModelValueSchema: z.ZodType<unknown> = z.lazy(() =>
-  z.union([
-    z.null(),
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.array(PublicModelValueSchema),
-    z.record(PublicRecordKeySchema, PublicModelValueSchema),
-  ]),
-);
+
+const PublicModelValueSchema: z.ZodType<unknown> =
+  ProjectedResponseContentSchema;
 
 function strictCanonicalPublicSuccessSchema(
   action: string,
