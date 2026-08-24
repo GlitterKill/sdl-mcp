@@ -216,6 +216,7 @@ describe("sdl.context response artifacts", () => {
     const nextCalls = projectedStep.error?.nextCalls;
     const nextAction = nextCalls?.[0];
     assert.equal(projectedStep.failureTrace, undefined);
+    assert.equal("nextAction" in projectedStep, false);
     assert.deepEqual(nextAction, {
       action: "sdl.retrieve",
       args: {
