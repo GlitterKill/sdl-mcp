@@ -2,7 +2,7 @@ import {
   resolveRecoveryActionDefinition,
   resolveRecoveryWorkflowFunction,
 } from "./action-catalog.js";
-import { RetrieveRequestSchema } from "./retrieve.js";
+import { RetrieveRequestSchema } from "./retrieve-schema.js";
 import {
   buildValidatedRecoveryAction,
   _recoveryValidationTesting,
