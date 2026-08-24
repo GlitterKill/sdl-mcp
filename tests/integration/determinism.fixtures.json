@@ -563,6 +563,18 @@
       }
     },
     {
+      "tool": "sdl.retrieve",
+      "expectError": true,
+      "args": {
+        "repoId": "{REPO_ID}",
+        "op": "responseGet",
+        "args": {
+          "handle": "missing-response-artifact"
+        },
+        "detail": "compact"
+      }
+    },
+    {
       "tool": "sdl.workflow",
       "args": {
         "repoId": "{REPO_ID}",
@@ -692,6 +704,18 @@
           "limit": 1,
           "semantic": false,
           "wireFormat": "json"
+        },
+        "detail": "full"
+      }
+    },
+    {
+      "tool": "sdl.retrieve",
+      "expectError": true,
+      "args": {
+        "repoId": "{REPO_ID}",
+        "op": "responseGet",
+        "args": {
+          "handle": "missing-response-artifact"
         },
         "detail": "full"
       }

@@ -5,10 +5,11 @@
 Code Mode is built around one clear separation of responsibility:
 
 - `sdl.action.search` is the universal discovery surface.
+- `sdl.info` reports runtime and configuration status.
 - `sdl.manual` loads a compact API subset.
-- `sdl.context` handles task-shaped code understanding.
 - `sdl.retrieve` handles one exact retrieval step.
 - `sdl.workflow` handles multi-step operations.
+- `sdl.context` handles task-shaped code understanding.
 - `sdl.file` handles file reads, writes, edits, and gated source windows.
 
 If you remember only one rule, make it this one: use `sdl.context` first for `explain`, `debug`, `review`, and most `implement` requests. Always provide `budget.maxTokens` and add flat focus fields for named targets. Use `sdl.retrieve` for one exact retrieval step, `sdl.file` for file/edit/window work, and `sdl.workflow` only when the work is genuinely procedural.
@@ -139,6 +140,23 @@ Supported operations:
 - `codeSkeleton`
 - `codeHotPath`
 - `codeNeedWindow`
+- `responseGet` for continuing a stored large response
+
+A stored-response continuation keeps paging on the direct retrieval surface:
+
+```json
+{
+  "repoId": "my-repo",
+  "op": "responseGet",
+  "args": {
+    "handle": "response-handle",
+    "cursor": { "offsetBytes": 8192 },
+    "maxBytes": 8192
+  }
+}
+```
+
+The outer `responseMode` field remains part of the common envelope, but SDL-MCP ignores it for `responseGet` because paging controls belong to `response.get`.
 
 The public `args` schema publishes one titled variant per operation in the order above. Select the variant whose title matches `op`; the selected operation validates its arguments at dispatch. Each variant uses the mapped gateway action's request contract without `repoId`, which remains in the retrieve envelope. The `sliceBuild` budget accepts `maxCards` and `maxEstimatedTokens`; `maxTokens` fails validation.
 
@@ -337,9 +355,9 @@ The workflow engine also provides:
 | Mode | Registered tools |
 |:-----|:-----------------|
 | Disabled | Base flat or gateway tools, plus universal `sdl.action.search` and `sdl.info` |
-| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, `sdl.file` |
-| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, `sdl.file` |
-| Exclusive | `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, `sdl.file` only |
+| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.retrieve`, `sdl.workflow`, `sdl.context`, `sdl.file` |
+| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.retrieve`, `sdl.workflow`, `sdl.context`, `sdl.file` |
+| Exclusive | `sdl.action.search`, `sdl.info`, `sdl.manual`, `sdl.retrieve`, `sdl.workflow`, `sdl.context`, `sdl.file` only |
 
 ---
 

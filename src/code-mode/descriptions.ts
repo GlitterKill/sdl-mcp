@@ -27,8 +27,9 @@ export const CONTEXT_DESCRIPTION =
 export const RETRIEVE_DESCRIPTION =
   "Retrieve compact SDL graph/code context in one step. Use for " +
   "symbolSearch, symbolGetCard, sliceBuild, codeSkeleton, codeHotPath, " +
-  "and justified codeNeedWindow calls. Prefer sdl.workflow for multi-step " +
-  "pipelines, transforms, runtime execution, mutations, or $N result piping.";
+  "and justified codeNeedWindow calls. Use responseGet only to continue a " +
+  "stored large response. Prefer sdl.workflow for multi-step pipelines, " +
+  "transforms, runtime execution, mutations, or $N result piping.";
 
 export const ACTION_SEARCH_DESCRIPTION =
   "Search for SDL-MCP actions by keyword. Returns ranked matches and nearMisses " +

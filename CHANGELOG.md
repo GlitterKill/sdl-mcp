@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Code Mode response continuation**: Added direct stored-response paging through `sdl.retrieve` with the `responseGet` operation.
+
 ### Changed
 
 ### Fixed
