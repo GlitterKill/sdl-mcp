@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Bounded Windows CI tests**: Stream per-file progress, terminate hung test process trees after ten minutes, and cap the cross-platform test job at 45 minutes instead of consuming GitHub's six-hour limit.
+
 ## [0.13.4] - 2026-08-24
 
 ### Added

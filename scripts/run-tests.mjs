@@ -33,6 +33,8 @@ const repoRoot = resolve(__dirname, "..");
 const testLogPath = join(process.cwd(), "test-results.log");
 const logLines = [];
 const MAX_TEST_OUTPUT_BYTES = 10 * 1024 * 1024;
+// Fail one stuck file instead of consuming GitHub Actions' six-hour job limit.
+const TEST_FILE_TIMEOUT_MS = 10 * 60 * 1000;
 const INIT_DB_ARGS = [
   "--input-type=module",
   "-e",
@@ -199,23 +201,50 @@ function needsExperimentalModuleMocks(testFile) {
   return /\.mock\.module\s*\(/.test(source);
 }
 
-function runProcess(command, args, { cwd, env, maxOutputBytes = MAX_TEST_OUTPUT_BYTES }) {
+function runProcess(
+  command,
+  args,
+  {
+    cwd,
+    env,
+    maxOutputBytes = MAX_TEST_OUTPUT_BYTES,
+    timeoutMs = TEST_FILE_TIMEOUT_MS,
+  },
+) {
   return new Promise((resolveResult) => {
     const child = spawn(command, args, {
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     });
     let stdout = "";
     let stderr = "";
     let outputBytes = 0;
     let killedByOutputLimit = false;
+    let timedOut = false;
     let settled = false;
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      // The runtime helper owns descendant cleanup, including taskkill /T on Windows.
+      void import("../dist/runtime/executor.js")
+        .then(({ killProcessTree }) => killProcessTree(child.pid))
+        .catch(() => {
+          try {
+            child.kill();
+          } catch {
+            // The child may have exited while the cleanup helper loaded.
+          }
+        });
+    }, timeoutMs);
+    timeout.unref();
 
     const settle = (result) => {
       if (!settled) {
         settled = true;
-        resolveResult(result);
+        clearTimeout(timeout);
+        resolveResult({ ...result, timedOut });
       }
     };
 
@@ -307,6 +336,14 @@ async function runTestFile(testFile, index, baseTestEnv, testTempDir) {
     },
   );
 
+  if (result.timedOut) {
+    return {
+      ...result,
+      testFile,
+      passed: false,
+      reason: `timed out after ${TEST_FILE_TIMEOUT_MS}ms`,
+    };
+  }
   if (result.error) {
     return {
       ...result,
@@ -370,6 +407,7 @@ async function runIsolatedTests(isolatedTests, baseTestEnv, testTempDir) {
   const workers = Array.from({ length: workerCount }, async () => {
     while (nextIndex < isolatedTests.length) {
       const index = nextIndex++;
+      log(`[run-tests] ${isolatedTests[index]}: START`);
       const result = await runTestFile(
         isolatedTests[index],
         index,

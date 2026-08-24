@@ -8,6 +8,10 @@ const runnerSource = readFileSync(
   join(repoRoot, "scripts", "run-tests.mjs"),
   "utf8",
 );
+const ciSource = readFileSync(
+  join(repoRoot, ".github", "workflows", "ci.yml"),
+  "utf8",
+);
 const pkg = JSON.parse(
   readFileSync(join(repoRoot, "package.json"), "utf8"),
 ) as { scripts?: Record<string, string> };
@@ -46,6 +50,35 @@ describe("run-tests script parallel suites", () => {
     assert.match(runnerSource, /Promise\.all\(workers\)/);
     assert.match(runnerSource, /const testGraphDbPath = join\(testTempDir, `test-\$\{index\}-graph`\)/);
     assert.match(runnerSource, /SDL_GRAPH_DB_PATH: testGraphDbPath/);
+  });
+
+  it("reports each test file before awaiting its process", () => {
+    assert.match(
+      runnerSource,
+      /log\(`\[run-tests\] \$\{isolatedTests\[index\]\}: START`\);\s*const result = await runTestFile/,
+    );
+  });
+
+  it("times out stuck test files through the shared process-tree owner", () => {
+    assert.match(runnerSource, /const TEST_FILE_TIMEOUT_MS = 10 \* 60 \* 1000/);
+    assert.match(
+      runnerSource,
+      /setTimeout\(\(\) => \{[\s\S]*timedOut = true;[\s\S]*killProcessTree\(child\.pid\)/,
+    );
+    assert.match(
+      runnerSource,
+      /if \(result\.timedOut\) \{[\s\S]*reason: `timed out after \$\{TEST_FILE_TIMEOUT_MS\}ms`/,
+    );
+  });
+
+  it("streams the CI test log and bounds the matrix job", () => {
+    const testsJob =
+      ciSource.match(/\r?\n  tests:\r?\n[\s\S]*?\r?\n  benchmarks:/)?.[0] ?? "";
+
+    assert.match(testsJob, /timeout-minutes: 45/);
+    assert.match(testsJob, /npm test 2>&1 \| tee "\$TEST_OUT"/);
+    assert.match(testsJob, /TEST_EXIT=\$\{PIPESTATUS\[0\]\}/);
+    assert.doesNotMatch(testsJob, /npm test > "\$TEST_OUT"/);
   });
 
   it("enables the Windows native loader only for the semantic integration test", () => {
