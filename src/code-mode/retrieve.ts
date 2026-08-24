@@ -26,6 +26,7 @@ export const RETRIEVE_ACTION_BY_OP = {
   codeSkeleton: "code.getSkeleton",
   codeHotPath: "code.getHotPath",
   codeNeedWindow: "code.needWindow",
+  responseGet: "response.get",
 } as const;
 
 export const RetrieveOutputSchema = z.union([
@@ -100,8 +101,8 @@ export async function handleRetrieve(
   }
 
   const actionArgs = {
-    repoId: request.repoId,
     ...request.args,
+    repoId: request.repoId,
   };
   try {
     return await dispatchAction(

@@ -8,6 +8,7 @@ export const RetrieveOpSchema = z.enum([
   "codeSkeleton",
   "codeHotPath",
   "codeNeedWindow",
+  "responseGet",
 ]);
 
 export const RetrieveRequestSchema = z.object({

@@ -663,7 +663,7 @@ describe("MCP tool registration", () => {
     const variants = retrieveProperties.args.anyOf as Array<
       Record<string, unknown>
     >;
-    assert.strictEqual(variants.length, 6);
+    assert.strictEqual(variants.length, 7);
     assert.deepStrictEqual(
       variants.map((variant) => variant.title),
       [
@@ -673,6 +673,7 @@ describe("MCP tool registration", () => {
         "codeSkeleton",
         "codeHotPath",
         "codeNeedWindow",
+        "responseGet",
       ],
     );
     const sliceProperties = variants[2]?.properties as Record<
@@ -789,11 +790,15 @@ describe("MCP tool registration", () => {
       discovery.actions?.some((action) => action.action === "info"),
       "exclusive mode discovery should advertise universal sdl.info",
     );
-    assert.strictEqual(
-      names.length,
-      7,
-      `exclusive mode should register exactly 7 tools, got ${names.length}: ${names.join(", ")}`,
-    );
+    assert.deepStrictEqual(names, [
+      "sdl.action.search",
+      "sdl.info",
+      "sdl.manual",
+      "sdl.retrieve",
+      "sdl.workflow",
+      "sdl.context",
+      "sdl.file",
+    ]);
 
     // No flat tools
     assert.ok(

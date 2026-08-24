@@ -20,6 +20,7 @@ const RETRIEVE_ACTION_BY_OP: Readonly<Record<string, string>> = {
   codeSkeleton: "code.getSkeleton",
   codeHotPath: "code.getHotPath",
   codeNeedWindow: "code.needWindow",
+  responseGet: "response.get",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -528,7 +529,10 @@ export function projectRetrievalValue(
   input: ModelProjectionInput,
   projectCompatibilityValue: ModelValueProjectionDelegate,
 ): unknown {
-  const compatibility = projectCompatibilityValue(input);
+  const action = actionForInput(input);
+  const compatibility = projectCompatibilityValue(
+    action === "response.get" ? { ...input, action: "response.get" } : input,
+  );
   const canonical = input.canonicalResult;
   if (!isRecord(canonical)) return compatibility;
   if (isRecord(canonical.error)) {
@@ -538,7 +542,6 @@ export function projectRetrievalValue(
       ? canonical
       : compatibility;
   }
-  const action = actionForInput(input);
   if (![
     "symbol.getCard",
     "symbol.search",

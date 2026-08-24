@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { ValidationError } from "../../dist/domain/errors.js";
 import { createActionMap } from "../../dist/gateway/router.js";
+import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
 import { SliceBuildRequestSchema } from "../../dist/mcp/tools.js";
 
 import {
@@ -39,7 +40,34 @@ describe("sdl.retrieve", () => {
       codeSkeleton: "code.getSkeleton",
       codeHotPath: "code.getHotPath",
       codeNeedWindow: "code.needWindow",
+      responseGet: "response.get",
     });
+  });
+
+  it("routes responseGet through response.get model projection", () => {
+    const handle = "response-repo-1784866000000-deadbeefdeadbeef";
+    const canonical = {
+      handle,
+      content: {
+        fallbackRationale: "Use sdl.symbol.search to recover.",
+        nextBestAction: {
+          tool: "sdl.code.getSkeleton",
+          args: { repoId: "repo", symbolId: "sym" },
+        },
+      },
+    };
+    const expected = projectToolResultForModelContent(
+      "response.get",
+      structuredClone(canonical),
+      { repoId: "repo", handle },
+    );
+    const projected = projectToolResultForModelContent(
+      "sdl.retrieve",
+      structuredClone(canonical),
+      { repoId: "repo", op: "responseGet", args: { handle } },
+    );
+
+    assert.deepEqual(projected, expected);
   });
 
   it("validates every compact code success shape", () => {
@@ -169,6 +197,10 @@ describe("sdl.retrieve", () => {
           identifiersToFind: ["foo"],
         },
       ],
+      [
+        "responseGet",
+        { handle: "response-repo-1784866000000-deadbeefdeadbeef" },
+      ],
     ] as const;
 
     assert.strictEqual(variants.length, cases.length);
@@ -179,6 +211,19 @@ describe("sdl.retrieve", () => {
       const result = action.schema.safeParse({ repoId: "repo", ...args });
       assert.equal(result.success, true, `${op} args must match its variant`);
     });
+
+    const responseGet = variants.find(
+      (variant) => variant.title === "responseGet",
+    );
+    assert.ok(responseGet);
+    const responseGetProperties = responseGet.properties as Record<
+      string,
+      unknown
+    >;
+    assert.ok("handle" in responseGetProperties);
+    assert.ok(!("repoId" in responseGetProperties));
+    assert.deepEqual(responseGet.required, ["handle"]);
+    assert.ok(!(responseGet.required as string[]).includes("repoId"));
   });
 
   it("validates args against the selected operation at dispatch", async () => {
@@ -396,6 +441,32 @@ describe("sdl.retrieve", () => {
     assert.equal(Object.hasOwn(result as object, "totalTokens"), false);
     assert.equal(Object.hasOwn(result as object, "durationMs"), false);
     assert.equal(Object.hasOwn(result as object, "intermediateResultsSuppressed"), false);
+  });
+
+  it("uses the trusted envelope repoId for responseGet dispatch", async () => {
+    const calls: unknown[] = [];
+    const handle = "response-trusted-repo-1784866000000-deadbeefdeadbeef";
+    const result = await handleRetrieve(
+      {
+        repoId: "trusted-repo",
+        op: "responseGet",
+        args: { repoId: "attacker-repo", handle },
+      },
+      {
+        "response.get": {
+          schema: z
+            .object({ repoId: z.string(), handle: z.string() })
+            .strict(),
+          handler: async (args: unknown) => {
+            calls.push(args);
+            return { ok: true };
+          },
+        },
+      } as never,
+    );
+
+    assert.deepEqual(calls, [{ repoId: "trusted-repo", handle }]);
+    assert.deepEqual(result, { ok: true });
   });
 
   it("reports nested action validation failures as actionable validation errors", async () => {
