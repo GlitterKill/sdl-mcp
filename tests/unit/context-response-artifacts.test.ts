@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { executeWorkflow } from "../../dist/code-mode/workflow-executor.js";
-import { WorkflowRequestSchema } from "../../dist/code-mode/types.js";
+import { RetrieveRequestSchema } from "../../dist/code-mode/retrieve.js";
 import type { ParsedWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { ContextEngineV2 } from "../../dist/context/engine.js";
@@ -128,7 +128,7 @@ describe("sdl.context response artifacts", () => {
     assert.equal("truncation" in content, false);
   });
 
-  it("materializes response.get recovery through workflow projection", async () => {
+  it("materializes response.get recovery as direct retrieve continuation", async () => {
     _setResponseRepoExistsForTesting(async () => true);
     const baseDir = makeTempDir();
     const configPath = join(baseDir, "sdlmcp.config.json");
@@ -207,36 +207,32 @@ describe("sdl.context response artifacts", () => {
     ) as {
       results: Array<{
         failureTrace?: unknown;
-        nextAction?: { action: string; args: unknown };
+        error?: {
+          nextCalls?: Array<{ action: string; args: unknown }>;
+        };
       }>;
     };
     const projectedStep = projectedFailure.results[0];
-    const nextAction = projectedStep.nextAction;
+    const nextCalls = projectedStep.error?.nextCalls;
+    const nextAction = nextCalls?.[0];
     assert.equal(projectedStep.failureTrace, undefined);
     assert.deepEqual(nextAction, {
-      action: "sdl.workflow",
+      action: "sdl.retrieve",
       args: {
-        includeTelemetry: false,
-        onError: "continue",
         repoId: "repo-a",
-        steps: [{
-          args: {
-            full: false,
-            handle,
-            jsonPath: "evidence",
-            limit: 5,
-            maxBytes: 8192,
-            offset: 0,
-            offsetBytes: 0,
-            raw: false,
-          },
-          fn: "responseGet",
-        }],
+        op: "responseGet",
+        args: {
+          handle,
+          jsonPath: "evidence",
+          limit: 5,
+          maxBytes: 8192,
+          offset: 0,
+        },
       },
     });
-    assert.equal(WorkflowRequestSchema.safeParse(nextAction?.args).success, true);
+    assert.equal(RetrieveRequestSchema.safeParse(nextAction?.args).success, true);
     assert.equal(
-      (JSON.stringify(projectedStep).match(/"nextAction"/g) ?? []).length,
+      nextCalls?.length,
       1,
     );
 
