@@ -179,6 +179,25 @@ describe("sdl.retrieve", () => {
     );
   });
 
+  it("rejects unknown direct responseGet continuation arguments", () => {
+    const page = createIncompleteResponseGetPage();
+    const invalid = {
+      ...page,
+      nextAction: {
+        ...page.nextAction,
+        args: {
+          ...page.nextAction.args,
+          args: {
+            ...page.nextAction.args.args,
+            unknownNested: true,
+          },
+        },
+      },
+    };
+
+    assert.equal(RetrieveOutputSchema.safeParse(invalid).success, false);
+  });
+
   it("rejects incoherent direct responseGet continuation arguments", () => {
     const page = createIncompleteResponseGetPage();
     const invalidContinuationArgs = [
