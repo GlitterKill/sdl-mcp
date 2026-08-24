@@ -162,6 +162,7 @@ const GATED_RETRIEVE_OPS = new Set([
   "codeHotPath",
   "codeNeedWindow",
 ]);
+const EXCLUDED_RETRIEVE_OPS = new Set(["responseGet"]);
 
 const EXCLUDED_WORKFLOW_TRANSFORMS = new Set([
   "dataPick",
@@ -303,7 +304,7 @@ describe("public graph retrieval admission classifier", () => {
       RetrieveOpSchema.options,
       "sdl.retrieve operations",
       GATED_RETRIEVE_OPS,
-      new Set(),
+      EXCLUDED_RETRIEVE_OPS,
     );
     assertClosedRegistry(
       Object.keys(FN_NAME_MAP),
@@ -431,7 +432,7 @@ describe("public graph retrieval admission classifier", () => {
           op,
           args: {},
         }),
-        expected(true),
+        expected(GATED_RETRIEVE_OPS.has(op)),
         op,
       );
     }
