@@ -585,7 +585,8 @@ describe("response projection inventory", () => {
     });
     const nodeBudgets = new Map([
       ["sdl.file", 1_000],
-      ["sdl.retrieve", 1_500],
+      // Stored-response continuation adds one strict page-success arm (1,621 nodes).
+      ["sdl.retrieve", 1_625],
       // Successful-truncation recovery duplicates the strict callable-action schema across bound result arms (5,313 nodes).
       ["sdl.workflow", 5_400],
     ]);
@@ -1447,7 +1448,7 @@ describe("response projection inventory", () => {
         .filter((key) => key.startsWith(`${action}.output.union:`))
         .sort(compareCodeUnits);
 
-    assert.equal(arms("retrieve").length, 6, JSON.stringify(arms("retrieve")));
+    assert.equal(arms("retrieve").length, 7, JSON.stringify(arms("retrieve")));
     assert.equal(arms("context").length, 2, JSON.stringify(arms("context")));
     assert.equal(arms("file").length, 5, JSON.stringify(arms("file")));
   });
