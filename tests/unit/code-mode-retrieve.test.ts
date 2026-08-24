@@ -31,6 +31,45 @@ function createTestConfig() {
   };
 }
 
+const RESPONSE_GET_HANDLE =
+  "response-repo-1784866000000-deadbeefdeadbeef";
+
+const RESPONSE_GET_CONTINUATION_ARGS = {
+  handle: RESPONSE_GET_HANDLE,
+  view: "model" as const,
+  cursor: { offsetBytes: 8_192 },
+  full: false,
+  maxBytes: 8_192,
+  offsetBytes: 0,
+  raw: false,
+};
+
+function createIncompleteResponseGetPage() {
+  return {
+    handle: RESPONSE_GET_HANDLE,
+    contentKind: "json" as const,
+    content: "{\"partial\":",
+    metadata: {
+      repoId: "repo",
+      toolName: "sdl.context",
+      originalBytes: 16_384,
+      contentKind: "json" as const,
+    },
+    full: false as const,
+    complete: false as const,
+    truncated: true as const,
+    range: { offsetBytes: 0, returnedBytes: 8_192 },
+    nextAction: {
+      action: "sdl.retrieve" as const,
+      args: {
+        repoId: "repo",
+        op: "responseGet" as const,
+        args: RESPONSE_GET_CONTINUATION_ARGS,
+      },
+    },
+  };
+}
+
 describe("sdl.retrieve", () => {
   it("maps retrieval ops to existing read-only gateway actions", () => {
     assert.deepEqual(RETRIEVE_ACTION_BY_OP, {
@@ -68,6 +107,96 @@ describe("sdl.retrieve", () => {
     );
 
     assert.deepEqual(projected, expected);
+  });
+
+  it("accepts complete responseGet pages", () => {
+    const page = {
+      handle: RESPONSE_GET_HANDLE,
+      contentKind: "json" as const,
+      content: { done: true },
+      metadata: {
+        repoId: "repo",
+        toolName: "sdl.context",
+        originalBytes: 8_192,
+        contentKind: "json" as const,
+      },
+      full: false as const,
+      complete: true as const,
+      range: { offsetBytes: 0, returnedBytes: 8_192 },
+    };
+    const parsed = RetrieveOutputSchema.safeParse(page);
+
+    if (!parsed.success) assert.fail(parsed.error.message);
+  });
+
+  it("accepts direct responseGet continuations with stable key order", () => {
+    const page = createIncompleteResponseGetPage();
+    const parsed = RetrieveOutputSchema.safeParse(page);
+
+    if (!parsed.success) assert.fail(parsed.error.message);
+    assert.deepEqual(parsed.data.nextAction, page.nextAction);
+    assert.deepEqual(
+      Object.keys(JSON.parse(JSON.stringify(parsed.data)) as object),
+      [
+        "handle",
+        "contentKind",
+        "content",
+        "metadata",
+        "full",
+        "complete",
+        "truncated",
+        "range",
+        "nextAction",
+      ],
+    );
+  });
+
+  it("rejects workflow-wrapped and unknown-field responseGet pages", () => {
+    const page = createIncompleteResponseGetPage();
+    const workflowWrapped = {
+      ...page,
+      nextAction: {
+        action: "sdl.workflow",
+        args: {
+          repoId: "repo",
+          steps: [
+            {
+              fn: "responseGet",
+              args: RESPONSE_GET_CONTINUATION_ARGS,
+            },
+          ],
+        },
+      },
+    };
+
+    assert.equal(RetrieveOutputSchema.safeParse(workflowWrapped).success, false);
+    assert.equal(
+      RetrieveOutputSchema.safeParse({
+        ...page,
+        unknownPageField: true,
+      }).success,
+      false,
+    );
+  });
+
+  it("rejects incoherent direct responseGet continuation arguments", () => {
+    const page = createIncompleteResponseGetPage();
+    const invalidContinuationArgs = [
+      { ...RESPONSE_GET_CONTINUATION_ARGS, handle: "response-other" },
+      {
+        ...RESPONSE_GET_CONTINUATION_ARGS,
+        cursor: { offsetBytes: 8_191 },
+      },
+      { ...RESPONSE_GET_CONTINUATION_ARGS, full: true },
+      { ...RESPONSE_GET_CONTINUATION_ARGS, raw: true },
+      { ...RESPONSE_GET_CONTINUATION_ARGS, offsetBytes: 4_096 },
+    ];
+
+    for (const args of invalidContinuationArgs) {
+      const invalid = structuredClone(page);
+      invalid.nextAction.args.args = args;
+      assert.equal(RetrieveOutputSchema.safeParse(invalid).success, false);
+    }
   });
 
   it("validates every compact code success shape", () => {

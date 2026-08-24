@@ -6,9 +6,11 @@ import {
 } from "../gateway/compact-schema.js";
 import { dispatchAction, type ActionMap } from "../gateway/router.js";
 import {
+  buildProjectedResponseGetSuccessOutputSchema,
   CodeNeedWindowResponseSchema,
   GetHotPathResponseSchema,
   GetSkeletonResponseSchema,
+  ResponseGetContinuationRequestSchema,
   SliceBuildResponseSchema,
   SymbolGetCardResponseSchema,
   SymbolSearchResponseSchema,
@@ -29,6 +31,25 @@ export const RETRIEVE_ACTION_BY_OP = {
   responseGet: "response.get",
 } as const;
 
+const RetrieveResponseGetRequestSchema = RetrieveRequestSchema.extend({
+  op: z.literal("responseGet"),
+  args: ResponseGetContinuationRequestSchema,
+}).strict();
+
+const RetrieveResponseGetNextActionSchema = z
+  .object({
+    action: z.literal("sdl.retrieve"),
+    args: RetrieveResponseGetRequestSchema,
+  })
+  .strict();
+
+const RetrieveResponseGetOutputSchema =
+  buildProjectedResponseGetSuccessOutputSchema(
+    RetrieveResponseGetNextActionSchema,
+    (nextAction) =>
+      RetrieveResponseGetNextActionSchema.parse(nextAction).args.args,
+  );
+
 export const RetrieveOutputSchema = z.union([
   withProjectionSuccessOutputSchema("symbol.search", SymbolSearchResponseSchema),
   withProjectionSuccessOutputSchema("symbol.getCard", SymbolGetCardResponseSchema),
@@ -36,6 +57,7 @@ export const RetrieveOutputSchema = z.union([
   withProjectionSuccessOutputSchema("code.getSkeleton", GetSkeletonResponseSchema),
   withProjectionSuccessOutputSchema("code.getHotPath", GetHotPathResponseSchema),
   withProjectionSuccessOutputSchema("code.needWindow", CodeNeedWindowResponseSchema),
+  RetrieveResponseGetOutputSchema,
 ]);
 
 /** Publish each available retrieve operation's authoritative nested arguments. */

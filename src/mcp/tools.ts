@@ -3485,7 +3485,7 @@ export type RuntimeQueryOutputResponse = z.infer<
   typeof RuntimeQueryOutputResponseSchema
 >;
 
-export const ResponseGetRequestSchema = withProjectionRequestOptions(z.object({
+const ResponseGetRequestObjectSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   handle: z
     .string()
@@ -3558,7 +3558,16 @@ export const ResponseGetRequestSchema = withProjectionRequestOptions(z.object({
     .max(1000)
     .optional()
     .describe("Maximum array items to return after jsonPath extraction"),
-}));
+});
+
+export const ResponseGetRequestSchema = withProjectionRequestOptions(
+  ResponseGetRequestObjectSchema,
+);
+
+export const ResponseGetContinuationRequestSchema =
+  withProjectionRequestOptions(
+    ResponseGetRequestObjectSchema.omit({ repoId: true }),
+  );
 
 export const ResponseGetResponseSchema = z.object({
   handle: z.string(),
@@ -5000,9 +5009,22 @@ const ProjectedResponseGetNextActionSchema = z
   })
   .strict();
 
+type ProjectedResponseGetContinuationArgs = Omit<
+  z.infer<typeof ProjectedResponseGetRequestSchema>,
+  "repoId"
+>;
+
+type ProjectedResponseGetContinuationExtractor = (
+  nextAction: unknown,
+) => ProjectedResponseGetContinuationArgs;
+
 function buildProjectedResponseGetSchema(
   range: z.ZodType,
   truncatedWhenComplete: z.ZodType | undefined,
+  nextActionSchema: z.ZodType = ProjectedResponseGetNextActionSchema,
+  extractContinuationArgs: ProjectedResponseGetContinuationExtractor = (
+    nextAction,
+  ) => ProjectedResponseGetNextActionSchema.parse(nextAction).args,
 ): z.ZodType {
   const completeSchema = ProjectedResponseGetBaseSchema.extend({
     full: z.boolean(),
@@ -5019,7 +5041,7 @@ function buildProjectedResponseGetSchema(
     truncated: z.literal(true),
     range,
     pagination: ProjectedResponseGetPaginationSchema.optional(),
-    nextAction: ProjectedResponseGetNextActionSchema,
+    nextAction: nextActionSchema,
   }).strict();
 
   return z
@@ -5067,7 +5089,7 @@ function buildProjectedResponseGetSchema(
         return;
       }
 
-      const continuation = value.nextAction.args;
+      const continuation = extractContinuationArgs(value.nextAction);
       if (continuation.handle !== value.handle) {
         issue("The continuation handle must match the response handle");
       }
@@ -5121,6 +5143,27 @@ const ProjectedResponseGetFullSchema = buildProjectedResponseGetSchema(
   ProjectedResponseGetFullRangeSchema,
   z.literal(false),
 );
+
+/** Reuse response.get page fields and invariants with a caller-specific continuation. */
+export function buildProjectedResponseGetSuccessOutputSchema(
+  nextActionSchema: z.ZodType,
+  extractContinuationArgs: ProjectedResponseGetContinuationExtractor,
+): z.ZodType {
+  return z.union([
+    buildProjectedResponseGetSchema(
+      ProjectedResponseGetCompactRangeSchema,
+      undefined,
+      nextActionSchema,
+      extractContinuationArgs,
+    ),
+    buildProjectedResponseGetSchema(
+      ProjectedResponseGetFullRangeSchema,
+      z.literal(false),
+      nextActionSchema,
+      extractContinuationArgs,
+    ),
+  ]);
+}
 
 const ProjectedContextCompactResponseSchema = z
   .object({
