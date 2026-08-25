@@ -3565,9 +3565,7 @@ export const ResponseGetRequestSchema = withProjectionRequestOptions(
 );
 
 export const ResponseGetContinuationRequestSchema =
-  withProjectionRequestOptions(
-    ResponseGetRequestObjectSchema.omit({ repoId: true }).strict(),
-  );
+  ResponseGetRequestObjectSchema.omit({ repoId: true }).strict();
 
 export const ResponseGetResponseSchema = z.object({
   handle: z.string(),

@@ -130,7 +130,19 @@ describe("sdl.retrieve", () => {
   });
 
   it("accepts direct responseGet continuations with stable key order", () => {
-    const page = createIncompleteResponseGetPage();
+    const page = {
+      ...createIncompleteResponseGetPage(),
+      nextAction: {
+        action: "sdl.retrieve" as const,
+        args: {
+          repoId: "repo",
+          op: "responseGet" as const,
+          detail: "full" as const,
+          includeDiagnostics: true,
+          args: RESPONSE_GET_CONTINUATION_ARGS,
+        },
+      },
+    };
     const parsed = RetrieveOutputSchema.safeParse(page);
 
     if (!parsed.success) assert.fail(parsed.error.message);
@@ -148,6 +160,26 @@ describe("sdl.retrieve", () => {
         "range",
         "nextAction",
       ],
+    );
+
+    const nestedProjectionPage = {
+      ...createIncompleteResponseGetPage(),
+      nextAction: {
+        action: "sdl.retrieve" as const,
+        args: {
+          repoId: "repo",
+          op: "responseGet" as const,
+          args: {
+            ...RESPONSE_GET_CONTINUATION_ARGS,
+            detail: "full" as const,
+            includeDiagnostics: true,
+          },
+        },
+      },
+    };
+    assert.equal(
+      RetrieveOutputSchema.safeParse(nestedProjectionPage).success,
+      false,
     );
   });
 

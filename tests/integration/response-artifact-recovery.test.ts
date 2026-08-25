@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import {
+  createMCPServer,
   MCPServer,
   type ToolResponseEnvelope,
 } from "../../dist/server.js";
@@ -872,6 +873,51 @@ async function canonicalErrorEnvelope(
 }
 
 describe("sdl.retrieve responseGet artifact continuation", () => {
+  it("classifies misplaced and invalid responseGet projection controls at tools/call", async () => {
+    const server = await createMCPServer({
+      codeModeConfig: {
+        enabled: true,
+        exclusive: true,
+        maxWorkflowSteps: 20,
+        maxWorkflowTokens: 50_000,
+        maxWorkflowDurationMs: 60_000,
+        ladderValidation: "warn",
+        etagCaching: true,
+      },
+    });
+    const handler = getCallToolHandler(server);
+    const baseArgs = {
+      repoId: "repo-a",
+      op: "responseGet",
+      args: {
+        handle: "response-repo-a-1784866000000-deadbeefdeadbeef",
+      },
+    };
+    const cases: Array<[string, Record<string, unknown>]> = [
+      [
+        "nested detail",
+        { ...baseArgs, args: { ...baseArgs.args, detail: "full" } },
+      ],
+      [
+        "nested includeDiagnostics",
+        { ...baseArgs, args: { ...baseArgs.args, includeDiagnostics: true } },
+      ],
+      ["invalid outer detail", { ...baseArgs, detail: 42 }],
+      [
+        "invalid outer includeDiagnostics",
+        { ...baseArgs, includeDiagnostics: "yes" },
+      ],
+    ];
+
+    for (const [label, args] of cases) {
+      const error = await canonicalErrorEnvelope(async () => {
+        const response = await callStoredResponse(handler, "sdl.retrieve", args);
+        return response.structuredContent;
+      });
+      assert.equal(error.code, "VALIDATION_ERROR", label);
+    }
+  });
+
   it("returns page-native content for auto and handle modes and replays to completion", async () => {
     const baseDir = makeTempDir();
     configureArtifacts(baseDir);

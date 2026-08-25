@@ -34,6 +34,8 @@ export const RETRIEVE_ACTION_BY_OP = {
 const RetrieveResponseGetRequestSchema = RetrieveRequestSchema.extend({
   op: z.literal("responseGet"),
   args: ResponseGetContinuationRequestSchema,
+  detail: z.enum(["compact", "standard", "full"]).optional(),
+  includeDiagnostics: z.boolean().optional(),
 }).strict();
 
 const RetrieveResponseGetNextActionSchema = z
@@ -74,7 +76,11 @@ export function buildRetrieveWireSchema(
       const action = actionMap[actionName];
       if (!action) return [];
 
-      const variant = zodSchemaToJsonSchema(action.schema);
+      const variant = zodSchemaToJsonSchema(
+        op === "responseGet"
+          ? ResponseGetContinuationRequestSchema
+          : action.schema,
+      );
       const variantProperties = {
         ...(variant.properties as Record<string, unknown>),
       };
@@ -122,11 +128,15 @@ export async function handleRetrieve(
     );
   }
 
-  const actionArgs = {
-    ...request.args,
-    repoId: request.repoId,
-  };
   try {
+    const { repoId: _nestedRepoId, ...responseGetArgs } = request.args;
+    if (request.op === "responseGet") {
+      ResponseGetContinuationRequestSchema.parse(responseGetArgs);
+    }
+    const actionArgs = {
+      ...(request.op === "responseGet" ? responseGetArgs : request.args),
+      repoId: request.repoId,
+    };
     return await dispatchAction(
       actionName,
       actionArgs,

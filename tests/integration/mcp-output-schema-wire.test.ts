@@ -844,6 +844,31 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
     }
   });
 
+  it("advertises responseGet projection controls only on the retrieve envelope", async () => {
+    const retrieve = (await client.listTools()).tools.find(
+      (tool) => tool.name === "sdl.retrieve",
+    );
+    assert.ok(retrieve);
+    const rootProperties = (
+      retrieve.inputSchema as {
+        properties: Record<string, Record<string, unknown>>;
+      }
+    ).properties;
+    assert.ok(rootProperties.detail);
+    assert.ok(rootProperties.includeDiagnostics);
+
+    const variants = rootProperties.args?.anyOf as Array<
+      Record<string, unknown>
+    >;
+    const responseGet = variants.find(
+      (variant) => variant.title === "responseGet",
+    );
+    assert.ok(responseGet);
+    const nestedProperties = responseGet.properties as Record<string, unknown>;
+    assert.equal(Object.hasOwn(nestedProperties, "detail"), false);
+    assert.equal(Object.hasOwn(nestedProperties, "includeDiagnostics"), false);
+  });
+
   it("executes every non-mutating public contract case through the wire", async () => {
     const context = await setupWireFixtureContext(client, symbolId);
     await executePublicContractCases(client, flatClient, context);
