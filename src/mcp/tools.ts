@@ -5261,16 +5261,18 @@ const ProjectedDeltaPackBaseSchema = DeltaPackSchema.extend({
   blastRadius: DeltaPackSchema.shape.blastRadius.optional(),
 }).strict();
 
-const ProjectedDeltaGetCompactResponseSchema = DeltaGetResponseSchema.extend({
-  delta: z.union([
-    ProjectedDeltaPackBaseSchema.extend({
+const ProjectedDeltaGetCompactResponseSchema = z.union([
+  DeltaGetResponseSchema.extend({
+    delta: ProjectedDeltaPackBaseSchema.extend({
       mode: z.literal("preview"),
       totalChanges: z.number().int().nonnegative(),
       sampleSize: z.number().int().nonnegative(),
     }).strict(),
-    ProjectedDeltaPackBaseSchema,
-  ]),
-}).strict();
+  }).strict(),
+  DeltaGetResponseSchema.extend({
+    delta: ProjectedDeltaPackBaseSchema,
+  }).strict(),
+]);
 
 const PROJECTED_SUCCESS_SCHEMA_BY_ACTION: Readonly<
   Record<string, readonly z.ZodType[]>

@@ -590,8 +590,8 @@ describe("response projection inventory", () => {
       ["sdl.file", 1_000],
       // Stored-response continuation plus truncated-card metadata totals 1,628 nodes.
       ["sdl.retrieve", 1_635],
-      // Successful-truncation recovery plus strict delta preview arms total 5,514 nodes.
-      ["sdl.workflow", 5_524],
+      // Successful-truncation recovery plus strict delta preview arms total 5,589 nodes.
+      ["sdl.workflow", 5_599],
     ]);
 
     for (const [name, maxNodes] of nodeBudgets) {
@@ -1595,6 +1595,20 @@ describe("response projection inventory", () => {
     assert.equal(arms("retrieve").length, 7, JSON.stringify(arms("retrieve")));
     assert.equal(arms("context").length, 2, JSON.stringify(arms("context")));
     assert.equal(arms("file").length, 5, JSON.stringify(arms("file")));
+  });
+
+  it("preserves nested delta detail in generated output-arm coverage", () => {
+    const deltaArms = [
+      ...deriveRequiredPublicCoverage().outputArms,
+    ].filter((key) => key.startsWith("delta.get.output.union:"));
+
+    assert.ok(deltaArms.length > 0);
+    for (const arm of deltaArms) {
+      assert.ok(
+        arm.includes("delta.changedSymbols:object[]"),
+        `collapsed delta output arm: ${arm}`,
+      );
+    }
   });
 
   it("requires coverage for every registered public contract node", () => {
