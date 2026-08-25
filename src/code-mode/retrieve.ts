@@ -129,12 +129,11 @@ export async function handleRetrieve(
   }
 
   try {
-    const { repoId: _nestedRepoId, ...responseGetArgs } = request.args;
     if (request.op === "responseGet") {
-      ResponseGetContinuationRequestSchema.parse(responseGetArgs);
+      ResponseGetContinuationRequestSchema.parse(request.args);
     }
     const actionArgs = {
-      ...(request.op === "responseGet" ? responseGetArgs : request.args),
+      ...request.args,
       repoId: request.repoId,
     };
     return await dispatchAction(

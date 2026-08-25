@@ -839,6 +839,7 @@ interface CanonicalErrorEnvelope {
   code?: string;
   classification?: string;
   message?: string;
+  retryable?: boolean;
 }
 
 function canonicalErrorEnvelopeFrom(value: unknown): CanonicalErrorEnvelope {
@@ -846,10 +847,12 @@ function canonicalErrorEnvelopeFrom(value: unknown): CanonicalErrorEnvelope {
     code?: unknown;
     classification?: unknown;
     message?: unknown;
+    retryable?: unknown;
     error?: {
       code?: unknown;
       classification?: unknown;
       message?: unknown;
+      retryable?: unknown;
     };
   };
   const detail = candidate.error ?? candidate;
@@ -859,6 +862,7 @@ function canonicalErrorEnvelopeFrom(value: unknown): CanonicalErrorEnvelope {
       ? { classification: detail.classification }
       : {}),
     ...(typeof detail.message === "string" ? { message: detail.message } : {}),
+    ...(typeof detail.retryable === "boolean" ? { retryable: detail.retryable } : {}),
   };
 }
 
@@ -902,6 +906,13 @@ describe("sdl.retrieve responseGet artifact continuation", () => {
         "nested includeDiagnostics",
         { ...baseArgs, args: { ...baseArgs.args, includeDiagnostics: true } },
       ],
+      [
+        "nested repoId",
+        {
+          ...baseArgs,
+          args: { ...baseArgs.args, repoId: "attacker-repo" },
+        },
+      ],
       ["invalid outer detail", { ...baseArgs, detail: 42 }],
       [
         "invalid outer includeDiagnostics",
@@ -910,11 +921,15 @@ describe("sdl.retrieve responseGet artifact continuation", () => {
     ];
 
     for (const [label, args] of cases) {
-      const error = await canonicalErrorEnvelope(async () => {
-        const response = await callStoredResponse(handler, "sdl.retrieve", args);
-        return response.structuredContent;
-      });
+      const response = await callStoredResponse(handler, "sdl.retrieve", args);
+      const error = canonicalErrorEnvelopeFrom(response.structuredContent);
+
+      assert.equal(response.isError, true, label);
       assert.equal(error.code, "VALIDATION_ERROR", label);
+      if (label.startsWith("nested ")) {
+        assert.equal(error.classification, "invalid_input", label);
+        assert.equal(error.retryable, false, label);
+      }
     }
   });
 

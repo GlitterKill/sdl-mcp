@@ -630,7 +630,7 @@ describe("sdl.retrieve", () => {
       {
         repoId: "trusted-repo",
         op: "responseGet",
-        args: { repoId: "attacker-repo", handle },
+        args: { handle },
       },
       {
         "response.get": {
