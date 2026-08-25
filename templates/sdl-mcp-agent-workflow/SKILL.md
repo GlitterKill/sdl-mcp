@@ -22,11 +22,15 @@ Use SDL-MCP as the repository boundary.
 5. Read non-indexed files through `sdl.file`. Its targeted write operation can
    update one indexed file with live reconciliation; prefer symbol or
    search-edit preview/apply operations when they can anchor the change.
-6. Keep `responseMode: "auto"` for potentially large results. When a handle
-   is returned, continue the canonical `response.get` action directly with
-   `sdl.retrieve` using `op: "responseGet"` and `args: { handle, ... }`; request
-   only the needed field or page. Use workflow `responseGet` only when an
-   existing multi-step workflow needs it.
+6. Keep `responseMode: "auto"` for potentially large results. When a result
+   returns a canonical `response.get` continuation (`nextAction` or `action`) for
+   `sdl.retrieve` with `op: "responseGet"`, replay its returned action and
+   arguments unchanged; do not reconstruct it.
+   Outer `repoId` owns trusted dispatch, and `detail`/`includeDiagnostics` stay
+   outer `sdl.retrieve` controls. Nested `args` contains only artifact view and
+   paging fields; nested `repoId` is invalid. Use workflow `responseGet` only
+   when direct `sdl.retrieve` is unavailable or an existing multi-step workflow
+   needs it.
 7. Reuse refs and ETags. Set `refsMode: "off"` only for complete or byte-stable
    output.
 8. Never call `index.refresh`, directly, through `sdl.workflow`, or via

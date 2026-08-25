@@ -30,8 +30,10 @@
 
 ## Large-Response Recovery
 
-When `sdl.context` returns a response artifact handle, continue directly through
-`sdl.retrieve` and request only the needed canonical field or page:
+When a result returns a canonical `response.get` continuation (`nextAction` or
+`action`) for `sdl.retrieve` with `op: "responseGet"`, replay the returned action
+and arguments unchanged; do not reconstruct the continuation. A direct
+continuation has this shape:
 
 ```json
 {
@@ -42,9 +44,14 @@ When `sdl.context` returns a response artifact handle, continue directly through
     "jsonPath": "evidence",
     "offset": 0,
     "limit": 10
-  }
+  },
+  "detail": "full",
+  "includeDiagnostics": true
 }
 ```
 
-Use `cursor` and `maxBytes` for byte paging. Use workflow `responseGet` only
-when an existing multi-step workflow needs to pipe the retrieved result.
+The outer `repoId` owns trusted dispatch. `detail` and `includeDiagnostics` are
+outer `sdl.retrieve` controls; nested `args` contains only artifact view and
+paging fields, and nested `repoId` is invalid. Use `cursor` and `maxBytes` for
+byte paging. Use workflow `responseGet` only when direct `sdl.retrieve` is
+unavailable or an existing multi-step workflow needs to pipe the result.
