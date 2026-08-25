@@ -306,7 +306,14 @@ describe("MCPServer", () => {
         SDL_MCP_SERVER_INSTRUCTIONS,
         /sdl\.file[^\n]*op[^\n]*read[^\n]*other files/i,
       );
-      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.workflow[^\n]*responseGet/);
+      assert.match(
+        SDL_MCP_SERVER_INSTRUCTIONS,
+        /sdl\.retrieve[^\n]*responseGet/,
+      );
+      assert.doesNotMatch(
+        SDL_MCP_SERVER_INSTRUCTIONS,
+        /response\.get[^\n]*through `sdl\.workflow`/,
+      );
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.file[^\n]*op[^\n]*write/);
       assert.match(
         SDL_MCP_SERVER_INSTRUCTIONS,

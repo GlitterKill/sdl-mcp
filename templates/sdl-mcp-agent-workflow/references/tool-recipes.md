@@ -30,17 +30,21 @@
 
 ## Large-Response Recovery
 
-When `sdl.context` returns a response artifact handle, retrieve only the needed
-canonical field:
+When `sdl.context` returns a response artifact handle, continue directly through
+`sdl.retrieve` and request only the needed canonical field or page:
 
 ```json
 {
   "repoId": "my-repo",
-  "handle": "response-my-repo-...",
-  "jsonPath": "evidence",
-  "offset": 0,
-  "limit": 10
+  "op": "responseGet",
+  "args": {
+    "handle": "response-my-repo-...",
+    "jsonPath": "evidence",
+    "offset": 0,
+    "limit": 10
+  }
 }
 ```
 
-Use `full: true` only when the complete canonical payload is required.
+Use `cursor` and `maxBytes` for byte paging. Use workflow `responseGet` only
+when an existing multi-step workflow needs to pipe the retrieved result.

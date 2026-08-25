@@ -80,6 +80,25 @@ ${result.stderr}`);
     }
   });
 
+  it("documents direct stored-response continuation across generated workflow surfaces", () => {
+    const workflowSurfaces = [
+      "templates/SDL.md",
+      "SDL.md",
+      "tests/stress/fixtures/SDL.md",
+      "templates/sdl-mcp-agent-workflow/SKILL.md",
+      "templates/sdl-mcp-agent-workflow/references/tool-recipes.md",
+    ];
+
+    for (const relativePath of workflowSurfaces) {
+      const content = readFileSync(resolve(repoRoot, relativePath), "utf8");
+      assert.match(
+        content,
+        /sdl\.retrieve[\s\S]{0,300}(?:op:?\s*["`]responseGet["`]|["']op["']\s*:\s*["']responseGet["'])/,
+        relativePath,
+      );
+    }
+  });
+
   it("keeps fallback workflow readiness and provenance guidance current", () => {
     const workflowSurfaces = [
       "templates/SDL.md",

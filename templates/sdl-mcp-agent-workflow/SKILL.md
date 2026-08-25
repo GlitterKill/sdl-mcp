@@ -22,9 +22,11 @@ Use SDL-MCP as the repository boundary.
 5. Read non-indexed files through `sdl.file`. Its targeted write operation can
    update one indexed file with live reconciliation; prefer symbol or
    search-edit preview/apply operations when they can anchor the change.
-6. Keep `responseMode: "auto"` for potentially large results. A returned handle
-   is a generic response artifact; retrieve its canonical `evidence` or another
-   needed field with `response.get`.
+6. Keep `responseMode: "auto"` for potentially large results. When a handle
+   is returned, continue the canonical `response.get` action directly with
+   `sdl.retrieve` using `op: "responseGet"` and `args: { handle, ... }`; request
+   only the needed field or page. Use workflow `responseGet` only when an
+   existing multi-step workflow needs it.
 7. Reuse refs and ETags. Set `refsMode: "off"` only for complete or byte-stable
    output.
 8. Never call `index.refresh`, directly, through `sdl.workflow`, or via
