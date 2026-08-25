@@ -28,6 +28,9 @@ type DeltaPage = {
     fromVersion: string;
     toVersion: string;
     changedSymbols: DeltaChange[];
+    mode?: "preview";
+    totalChanges?: number;
+    sampleSize?: number;
     blastRadius?: unknown[];
     trimmedSet?: unknown;
     truncation?: unknown;
@@ -215,6 +218,30 @@ describe("delta paging contract", () => {
         expectedCount,
       );
     }
+  });
+
+  it("returns a bounded preview with complete metadata and no blast radius", async () => {
+    const versions = await seedPair("preview", [
+      "symbol-c",
+      "symbol-a",
+      "symbol-b",
+    ]);
+
+    const preview = (await handleDeltaGet({
+      repoId: REPO_ID,
+      ...versions,
+      preview: true,
+      previewSampleSize: 2,
+    })) as DeltaPage;
+
+    assert.equal(preview.delta.mode, "preview");
+    assert.equal(preview.delta.totalChanges, 3);
+    assert.equal(preview.delta.sampleSize, 2);
+    assert.deepEqual(
+      preview.delta.changedSymbols.map(({ symbolId }) => symbolId),
+      ["symbol-a", "symbol-b"],
+    );
+    assert.deepEqual(preview.delta.blastRadius, []);
   });
 
   it("returns the same-version handler hint with deterministic empty ordering", async () => {

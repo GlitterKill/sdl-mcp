@@ -251,6 +251,7 @@ export const AGENT_OUTPUT_CASES = [
     canonicalResultFactory: () => ({
       delta: {
         ...fixtureDeltaPack(),
+        blastRadius: [],
         mode: "preview",
         totalChanges: 1,
         sampleSize: 1,

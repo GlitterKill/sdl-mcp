@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Structured MCP output validation**: Accept truncated symbol-card dependency counts and `delta.get` preview metadata through the strict `sdl.retrieve` and `sdl.workflow` public schemas.
+- **Structured MCP output validation**: Ensure the strict `sdl.retrieve` and `sdl.workflow` public schemas accept emitted fields, including truncated symbol-card dependency counts and complete `delta.get` preview metadata, while rejecting incomplete delta preview metadata.
 
 - **Bounded Windows CI tests**: Stream per-file progress, terminate hung test process trees after ten minutes, and cap the cross-platform test job at 45 minutes instead of consuming GitHub's six-hour limit.
 
