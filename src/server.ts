@@ -718,10 +718,23 @@ export function buildToolResponseEnvelope(
         ...boundaryOverrides,
       },
     );
-    if (toolName === "sdl.retrieve") {
+    if (toolName === "sdl.retrieve" && toolArgs.op === "responseGet") {
       const repoId =
         typeof toolArgs.repoId === "string" ? toolArgs.repoId : undefined;
-      const value = projectExclusiveCodeModeRecovery(projection.value, repoId);
+      const responseContinuationOptions = {
+        ...(projectionOptions.detail === "standard"
+        || projectionOptions.detail === "full"
+          ? { detail: projectionOptions.detail }
+          : {}),
+        ...(projectionOptions.includeDiagnostics
+          ? { includeDiagnostics: true as const }
+          : {}),
+      };
+      const value = projectExclusiveCodeModeRecovery(
+        projection.value,
+        repoId,
+        responseContinuationOptions,
+      );
       const measurement = measureProjectionValue(value);
       projection = {
         ...projection,

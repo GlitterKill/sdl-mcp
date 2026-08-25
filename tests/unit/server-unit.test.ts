@@ -4,12 +4,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import {
+  buildToolResponseEnvelope,
   isPublicIndexRefresh,
   isMetadataOnlyTool,
   MCPServer,
   shouldBypassToolDispatch,
   isReadOnlyWhenDegraded,
 } from "../../dist/server.js";
+import { projectExclusiveCodeModeRecovery } from "../../dist/code-mode/action-reference-projection.js";
 import { SDL_MCP_SERVER_INSTRUCTIONS } from "../../dist/mcp/server-instructions.js";
 import { getPackageVersion } from "../../dist/util/package-info.js";
 
@@ -568,5 +570,53 @@ describe("readiness admission classification", () => {
     for (const [tool, args] of rejected) {
       assert.equal(isReadOnlyWhenDegraded(tool, args), false, tool);
     }
+  });
+});
+
+
+describe("response continuation recovery boundary", () => {
+  it("preserves unrelated non-exclusive recovery and keeps exclusive recovery projected", () => {
+    const canonical = {
+      approved: false,
+      whyDenied: ["Call sdl.code.getSkeleton."],
+      nextBestAction: {
+        tool: "sdl.code.getSkeleton",
+        args: { repoId: "repo", symbolId: "sym" },
+      },
+    };
+    const expectedNonExclusive =
+      '{"whyDenied":["Call sdl.code.getSkeleton."],"nextBestAction":{"tool":"sdl.code.getSkeleton","args":{"repoId":"repo","symbolId":"sym"}}}';
+    const nonExclusive = buildToolResponseEnvelope(
+      structuredClone(canonical),
+      null,
+      "",
+      "sdl.retrieve",
+      { repoId: "repo", op: "codeNeedWindow" },
+    );
+
+    assert.equal(
+      JSON.stringify(nonExclusive.structuredContent),
+      expectedNonExclusive,
+    );
+
+    const projected = projectExclusiveCodeModeRecovery(
+      structuredClone(canonical),
+      "repo",
+    );
+    const exclusive = buildToolResponseEnvelope(
+      projected,
+      null,
+      "",
+      "sdl.retrieve",
+      { repoId: "repo", op: "codeNeedWindow" },
+    );
+    assert.equal(
+      JSON.stringify(exclusive.structuredContent),
+      "{\"whyDenied\":[\"Call sdl.retrieve op:\\\"codeSkeleton\\\".\"],\"nextBestAction\":{\"args\":{\"includeTelemetry\":false,\"onError\":\"continue\",\"repoId\":\"repo\",\"steps\":[{\"args\":{\"refsMode\":\"auto\",\"symbolId\":\"sym\"},\"fn\":\"codeSkeleton\"}]},\"tool\":\"sdl.workflow\"}}",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(exclusive.structuredContent),
+      /sdl\.code\.getSkeleton/,
+    );
   });
 });

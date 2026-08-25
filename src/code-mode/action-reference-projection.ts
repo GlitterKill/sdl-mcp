@@ -26,6 +26,11 @@ type GatewayReference =
   | { tool: "sdl.retrieve"; op: string }
   | { tool: "sdl.workflow"; fn: string };
 
+type ResponseContinuationProjectionOptions = Readonly<{
+  detail?: "standard" | "full";
+  includeDiagnostics?: true;
+}>;
+
 const EXCLUSIVE_GATEWAY_REFERENCES: Readonly<Record<string, GatewayReference>> =
   Object.freeze({
     "sdl.symbol.search": { tool: "sdl.retrieve", op: "symbolSearch" },
@@ -189,6 +194,7 @@ function projectNextAction(
   value: unknown,
   fallbackRepoId: string | undefined,
   failedCall: RecoveryActionCall | undefined,
+  responseContinuationOptions: ResponseContinuationProjectionOptions,
   materializeResponseBound = false,
 ): unknown | undefined {
   if (!isRecord(value)) return undefined;
@@ -223,11 +229,22 @@ function projectNextAction(
     if (!repoId) return undefined;
 
     const childArgs = copyRecord(validatedArgs);
+    const responseMode =
+      ownString(childArgs, "responseMode")
+      ?? ownString(candidateArgs(value), "responseMode");
     delete childArgs.repoId;
+    delete childArgs.detail;
+    delete childArgs.includeDiagnostics;
+    delete childArgs.responseMode;
     const parsedEnvelope = RetrieveRequestSchema.safeParse({
       repoId,
       op: "responseGet",
       args: canonicalRecord(childArgs),
+      ...(responseMode === "inline"
+      || responseMode === "auto"
+      || responseMode === "handle"
+        ? { responseMode }
+        : {}),
     });
     if (!parsedEnvelope.success) return undefined;
 
@@ -246,10 +263,21 @@ function projectNextAction(
     }
     const projectedEnvelope = copyRecord(parsedEnvelope.data);
     defineOwn(projectedEnvelope, "args", canonicalRecord(projectedChildArgs));
+    const canonicalEnvelope = canonicalRecord(projectedEnvelope);
+    if (responseContinuationOptions.detail !== undefined) {
+      defineOwn(
+        canonicalEnvelope,
+        "detail",
+        responseContinuationOptions.detail,
+      );
+    }
+    if (responseContinuationOptions.includeDiagnostics === true) {
+      defineOwn(canonicalEnvelope, "includeDiagnostics", true);
+    }
 
     const projected = copyRecord(value);
     defineOwn(projected, referenceKey, "sdl.retrieve");
-    defineOwn(projected, "args", canonicalRecord(projectedEnvelope));
+    defineOwn(projected, "args", canonicalEnvelope);
     return canonicalRecord(projected);
   }
   if (!validated.nextAction) return undefined;
@@ -276,6 +304,7 @@ function projectRecoveryValue<T>(
   value: T,
   fallbackRepoId: string | undefined,
   inheritedFailedCall: RecoveryActionCall | undefined,
+  responseContinuationOptions: ResponseContinuationProjectionOptions,
 ): T {
   if (!isRecord(value)) return value;
 
@@ -374,6 +403,7 @@ function projectRecoveryValue<T>(
         projected.nextAction,
         fallbackRepoId,
         failedCall,
+        responseContinuationOptions,
       );
       if (nextAction === undefined) {
         delete projected.nextAction;
@@ -391,6 +421,7 @@ function projectRecoveryValue<T>(
         projected.nextBestAction,
         fallbackRepoId,
         failedCall,
+        responseContinuationOptions,
       );
       if (nextBestAction === undefined) {
         delete projected.nextBestAction;
@@ -405,7 +436,13 @@ function projectRecoveryValue<T>(
     ) {
       const nextCalls = projected.nextCalls
         .map((nextCall) =>
-          projectNextAction(nextCall, fallbackRepoId, failedCall, true),
+          projectNextAction(
+            nextCall,
+            fallbackRepoId,
+            failedCall,
+            responseContinuationOptions,
+            true,
+          ),
         )
         .filter((nextCall) => nextCall !== undefined);
       if (nextCalls.length === 0) {
@@ -470,8 +507,14 @@ function projectRecoveryValue<T>(
 export function projectExclusiveCodeModeRecovery<T>(
   value: T,
   fallbackRepoId?: string,
+  responseContinuationOptions: ResponseContinuationProjectionOptions = {},
 ): T {
-  return projectRecoveryValue(value, fallbackRepoId, undefined);
+  return projectRecoveryValue(
+    value,
+    fallbackRepoId,
+    undefined,
+    responseContinuationOptions,
+  );
 }
 
 /** Apply exclusive-surface projection to both successful results and typed errors. */
@@ -482,9 +525,11 @@ export async function withExclusiveCodeModeRecoveryProjection<T>(
 ): Promise<T> {
   const repoId =
     isRecord(request) ? ownString(request, "repoId") : undefined;
+  const deferSuccessfulResponseGet =
+    isRecord(request) && ownString(request, "op") === "responseGet";
   try {
     const result = await call();
-    return exclusive
+    return exclusive && !deferSuccessfulResponseGet
       ? projectExclusiveCodeModeRecovery(result, repoId)
       : result;
   } catch (error) {

@@ -1280,3 +1280,80 @@ it("restores the fallback repoId on an already-projected responseGet continuatio
     },
   );
 });
+
+
+describe("response.get continuation projection options", () => {
+  const canonicalAction = {
+    action: "sdl.response.get",
+    args: {
+      repoId: "child-repo",
+      handle: RESPONSE_GET_HANDLE,
+      cursor: { offsetBytes: 8_192 },
+      maxBytes: 8_192,
+    },
+  };
+  const expectedAction =
+    `{"action":"sdl.retrieve","args":{"args":{"cursor":{"offsetBytes":8192},"handle":"${RESPONSE_GET_HANDLE}","maxBytes":8192},"op":"responseGet","repoId":"repo","detail":"full","includeDiagnostics":true}}`;
+
+  it("preserves outer controls across every projected recovery location", () => {
+    const result = projectExclusiveCodeModeRecovery(
+      {
+        nextAction: structuredClone(canonicalAction),
+        nextBestAction: structuredClone(canonicalAction),
+        nextCalls: [
+          structuredClone(canonicalAction),
+          structuredClone(canonicalAction),
+        ],
+        details: { nextAction: structuredClone(canonicalAction) },
+      },
+      "repo",
+      { detail: "full", includeDiagnostics: true },
+    );
+    const actions = [
+      result.nextAction,
+      result.nextBestAction,
+      ...result.nextCalls,
+      result.details.nextAction,
+    ];
+
+    assert.deepEqual(actions.map(JSON.stringify), Array(5).fill(expectedAction));
+    for (const action of actions) {
+      assert.deepEqual(Object.keys(action.args), [
+        "args",
+        "op",
+        "repoId",
+        "detail",
+        "includeDiagnostics",
+      ]);
+    }
+  });
+
+  it("orders responseMode before preserved outer controls", () => {
+    const result = projectExclusiveCodeModeRecovery(
+      {
+        nextAction: {
+          ...structuredClone(canonicalAction),
+          args: { ...canonicalAction.args, responseMode: "inline" },
+        },
+      },
+      "repo",
+      { detail: "full", includeDiagnostics: true },
+    );
+
+    assert.deepEqual(Object.keys(result.nextAction.args), [
+      "args",
+      "op",
+      "repoId",
+      "responseMode",
+      "detail",
+      "includeDiagnostics",
+    ]);
+    assert.equal(
+      JSON.stringify(result.nextAction),
+      expectedAction.replace(
+        ',"detail":"full"',
+        ',"responseMode":"inline","detail":"full"',
+      ),
+    );
+  });
+});

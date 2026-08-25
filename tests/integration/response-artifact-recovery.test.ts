@@ -16,11 +16,13 @@ import {
 } from "../../dist/runtime/response-artifacts.js";
 import {
   handleRetrieve,
+  RetrieveOutputSchema,
   RetrieveRequestSchema,
 } from "../../dist/code-mode/retrieve.js";
 import { withExclusiveCodeModeRecoveryProjection } from "../../dist/code-mode/action-reference-projection.js";
 import { ACTION_DEFINITION_BY_ACTION } from "../../dist/code-mode/action-catalog.js";
 import { errorToMcpResponse } from "../../dist/mcp/errors.js";
+import { ValidationError } from "../../dist/domain/errors.js";
 import {
   beginRepoRemoval,
   replaceRegisteredRepoIds,
@@ -787,12 +789,16 @@ describe("response artifact recovery", () => {
   });
 });
 
-function registerResponseContinuationTools(server: MCPServer): void {
+function registerResponseContinuationTools(
+  server: MCPServer,
+  exclusive = true,
+  responseHandler = handleResponseGet,
+): void {
   const responseActions = {
     "response.get": {
       schema: ResponseGetRequestSchema,
       definition: ACTION_DEFINITION_BY_ACTION["response.get"],
-      handler: handleResponseGet,
+      handler: responseHandler,
     },
   };
   server.clearTools();
@@ -800,7 +806,7 @@ function registerResponseContinuationTools(server: MCPServer): void {
     "sdl.response.get",
     "Response artifact test tool",
     ResponseGetRequestSchema,
-    handleResponseGet,
+    responseHandler,
   );
   server.registerTool(
     "sdl.retrieve",
@@ -1187,5 +1193,185 @@ describe("sdl.retrieve responseGet artifact continuation", () => {
       argsFor("repo-a", boundedDirect),
       retrieveFor("repo-a", boundedRetrieve),
     );
+  });
+});
+
+
+describe("responseGet production projection boundary", () => {
+  it("keeps typed responseGet errors stable with one direct recovery", async () => {
+    const serialized: string[] = [];
+
+    for (const exclusive of [false, true]) {
+      const server = new MCPServer();
+      const typedError = Object.assign(
+        new ValidationError("Response page validation failed."),
+        {
+          classification: "invalid_input",
+          retryable: false,
+          nextCalls: [
+            {
+              action: "sdl.response.get",
+              args: {
+                repoId: "repo-a",
+                handle: "response-repo-a-1784866000000-deadbeefdeadbeef",
+                cursor: { offsetBytes: 0 },
+                maxBytes: 8_192,
+              },
+            },
+          ],
+        },
+      );
+      registerResponseContinuationTools(
+        server,
+        exclusive,
+        async () => {
+          throw typedError;
+        },
+      );
+      const response = await callStoredResponse(
+        getCallToolHandler(server),
+        "sdl.retrieve",
+        {
+          repoId: "repo-a",
+          op: "responseGet",
+          args: {
+            handle: "response-repo-a-1784866000000-deadbeefdeadbeef",
+          },
+        },
+      );
+      const value = JSON.stringify(response);
+
+      assert.equal(response.isError, true);
+      assert.deepEqual(Object.keys(response), [
+        "content",
+        "structuredContent",
+        "isError",
+      ]);
+      assert.equal(value.match(/"action":"sdl\.retrieve"/g)?.length, 1, value);
+      assert.equal(value.match(/"op":"responseGet"/g)?.length, 1, value);
+      serialized.push(value);
+    }
+
+    const expected =
+      "{\"content\":[{\"type\":\"text\",\"text\":\"sdl.retrieve [error]\\nerror: Response page validation failed.\"}],\"structuredContent\":{\"error\":{\"message\":\"Response page validation failed.\",\"code\":\"VALIDATION_ERROR\",\"classification\":\"invalid_input\",\"retryable\":false,\"nextCalls\":[{\"action\":\"sdl.retrieve\",\"args\":{\"args\":{\"cursor\":{\"offsetBytes\":0},\"handle\":\"response-repo-a-1784866000000-deadbeefdeadbeef\",\"maxBytes\":8192},\"op\":\"responseGet\",\"repoId\":\"repo-a\"}}]}},\"isError\":true}";
+    assert.deepEqual(serialized, [expected, expected]);
+  });
+
+  it("replays full diagnostic JSON-path pages unchanged in both modes", async () => {
+    const payload = {
+      evidence: Array.from({ length: 5 }, (_, index) => ({
+        index,
+        summary: `evidence-${index}`,
+        fullOnly: { command: `command-${index}` },
+        diagnostics: { timings: { totalMs: index + 1 } },
+      })),
+    };
+
+    for (const exclusive of [false, true]) {
+      const baseDir = makeTempDir();
+      configureArtifacts(baseDir);
+      const stored = await maybeStoreLargeResponse({
+        repoId: "repo-a",
+        toolName: "sdl.context",
+        payload,
+        responseMode: "handle",
+        artifactBaseDir: baseDir,
+      });
+      assert.equal(stored.responseMode, "handle");
+      if (stored.responseMode !== "handle") assert.fail("expected handle");
+
+      const server = new MCPServer();
+      registerResponseContinuationTools(server, exclusive);
+      const handler = getCallToolHandler(server);
+      let action = "sdl.retrieve";
+      let args: Record<string, unknown> = {
+        repoId: "repo-a",
+        op: "responseGet",
+        args: {
+          handle: stored.payload.handle,
+          jsonPath: "evidence",
+          offset: 0,
+          limit: 2,
+        },
+        detail: "full",
+        includeDiagnostics: true,
+      };
+      const restored: unknown[] = [];
+
+      for (let pageCount = 0; pageCount < 10; pageCount += 1) {
+        const response = await callStoredResponse(
+          handler,
+          action as "sdl.retrieve",
+          args,
+        );
+        assert.equal(response.isError, undefined);
+        const advertised = z.looseObject({
+          results: z.unknown().optional(),
+          card: z.unknown().optional(),
+          slice: z.unknown().optional(),
+          approved: z.unknown().optional(),
+          kind: z.unknown().optional(),
+          handle: z.unknown().optional(),
+        }).safeParse(response.structuredContent);
+        if (!advertised.success) assert.fail(advertised.error.message);
+        const { diagnostics: _diagnostics, ...canonicalPage } =
+          response.structuredContent as Record<string, unknown>;
+        const parsed = RetrieveOutputSchema.safeParse(canonicalPage);
+        if (!parsed.success) assert.fail(parsed.error.message);
+        const page = parsed.data;
+        assert.ok(Array.isArray(page.content));
+        restored.push(...page.content);
+
+        if (!page.nextAction) {
+          assert.equal(page.complete, true);
+          break;
+        }
+
+        assert.equal(page.nextAction.action, "sdl.retrieve");
+        assert.equal(page.nextAction.args.detail, "full");
+        assert.equal(page.nextAction.args.includeDiagnostics, true);
+        action = page.nextAction.action;
+        args = page.nextAction.args;
+      }
+
+      assert.deepStrictEqual(restored, payload.evidence);
+    }
+  });
+
+  it("returns successful raw content while keeping raw nested", async () => {
+    const baseDir = makeTempDir();
+    configureArtifacts(baseDir);
+    const payload = { raw: ["alpha", "beta"] };
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+    });
+    assert.equal(stored.responseMode, "handle");
+    if (stored.responseMode !== "handle") assert.fail("expected handle");
+
+    const server = new MCPServer();
+    registerResponseContinuationTools(server);
+    const args = {
+      repoId: "repo-a",
+      op: "responseGet",
+      args: { handle: stored.payload.handle, raw: true },
+      detail: "full",
+    };
+    const response = await callStoredResponse(
+      getCallToolHandler(server),
+      "sdl.retrieve",
+      args,
+    );
+    const parsed = RetrieveOutputSchema.safeParse(response.structuredContent);
+    if (!parsed.success) assert.fail(parsed.error.message);
+
+    assert.equal(response.isError, undefined);
+    assert.equal(parsed.data.content, JSON.stringify(payload));
+    assert.equal(parsed.data.complete, true);
+    assert.equal((args as Record<string, unknown>).raw, undefined);
+    assert.equal(args.args.raw, true);
   });
 });
