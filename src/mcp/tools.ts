@@ -5256,14 +5256,20 @@ const ProjectedUsageStatsResponseSchema = UsageStatsResponseSchema.omit({
   })
   .strict();
 
+const ProjectedDeltaPackBaseSchema = DeltaPackSchema.extend({
+  largeDeltaWarning: z.string().optional(),
+  blastRadius: DeltaPackSchema.shape.blastRadius.optional(),
+}).strict();
+
 const ProjectedDeltaGetCompactResponseSchema = DeltaGetResponseSchema.extend({
-  delta: DeltaPackSchema.extend({
-    mode: z.literal("preview").optional(),
-    totalChanges: z.number().int().nonnegative().optional(),
-    sampleSize: z.number().int().nonnegative().optional(),
-    largeDeltaWarning: z.string().optional(),
-    blastRadius: DeltaPackSchema.shape.blastRadius.optional(),
-  }).strict(),
+  delta: z.union([
+    ProjectedDeltaPackBaseSchema.extend({
+      mode: z.literal("preview"),
+      totalChanges: z.number().int().nonnegative(),
+      sampleSize: z.number().int().nonnegative(),
+    }).strict(),
+    ProjectedDeltaPackBaseSchema,
+  ]),
 }).strict();
 
 const PROJECTED_SUCCESS_SCHEMA_BY_ACTION: Readonly<

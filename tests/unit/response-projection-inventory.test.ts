@@ -590,8 +590,8 @@ describe("response projection inventory", () => {
       ["sdl.file", 1_000],
       // Stored-response continuation plus truncated-card metadata totals 1,628 nodes.
       ["sdl.retrieve", 1_635],
-      // Successful-truncation recovery duplicates the strict callable-action schema across bound result arms (5,313 nodes).
-      ["sdl.workflow", 5_400],
+      // Successful-truncation recovery plus strict delta preview arms total 5,514 nodes.
+      ["sdl.workflow", 5_524],
     ]);
 
     for (const [name, maxNodes] of nodeBudgets) {
@@ -1133,6 +1133,79 @@ describe("response projection inventory", () => {
       DeltaGetResponseSchema,
     );
     assert.deepEqual(schema.parse(projected), projected);
+  });
+
+  it("rejects incomplete delta preview metadata", () => {
+    const fixture = AGENT_OUTPUT_CASES.find(
+      ({ action }) => action === "delta.get",
+    );
+    assert.ok(fixture);
+    const projected = projectToolResultForModelContent(
+      fixture.action,
+      fixture.canonicalResultFactory(),
+      { ...fixture.publicRequest, detail: "full", includeDiagnostics: false },
+    ) as Record<string, unknown> & { delta: Record<string, unknown> };
+    const schema = withProjectionSuccessOutputSchema(
+      "delta.get",
+      DeltaGetResponseSchema,
+    );
+    const {
+      mode: _mode,
+      totalChanges: _totalChanges,
+      sampleSize: _sampleSize,
+      ...normalDelta
+    } = projected.delta;
+    const partials: readonly Record<string, unknown>[] = [
+      { mode: "preview" },
+      { totalChanges: 1 },
+      { sampleSize: 1 },
+      { mode: "preview", totalChanges: 1 },
+      { mode: "preview", sampleSize: 1 },
+      { totalChanges: 1, sampleSize: 1 },
+    ];
+
+    for (const partial of partials) {
+      const candidate = {
+        ...projected,
+        delta: { ...normalDelta, ...partial },
+      };
+      assert.equal(
+        schema.safeParse(candidate).success,
+        false,
+        JSON.stringify(partial),
+      );
+    }
+  });
+
+  it("accepts a normal delta with a large-delta warning", () => {
+    const fixture = AGENT_OUTPUT_CASES.find(
+      ({ action }) => action === "delta.get",
+    );
+    assert.ok(fixture);
+    const projected = projectToolResultForModelContent(
+      fixture.action,
+      fixture.canonicalResultFactory(),
+      { ...fixture.publicRequest, detail: "full", includeDiagnostics: false },
+    ) as Record<string, unknown> & { delta: Record<string, unknown> };
+    const schema = withProjectionSuccessOutputSchema(
+      "delta.get",
+      DeltaGetResponseSchema,
+    );
+    const {
+      mode: _mode,
+      totalChanges: _totalChanges,
+      sampleSize: _sampleSize,
+      ...normalDelta
+    } = projected.delta;
+    const normal = {
+      ...projected,
+      delta: {
+        ...normalDelta,
+        largeDeltaWarning: "Narrow the version range.",
+      },
+    };
+
+    assert.deepEqual(schema.parse(normal), normal);
   });
 
   it("accepts every projected compact/full fixture without stripping fields", () => {
