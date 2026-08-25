@@ -4,6 +4,8 @@ Use this file as the repository fallback for the `sdl-mcp-agent-workflow` skill.
 
 SDL-MCP is the normal repository interface. Native filesystem and shell tools are fallback-only when SDL-MCP is unavailable, or when accessing agent memory and other internal client data outside the indexed repository.
 
+When a client bridge returns the raw MCP result, prefer `structuredContent`; use text `content` only as a fallback for older servers. Do not emit both or return the whole MCP response envelope to the agent.
+
 ---
 
 ## 1. Start Every Task
@@ -175,7 +177,7 @@ Use this when you need likely files and symbols before choosing `symbol.edit` or
 
 Use the cheapest rung that answers the task. Static price tags in `sdl.manual` and `sdl.action.search` are release-time estimates, not live telemetry; use them to choose the first probe, then use `usage.stats` and `signalDensity` only when you need a savings or waste report.
 
-- Runtime: prefer `outputMode: "digest"` for build/test/lint and other noisy commands. The digest keeps a compact parsed status and persists full output for `runtimeQueryOutput`.
+- Runtime: prefer `outputMode: "digest"` for build/test/lint and other noisy commands. The digest keeps a compact parsed status and persists full output for `runtimeQueryOutput`. Do not guess `runtimeQueryOutput` arguments; replay a returned action unchanged or call focused `sdl.manual` for `runtime.queryOutput` first.
   ```json
   {
     "fn": "runtimeExecute",

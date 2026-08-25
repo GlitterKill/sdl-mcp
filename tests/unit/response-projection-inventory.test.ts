@@ -20,7 +20,10 @@ import {
   zodToSchemaSummary,
 } from "../../dist/code-mode/action-catalog.js";
 import { getActiveFnNameMap } from "../../dist/code-mode/manual-generator.js";
-import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
+import {
+  projectToolResultForModelContent,
+  projectWorkflowChildResultForModel,
+} from "../../dist/mcp/context-response-projection.js";
 import { OUTPUT_BUDGET_TOKEN_LIMITS } from "../../dist/mcp/response-projection/budgets.js";
 import { buildValidatedRecoveryAction } from "../../dist/mcp/response-projection/recovery.js";
 import {
@@ -797,6 +800,74 @@ describe("response projection inventory", () => {
     );
 
     assert.deepEqual(workflowOutputSchema.parse(projected), projected);
+  });
+
+  it("accepts every projected workflow child fixture", () => {
+    const workflowRegistration = capturePublicToolRegistrations({
+      enabled: true,
+      exclusive: true,
+    }).find(({ name }) => name === "sdl.workflow");
+    assert.ok(workflowRegistration);
+    const workflowOutputSchema = exhaustiveOutputSchema(workflowRegistration);
+    assert.ok(workflowOutputSchema);
+
+    const fnByAction = new Map<string, string>([
+      ...Object.entries(getActiveFnNameMap(true)).map(
+        ([fn, action]) => [action, fn] as const,
+      ),
+      ...Object.keys(INTERNAL_TRANSFORM_OUTPUT_SCHEMA_BY_ACTION).map(
+        (action) => [action, action] as const,
+      ),
+    ]);
+    const coveredActions = new Set<string>();
+    const failures: string[] = [];
+
+    for (const fixture of AGENT_OUTPUT_CASES) {
+      const fn = fnByAction.get(fixture.action);
+      if (fn === undefined) continue;
+      coveredActions.add(fixture.action);
+      for (const detail of ["compact", "full"] as const) {
+        const workflowArgs = {
+          repoId: "projection-fixture",
+          detail,
+          includeDiagnostics: false,
+          steps: [{ fn, args: fixture.publicRequest, detail }],
+        };
+        const childResult = projectWorkflowChildResultForModel(
+          fn,
+          fixture.canonicalResultFactory(),
+          workflowArgs,
+          { ...fixture.publicRequest, detail },
+        );
+        const projected = projectToolResultForModelContent(
+          "sdl.workflow",
+          {
+            results: [{
+              stepIndex: 0,
+              fn,
+              status: "ok",
+              result: childResult,
+              _resolvedArgs: fixture.publicRequest,
+            }],
+          },
+          workflowArgs,
+        );
+        const parsed = workflowOutputSchema.safeParse(projected);
+        if (!parsed.success) {
+          failures.push(
+            `${fixture.action}/${detail}: projected=${JSON.stringify(projected)} issues=${JSON.stringify(parsed.error.issues)}`,
+          );
+        } else {
+          assert.deepEqual(parsed.data, projected, `${fixture.action}/${detail}`);
+        }
+      }
+    }
+
+    assert.deepEqual(
+      [...coveredActions].sort(),
+      [...new Set(fnByAction.keys())].sort(),
+    );
+    assert.deepEqual(failures, []);
   });
 
   it("rejects arbitrary response content schemas and incoherent continuations", () => {

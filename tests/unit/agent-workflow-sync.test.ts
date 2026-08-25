@@ -99,6 +99,35 @@ ${result.stderr}`);
     }
   });
 
+  it("keeps raw MCP result handling compact across agent workflow surfaces", () => {
+    const workflowSurfaces = [
+      "templates/SDL.md",
+      "SDL.md",
+      "tests/stress/fixtures/SDL.md",
+      "templates/sdl-mcp-agent-workflow/SKILL.md",
+      "src/mcp/server-instructions.ts",
+    ];
+
+    for (const relativePath of workflowSurfaces) {
+      const content = readFileSync(resolve(repoRoot, relativePath), "utf8");
+      assert.match(
+        content,
+        /prefer `structuredContent`[\s\S]{0,220}fallback[\s\S]{0,120}older servers/i,
+        relativePath,
+      );
+      assert.match(
+        content,
+        /do not emit both[\s\S]{0,120}whole MCP response envelope/i,
+        relativePath,
+      );
+      assert.match(
+        content,
+        /Do not guess\s+`runtimeQueryOutput` arguments[\s\S]{0,180}sdl\.manual/i,
+        relativePath,
+      );
+    }
+  });
+
   it("keeps fallback workflow readiness and provenance guidance current", () => {
     const workflowSurfaces = [
       "templates/SDL.md",

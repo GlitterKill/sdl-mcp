@@ -285,11 +285,23 @@ describe("MCPServer", () => {
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl-mcp-agent-workflow/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /repo\.status/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.workflow[^\n]*repoStatus/);
+      assert.match(
+        SDL_MCP_SERVER_INSTRUCTIONS,
+        /prefer `structuredContent`[^\n]*fallback[^\n]*older servers/i,
+      );
+      assert.match(
+        SDL_MCP_SERVER_INSTRUCTIONS,
+        /do not emit both[^\n]*whole MCP response envelope/i,
+      );
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.action\.search/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.context/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /usageStats/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /outputMode: \"digest\"/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /outputMode: \"minimal\"/);
+      assert.match(
+        SDL_MCP_SERVER_INSTRUCTIONS,
+        /Do not guess `runtimeQueryOutput` arguments[^\n]*sdl\.manual/i,
+      );
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /refsMode: \"off\"/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /short ids/);
       assert.match(

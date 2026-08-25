@@ -7,6 +7,10 @@ description: Use when working in an SDL-MCP-enabled repository, including reposi
 
 Use SDL-MCP as the repository boundary.
 
+When a client bridge returns the raw MCP result, prefer `structuredContent`; use
+text `content` only as a fallback for older servers. Do not emit both or return
+the whole MCP response envelope to the agent.
+
 1. Start with `repo.status`.
 2. Use `sdl.context` for task-shaped explain, debug, review, and implement work.
    Its request is flat and requires `budget.maxTokens`; never send `options`,
@@ -18,7 +22,9 @@ Use SDL-MCP as the repository boundary.
    runtimeExecute executes repository tooling. Permitted uses include build,
    test, lint, compiler, named scripts, and targeted edit scripts. Do not use it
    to inspect, search, or print repository files. Use sdl.context or sdl.retrieve
-   for indexed source and sdl.file with op="read" for other files.
+   for indexed source and sdl.file with op="read" for other files. Do not guess
+   `runtimeQueryOutput` arguments; replay a returned action unchanged or call
+   focused `sdl.manual` for `runtime.queryOutput` first.
 5. Read non-indexed files through `sdl.file`. Its targeted write operation can
    update one indexed file with live reconciliation; prefer symbol or
    search-edit preview/apply operations when they can anchor the change.

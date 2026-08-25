@@ -38,7 +38,7 @@ Code Mode keeps those flows inside SDL-MCP:
 
 ## Output Surfaces
 
-Code Mode tool output is human-first. The first MCP `content` text block is concise terminal-friendly text, while task-relevant machine-readable data is carried in `structuredContent`. Agents should read the visible text for the human-facing summary and use `structuredContent` for follow-up identifiers such as `etag`, handles, file paths, symbol IDs, references, summaries, errors, and next-action hints.
+Raw Code Mode MCP results retain a concise human-readable `content` text block beside task-relevant `structuredContent`. Agent bridges should pass through `structuredContent` when it is present, use text `content` only as a compatibility fallback for older servers, and avoid exposing both or the whole MCP response envelope to the agent. Follow-up identifiers such as `etag`, handles, file paths, symbol IDs, references, summaries, errors, and next-action hints remain in `structuredContent`.
 
 SDL-MCP internal bookkeeping is not duplicated into model-visible output by default. Timing diagnostics, packed-wire stats, raw-context baselines, action traces, precondition snapshots, backup paths, and retrieval-debug details stay in logs or diagnostics surfaces. Set `includeDiagnostics: true` or the relevant retrieval-evidence option only when the task actually needs those details; even then, the normal visible text stays concise.
 
