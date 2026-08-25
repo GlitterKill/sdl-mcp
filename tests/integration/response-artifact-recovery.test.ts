@@ -136,7 +136,11 @@ async function exhaustArtifact(repoId: string, handle: string): Promise<Buffer> 
       assert.equal(encoded.encoding, "base64");
       chunks.push(Buffer.from(encoded.data, "base64"));
     } else {
-      assert.equal(typeof page.content, "string");
+      assert.equal(
+        typeof page.content,
+        "string",
+        JSON.stringify(page),
+      );
       chunks.push(Buffer.from(page.content, "utf-8"));
     }
 
@@ -1406,5 +1410,271 @@ describe("responseGet production projection boundary", () => {
     assert.equal(parsed.data.complete, true);
     assert.equal((args as Record<string, unknown>).raw, undefined);
     assert.equal(args.args.raw, true);
+  });
+});
+
+
+describe("production-registered sdl.retrieve continuation", () => {
+  it("keeps unrelated non-exclusive code recovery flat", async () => {
+    const repoRoot = makeTempDir();
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const {
+      closeLadybugDb,
+      getLadybugConn,
+      initLadybugDb,
+    } = await import("../../dist/db/ladybug.js");
+    const {
+      createVersion,
+      replaceGraphIntegrityManifestInTransaction,
+      upsertFile,
+      upsertRepo,
+      upsertSymbol,
+    } = await import("../../dist/db/ladybug-queries.js");
+    const { markGraphIntegrityVerified } =
+      await import("../../dist/db/ladybug-derived-state.js");
+    const {
+      createGraphIntegrityExpectationFromManifest,
+      createGraphIntegrityFileState,
+    } = await import(
+      "../../dist/indexer/provider-first/persisted-graph-integrity.js"
+    );
+    const { replaceRegisteredRepoIds } =
+      await import("../../dist/services/repo-lifecycle.js");
+
+    mkdirSync(join(repoRoot, "src"), { recursive: true });
+    writeFileSync(join(repoRoot, "src", "file.ts"), "function target() {}\n");
+    const previousConfig = process.env.SDL_CONFIG;
+    const configPath = join(repoRoot, "sdl.config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        repos: [],
+        policy: { requireIdentifiers: false, defaultDenyRaw: false },
+        semantic: { enabled: false },
+      }),
+    );
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+    await initLadybugDb(join(repoRoot, "production-registration.lbug"));
+    const conn = await getLadybugConn();
+    await upsertRepo(conn, {
+      repoId: "repo",
+      rootPath: repoRoot,
+      configJson: "{}",
+      createdAt: "2026-08-25T00:00:00Z",
+    });
+    await upsertFile(conn, {
+      fileId: "file",
+      repoId: "repo",
+      relPath: "src/file.ts",
+      contentHash: "hash",
+      language: "typescript",
+      byteSize: 28,
+      lastIndexedAt: null,
+    });
+    await upsertSymbol(conn, {
+      symbolId: "sym",
+      repoId: "repo",
+      fileId: "file",
+      kind: "function",
+      name: "target",
+      exported: false,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 27,
+      astFingerprint: "target",
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: "2026-08-25T00:00:00Z",
+    });
+    const manifestSymbol = {
+      symbolId: "sym",
+      repoId: "repo",
+      fileId: "file",
+      kind: "function",
+      name: "target",
+      exported: false,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 27,
+      astFingerprint: "target",
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      source: "scip" as const,
+      scipSymbol: "scip-typescript npm fixture 1.0.0 repo/target().",
+      updatedAt: "2026-08-25T00:00:00Z",
+    };
+    const manifestFile = createGraphIntegrityFileState(
+      "repo",
+      "file",
+      "src/file.ts",
+      [manifestSymbol],
+      [],
+    );
+    const expectation = createGraphIntegrityExpectationFromManifest(
+      [manifestFile],
+      [],
+    );
+    await replaceGraphIntegrityManifestInTransaction(conn, "repo", {
+      files: [manifestFile],
+      fileless: [],
+    });
+    await createVersion(conn, {
+      versionId: "repo:v1",
+      repoId: "repo",
+      createdAt: "2026-08-25T00:00:00Z",
+      reason: "test",
+      prevVersionHash: null,
+      versionHash: null,
+    });
+    await markGraphIntegrityVerified("repo", "repo:v1", expectation.digest);
+    replaceRegisteredRepoIds(["repo"]);
+
+    try {
+      const server = await createMCPServer({
+        codeModeConfig: {
+          enabled: true,
+          exclusive: false,
+          maxWorkflowSteps: 20,
+          maxWorkflowTokens: 50_000,
+          maxWorkflowDurationMs: 60_000,
+          ladderValidation: "warn",
+          etagCaching: true,
+        },
+      });
+      const callTool = getCallToolHandler(server);
+      const response = await callTool(
+        {
+          method: "tools/call",
+          params: {
+            name: "sdl.retrieve",
+            arguments: {
+              repoId: "repo",
+              op: "codeNeedWindow",
+              args: {
+                symbolId: "sym",
+                identifiersToFind: [],
+                reason: "Verify production recovery registration.",
+                expectedLines: 1,
+              },
+            },
+          },
+        },
+        {
+          _meta: {},
+          sendNotification: async () => {},
+          signal: new AbortController().signal,
+        },
+      );
+      const nextBestAction = response.structuredContent?.nextBestAction;
+      assert.equal(
+        JSON.stringify(nextBestAction),
+        '{"tool":"sdl.code.getSkeleton","args":{"repoId":"repo","symbolId":"sym"},"rationale":"Symbol does not meet utility threshold for full window — start from the skeleton and refine identifier set."}',
+        JSON.stringify(response.structuredContent),
+      );
+    } finally {
+      replaceRegisteredRepoIds(["repo-a"]);
+      await closeLadybugDb();
+      if (previousConfig === undefined) delete process.env.SDL_CONFIG;
+      else process.env.SDL_CONFIG = previousConfig;
+      invalidateConfigCache();
+    }
+  });
+
+  it("replays direct responseGet paging through production registration", async () => {
+    const baseDir = makeTempDir();
+    configureArtifacts(baseDir);
+    const items = ["zero", "one", "two", "three", "four"];
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload: { items, padding: "x".repeat(40_000) },
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+    });
+    assert.equal(stored.responseMode, "handle");
+    if (stored.responseMode !== "handle") {
+      assert.fail("expected a stored response artifact");
+    }
+
+    const server = await createMCPServer({
+      codeModeConfig: {
+        enabled: true,
+        exclusive: false,
+        maxWorkflowSteps: 20,
+        maxWorkflowTokens: 50_000,
+        maxWorkflowDurationMs: 60_000,
+        ladderValidation: "warn",
+        etagCaching: true,
+      },
+    });
+    const callTool = getCallToolHandler(server);
+    const advertisedOutputSchema = await getAdvertisedRetrieveOutputSchema();
+    const collected: unknown[] = [];
+    let action = {
+      action: "sdl.retrieve",
+      args: {
+        args: {
+          handle: stored.payload.handle,
+          jsonPath: "$.items",
+          offset: 0,
+          limit: 2,
+        },
+        op: "responseGet",
+        repoId: "repo-a",
+        detail: "full",
+        includeDiagnostics: true,
+      } as Record<string, unknown>,
+    };
+
+    for (let pageIndex = 0; pageIndex < 10; pageIndex += 1) {
+      const response = await callTool(
+        {
+          method: "tools/call",
+          params: { name: action.action, arguments: action.args },
+        },
+        {
+          _meta: {},
+          sendNotification: async () => {},
+          signal: new AbortController().signal,
+        },
+      );
+      const validation = advertisedOutputSchema.safeParse(
+        response.structuredContent,
+      );
+      assert.equal(
+        validation.success,
+        true,
+        validation.success ? undefined : validation.error.message,
+      );
+      const page = response.structuredContent as Record<string, unknown>;
+      const pageItems = page.content;
+      assert.ok(Array.isArray(pageItems));
+      collected.push(...pageItems);
+      const nextAction = page.nextAction as
+        | { action: string; args: Record<string, unknown> }
+        | undefined;
+      if (nextAction === undefined) {
+        assert.deepEqual(collected, items);
+        return;
+      }
+      assert.equal(nextAction.action, "sdl.retrieve");
+      assert.equal(nextAction.args.detail, "full");
+      assert.equal(nextAction.args.includeDiagnostics, true);
+      action = nextAction;
+    }
+
+    assert.fail("production responseGet replay did not terminate");
   });
 });

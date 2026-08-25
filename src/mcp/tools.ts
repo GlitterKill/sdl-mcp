@@ -4945,6 +4945,28 @@ const ProjectedResponseContentSchema = z.custom<unknown>(
   { message: "Recovered content contains a reserved or non-JSON value" },
 );
 
+const ProjectedResponseGetTimingPhaseSchema = z.number().int().nonnegative();
+const ProjectedResponseGetTimingDiagnosticsSchema = z
+  .object({
+    timings: z
+      .object({
+        totalMs: ProjectedResponseGetTimingPhaseSchema,
+        // ToolPhaseTimer emits a fixed server-boundary phase set for successful calls.
+        phases: z
+          .object({
+            "server.normalize": ProjectedResponseGetTimingPhaseSchema,
+            "server.validate": ProjectedResponseGetTimingPhaseSchema,
+            "server.dispatch": ProjectedResponseGetTimingPhaseSchema,
+            "server.responseProcessing": ProjectedResponseGetTimingPhaseSchema,
+            "server.postDispatchHook":
+              ProjectedResponseGetTimingPhaseSchema.optional(),
+          })
+          .strict(),
+      })
+      .strict(),
+  })
+  .strict();
+
 const ProjectedResponseGetBaseSchema = ResponseGetResponseSchema.pick({
   handle: true,
   contentKind: true,
@@ -4955,6 +4977,7 @@ const ProjectedResponseGetBaseSchema = ResponseGetResponseSchema.pick({
     // another arbitrary-record schema alongside dataPick.
     content: ProjectedResponseContentSchema,
     metadata: ProjectedResponseMetadataSchema,
+    diagnostics: ProjectedResponseGetTimingDiagnosticsSchema.optional(),
   })
   .strict();
 
@@ -5246,6 +5269,12 @@ const PROJECTED_SUCCESS_SCHEMA_BY_ACTION: Readonly<
   "pr.risk.analyze": [ProjectedPRRiskCompactResponseSchema],
   "code.getSkeleton": [ProjectedCodeSkeletonCompactResponseSchema],
   "code.getHotPath": [ProjectedCodeHotPathCompactResponseSchema],
+  "code.needWindow": [
+    CodeWindowResponseDeniedSchema.omit({
+      approved: true,
+      suggestedNextRequest: true,
+    }).strict(),
+  ],
   "repo.unregister": [
     z.object({ ok: z.literal(true), removed: z.literal(true) }).strict(),
   ],
