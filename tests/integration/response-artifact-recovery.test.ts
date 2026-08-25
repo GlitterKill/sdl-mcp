@@ -39,6 +39,11 @@ import {
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { estimateTokens } from "../../dist/util/tokenize.js";
 
+type ListToolsHandler = (
+  request: { method: "tools/list" },
+  extra: Record<string, unknown>,
+) => Promise<{ tools: Array<Record<string, unknown>> }>;
+
 type CallToolHandler = (
   request: {
     method: "tools/call";
@@ -78,6 +83,40 @@ function getCallToolHandler(server: MCPServer): CallToolHandler {
   const handler = sdkServer._requestHandlers.get("tools/call");
   assert.ok(handler);
   return handler;
+}
+
+function getListToolsHandler(server: MCPServer): ListToolsHandler {
+  const sdkServer = server.getServer() as unknown as {
+    _requestHandlers: Map<string, ListToolsHandler>;
+  };
+  const handler = sdkServer._requestHandlers.get("tools/list");
+  assert.ok(handler);
+  return handler;
+}
+
+async function getAdvertisedRetrieveOutputSchema(): Promise<z.ZodType> {
+  const server = await createMCPServer({
+    codeModeConfig: {
+      enabled: true,
+      exclusive: true,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50_000,
+      maxWorkflowDurationMs: 60_000,
+      ladderValidation: "warn",
+      etagCaching: true,
+    },
+  });
+  const { tools } = await getListToolsHandler(server)(
+    { method: "tools/list" },
+    {},
+  );
+  const registration = tools.find((tool) => tool.name === "sdl.retrieve");
+  assert.ok(registration);
+  const outputSchema = registration.outputSchema;
+  assert.ok(outputSchema && typeof outputSchema === "object");
+  return z.fromJSONSchema(
+    outputSchema as Parameters<typeof z.fromJSONSchema>[0],
+  );
 }
 
 async function exhaustArtifact(repoId: string, handle: string): Promise<Buffer> {
@@ -814,7 +853,7 @@ function registerResponseContinuationTools(
     RetrieveRequestSchema,
     async (request, context) =>
       withExclusiveCodeModeRecoveryProjection(
-        true,
+        exclusive,
         () => handleRetrieve(request, responseActions as never, context),
         request,
       ),
@@ -1258,6 +1297,7 @@ describe("responseGet production projection boundary", () => {
   });
 
   it("replays full diagnostic JSON-path pages unchanged in both modes", async () => {
+    const advertisedOutputSchema = await getAdvertisedRetrieveOutputSchema();
     const payload = {
       evidence: Array.from({ length: 5 }, (_, index) => ({
         index,
@@ -1305,20 +1345,13 @@ describe("responseGet production projection boundary", () => {
           args,
         );
         assert.equal(response.isError, undefined);
-        const advertised = z.looseObject({
-          results: z.unknown().optional(),
-          card: z.unknown().optional(),
-          slice: z.unknown().optional(),
-          approved: z.unknown().optional(),
-          kind: z.unknown().optional(),
-          handle: z.unknown().optional(),
-        }).safeParse(response.structuredContent);
+        const advertised = advertisedOutputSchema.safeParse(
+          response.structuredContent,
+        );
         if (!advertised.success) assert.fail(advertised.error.message);
-        const { diagnostics: _diagnostics, ...canonicalPage } =
-          response.structuredContent as Record<string, unknown>;
-        const parsed = RetrieveOutputSchema.safeParse(canonicalPage);
-        if (!parsed.success) assert.fail(parsed.error.message);
-        const page = parsed.data;
+        const page = response.structuredContent as z.infer<
+          typeof RetrieveOutputSchema
+        >;
         assert.ok(Array.isArray(page.content));
         restored.push(...page.content);
 
