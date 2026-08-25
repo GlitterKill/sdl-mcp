@@ -588,8 +588,8 @@ describe("response projection inventory", () => {
     });
     const nodeBudgets = new Map([
       ["sdl.file", 1_000],
-      // Stored-response continuation adds one strict page-success arm (1,621 nodes).
-      ["sdl.retrieve", 1_625],
+      // Stored-response continuation plus truncated-card metadata totals 1,628 nodes.
+      ["sdl.retrieve", 1_635],
       // Successful-truncation recovery duplicates the strict callable-action schema across bound result arms (5,313 nodes).
       ["sdl.workflow", 5_400],
     ]);

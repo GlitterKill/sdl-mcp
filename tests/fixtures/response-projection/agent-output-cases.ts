@@ -128,7 +128,12 @@ export const AGENT_OUTPUT_CASES = [
   compactCase({
     action: "symbol.getCard",
     publicRequest: { repoId: REPO_ID, symbolId: "symbol-user-repository" },
-    canonicalResultFactory: () => ({ card: fixtureSymbolCard() }),
+    canonicalResultFactory: () => ({
+      card: {
+        ...fixtureSymbolCard(),
+        deps: { calls: ["loadUser"], callsOmitted: 1 },
+      },
+    }),
     expectedCompactKeys: ["card"],
     requiredActionabilityKeys: ["card"],
     executionMode: "read-only",
@@ -236,9 +241,21 @@ export const AGENT_OUTPUT_CASES = [
   }),
   compactCase({
     action: "delta.get",
-    publicRequest: { repoId: REPO_ID, fromVersion: "v1", toVersion: "v2" },
+    publicRequest: {
+      repoId: REPO_ID,
+      fromVersion: "v1",
+      toVersion: "v2",
+      preview: true,
+      previewSampleSize: 1,
+    },
     canonicalResultFactory: () => ({
-      delta: fixtureDeltaPack(),
+      delta: {
+        ...fixtureDeltaPack(),
+        mode: "preview",
+        totalChanges: 1,
+        sampleSize: 1,
+        largeDeltaWarning: "Narrow the version range.",
+      },
       amplifiers: [
         {
           symbolId: "symbol-user-repository",

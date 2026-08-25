@@ -81,6 +81,7 @@ const SymbolSignatureSchema = z.object({
 const SymbolDepsSchema = z.object({
   imports: z.array(z.string()).optional(),
   calls: z.array(z.string()).optional(),
+  callsOmitted: z.number().int().nonnegative().optional(),
   callsNote: z.string().optional(),
 });
 
@@ -5257,6 +5258,10 @@ const ProjectedUsageStatsResponseSchema = UsageStatsResponseSchema.omit({
 
 const ProjectedDeltaGetCompactResponseSchema = DeltaGetResponseSchema.extend({
   delta: DeltaPackSchema.extend({
+    mode: z.literal("preview").optional(),
+    totalChanges: z.number().int().nonnegative().optional(),
+    sampleSize: z.number().int().nonnegative().optional(),
+    largeDeltaWarning: z.string().optional(),
     blastRadius: DeltaPackSchema.shape.blastRadius.optional(),
   }).strict(),
 }).strict();
