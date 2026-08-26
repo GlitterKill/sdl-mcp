@@ -58,7 +58,16 @@ async function createVersion22Database(
     )`,
     `CREATE NODE TABLE Symbol (
       symbolId STRING PRIMARY KEY,
-      roleTagsJson STRING
+      repoId STRING,
+      roleTagsJson STRING,
+      embeddingJinaCode STRING,
+      embeddingJinaCodeCardHash STRING,
+      embeddingJinaCodeUpdatedAt STRING,
+      embeddingNomic STRING,
+      embeddingNomicCardHash STRING,
+      embeddingNomicUpdatedAt STRING,
+      embeddingJinaCodeVec DOUBLE[768],
+      embeddingNomicVec DOUBLE[768]
     )`,
     `CREATE NODE TABLE SymbolVersion (
       id STRING PRIMARY KEY,
@@ -197,7 +206,7 @@ describe("migration: graph integrity revisions and manifest", () => {
     }
   });
 
-  it("migrates a populated m022 graph through m025 without deleting nodes", async () => {
+  it("migrates a populated m022 graph through m026 without deleting nodes", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-integrity-m024-"));
     const dbPath = join(root, "v22.lbug");
     await createVersion22Database(dbPath);
@@ -210,7 +219,7 @@ describe("migration: graph integrity revisions and manifest", () => {
     ]);
     const summary = await getDerivedStateSummary("repo");
 
-    assert.equal(LADYBUG_SCHEMA_VERSION, 25);
+    assert.equal(LADYBUG_SCHEMA_VERSION, 26);
     assert.deepEqual(
       rows.map((row) => ({
         state: row?.graphIntegrityState,
@@ -251,7 +260,7 @@ describe("migration: graph integrity revisions and manifest", () => {
       conn,
       "MATCH (v:SchemaVersion {id: 'current'}) RETURN v.schemaVersion AS schemaVersion",
     );
-    assert.equal(Number(schemaVersion?.schemaVersion), 25);
+    assert.equal(Number(schemaVersion?.schemaVersion), 26);
     assert.deepEqual(
       await queryAll(
         conn,

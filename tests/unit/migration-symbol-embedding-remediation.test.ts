@@ -354,14 +354,14 @@ describe("m007 safe SymbolEmbedding remediation", () => {
 
 describe("SymbolEmbedding migration registry and initializer paths", () => {
   it("keeps m021 before the graph-integrity migration", () => {
-    assert.equal(LADYBUG_SCHEMA_VERSION, 25);
+    assert.equal(LADYBUG_SCHEMA_VERSION, 26);
     assert.deepEqual(
       computePendingMigrations(migrations, 20).map(({ version }) => version),
-      [21, 22, 23, 24, 25],
+      [21, 22, 23, 24, 25, 26],
     );
     assert.deepEqual(
       computePendingMigrations(migrations, 7).map(({ version }) => version),
-      Array.from({ length: 18 }, (_, index) => index + 8),
+      Array.from({ length: 19 }, (_, index) => index + 8),
     );
   });
 
@@ -377,7 +377,7 @@ describe("SymbolEmbedding migration registry and initializer paths", () => {
     await initLadybugDb(dbPath);
     conn = await getLadybugConn();
 
-    assert.equal(await getSchemaVersion(conn), 25);
+    assert.equal(await getSchemaVersion(conn), 26);
     assert.deepEqual(await readSourceIds(conn), []);
     assert.equal(
       (await readDestinationRows(conn))[0]?.embeddingMiniLM,
@@ -385,7 +385,7 @@ describe("SymbolEmbedding migration registry and initializer paths", () => {
     );
   });
 
-  it("runs versions 8 through 25 in order from a recorded version 7", async () => {
+  it("runs versions 8 through 26 in order from a recorded version 7", async () => {
     const dbPath = join(testRoot, "version-7.lbug");
     mkdirSync(testRoot, { recursive: true });
     await initLadybugDb(dbPath);
@@ -414,9 +414,9 @@ describe("SymbolEmbedding migration registry and initializer paths", () => {
       conn = await getLadybugConn();
       assert.deepEqual(
         invoked,
-        Array.from({ length: 18 }, (_, index) => index + 8),
+        Array.from({ length: 19 }, (_, index) => index + 8),
       );
-      assert.equal(await getSchemaVersion(conn), 25);
+      assert.equal(await getSchemaVersion(conn), 26);
       assert.deepEqual(await readSourceIds(conn), []);
       assert.equal(
         (await readDestinationRows(conn))[0]?.embeddingMiniLM,
