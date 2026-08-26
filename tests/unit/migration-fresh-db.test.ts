@@ -55,7 +55,7 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
     }
   });
 
-  it("creates schema version 25 with parser provenance directly and idempotently", async () => {
+  it("creates schema version 26 with symbol vector embeddings directly and idempotently", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "fresh.lbug");
     const original = migrations[0];
@@ -70,8 +70,71 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
       await initLadybugDb(dbPath);
       const conn = await getLadybugConn();
 
-      assert.equal(LADYBUG_SCHEMA_VERSION, 25);
-      assert.equal(await getSchemaVersion(conn), 25);
+      assert.equal(LADYBUG_SCHEMA_VERSION, 26);
+      assert.equal(await getSchemaVersion(conn), 26);
+
+      await exec(
+        conn,
+        `CREATE (e:SymbolVectorEmbedding {
+          embeddingId: $embeddingId,
+          repoId: $repoId,
+          symbolId: $symbolId,
+          model: $model,
+          embeddingVector: $embeddingVector,
+          cardHash: $cardHash,
+          updatedAt: $updatedAt,
+          embeddingJinaCodeVec: $embeddingJinaCodeVec,
+          embeddingNomicVec: $embeddingNomicVec
+        })`,
+        {
+          embeddingId: "jina-embeddings-v2-base-code:fresh-symbol",
+          repoId: "fresh-repo",
+          symbolId: "fresh-symbol",
+          model: "jina-embeddings-v2-base-code",
+          embeddingVector: "[0.25]",
+          cardHash: "fresh-hash",
+          updatedAt: "2026-08-26T00:00:00.000Z",
+          embeddingJinaCodeVec: Array(768).fill(0.25),
+          embeddingNomicVec: null,
+        },
+      );
+      const vectorRows = await queryAll<{
+        embeddingId: string;
+        repoId: string;
+        symbolId: string;
+        model: string;
+        embeddingVector: string;
+        cardHash: string;
+        updatedAt: string;
+        jinaSize: number;
+        embeddingNomicVec: number[] | null;
+      }>(
+        conn,
+        `MATCH (e:SymbolVectorEmbedding {embeddingId: $embeddingId})
+         RETURN e.embeddingId AS embeddingId,
+                e.repoId AS repoId,
+                e.symbolId AS symbolId,
+                e.model AS model,
+                e.embeddingVector AS embeddingVector,
+                e.cardHash AS cardHash,
+                e.updatedAt AS updatedAt,
+                size(e.embeddingJinaCodeVec) AS jinaSize,
+                e.embeddingNomicVec AS embeddingNomicVec`,
+        { embeddingId: "jina-embeddings-v2-base-code:fresh-symbol" },
+      );
+      assert.deepEqual(vectorRows, [
+        {
+          embeddingId: "jina-embeddings-v2-base-code:fresh-symbol",
+          repoId: "fresh-repo",
+          symbolId: "fresh-symbol",
+          model: "jina-embeddings-v2-base-code",
+          embeddingVector: "[0.25]",
+          cardHash: "fresh-hash",
+          updatedAt: "2026-08-26T00:00:00.000Z",
+          jinaSize: 768,
+          embeddingNomicVec: null,
+        },
+      ]);
 
       const m025 = await import(
         "../../dist/db/migrations/m025-add-parser-provenance.js"

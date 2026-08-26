@@ -10,7 +10,7 @@
  * Node tables: Repo, File, Symbol, Version, SymbolVersion, Metrics,
  *              Cluster, Process, FileSummary, SliceHandle, CardHash, Audit,
  *              AgentFeedback (with searchText + embedding columns),
- *              SymbolEmbedding, SummaryCache, SyncArtifact,
+ *              SymbolEmbedding, SymbolVectorEmbedding, SummaryCache, SyncArtifact,
  *              SymbolReference, MetricsFingerprint, Memory, UsageSnapshot, SchemaVersion,
  *              ScipIngestion, SemanticProviderRun, SemanticDiagnostic,
  *              SemanticPrecisionMetric
@@ -98,6 +98,18 @@ export const NODE_TABLES: string[] = [
     symbolStatus STRING DEFAULT 'real',
     placeholderKind STRING,
     placeholderTarget STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SymbolVectorEmbedding (
+    embeddingId STRING PRIMARY KEY,
+    repoId STRING,
+    symbolId STRING,
+    model STRING,
+    embeddingVector STRING,
+    cardHash STRING,
+    updatedAt STRING,
+    embeddingJinaCodeVec DOUBLE[768],
+    embeddingNomicVec DOUBLE[768]
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Version (

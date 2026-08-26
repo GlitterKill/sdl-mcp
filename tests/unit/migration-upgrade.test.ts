@@ -13,17 +13,20 @@ let getSchemaVersion: (
 ) => Promise<number | null>;
 let LADYBUG_SCHEMA_VERSION: number;
 let ladybugQueries: typeof import("../../dist/db/ladybug-queries.js");
+let queryAll: typeof import("../../dist/db/ladybug-core.js").queryAll;
 let ladybugAvailable = false;
 
 try {
   const ladybugMod = await import("../../dist/db/ladybug.js");
   const schemaMod = await import("../../dist/db/ladybug-schema.js");
   const migMod = await import("../../dist/db/migrations/index.js");
+  const coreMod = await import("../../dist/db/ladybug-core.js");
   ladybugQueries = await import("../../dist/db/ladybug-queries.js");
   closeLadybugDb = ladybugMod.closeLadybugDb;
   getLadybugConn = ladybugMod.getLadybugConn;
   getSchemaVersion = schemaMod.getSchemaVersion;
   LADYBUG_SCHEMA_VERSION = migMod.LADYBUG_SCHEMA_VERSION;
+  queryAll = coreMod.queryAll;
   ladybugAvailable = true;
 } catch {
   // Module not built or kuzu unavailable
@@ -43,6 +46,16 @@ function closeResult(r: unknown): void {
   ) {
     (r as { close(): void }).close();
   }
+}
+
+async function execRaw(
+  conn: import("kuzu").Connection,
+  statement: string,
+  params: Record<string, unknown>,
+): Promise<void> {
+  const prepared = await conn.prepare(statement);
+  const result = await conn.execute(prepared, params);
+  result.close();
 }
 
 async function createV4Database(dbPath: string): Promise<void> {
@@ -258,6 +271,160 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     const conn = await getLadybugConn();
     const version = await getSchemaVersion(conn);
     assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
+  });
+
+  it("v25 -> v26: migrates only complete model embedding tuples idempotently", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "v25-symbol-vector-embeddings.lbug");
+    const kuzu = await import("kuzu");
+    const db = new kuzu.Database(dbPath);
+    const seedConn = new kuzu.Connection(db);
+    const now = "2026-08-26T00:00:00.000Z";
+    const jinaVector = Array(768).fill(0.25);
+    const nomicVector = Array(768).fill(0.75);
+
+    for (const stmt of [
+      `CREATE NODE TABLE IF NOT EXISTS Symbol (
+        symbolId STRING PRIMARY KEY,
+        repoId STRING,
+        embeddingJinaCode STRING,
+        embeddingJinaCodeCardHash STRING,
+        embeddingJinaCodeUpdatedAt STRING,
+        embeddingNomic STRING,
+        embeddingNomicCardHash STRING,
+        embeddingNomicUpdatedAt STRING,
+        embeddingJinaCodeVec DOUBLE[768],
+        embeddingNomicVec DOUBLE[768]
+      )`,
+      `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (
+        id STRING PRIMARY KEY,
+        schemaVersion INT64,
+        createdAt STRING,
+        updatedAt STRING
+      )`,
+    ]) {
+      closeResult(await seedConn.query(stmt));
+    }
+    await execRaw(
+      seedConn,
+      `CREATE (s:Symbol {
+        symbolId: $symbolId,
+        repoId: $repoId,
+        embeddingJinaCode: $jinaText,
+        embeddingJinaCodeCardHash: $jinaHash,
+        embeddingJinaCodeUpdatedAt: $jinaUpdatedAt,
+        embeddingNomic: $nomicText,
+        embeddingNomicCardHash: $nomicHash,
+        embeddingNomicUpdatedAt: $nomicUpdatedAt,
+        embeddingJinaCodeVec: $jinaVector,
+        embeddingNomicVec: $nomicVector
+      })`,
+      {
+        symbolId: "complete-symbol",
+        repoId: "repo-1",
+        jinaText: "[0.25]",
+        jinaHash: "jina-hash",
+        jinaUpdatedAt: now,
+        nomicText: "[0.75]",
+        nomicHash: "nomic-hash",
+        nomicUpdatedAt: now,
+        jinaVector,
+        nomicVector,
+      },
+    );
+    await execRaw(
+      seedConn,
+      `CREATE (s:Symbol {
+        symbolId: $symbolId,
+        repoId: $repoId,
+        embeddingJinaCode: $jinaText,
+        embeddingJinaCodeCardHash: $jinaHash,
+        embeddingJinaCodeUpdatedAt: $jinaUpdatedAt,
+        embeddingJinaCodeVec: $jinaVector
+      })`,
+      {
+        symbolId: "incomplete-symbol",
+        repoId: "repo-1",
+        jinaText: "[0.5]",
+        jinaHash: "incomplete-hash",
+        jinaUpdatedAt: now,
+        jinaVector: null,
+      },
+    );
+    await execRaw(
+      seedConn,
+      `CREATE (sv:SchemaVersion {
+        id: 'current',
+        schemaVersion: 25,
+        createdAt: $now,
+        updatedAt: $now
+      })`,
+      { now },
+    );
+    await seedConn.close();
+    await db.close();
+
+    await initValidatedTestLadybugClone(dbPath);
+    const conn = await getLadybugConn();
+    assert.strictEqual(await getSchemaVersion(conn), 26);
+
+    const readRows = () => queryAll<{
+      embeddingId: string;
+      repoId: string;
+      symbolId: string;
+      model: string;
+      embeddingVector: string;
+      cardHash: string;
+      updatedAt: string;
+      jinaSize: number | null;
+      nomicSize: number | null;
+    }>(
+      conn,
+      `MATCH (e:SymbolVectorEmbedding)
+       RETURN e.embeddingId AS embeddingId,
+              e.repoId AS repoId,
+              e.symbolId AS symbolId,
+              e.model AS model,
+              e.embeddingVector AS embeddingVector,
+              e.cardHash AS cardHash,
+              e.updatedAt AS updatedAt,
+              CASE WHEN e.embeddingJinaCodeVec IS NULL THEN NULL ELSE size(e.embeddingJinaCodeVec) END AS jinaSize,
+              CASE WHEN e.embeddingNomicVec IS NULL THEN NULL ELSE size(e.embeddingNomicVec) END AS nomicSize
+       ORDER BY e.embeddingId`,
+    );
+
+    const expected = [
+      {
+        embeddingId: "jina-embeddings-v2-base-code:complete-symbol",
+        repoId: "repo-1",
+        symbolId: "complete-symbol",
+        model: "jina-embeddings-v2-base-code",
+        embeddingVector: "[0.25]",
+        cardHash: "jina-hash",
+        updatedAt: now,
+        jinaSize: 768,
+        nomicSize: null,
+      },
+      {
+        embeddingId: "nomic-embed-text-v1.5:complete-symbol",
+        repoId: "repo-1",
+        symbolId: "complete-symbol",
+        model: "nomic-embed-text-v1.5",
+        embeddingVector: "[0.75]",
+        cardHash: "nomic-hash",
+        updatedAt: now,
+        jinaSize: null,
+        nomicSize: 768,
+      },
+    ];
+    assert.deepStrictEqual(await readRows(), expected);
+
+    const m026 = await import(
+      "../../dist/db/migrations/m026-add-symbol-vector-embeddings.js"
+    );
+    await m026.up(conn);
+    await m026.up(conn);
+    assert.deepStrictEqual(await readRows(), expected);
   });
 
   it("upgrades old v8 DBs that are missing Symbol summary metadata columns", async () => {
@@ -503,7 +670,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
 
     for (const stmt of [
       `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
-      `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, repoId STRING, kind STRING, name STRING, exported BOOLEAN, visibility STRING, language STRING, rangeStartLine INT64, rangeStartCol INT64, rangeEndLine INT64, rangeEndCol INT64, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING, roleTagsJson STRING, searchText STRING, updatedAt STRING, external BOOL DEFAULT false, symbolStatus STRING DEFAULT 'real', placeholderKind STRING, placeholderTarget STRING)`,
+      `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, repoId STRING, kind STRING, name STRING, exported BOOLEAN, visibility STRING, language STRING, rangeStartLine INT64, rangeStartCol INT64, rangeEndLine INT64, rangeEndCol INT64, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING, roleTagsJson STRING, searchText STRING, updatedAt STRING, embeddingJinaCode STRING, embeddingJinaCodeCardHash STRING, embeddingJinaCodeUpdatedAt STRING, embeddingNomic STRING, embeddingNomicCardHash STRING, embeddingNomicUpdatedAt STRING, embeddingJinaCodeVec DOUBLE[768], embeddingNomicVec DOUBLE[768], external BOOL DEFAULT false, symbolStatus STRING DEFAULT 'real', placeholderKind STRING, placeholderTarget STRING)`,
       `CREATE NODE TABLE IF NOT EXISTS File (fileId STRING PRIMARY KEY, relPath STRING, contentHash STRING, language STRING, byteSize INT64, lastIndexedAt STRING, directory STRING)`,
       `CREATE NODE TABLE IF NOT EXISTS SymbolVersion (id STRING PRIMARY KEY, versionId STRING, symbolId STRING, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING)`,
       `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
@@ -580,7 +747,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
 
     for (const stmt of [
       `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
-      `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY)`,
+      `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, repoId STRING, embeddingJinaCode STRING, embeddingJinaCodeCardHash STRING, embeddingJinaCodeUpdatedAt STRING, embeddingNomic STRING, embeddingNomicCardHash STRING, embeddingNomicUpdatedAt STRING, embeddingJinaCodeVec DOUBLE[768], embeddingNomicVec DOUBLE[768])`,
       `CREATE NODE TABLE IF NOT EXISTS SymbolVersion (id STRING PRIMARY KEY, versionId STRING, symbolId STRING, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING)`,
       `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
       `CREATE (r:Repo {repoId: 'repo-1', rootPath: '/repo', configJson: '{}', createdAt: '${now}'})`,
@@ -642,7 +809,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
 
     for (const stmt of [
       `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
-      `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY)`,
+      `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, repoId STRING, embeddingJinaCode STRING, embeddingJinaCodeCardHash STRING, embeddingJinaCodeUpdatedAt STRING, embeddingNomic STRING, embeddingNomicCardHash STRING, embeddingNomicUpdatedAt STRING, embeddingJinaCodeVec DOUBLE[768], embeddingNomicVec DOUBLE[768])`,
       `CREATE NODE TABLE IF NOT EXISTS SymbolVersion (id STRING PRIMARY KEY, versionId STRING, symbolId STRING, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING)`,
       `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
       `CREATE (r:Repo {repoId: 'repo-1', rootPath: '/repo', configJson: '{}', createdAt: '${now}'})`,
