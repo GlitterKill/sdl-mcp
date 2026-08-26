@@ -34,11 +34,18 @@ describe("install-local-global.ps1", () => {
     );
   });
 
-  it("links managed Watchman packages into the checkout for symlinked global installs", () => {
+  it("links managed Watchman packages into the checkout before packaging", () => {
     assert.match(script, /function Install-CheckoutWatchmanPackages/);
     assert.match(script, /New-Item -ItemType Junction/);
     assert.doesNotMatch(script, /npm install --no-save/);
     assert.match(script, /Install-CheckoutWatchmanPackages -RepoRoot \$repoRoot/);
+  });
+
+  it("installs global packages as copies instead of checkout junctions", () => {
+    assert.match(
+      script,
+      /Invoke-Native npm install -g --install-links @localPackages/,
+    );
   });
 
   it("runs the Watchman resolver from a temp mjs file to preserve Node import quotes", () => {
@@ -65,7 +72,7 @@ describe("install-local-global.ps1", () => {
     );
     assert.match(
       script,
-      /Install local packages globally[\s\S]*Verify LadybugDB runtime[\s\S]*Global sdl-mcp now points/,
+      /Install local packages globally[\s\S]*Verify LadybugDB runtime[\s\S]*Global sdl-mcp now contains a copy/,
     );
   });
 
@@ -77,7 +84,7 @@ describe("install-local-global.ps1", () => {
     );
     assert.match(
       script,
-      /Install local packages globally[\s\S]*Verify tokenizer runtime[\s\S]*Global sdl-mcp now points/,
+      /Install local packages globally[\s\S]*Verify tokenizer runtime[\s\S]*Global sdl-mcp now contains a copy/,
     );
   });
 

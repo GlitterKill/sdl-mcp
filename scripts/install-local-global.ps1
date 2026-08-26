@@ -4,8 +4,8 @@ Builds the current SDL-MCP checkout and installs it as the global sdl-mcp comman
 
 .DESCRIPTION
 Use this after changing local code when you want the HTTP server started from your
-global sdl-mcp install to use the latest local runtime, native addon, and managed
-Watchman packages.
+global sdl-mcp install to use a stable copy of the latest local runtime, native
+addon, and managed Watchman packages.
 
 The script installs the local packages globally in dependency order:
 1. native platform package
@@ -268,7 +268,8 @@ Invoke-Step "Install local packages globally" {
     (Join-Path $repoRoot "watchman"),
     $repoRoot
   )
-  Invoke-Native npm install -g @localPackages
+  # Copy each package so clean:dist cannot invalidate the installed CLI.
+  Invoke-Native npm install -g --install-links @localPackages
 }
 
 Invoke-Step "Verify LadybugDB runtime" {
@@ -313,4 +314,4 @@ Invoke-Step "Verify managed Watchman resolver" {
 }
 
 Write-Host ""
-Write-Host "Global sdl-mcp now points at the latest local checkout build." -ForegroundColor Green
+Write-Host "Global sdl-mcp now contains a copy of the latest local checkout build." -ForegroundColor Green
