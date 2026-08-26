@@ -197,8 +197,10 @@ export async function deleteRepo(
       (symbolId) => !sharedSymbolIds.has(symbolId),
     );
 
-    const fileIds = fileRows.map((r) => r.fileId);
-    await deleteFilesByIds(txConn, fileIds);
+    const fileIds = [...new Set(fileRows.map((r) => r.fileId))];
+    if (fileIds.length > 0) {
+      await _deleteFilesByIdsInner(txConn, fileIds, sharedSymbolIds);
+    }
 
     // Collect versionIds before deleting Version nodes so SymbolVersion rows
     // can be removed by either owned version or owned symbol.
@@ -641,6 +643,7 @@ export async function deleteFilesByIds(
 async function _deleteFilesByIdsInner(
   conn: Connection,
   uniqueFileIds: string[],
+  preservedSymbolIds: ReadonlySet<string> = new Set(),
 ): Promise<void> {
   // Step 1: Collect all symbolIds for all fileIds in one query
   const symbolRows = await queryAll<{ symbolId: string }>(
@@ -650,7 +653,9 @@ async function _deleteFilesByIdsInner(
      RETURN s.symbolId AS symbolId`,
     { fileIds: uniqueFileIds },
   );
-  const symbolIds = symbolRows.map((r) => r.symbolId);
+  const symbolIds = symbolRows
+    .map((r) => r.symbolId)
+    .filter((symbolId) => !preservedSymbolIds.has(symbolId));
 
   if (symbolIds.length > 0) {
     // Step 2: Batch-delete DEPENDS_ON edges (both directions)

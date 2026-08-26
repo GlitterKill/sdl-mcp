@@ -150,6 +150,9 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       "CREATE (:SummaryCache {symbolId: 'shared_placeholder'})",
       "MATCH (s:Symbol {symbolId: 'shared_placeholder'}), (r:Repo) WHERE r.repoId IN ['remove-repo', 'keep-repo'] CREATE (s)-[:SYMBOL_IN_REPO]->(r)",
       "MATCH (s:Symbol {symbolId: 'symbol_keep_repo'}), (p:Symbol {symbolId: 'shared_placeholder'}) CREATE (s)-[:DEPENDS_ON]->(p)",
+      "CREATE (:Symbol {symbolId: 'shared_file_symbol', repoId: 'remove-repo'})",
+      "MATCH (s:Symbol {symbolId: 'shared_file_symbol'}), (f:File) WHERE f.fileId IN ['file_remove_repo', 'file_keep_repo'] CREATE (s)-[:SYMBOL_IN_FILE]->(f)",
+      "MATCH (s:Symbol {symbolId: 'shared_file_symbol'}), (r:Repo) WHERE r.repoId IN ['remove-repo', 'keep-repo'] CREATE (s)-[:SYMBOL_IN_REPO]->(r)",
     ]) {
       await exec(statement);
     }
@@ -165,6 +168,15 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
         `shared-${suffix}`,
         `shared-${suffix}-hash`,
         new Array<number>(768).fill(value),
+      );
+      await queries.setSymbolVectorEmbedding(
+        conn,
+        "remove-repo",
+        "shared_file_symbol",
+        model,
+        `shared-file-${suffix}`,
+        `shared-file-${suffix}-hash`,
+        new Array<number>(768).fill(value + 0.1),
       );
     }
   });
@@ -265,11 +277,29 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       ),
       0,
     );
+    assert.strictEqual(
+      await count(
+        "MATCH (s:Symbol {symbolId: 'shared_file_symbol', repoId: 'keep-repo'}) RETURN count(s) AS c",
+      ),
+      1,
+    );
+    assert.strictEqual(
+      await count(
+        "MATCH (e:SymbolVectorEmbedding {symbolId: 'shared_file_symbol', repoId: 'keep-repo'}) RETURN count(e) AS c",
+      ),
+      2,
+    );
+    assert.strictEqual(
+      await count(
+        "MATCH (s:Symbol {symbolId: 'shared_file_symbol'})-[:SYMBOL_IN_FILE]->(:File {fileId: 'file_keep_repo'}) RETURN count(s) AS c",
+      ),
+      1,
+    );
 
     const relationCounts: Record<string, number> = {
       FILE_IN_REPO: 1,
-      SYMBOL_IN_FILE: 1,
-      SYMBOL_IN_REPO: 3,
+      SYMBOL_IN_FILE: 2,
+      SYMBOL_IN_REPO: 4,
       DEPENDS_ON: 2,
       VERSION_OF_REPO: 1,
       BELONGS_TO_CLUSTER: 1,
