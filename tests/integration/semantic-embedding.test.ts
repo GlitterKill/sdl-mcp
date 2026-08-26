@@ -736,6 +736,79 @@ describe("Semantic Embedding Pipeline", () => {
     );
   });
 
+  it("bootstraps migrated rows when the provider is already degraded", async () => {
+    const conn = await getLadybugConn();
+    await withWriteConn((writeConn) =>
+      ladybugDb.setSymbolVectorEmbeddingBatch(
+        writeConn,
+        repoId,
+        jinaModel,
+        symbols.map((symbol, index) => ({
+          symbolId: symbol.symbolId,
+          vector: `migrated-vector-${index}`,
+          cardHash: `migrated-card-hash-${index}`,
+          vectorArray: makeDeterministicVector("migrated", 1, index),
+        })),
+      ),
+    );
+    const readRows = () =>
+      ladybugDb.queryAll<{
+        embeddingId: string;
+        vector: string;
+        cardHash: string;
+        updatedAt: string;
+        vectorArray: number[];
+      }>(
+        conn,
+        `MATCH (e:SymbolVectorEmbedding)
+         RETURN e.embeddingId AS embeddingId,
+                e.embeddingVector AS vector,
+                e.cardHash AS cardHash,
+                e.updatedAt AS updatedAt,
+                e.embeddingJinaCodeVec AS vectorArray
+         ORDER BY e.embeddingId`,
+      );
+    const rowsBefore = await readRows();
+
+    let providerCalls = 0;
+    const degradedProvider: EmbeddingProvider = {
+      async embed(): Promise<number[][]> {
+        providerCalls++;
+        throw new Error("degraded provider must not run inference");
+      },
+      getDimension: () => 64,
+      isMockFallback: () => true,
+    };
+    const phases: string[] = [];
+    const result = await refreshSymbolEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      embeddingProvider: degradedProvider,
+      recordTiming: (phaseName) => phases.push(phaseName),
+    });
+
+    assert.deepStrictEqual(result, {
+      embedded: 0,
+      skipped: 0,
+      degraded: true,
+    });
+    assert.strictEqual(providerCalls, 0);
+    assert.strictEqual(
+      phases.filter((phaseName) => phaseName === "hnsw.create").length,
+      1,
+    );
+    assert.ok(
+      (await showIndexesStrict(conn)).some(
+        ({ tableName, name, property }) =>
+          tableName === "SymbolVectorEmbedding" &&
+          name === "symbol_vec_jina_code_v2" &&
+          property === "embeddingJinaCodeVec",
+      ),
+    );
+    assert.deepStrictEqual(await readRows(), rowsBefore);
+  });
+
   it("uses the configured Symbol HNSW name during bootstrap", async () => {
     const events: PostIndexSessionTapEvent[] = [];
     installObservabilityTap(new Proxy({} as ObservabilityTap, {

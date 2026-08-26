@@ -393,18 +393,102 @@ export async function refreshSymbolEmbeddings(params: {
   const symbols =
     params.symbols ?? (await ladybugDb.getSymbolsByRepo(conn, params.repoId));
 
-  // Phase 4: Pin storageModel once at start. If mock-fallback, return immediately.
+  // Phase 4: Pin storageModel once at start.
   const storageModel = provider.isMockFallback?.()
     ? "mock-fallback"
     : modelName;
+  let embedded = 0;
+  let skipped = 0;
+
+  const vecProp = getVecPropertyName(modelName);
+  const indexName = params.vectorIndexName ?? getVectorIndexName(modelName);
+  const modelInfo = EMBEDDING_MODELS[modelName];
+  let shouldBootstrapIndex = false;
+  if (vecProp !== null && indexName !== null && modelInfo) {
+    const configuredIndex = (await showIndexesStrict(conn)).find(
+      ({ tableName, name }) =>
+        tableName === SYMBOL_VECTOR_EMBEDDING_TABLE && name === indexName,
+    );
+    if (
+      configuredIndex &&
+      (configuredIndex.type !== "vector" ||
+        configuredIndex.property !== vecProp)
+    ) {
+      throw new IndexError(
+        `Configured vector index '${indexName}' belongs to ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${configuredIndex.property} (${configuredIndex.type}), not ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${vecProp}`,
+      );
+    }
+    shouldBootstrapIndex = configuredIndex === undefined;
+  }
+
+  const bootstrapVectorIndex = async (): Promise<void> => {
+    if (
+      !shouldBootstrapIndex ||
+      vecProp === null ||
+      indexName === null ||
+      !modelInfo
+    ) {
+      return;
+    }
+    await runHnswRebuildCycle(
+      "symbol-vector-bootstrap-pre-create",
+      "symbol-vector-bootstrap-post-create",
+      async () => {
+        recordMemorySnapshot("beforeHnsw");
+        params.onProgress?.({
+          stage: "embeddings",
+          substage: "symbolVectorIndex",
+          current: Math.min(skipped + embedded, symbols.length),
+          total: symbols.length,
+          model: storageModel,
+          message: "building HNSW",
+        });
+        let ok: boolean;
+        try {
+          ok = await measure("hnsw.create", () =>
+            withWriteConn((wConn) =>
+              createVectorIndex(
+                wConn,
+                SYMBOL_VECTOR_EMBEDDING_TABLE,
+                vecProp,
+                indexName,
+                modelInfo.dimension,
+                params.vectorEfc,
+              ),
+            ),
+          );
+        } finally {
+          recordMemorySnapshot("afterHnsw");
+        }
+        params.onProgress?.({
+          stage: "embeddings",
+          substage: "symbolVectorIndex",
+          current: Math.min(skipped + embedded, symbols.length),
+          total: symbols.length,
+          model: storageModel,
+          message: ok ? "ready" : "creation failed",
+        });
+        if (ok) {
+          logger.info(
+            `[embeddings] Vector index '${indexName}' created on ${SYMBOL_VECTOR_EMBEDDING_TABLE}`,
+          );
+        } else {
+          logger.error(
+            `[embeddings] Vector index '${indexName}' creation FAILED — vector retrieval for ${modelName} will degrade until next refresh`,
+          );
+        }
+      },
+      params.postIndexSessionTimeoutMs,
+      params.recordTiming,
+      params.repoId,
+    );
+  };
 
   if (storageModel === "mock-fallback") {
     // Mock-fallback vectors must not be persisted or reported as cache hits.
+    await bootstrapVectorIndex();
     return { embedded: 0, skipped: 0, degraded: true };
   }
-
-  let embedded = 0;
-  let skipped = 0;
 
   // Load summary cache once for all symbols (used by prepareSymbolEmbeddingInputs).
   const summaryCacheMap = await ladybugDb.getSummaryCaches(
@@ -456,27 +540,6 @@ export async function refreshSymbolEmbeddings(params: {
   // Note: callers must not depend on write order — sort is purely a
   // throughput optimisation.
   uncachedItems.sort((a, b) => a.prefixedText.length - b.prefixedText.length);
-
-  const vecProp = getVecPropertyName(modelName);
-  const indexName = params.vectorIndexName ?? getVectorIndexName(modelName);
-  const modelInfo = EMBEDDING_MODELS[modelName];
-  let shouldBootstrapIndex = false;
-  if (vecProp !== null && indexName !== null && modelInfo) {
-    const configuredIndex = (await showIndexesStrict(conn)).find(
-      ({ tableName, name }) =>
-        tableName === SYMBOL_VECTOR_EMBEDDING_TABLE && name === indexName,
-    );
-    if (
-      configuredIndex &&
-      (configuredIndex.type !== "vector" ||
-        configuredIndex.property !== vecProp)
-    ) {
-      throw new IndexError(
-        `Configured vector index '${indexName}' belongs to ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${configuredIndex.property} (${configuredIndex.type}), not ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${vecProp}`,
-      );
-    }
-    shouldBootstrapIndex = configuredIndex === undefined;
-  }
 
   // Resolve concurrency: clamp to [1, MAX_EMBEDDING_CONCURRENCY].
   const maxConcurrency = Math.max(
@@ -693,65 +756,7 @@ export async function refreshSymbolEmbeddings(params: {
       }
       recordMemorySnapshot("afterInference");
     } finally {
-      if (
-        shouldBootstrapIndex &&
-        vecProp !== null &&
-        indexName !== null &&
-        modelInfo
-      ) {
-        await runHnswRebuildCycle(
-          "symbol-vector-bootstrap-pre-create",
-          "symbol-vector-bootstrap-post-create",
-          async () => {
-            recordMemorySnapshot("beforeHnsw");
-            params.onProgress?.({
-              stage: "embeddings",
-              substage: "symbolVectorIndex",
-              current: Math.min(skipped + embedded, symbols.length),
-              total: symbols.length,
-              model: storageModel,
-              message: "building HNSW",
-            });
-            let ok: boolean;
-            try {
-              ok = await measure("hnsw.create", () =>
-                withWriteConn((wConn) =>
-                  createVectorIndex(
-                    wConn,
-                    SYMBOL_VECTOR_EMBEDDING_TABLE,
-                    vecProp,
-                    indexName,
-                    modelInfo.dimension,
-                    params.vectorEfc,
-                  ),
-                ),
-              );
-            } finally {
-              recordMemorySnapshot("afterHnsw");
-            }
-            params.onProgress?.({
-              stage: "embeddings",
-              substage: "symbolVectorIndex",
-              current: Math.min(skipped + embedded, symbols.length),
-              total: symbols.length,
-              model: storageModel,
-              message: ok ? "ready" : "creation failed",
-            });
-            if (ok) {
-              logger.info(
-                `[embeddings] Vector index '${indexName}' created on ${SYMBOL_VECTOR_EMBEDDING_TABLE}`,
-              );
-            } else {
-              logger.error(
-                `[embeddings] Vector index '${indexName}' creation FAILED — vector retrieval for ${modelName} will degrade until next refresh`,
-              );
-            }
-          },
-          params.postIndexSessionTimeoutMs,
-          params.recordTiming,
-          params.repoId,
-        );
-      }
+      await bootstrapVectorIndex();
     }
 
     // Progress: fire at end through fireProgress() so the monotonic clamp
