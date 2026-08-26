@@ -1165,6 +1165,7 @@ export async function pruneIsolatedPlaceholderSymbols(
       );
     }
     if (symbolIds.length > 0) {
+      await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
       await exec(
         txConn,
         `MATCH (s:Symbol)

@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
+import { queryStoredProcAll } from "../../dist/db/ladybug-core.js";
+import { createVectorIndex } from "../../dist/retrieval/index-lifecycle.js";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const TEST_DB_PATH = join(tmpdir(), ".lbug-edge-test-db.lbug");
@@ -790,7 +793,7 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
-    "pruneIsolatedPlaceholderSymbols removes derived relationships before deleting nodes",
+    "pruneIsolatedPlaceholderSymbols removes vectors and retains the live HNSW",
     { skip: !ladybugAvailable },
     async () => {
       await exec(
@@ -818,8 +821,41 @@ describe("LadybugDB Edge Queries", () => {
          CREATE (s)-[:BELONGS_TO_SHADOW_CLUSTER]->(c)`,
       );
 
+      const kuzuConn = conn as unknown as import("kuzu").Connection;
+      const staleVector = [1, ...new Array<number>(767).fill(0)];
+      const survivingVector = [0, 1, ...new Array<number>(766).fill(0)];
+      await queries.setSymbolVectorEmbedding(
+        kuzuConn,
+        repoId,
+        "unresolved:call:staleClustered",
+        "jina-embeddings-v2-base-code",
+        "stale-placeholder-vector",
+        "stale-placeholder-vector-hash",
+        staleVector,
+      );
+      await queries.setSymbolVectorEmbedding(
+        kuzuConn,
+        repoId,
+        "edge-from",
+        "jina-embeddings-v2-base-code",
+        "surviving-symbol-vector",
+        "surviving-symbol-vector-hash",
+        survivingVector,
+      );
+      await exec(conn, "LOAD EXTENSION vector");
+      assert.equal(
+        await createVectorIndex(
+          kuzuConn,
+          "SymbolVectorEmbedding",
+          "embeddingJinaCodeVec",
+          "symbol_vec_jina_code_v2",
+          768,
+        ),
+        true,
+      );
+
       const pruned = await queries.pruneIsolatedPlaceholderSymbols(
-        conn as unknown as import("kuzu").Connection,
+        kuzuConn,
         repoId,
       );
 
@@ -831,6 +867,27 @@ describe("LadybugDB Edge Queries", () => {
       const row = await result.getNext();
       result.close();
       assert.strictEqual(Number(row.count), 0);
+
+      const embeddingResult = await conn.query(
+        `MATCH (e:SymbolVectorEmbedding {symbolId: 'unresolved:call:staleClustered'})
+         RETURN count(e) AS count`,
+      );
+      const embeddingRow = await embeddingResult.getNext();
+      embeddingResult.close();
+      assert.strictEqual(Number(embeddingRow.count), 0);
+
+      const neighbors = await queryStoredProcAll<{
+        symbolId: string;
+        distance: number;
+      }>(
+        kuzuConn,
+        `CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding', 'symbol_vec_jina_code_v2', ${JSON.stringify(survivingVector)}, 1, efs := 200) RETURN node.symbolId AS symbolId, distance`,
+      );
+      assert.strictEqual(neighbors.length, 1);
+      assert.strictEqual(neighbors[0]?.symbolId, "edge-from");
+      assert.ok(
+        Math.abs(neighbors[0]?.distance ?? Number.POSITIVE_INFINITY) <= 1e-6,
+      );
     },
   );
 
