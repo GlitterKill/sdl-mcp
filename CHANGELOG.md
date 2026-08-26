@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Output-contract migration**: Replace repo.status `detail:"minimal"` with `detail:"compact"`. Omitted `file.read` `responseMode` now parses as `auto` instead of former `inline`. Small reads remain inline; large reads may return handles.
+
 - **Compact responses by default**: Status, usage, action discovery, retrieval, workflow, and runtime surfaces now favor bounded model-facing output. Large file reads, deltas, and response artifacts use recoverable paging handles.
 - **Workflow and runtime projection**: Removed redundant success metadata while preserving canonical results for piping and accounting. Failures now propagate explicit error details and recoverable output.
 - **Agent safety boundaries**: Index refresh requires explicit approval, repository inspection is routed away from runtime commands, and structural versus semantic staleness now produces safer recovery guidance.
