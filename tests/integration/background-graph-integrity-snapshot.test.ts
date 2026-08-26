@@ -29,6 +29,7 @@ import {
 } from "../../dist/db/ladybug-core.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 import { withPostIndexWriteSession } from "../../dist/db/write-session.js";
+import { verifyPersistedGraphIntegrityRevision } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
 
 interface SnapshotRow {
   id: bigint | number;
@@ -94,12 +95,70 @@ describe("background graph integrity snapshot", () => {
           ],
         },
       );
+      await exec(
+        conn,
+        `CREATE (e:SymbolVectorEmbedding {
+           embeddingId: $embeddingId,
+           repoId: $repoId,
+           symbolId: $symbolId,
+           model: $model,
+           embeddingVector: $embeddingVector,
+           cardHash: $cardHash,
+           updatedAt: $updatedAt,
+           embeddingJinaCodeVec: $vector
+         })`,
+        {
+          embeddingId: "jina-embeddings-v2-base-code:snapshot-symbol",
+          repoId: "snapshot-embedding-repo",
+          symbolId: "snapshot-symbol",
+          model: "jina-embeddings-v2-base-code",
+          embeddingVector: "snapshot-vector",
+          cardHash: "snapshot-card-hash",
+          updatedAt: "2026-08-26T00:00:00.000Z",
+          vector: new Array<number>(768).fill(0).map((_, index) => index / 768),
+        },
+      );
     });
   });
 
   after(async () => {
     await closeLadybugDb();
     rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it("leaves persisted embedding bytes unchanged after the read-only verifier", async () => {
+    const readEmbeddingBytes = () =>
+      withExclusiveReadConnection(async (conn) =>
+        JSON.stringify(
+          await queryAll(
+            conn,
+            `MATCH (e:SymbolVectorEmbedding)
+            WHERE e.embeddingId = $embeddingId
+            RETURN e.embeddingId AS embeddingId,
+                   e.repoId AS repoId,
+                   e.symbolId AS symbolId,
+                   e.model AS model,
+                   e.embeddingVector AS embeddingVector,
+                   e.cardHash AS cardHash,
+                   e.updatedAt AS updatedAt,
+                   e.embeddingJinaCodeVec AS vector`,
+            {
+              embeddingId: "jina-embeddings-v2-base-code:snapshot-symbol",
+            },
+          ),
+        ),
+      );
+    const before = await readEmbeddingBytes();
+
+    const result = await verifyPersistedGraphIntegrityRevision(
+      "snapshot-embedding-repo",
+      "snapshot-version",
+      1,
+      { persistSuccessState: async () => true },
+    );
+
+    assert.strictEqual(result, "verified");
+    assert.strictEqual(await readEmbeddingBytes(), before);
   });
 
   it("keeps timed-out session work admitted until the body actually settles", async () => {

@@ -342,6 +342,82 @@ describe("upsertSymbolBatch — integration", () => {
   );
 
   it(
+    "provider retirement deletes every vector model for exact retired Symbols",
+    { skip: !ladybugAvailable },
+    async () => {
+      const conn_ = conn as unknown as import("kuzu").Connection;
+      const otherFileId = "provider-retirement-other-file";
+      await queries.upsertFile(conn_, {
+        fileId: otherFileId,
+        repoId,
+        relPath: "src/provider-other.ts",
+        contentHash: "provider-other-hash",
+        language: "ts",
+        byteSize: 50,
+        lastIndexedAt: null,
+      });
+      const scoped = makeSymbol(
+        "provider-retired-scoped",
+        repoId,
+        fileId,
+        "scoped",
+      );
+      const incoming = makeSymbol(
+        "provider-retired-incoming",
+        repoId,
+        otherFileId,
+        "incoming",
+      );
+      const preserved = makeSymbol(
+        "provider-retirement-preserved",
+        repoId,
+        otherFileId,
+        "preserved",
+      );
+      await queries.upsertSymbolBatch(conn_, [scoped, incoming, preserved]);
+
+      for (const symbol of [scoped, incoming, preserved]) {
+        await queries.setSymbolVectorEmbedding(
+          conn_,
+          repoId,
+          symbol.symbolId,
+          "jina-embeddings-v2-base-code",
+          `${symbol.symbolId}-jina`,
+          `${symbol.symbolId}-jina-hash`,
+          new Array<number>(768).fill(0.1),
+        );
+        await queries.setSymbolVectorEmbedding(
+          conn_,
+          repoId,
+          symbol.symbolId,
+          "nomic-embed-text-v1.5",
+          `${symbol.symbolId}-nomic`,
+          `${symbol.symbolId}-nomic-hash`,
+          new Array<number>(768).fill(0.2),
+        );
+      }
+
+      await queries.deleteProviderReplacementSymbols(
+        conn_,
+        repoId,
+        [fileId],
+        [incoming.symbolId],
+      );
+
+      const rows = await queries.queryAll<{ symbolId: string; model: string }>(
+        conn_,
+        `MATCH (e:SymbolVectorEmbedding)
+         RETURN e.symbolId AS symbolId, e.model AS model
+         ORDER BY e.symbolId, e.model`,
+      );
+      assert.deepStrictEqual(rows, [
+        { symbolId: preserved.symbolId, model: "jina-embeddings-v2-base-code" },
+        { symbolId: preserved.symbolId, model: "nomic-embed-text-v1.5" },
+      ]);
+    },
+  );
+
+  it(
     "rejects oversized provider replacement before deleting any Symbol rows",
     { skip: !ladybugAvailable },
     async () => {

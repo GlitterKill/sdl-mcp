@@ -25,6 +25,7 @@ import {
   type RequiredRetrievalIndex,
 } from "../retrieval/health.js";
 import { showIndexesStrict } from "../retrieval/index-lifecycle.js";
+import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "../retrieval/model-mapping.js";
 import { normalizePath } from "../util/paths.js";
 
 export interface ContextQualityCacheExpectation {
@@ -39,7 +40,7 @@ export interface ContextQualityCacheExpectation {
 
 export interface ContextQualityCacheIndexIdentity {
   model?: string;
-  tableName: "Symbol" | "FileSummary";
+  tableName: "Symbol" | typeof SYMBOL_VECTOR_EMBEDDING_TABLE | "FileSummary";
   name: string;
   type: "fts" | "vector";
   property: string;
@@ -107,7 +108,7 @@ function assertExactArray(
 
 function assertHealthyIndex(
   index: ContextQualityCacheIndexIdentity,
-  tableName: "Symbol" | "FileSummary",
+  tableName: "Symbol" | typeof SYMBOL_VECTOR_EMBEDDING_TABLE | "FileSummary",
   type: "fts" | "vector",
 ): void {
   if (
@@ -124,7 +125,7 @@ function assertHealthyIndex(
 function assertCompleteVectorCoverage(
   indexes: readonly ContextQualityCacheIndexIdentity[],
   models: readonly string[],
-  tableName: "Symbol" | "FileSummary",
+  tableName: "Symbol" | typeof SYMBOL_VECTOR_EMBEDDING_TABLE | "FileSummary",
 ): void {
   assertExactArray(
     indexes.map((index) => index.model ?? ""),
@@ -219,7 +220,7 @@ export function validateContextQualityCacheSnapshot(
   assertCompleteVectorCoverage(
     snapshot.indexes.symbolVectors,
     expectation.symbolEmbeddingModels,
-    "Symbol",
+    SYMBOL_VECTOR_EMBEDDING_TABLE,
   );
   assertCompleteVectorCoverage(
     snapshot.indexes.fileSummaryVectors,
@@ -276,7 +277,7 @@ async function vectorIndexIdentity(
 ): Promise<ContextQualityCacheIndexIdentity> {
   const identity = exactIndexIdentity(indexes, required);
   const coverage =
-    required.tableName === "Symbol"
+    required.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE
       ? await getSymbolRetrievalCoverage(
           connection,
           repoId,

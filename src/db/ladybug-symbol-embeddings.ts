@@ -40,6 +40,20 @@ function getEmbeddingId(symbolId: string, model: string): string {
   return `${model}:${symbolId}`;
 }
 
+export async function deleteSymbolVectorEmbeddingsBySymbolIds(
+  conn: Connection,
+  symbolIds: readonly string[],
+): Promise<void> {
+  if (symbolIds.length === 0) return;
+  await exec(
+    conn,
+    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE})
+     WHERE e.symbolId IN $symbolIds
+     DELETE e`,
+    { symbolIds: [...symbolIds] },
+  );
+}
+
 export async function getSymbolVectorEmbedding(
   conn: Connection,
   symbolId: string,

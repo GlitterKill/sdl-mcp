@@ -55,7 +55,10 @@ import {
   queryVectorIndexProbe,
   showIndexesStrict,
 } from "../../retrieval/index-lifecycle.js";
-import { EMBEDDING_MODELS } from "../../retrieval/model-mapping.js";
+import {
+  EMBEDDING_MODELS,
+  SYMBOL_VECTOR_EMBEDDING_TABLE,
+} from "../../retrieval/model-mapping.js";
 import { buildFtsStoredProcQuery } from "../../retrieval/orchestrator.js";
 import { loadConfiguredAdapterPlugins } from "../../startup/plugins.js";
 import { getCurrentTimestamp } from "../../util/time.js";
@@ -416,7 +419,7 @@ async function validateJinaVectorIndex(
 
   const index = (await showIndexesStrict(conn)).find(
     (candidate) =>
-      candidate.tableName === "Symbol" &&
+      candidate.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE &&
       candidate.name === indexName &&
       candidate.type === "vector",
   );
@@ -427,7 +430,7 @@ async function validateJinaVectorIndex(
     index.extensionLoaded === false
   ) {
     failCandidateValidation(
-      `required healthy Symbol vector index ${indexName} on ${modelInfo.vecProperty} is absent`,
+      `required healthy SymbolVectorEmbedding vector index ${indexName} on ${modelInfo.vecProperty} is absent`,
     );
   }
   if ((await queryVectorIndexProbe(conn, indexName, probeVector)) === 0) {

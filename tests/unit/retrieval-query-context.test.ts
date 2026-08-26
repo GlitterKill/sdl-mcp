@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Connection } from "kuzu";
 
 import {
@@ -23,6 +25,11 @@ const healthy: RetrievalCapabilities = {
     fileSummaryVector: 1000,
   },
 };
+
+const orchestratorSrc = readFileSync(
+  join(process.cwd(), "src/retrieval/orchestrator.ts"),
+  "utf8",
+);
 
 describe("request-scoped retrieval work", () => {
   it("preserves the checked-out connection and initializes backend outcomes", () => {
@@ -227,6 +234,16 @@ describe("request-scoped retrieval work", () => {
       sorted.map((row) => row.node?.symbolId),
       ["c", "a", "b"],
     );
+  });
+
+  it("queries symbol ANN on SymbolVectorEmbedding and returns symbol IDs", () => {
+    assert.ok(orchestratorSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
+    assert.ok(
+      orchestratorSrc.includes(
+        "`CALL QUERY_VECTOR_INDEX('${SYMBOL_VECTOR_EMBEDDING_TABLE}'",
+      ),
+    );
+    assert.ok(orchestratorSrc.includes('idField: "symbolId"'));
   });
 
   it("uses the stable ID tie-break for non-finite vector distances", () => {

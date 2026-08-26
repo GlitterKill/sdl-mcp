@@ -1,5 +1,6 @@
 import type { Connection } from "kuzu";
 
+import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "../retrieval/model-mapping.js";
 import {
   assertSafeInt,
   queryAll,
@@ -28,7 +29,7 @@ export async function readSafeRebuildJinaVectorProbe(
 ): Promise<unknown | null> {
   const row = await querySingle<{ vector: unknown }>(
     conn,
-    `MATCH (s:Symbol)
+    `MATCH (s:${SYMBOL_VECTOR_EMBEDDING_TABLE})
      WHERE s.embeddingJinaCodeVec IS NOT NULL
      RETURN s.embeddingJinaCodeVec AS vector
      LIMIT 1`,

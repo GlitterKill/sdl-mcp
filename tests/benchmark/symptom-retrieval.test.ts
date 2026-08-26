@@ -83,6 +83,14 @@ describe("semantic retrieval quality baseline", () => {
       lcSrc.includes("getVecPropertyName"),
       "Index lifecycle should use Vec property names for vector index creation",
     );
+    assert.ok(
+      lcSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"),
+      "Symbol vector indexes should target the dedicated embedding table",
+    );
+    assert.ok(
+      orchSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"),
+      "Symbol ANN retrieval should target the dedicated embedding table",
+    );
   });
 
   it("embedding persistence writes to numeric array columns", () => {

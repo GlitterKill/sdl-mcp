@@ -110,6 +110,29 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
     await exec("CREATE (:TsconfigHash {tsconfigHash: 'global_tsconfig'})");
     await seedRepo("remove-repo");
     await seedRepo("keep-repo");
+    for (const repoId of ["remove-repo", "keep-repo"]) {
+      const id = repoId.replaceAll("-", "_");
+      for (const symbolId of [`symbol_${id}`, `placeholder_${id}`]) {
+        await queries.setSymbolVectorEmbedding(
+          conn,
+          repoId,
+          symbolId,
+          "jina-embeddings-v2-base-code",
+          `${symbolId}-jina`,
+          `${symbolId}-jina-hash`,
+          new Array<number>(768).fill(0.1),
+        );
+        await queries.setSymbolVectorEmbedding(
+          conn,
+          repoId,
+          symbolId,
+          "nomic-embed-text-v1.5",
+          `${symbolId}-nomic`,
+          `${symbolId}-nomic-hash`,
+          new Array<number>(768).fill(0.2),
+        );
+      }
+    }
     for (const statement of [
       "CREATE (:Symbol {symbolId: 'shared_placeholder', repoId: 'remove-repo', external: true, symbolStatus: 'placeholder'})",
       "CREATE (:SymbolVersion {id: 'shared_placeholder_version', versionId: 'shared_orphan_version', symbolId: 'shared_placeholder'})",
@@ -160,6 +183,7 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       "GraphIntegrityFilelessState",
       "FileParserState",
       "RepoParserState",
+      "SymbolVectorEmbedding",
     ];
     for (const table of repoScopedTables) {
       assert.strictEqual(
@@ -184,6 +208,30 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       ["Metrics", "symbolId", "placeholder_remove_repo", "placeholder_keep_repo"],
       ["SymbolEmbedding", "symbolId", "placeholder_remove_repo", "placeholder_keep_repo"],
       ["SummaryCache", "symbolId", "placeholder_remove_repo", "placeholder_keep_repo"],
+      [
+        "SymbolVectorEmbedding",
+        "embeddingId",
+        "jina-embeddings-v2-base-code:symbol_remove_repo",
+        "jina-embeddings-v2-base-code:symbol_keep_repo",
+      ],
+      [
+        "SymbolVectorEmbedding",
+        "embeddingId",
+        "nomic-embed-text-v1.5:symbol_remove_repo",
+        "nomic-embed-text-v1.5:symbol_keep_repo",
+      ],
+      [
+        "SymbolVectorEmbedding",
+        "embeddingId",
+        "jina-embeddings-v2-base-code:placeholder_remove_repo",
+        "jina-embeddings-v2-base-code:placeholder_keep_repo",
+      ],
+      [
+        "SymbolVectorEmbedding",
+        "embeddingId",
+        "nomic-embed-text-v1.5:placeholder_remove_repo",
+        "nomic-embed-text-v1.5:placeholder_keep_repo",
+      ],
     ]) {
       assert.strictEqual(await count(`MATCH (n:${table} {${key}: '${target}'}) RETURN count(n) AS c`), 0);
       assert.strictEqual(await count(`MATCH (n:${table} {${key}: '${keeper}'}) RETURN count(n) AS c`), 1);

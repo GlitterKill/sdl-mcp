@@ -27,6 +27,14 @@ const src = readFileSync(
   join(process.cwd(), "src/retrieval/index-lifecycle.ts"),
   "utf8",
 );
+const safeRebuildSrc = readFileSync(
+  join(process.cwd(), "src/db/ladybug-safe-rebuild.ts"),
+  "utf8",
+);
+const safeRebuildCliSrc = readFileSync(
+  join(process.cwd(), "src/cli/commands/index-safe-rebuild.ts"),
+  "utf8",
+);
 
 // ---------------------------------------------------------------------------
 // IndexHealthResult structure
@@ -319,12 +327,12 @@ describe("showIndexes — SHOW_INDEXES() RETURN * compatibility", () => {
 });
 
 describe("checkIndexHealth table-aware vector health", () => {
-  it("requires Symbol table for vector health checks", () => {
+  it("requires SymbolVectorEmbedding for vector health checks", () => {
     const fnStart = src.indexOf("export async function checkIndexHealth");
     const fnBody = src.slice(fnStart, fnStart + 1800);
     assert.ok(
-      fnBody.includes('index.tableName === "Symbol"'),
-      "Symbol vector health should not be satisfied by FileSummary or AgentFeedback vector indexes",
+      fnBody.includes("index.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE"),
+      "Symbol vector health should use the dedicated embedding table",
     );
     assert.ok(
       !fnBody.includes("index.tableName === undefined"),
@@ -340,8 +348,10 @@ describe("checkIndexHealth table-aware vector health", () => {
 describe("ensureIndexes vector table awareness", () => {
   it("uses table-aware vector checks for Symbol and entity vector indexes", () => {
     assert.ok(
-      src.includes('indexExistsForTable(existing, "Symbol", indexName, "vector")'),
-      "Symbol vector ensure should not rely on a global index name set",
+      /indexExistsForTable\(\s*existing,\s*SYMBOL_VECTOR_EMBEDDING_TABLE,\s*indexName,\s*"vector"/u.test(
+        src,
+      ),
+      "Symbol vector ensure should use the dedicated embedding table",
     );
     assert.ok(
       src.includes(
@@ -508,10 +518,32 @@ describe("createVectorIndex — current Kuzu API", () => {
     assert.ok(fnBody.includes("validateIdentifier(indexName"));
     assert.ok(fnBody.includes("Number.isFinite"));
     assert.ok(fnBody.includes("QUERY_VECTOR_INDEX"));
+    assert.ok(fnBody.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
     assert.ok(fnBody.includes("node.symbolId AS id"));
     assert.ok(fnBody.includes("row.distance"));
     assert.ok(fnBody.includes("near-zero"));
     assert.ok(src.includes("@param efc - HNSW ef_construction"));
+  });
+
+  it("safe rebuild reads and validates Jina vectors on the embedding table", () => {
+    assert.ok(
+      safeRebuildSrc.includes(
+        "MATCH (s:${SYMBOL_VECTOR_EMBEDDING_TABLE})",
+      ),
+      "safe rebuild probe should read SymbolVectorEmbedding",
+    );
+    assert.ok(
+      safeRebuildCliSrc.includes(
+        "candidate.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE",
+      ),
+      "safe rebuild validation should require the embedding-table HNSW",
+    );
+    assert.ok(
+      safeRebuildCliSrc.includes(
+        "required healthy SymbolVectorEmbedding vector index",
+      ),
+      "safe rebuild validation error should name the required table",
+    );
   });
 });
 

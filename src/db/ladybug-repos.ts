@@ -22,6 +22,7 @@ import {
   deleteFileParserStatesByFileIdsInTransaction,
   deleteParserProvenanceForRepoInTransaction,
 } from "./ladybug-parser-provenance.js";
+import { deleteSymbolVectorEmbeddingsBySymbolIds } from "./ladybug-symbol-embeddings.js";
 
 export interface MetricsRow {
   symbolId: string;
@@ -256,6 +257,7 @@ export async function deleteRepo(
       ]) {
         await exec(txConn, statement, { deletedSymbolIds });
       }
+      await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, deletedSymbolIds);
       await exec(
         txConn,
         `MATCH (s:Symbol) WHERE s.symbolId IN $deletedSymbolIds DELETE s`,

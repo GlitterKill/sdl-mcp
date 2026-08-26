@@ -30,6 +30,7 @@ import { IndexError } from "../domain/errors.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { resolveSemanticEmbeddingModelPlan } from "../config/semantic-embedding-model-plan.js";
+import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "./model-mapping.js";
 import {
   SYMBOL_SEARCH_MAX_QUERY_TOKENS,
   SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH,
@@ -603,7 +604,7 @@ async function queryVectorIndex(
     const vectorLiteral = cypherNumberArray(embedding);
     const rows = await queryStoredProcAll<VectorRawRow>(
       conn,
-      `CALL QUERY_VECTOR_INDEX('Symbol', '${indexName}', ${vectorLiteral}, ${k}) RETURN node, distance`,
+      `CALL QUERY_VECTOR_INDEX('${SYMBOL_VECTOR_EMBEDDING_TABLE}', '${indexName}', ${vectorLiteral}, ${k}) RETURN node, distance`,
     );
     const results = sortVectorRowsByDistance(rows).map((r) => ({
       symbolId: vectorRowId(r),
@@ -1455,13 +1456,17 @@ async function runEntitySearch<T = never>(
         const vectorQueryStartedAt = performance.now();
         const vectorLane = `${entityType}:${vectorSourceForModel(modelName)}`;
         try {
-          assertTableName(entityFtsCfg.tableName);
+          const vectorTableName =
+            entityType === "symbol"
+              ? SYMBOL_VECTOR_EMBEDDING_TABLE
+              : entityFtsCfg.tableName;
+          assertTableName(vectorTableName);
           assertIndexName(indexName);
           const k = assertPositiveInt(vectorTopK, "topK");
           const vectorLiteral = cypherNumberArray(queryEmbedding);
           const rawRows = await queryStoredProcAll<VectorRawRow>(
             conn,
-            `CALL QUERY_VECTOR_INDEX('${entityFtsCfg.tableName}', '${indexName}', ${vectorLiteral}, ${k}) RETURN node, distance`,
+            `CALL QUERY_VECTOR_INDEX('${vectorTableName}', '${indexName}', ${vectorLiteral}, ${k}) RETURN node, distance`,
           );
           vecRows = sortVectorRowsByDistance(
             rawRows,

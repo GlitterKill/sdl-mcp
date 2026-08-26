@@ -20,6 +20,7 @@ import {
   getEmbeddingPropertyName,
   getVecPropertyName,
   getVectorIndexName,
+  SYMBOL_VECTOR_EMBEDDING_TABLE,
 } from "./model-mapping.js";
 
 // ---------------------------------------------------------------------------
@@ -366,7 +367,7 @@ export async function queryVectorIndexProbe(
   }
   const rows = await queryStoredProcAll<{ id: unknown; distance: unknown }>(
     conn,
-    `CALL QUERY_VECTOR_INDEX('Symbol', '${indexName}', ${JSON.stringify(embedding)}, 10, efs := 200) RETURN node.symbolId AS id, distance`,
+    `CALL QUERY_VECTOR_INDEX('${SYMBOL_VECTOR_EMBEDDING_TABLE}', '${indexName}', ${JSON.stringify(embedding)}, 10, efs := 200) RETURN node.symbolId AS id, distance`,
   );
   for (const row of rows) {
     if (
@@ -732,7 +733,7 @@ export async function checkIndexHealth(
     const match = indexes.find(
       (index) =>
         index.type === "vector" &&
-        index.tableName === "Symbol" &&
+        index.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE &&
         ((fallbackName !== null && index.name === fallbackName) ||
           (propName !== null && index.property === propName)),
     );
@@ -895,7 +896,14 @@ export async function ensureIndexes(
               getVectorIndexName(model) ??
               `symbol_vec_${propName.toLowerCase()}`;
 
-            if (indexExistsForTable(existing, "Symbol", indexName, "vector")) {
+            if (
+              indexExistsForTable(
+                existing,
+                SYMBOL_VECTOR_EMBEDDING_TABLE,
+                indexName,
+                "vector",
+              )
+            ) {
               logger.debug(
                 `[index-lifecycle] Vector index '${indexName}' already exists, skipping`,
               );
@@ -905,7 +913,7 @@ export async function ensureIndexes(
 
             const ok = await createVectorIndex(
               conn,
-              "Symbol",
+              SYMBOL_VECTOR_EMBEDDING_TABLE,
               propName,
               indexName,
               modelInfo.dimension,

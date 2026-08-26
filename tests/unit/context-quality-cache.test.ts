@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { LADYBUG_SCHEMA_VERSION } from "../../dist/db/ladybug-schema.js";
 
 const modulePath = "../../dist/benchmark/context-quality-cache.js";
+const source = readFileSync(
+  join(process.cwd(), "src/benchmark/context-quality-cache.ts"),
+  "utf8",
+);
 
 function exactSnapshot() {
   return {
@@ -46,7 +52,7 @@ function exactSnapshot() {
       symbolVectors: [
         {
           model: "jina-embeddings-v2-base-code",
-          tableName: "Symbol",
+          tableName: "SymbolVectorEmbedding",
           name: "symbol_embedding_jina_code_vec_v1",
           type: "vector",
           property: "embeddingJinaCodeVec",
@@ -82,6 +88,11 @@ const expectation = {
 };
 
 describe("context-quality database cache identity", () => {
+  it("routes SymbolVectorEmbedding coverage through symbol coverage", () => {
+    assert.ok(source.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
+    assert.ok(!source.includes('"SymbolVectorEmbedding"'));
+  });
+
   it("accepts only the exact closed-graph provenance snapshot", async () => {
     const cacheModule = await import(modulePath).catch(() => ({}));
     const validate = Reflect.get(

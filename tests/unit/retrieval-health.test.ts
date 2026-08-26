@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import type { Connection } from "kuzu";
@@ -9,6 +11,11 @@ import {
   hasExactHealthyIndex,
   resolveRequiredRetrievalIndexes,
 } from "../../dist/retrieval/health.js";
+
+const retrievalHealthDbSource = readFileSync(
+  join(process.cwd(), "src/db/ladybug-retrieval-health.ts"),
+  "utf8",
+);
 
 const exactIndexes = [
   {
@@ -22,6 +29,13 @@ const exactIndexes = [
 ];
 
 describe("strict retrieval health", () => {
+  it("uses the shared symbol-vector table constant in coverage queries", () => {
+    assert.ok(
+      retrievalHealthDbSource.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"),
+    );
+    assert.ok(!retrievalHealthDbSource.includes("SymbolVectorEmbedding"));
+  });
+
   it("requires an exact table, name, type, and property match", () => {
     const required = {
       name: "symbol_search_text_v1",
@@ -67,7 +81,7 @@ describe("strict retrieval health", () => {
     assert.deepEqual(required.symbolVectors, [
       {
         model: "jina-embeddings-v2-base-code",
-        tableName: "Symbol",
+        tableName: "SymbolVectorEmbedding",
         name: "symbol_vec_jina_code_v2",
         type: "vector",
         property: "embeddingJinaCodeVec",
@@ -180,7 +194,12 @@ describe("strict retrieval health", () => {
     } as never);
 
     assert.equal(required.symbolFts.name, "custom_symbol_fts");
+    assert.equal(required.symbolFts.tableName, "Symbol");
     assert.equal(required.symbolVectors[0]?.name, "custom_symbol_jina");
+    assert.equal(
+      required.symbolVectors[0]?.tableName,
+      "SymbolVectorEmbedding",
+    );
   });
 
   it("retains unsupported configured models as unavailable zero-coverage lanes", () => {

@@ -17,7 +17,11 @@ import {
   showIndexesStrict,
   type IndexInfo,
 } from "./index-lifecycle.js";
-import { getVecPropertyName, getVectorIndexName } from "./model-mapping.js";
+import {
+  getVecPropertyName,
+  getVectorIndexName,
+  SYMBOL_VECTOR_EMBEDDING_TABLE,
+} from "./model-mapping.js";
 import type {
   DegradationReason,
   RetrievalCapabilities,
@@ -25,7 +29,7 @@ import type {
 
 export interface RequiredRetrievalIndex {
   model?: string;
-  tableName: "Symbol" | "FileSummary";
+  tableName: "Symbol" | "SymbolVectorEmbedding" | "FileSummary";
   name: string | null;
   type: IndexInfo["type"];
   property: string | null;
@@ -84,7 +88,7 @@ export function resolveRequiredRetrievalIndexes(
         getVectorIndexName(model);
       return {
         model,
-        tableName: "Symbol" as const,
+        tableName: SYMBOL_VECTOR_EMBEDDING_TABLE,
         name: property ? (name ?? null) : null,
         type: "vector" as const,
         property: property ?? null,

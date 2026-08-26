@@ -28,7 +28,7 @@ it("derives specialized entity/model health from configured exact indexes", asyn
     },
     {
       name: "custom_symbol_jina",
-      tableName: "Symbol",
+      tableName: "SymbolVectorEmbedding",
       type: "vector" as const,
       property: "embeddingJinaCodeVec",
       extensionLoaded: true,

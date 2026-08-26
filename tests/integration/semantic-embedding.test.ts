@@ -20,11 +20,18 @@ import {
 import { refreshFileSummaryEmbeddings } from "../../dist/indexer/file-summary-embeddings.js";
 import { readSafeRebuildJinaVectorProbe } from "../../dist/db/ladybug-safe-rebuild.js";
 import {
+  AGENTFEEDBACK_EMBEDDING_PROPERTIES,
+  AGENTFEEDBACK_VECTOR_INDEX_NAMES,
+  createFtsIndex,
   createVectorIndex,
   dropVectorIndex,
+  FILESUMMARY_EMBEDDING_PROPERTIES,
+  FILESUMMARY_VECTOR_INDEX_NAMES,
   queryVectorIndexProbe,
   showIndexesStrict,
 } from "../../dist/retrieval/index-lifecycle.js";
+import { checkRetrievalHealth } from "../../dist/retrieval/health.js";
+import { getSymbolRetrievalCoverage } from "../../dist/db/ladybug-retrieval-health.js";
 import {
   installObservabilityTap,
   resetObservabilityTap,
@@ -290,6 +297,143 @@ describe("Semantic Embedding Pipeline", () => {
     assert.strictEqual(rows.length, 1);
     return rows[0];
   }
+
+  async function seedDeletionVectors(
+    deletedSymbols: ladybugDb.SymbolRow[],
+    preservedSymbol: ladybugDb.SymbolRow,
+  ): Promise<number[]> {
+    const nomicModel = "nomic-embed-text-v1.5";
+    const allSymbols = [...deletedSymbols, preservedSymbol];
+    const jinaVectors = new Map(
+      allSymbols.map((symbol, index) => [
+        symbol.symbolId,
+        makeDeterministicVector(symbol.symbolId, 10, index),
+      ]),
+    );
+
+    await withWriteConn(async (conn) => {
+      for (const symbol of allSymbols) {
+        const jinaVector = jinaVectors.get(symbol.symbolId)!;
+        await ladybugDb.setSymbolVectorEmbedding(
+          conn,
+          repoId,
+          symbol.symbolId,
+          jinaModel,
+          `${symbol.symbolId}-jina`,
+          `${symbol.symbolId}-jina-hash`,
+          jinaVector,
+        );
+        await ladybugDb.setSymbolVectorEmbedding(
+          conn,
+          repoId,
+          symbol.symbolId,
+          nomicModel,
+          `${symbol.symbolId}-nomic`,
+          `${symbol.symbolId}-nomic-hash`,
+          makeDeterministicVector(
+            symbol.symbolId,
+            20,
+            allSymbols.indexOf(symbol),
+          ),
+        );
+      }
+      await createVectorIndex(
+        conn,
+        "SymbolVectorEmbedding",
+        "embeddingJinaCodeVec",
+        "symbol_vec_jina_code_v2",
+        768,
+      );
+    });
+
+    return jinaVectors.get(preservedSymbol.symbolId)!;
+  }
+
+  async function assertDeletedVectorsAndHealthyIndex(
+    deletedSymbolIds: string[],
+    preservedSymbolId: string,
+    preservedJinaVector: number[],
+  ): Promise<void> {
+    const conn = await getLadybugConn();
+    const rows = await ladybugDb.queryAll<{
+      symbolId: string;
+      model: string;
+    }>(
+      conn,
+      `MATCH (e:SymbolVectorEmbedding)
+       RETURN e.symbolId AS symbolId, e.model AS model
+       ORDER BY e.symbolId, e.model`,
+    );
+    assert.ok(
+      rows.every((row) => !deletedSymbolIds.includes(row.symbolId)),
+      "all model rows for deleted Symbols should be removed",
+    );
+    assert.deepStrictEqual(
+      rows.filter((row) => row.symbolId === preservedSymbolId),
+      [
+        { symbolId: preservedSymbolId, model: jinaModel },
+        { symbolId: preservedSymbolId, model: "nomic-embed-text-v1.5" },
+      ],
+    );
+    assert.ok(
+      (await showIndexesStrict(conn)).some(
+        ({ tableName, name }) =>
+          tableName === "SymbolVectorEmbedding" &&
+          name === "symbol_vec_jina_code_v2",
+      ),
+    );
+    const neighbor = await queryJinaNeighbor(conn, preservedJinaVector);
+    assert.strictEqual(neighbor.symbolId, preservedSymbolId);
+    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
+  }
+
+  it("deleteSymbolsByFileId removes every model row and retains live HNSW", async () => {
+    const preservedVector = await seedDeletionVectors(
+      [symbols[0], symbols[1]],
+      symbols[2],
+    );
+
+    await withWriteConn((conn) =>
+      ladybugDb.deleteSymbolsByFileId(conn, "file1"),
+    );
+
+    await assertDeletedVectorsAndHealthyIndex(
+      [symbols[0].symbolId, symbols[1].symbolId],
+      symbols[2].symbolId,
+      preservedVector,
+    );
+  });
+
+  it("deleteSymbolsByFileIds removes every model row and retains live HNSW", async () => {
+    const preservedVector = await seedDeletionVectors(
+      [symbols[0], symbols[1]],
+      symbols[2],
+    );
+
+    await withWriteConn((conn) =>
+      ladybugDb.deleteSymbolsByFileIds(conn, ["file1"]),
+    );
+
+    await assertDeletedVectorsAndHealthyIndex(
+      [symbols[0].symbolId, symbols[1].symbolId],
+      symbols[2].symbolId,
+      preservedVector,
+    );
+  });
+
+  it("deleteSymbolsByIds removes every model row and retains live HNSW", async () => {
+    const preservedVector = await seedDeletionVectors([symbols[0]], symbols[1]);
+
+    await withWriteConn((conn) =>
+      ladybugDb.deleteSymbolsByIds(conn, [symbols[0].symbolId]),
+    );
+
+    await assertDeletedVectorsAndHealthyIndex(
+      [symbols[0].symbolId],
+      symbols[1].symbolId,
+      preservedVector,
+    );
+  });
 
   it("mock provider generates embeddings with expected dimension", async () => {
     const provider = getEmbeddingProvider("mock");
@@ -923,6 +1067,200 @@ describe("Semantic Embedding Pipeline", () => {
         unrelated,
       ),
       /near-zero/i,
+    );
+  });
+
+  it("isolates symbol vector health and ANN coverage by repository and model", async () => {
+    const conn = await getLadybugConn();
+    const otherRepoId = "embed-test-other-repo";
+    const otherSymbolId = "sym-other";
+    const nomicModel = "nomic-embed-text-v1.5";
+    const jinaVector = makeDeterministicVector("repo-one-jina", 1, 0);
+    const nomicVector = makeDeterministicVector("repo-one-nomic", 2, 0);
+    const otherJinaVector = makeDeterministicVector("repo-two-jina", 3, 0);
+    const now = new Date().toISOString();
+
+    await ladybugDb.upsertRepo(conn, {
+      repoId: otherRepoId,
+      rootPath: "/fake/embed-other-repo",
+      configJson: "{}",
+      createdAt: now,
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId: "other-file",
+      repoId: otherRepoId,
+      relPath: "src/other.ts",
+      contentHash: "other-hash",
+      language: "ts",
+      byteSize: 10,
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertSymbol(conn, {
+      ...symbols[0],
+      symbolId: otherSymbolId,
+      repoId: otherRepoId,
+      fileId: "other-file",
+      name: "otherSymbol",
+      searchText: "other symbol",
+      updatedAt: now,
+    });
+    await ladybugDb.exec(
+      conn,
+      `MATCH (s:Symbol)
+       WHERE s.repoId = $repoId
+       SET s.searchText = s.name`,
+      { repoId },
+    );
+    await withWriteConn(async (writeConn) => {
+      await ladybugDb.setSymbolVectorEmbedding(
+        writeConn,
+        repoId,
+        symbols[0].symbolId,
+        jinaModel,
+        "repo-one-jina",
+        "repo-one-jina-hash",
+        jinaVector,
+      );
+      await ladybugDb.setSymbolVectorEmbedding(
+        writeConn,
+        repoId,
+        symbols[1].symbolId,
+        nomicModel,
+        "repo-one-nomic",
+        "repo-one-nomic-hash",
+        nomicVector,
+      );
+      await ladybugDb.setSymbolVectorEmbedding(
+        writeConn,
+        otherRepoId,
+        otherSymbolId,
+        jinaModel,
+        "repo-two-jina",
+        "repo-two-jina-hash",
+        otherJinaVector,
+      );
+      assert.strictEqual(
+        await createFtsIndex(writeConn, "Symbol", "symbol_search_text_v1"),
+        true,
+      );
+      assert.strictEqual(
+        await createVectorIndex(
+          writeConn,
+          "SymbolVectorEmbedding",
+          "embeddingJinaCodeVec",
+          "symbol_vec_jina_code_v2",
+          768,
+        ),
+        true,
+      );
+      assert.strictEqual(
+        await createVectorIndex(
+          writeConn,
+          "SymbolVectorEmbedding",
+          "embeddingNomicVec",
+          "symbol_vec_nomic_embed_v15",
+          768,
+        ),
+        true,
+      );
+      assert.strictEqual(
+        await createVectorIndex(
+          writeConn,
+          "FileSummary",
+          FILESUMMARY_EMBEDDING_PROPERTIES.nomic.property,
+          FILESUMMARY_VECTOR_INDEX_NAMES.nomic,
+          768,
+        ),
+        true,
+      );
+      assert.strictEqual(
+        await createVectorIndex(
+          writeConn,
+          "AgentFeedback",
+          AGENTFEEDBACK_EMBEDDING_PROPERTIES.jinaCode.property,
+          AGENTFEEDBACK_VECTOR_INDEX_NAMES.jinaCode,
+          768,
+        ),
+        true,
+      );
+    });
+
+    assert.deepStrictEqual(
+      await getSymbolRetrievalCoverage(conn, repoId, "embeddingJinaCodeVec"),
+      { eligible: 3, covered: 1 },
+    );
+    assert.deepStrictEqual(
+      await getSymbolRetrievalCoverage(conn, repoId, "embeddingNomicVec"),
+      { eligible: 3, covered: 1 },
+    );
+    assert.deepStrictEqual(
+      await getSymbolRetrievalCoverage(
+        conn,
+        otherRepoId,
+        "embeddingJinaCodeVec",
+      ),
+      { eligible: 1, covered: 1 },
+    );
+    assert.deepStrictEqual(
+      await getSymbolRetrievalCoverage(conn, otherRepoId, "embeddingNomicVec"),
+      { eligible: 1, covered: 0 },
+    );
+
+    const health = await checkRetrievalHealth(conn, repoId, {
+      embeddingProfile: "specialized",
+      symbolEmbeddingModels: [jinaModel, nomicModel],
+      fileSummaryEmbeddingModels: [],
+    });
+    assert.strictEqual(health.vectorJinaCode, true);
+    assert.strictEqual(health.vectorNomic, true);
+    assert.strictEqual(health.modelCoveragePermille?.symbol[jinaModel], 333);
+    assert.strictEqual(health.modelCoveragePermille?.symbol[nomicModel], 333);
+    assert.ok(
+      (await queryVectorIndexProbe(
+        conn,
+        "symbol_vec_jina_code_v2",
+        jinaVector,
+      )) > 0,
+    );
+    assert.ok(
+      (await queryVectorIndexProbe(
+        conn,
+        "symbol_vec_nomic_embed_v15",
+        nomicVector,
+      )) > 0,
+    );
+
+    const indexes = await showIndexesStrict(conn);
+    assert.ok(
+      indexes.some(
+        ({ tableName, name, type }) =>
+          tableName === "Symbol" &&
+          name === "symbol_search_text_v1" &&
+          type === "fts",
+      ),
+    );
+    assert.ok(
+      !indexes.some(
+        ({ tableName, type }) => tableName === "Symbol" && type === "vector",
+      ),
+    );
+    assert.ok(
+      indexes.some(
+        ({ tableName, name, property, type }) =>
+          tableName === "FileSummary" &&
+          name === FILESUMMARY_VECTOR_INDEX_NAMES.nomic &&
+          property === FILESUMMARY_EMBEDDING_PROPERTIES.nomic.property &&
+          type === "vector",
+      ),
+    );
+    assert.ok(
+      indexes.some(
+        ({ tableName, name, property, type }) =>
+          tableName === "AgentFeedback" &&
+          name === AGENTFEEDBACK_VECTOR_INDEX_NAMES.jinaCode &&
+          property === AGENTFEEDBACK_EMBEDDING_PROPERTIES.jinaCode.property &&
+          type === "vector",
+      ),
     );
   });
 

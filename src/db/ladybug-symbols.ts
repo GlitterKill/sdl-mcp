@@ -30,6 +30,7 @@ import {
   resolveLadybugWriteChunkSize,
   type LadybugWriteChunkOptions,
 } from "./ladybug-batching.js";
+import { deleteSymbolVectorEmbeddingsBySymbolIds } from "./ladybug-symbol-embeddings.js";
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
 const PRESERVE_OPTIONAL_SYMBOL_FIELD = "__sdl_preserve_optional_symbol_field__";
@@ -2168,70 +2169,73 @@ export async function deleteSymbolsByFileIds(
 ): Promise<void> {
   if (fileIds.length === 0) return;
 
-  const symbolRows = await queryAll<{ symbolId: string }>(
-    conn,
-    `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
-     WHERE f.fileId IN $fileIds
-     RETURN s.symbolId AS symbolId`,
-    { fileIds },
-  );
+  await withTransaction(conn, async (txConn) => {
+    const symbolRows = await queryAll<{ symbolId: string }>(
+      txConn,
+      `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+       WHERE f.fileId IN $fileIds
+       RETURN s.symbolId AS symbolId`,
+      { fileIds },
+    );
 
-  if (symbolRows.length === 0) return;
+    if (symbolRows.length === 0) return;
 
-  const symbolIds = symbolRows.map((r) => r.symbolId);
+    const symbolIds = symbolRows.map((r) => r.symbolId);
 
-  await exec(
-    conn,
-    `MATCH (m:Metrics)
+    await exec(
+      txConn,
+      `MATCH (m:Metrics)
      WHERE m.symbolId IN $symbolIds
      DELETE m`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (e:SymbolEmbedding)
+      { symbolIds },
+    );
+    await exec(
+      txConn,
+      `MATCH (e:SymbolEmbedding)
      WHERE e.symbolId IN $symbolIds
      DELETE e`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (sc:SummaryCache)
+      { symbolIds },
+    );
+    await exec(
+      txConn,
+      `MATCH (sc:SummaryCache)
      WHERE sc.symbolId IN $symbolIds
      DELETE sc`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (sr:SymbolReference)
+      { symbolIds },
+    );
+    await exec(
+      txConn,
+      `MATCH (sr:SymbolReference)
      WHERE sr.fileId IN $fileIds
      DELETE sr`,
-    { fileIds },
-  );
-  await exec(
-    conn,
-    `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
+      { fileIds },
+    );
+    await exec(
+      txConn,
+      `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
      WHERE s.symbolId IN $symbolIds
      DELETE r`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File)
+      { symbolIds },
+    );
+    await exec(
+      txConn,
+      `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File)
      WHERE f.fileId IN $fileIds
      DELETE r`,
-    { fileIds },
-  );
-  // Symbol graph relationships are all incident to Symbol nodes. DETACH DELETE
-  // lets LadybugDB remove them in one indexed symbol pass instead of scanning
-  // every relationship type separately during full-refresh stale cleanup.
-  await exec(
-    conn,
-    `MATCH (s:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DETACH DELETE s`,
-    { symbolIds },
-  );
+      { fileIds },
+    );
+    await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
+    // Symbol graph relationships are all incident to Symbol nodes. DETACH DELETE
+    // lets LadybugDB remove them in one indexed symbol pass instead of scanning
+    // every relationship type separately during full-refresh stale cleanup.
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DETACH DELETE s`,
+      { symbolIds },
+    );
+  });
 }
 
 export async function deleteSymbolsByFileId(
@@ -2251,6 +2255,7 @@ export async function deleteSymbolsByFileId(
     const symbolIds = symbolRows.map((r) => r.symbolId);
 
     // Batch delete all relationships and nodes for the collected symbols
+    await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
     await exec(
       txConn,
       `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
@@ -2480,6 +2485,7 @@ export async function deleteSymbolsByIds(
       { symbolIds },
     );
 
+    await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
     // Symbol nodes
     await exec(
       txConn,
