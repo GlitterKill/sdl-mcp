@@ -10,8 +10,10 @@ import {
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
+import { queryStoredProcAll } from "../../dist/db/ladybug-core.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
+import { createVectorIndex } from "../../dist/retrieval/index-lifecycle.js";
 import {
   materializeProviderFacts,
   providerFactsToGraphRows,
@@ -288,6 +290,107 @@ describe("provider-first SCIP materialization", () => {
       { repoId: REPO_ID },
     );
     assert.deepEqual(externalRows, [{ name: "replacement" }]);
+  });
+
+  it("prunes stale SCIP external vectors while retaining the live HNSW", async () => {
+    graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-db-"));
+    await initRepo(graphDbPath);
+
+    const facts = normalizeScipProviderFacts({
+      repoId: REPO_ID,
+      generationId: "gen-vector-prune",
+      providerId: "scip-typescript",
+      providerVersion: "1.0.0",
+      documents: [documentForExternals(["api", "replacement"])],
+      externalSymbols: [externalSymbol("api"), externalSymbol("replacement")],
+    });
+    await materializeFacts(facts);
+
+    const conn = await getLadybugConn();
+    const externalRows = await ladybugDb.queryAll<{
+      name: string;
+      symbolId: string;
+    }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.external = true AND s.source = 'scip'
+       RETURN s.name AS name, s.symbolId AS symbolId
+       ORDER BY name`,
+      { repoId: REPO_ID },
+    );
+    assert.equal(externalRows.length, 2);
+    const staleSymbolId = externalRows.find((row) => row.name === "api")?.symbolId;
+    const survivingSymbolId = externalRows.find(
+      (row) => row.name === "replacement",
+    )?.symbolId;
+    assert.ok(staleSymbolId);
+    assert.ok(survivingSymbolId);
+    const staleVector = [1, ...new Array<number>(767).fill(0)];
+    const survivingVector = [0, 1, ...new Array<number>(766).fill(0)];
+
+    await withWriteConn(async (writeConn) => {
+      await ladybugDb.setSymbolVectorEmbedding(
+        writeConn,
+        REPO_ID,
+        staleSymbolId,
+        "jina-embeddings-v2-base-code",
+        "stale-scip-vector",
+        "stale-scip-vector-hash",
+        staleVector,
+      );
+      await ladybugDb.setSymbolVectorEmbedding(
+        writeConn,
+        REPO_ID,
+        survivingSymbolId,
+        "jina-embeddings-v2-base-code",
+        "surviving-scip-vector",
+        "surviving-scip-vector-hash",
+        survivingVector,
+      );
+      assert.equal(
+        await createVectorIndex(
+          writeConn,
+          "SymbolVectorEmbedding",
+          "embeddingJinaCodeVec",
+          "symbol_vec_jina_code_v2",
+          768,
+        ),
+        true,
+      );
+      assert.equal(
+        await ladybugDb.pruneStaleScipExternalSymbols(
+          writeConn,
+          REPO_ID,
+          [survivingSymbolId],
+        ),
+        1,
+      );
+    });
+
+    const staleRows = await ladybugDb.queryAll<{ symbolId: string }>(
+      conn,
+      `MATCH (s:Symbol {symbolId: $symbolId})
+       RETURN s.symbolId AS symbolId`,
+      { symbolId: staleSymbolId },
+    );
+    assert.deepEqual(staleRows, []);
+    const embeddingRows = await ladybugDb.queryAll<{ symbolId: string }>(
+      conn,
+      `MATCH (e:SymbolVectorEmbedding {symbolId: $symbolId})
+       RETURN e.symbolId AS symbolId`,
+      { symbolId: staleSymbolId },
+    );
+    assert.deepEqual(embeddingRows, []);
+    const neighbors = await queryStoredProcAll<{
+      symbolId: string;
+      distance: number;
+    }>(
+      conn,
+      `CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding', 'symbol_vec_jina_code_v2', ${JSON.stringify(survivingVector)}, 1, efs := 200) RETURN node.symbolId AS symbolId, distance`,
+    );
+    assert.equal(neighbors.length, 1);
+    assert.equal(neighbors[0]?.symbolId, survivingSymbolId);
+    assert.ok(Math.abs(neighbors[0]?.distance ?? Number.POSITIVE_INFINITY) <= 1e-6);
   });
 
   it("materializes multiple SCIP external symbols through the real DB batch path", async () => {
