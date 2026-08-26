@@ -278,6 +278,11 @@ export async function deleteRepo(
         { replacements, repoId },
       );
     }
+    await exec(
+      txConn,
+      `MATCH (e:SymbolVectorEmbedding {repoId: $repoId}) DELETE e`,
+      { repoId },
+    );
 
     await exec(
       txConn,
@@ -732,6 +737,7 @@ async function _deleteFilesByIdsInner(
       { symbolIds },
     );
 
+    await deleteSymbolVectorEmbeddingsBySymbolIds(conn, symbolIds);
     // Step 6: Batch-delete Symbol nodes
     await exec(
       conn,

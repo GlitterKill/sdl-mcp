@@ -421,6 +421,21 @@ describe("Semantic Embedding Pipeline", () => {
     );
   });
 
+  it("deleteFilesByIds removes every model row and retains live HNSW", async () => {
+    const preservedVector = await seedDeletionVectors(
+      [symbols[0], symbols[1]],
+      symbols[2],
+    );
+
+    await withWriteConn((conn) => ladybugDb.deleteFilesByIds(conn, ["file1"]));
+
+    await assertDeletedVectorsAndHealthyIndex(
+      [symbols[0].symbolId, symbols[1].symbolId],
+      symbols[2].symbolId,
+      preservedVector,
+    );
+  });
+
   it("deleteSymbolsByIds removes every model row and retains live HNSW", async () => {
     const preservedVector = await seedDeletionVectors([symbols[0]], symbols[1]);
 

@@ -133,6 +133,15 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
         );
       }
     }
+    await queries.setSymbolVectorEmbedding(
+      conn,
+      "remove-repo",
+      "orphan_embedding_remove_repo",
+      "jina-embeddings-v2-base-code",
+      "orphan-jina",
+      "orphan-jina-hash",
+      new Array<number>(768).fill(0.3),
+    );
     for (const statement of [
       "CREATE (:Symbol {symbolId: 'shared_placeholder', repoId: 'remove-repo', external: true, symbolStatus: 'placeholder'})",
       "CREATE (:SymbolVersion {id: 'shared_placeholder_version', versionId: 'shared_orphan_version', symbolId: 'shared_placeholder'})",
@@ -236,6 +245,12 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       assert.strictEqual(await count(`MATCH (n:${table} {${key}: '${target}'}) RETURN count(n) AS c`), 0);
       assert.strictEqual(await count(`MATCH (n:${table} {${key}: '${keeper}'}) RETURN count(n) AS c`), 1);
     }
+    assert.strictEqual(
+      await count(
+        "MATCH (e:SymbolVectorEmbedding {embeddingId: 'jina-embeddings-v2-base-code:orphan_embedding_remove_repo'}) RETURN count(e) AS c",
+      ),
+      0,
+    );
 
     const relationCounts: Record<string, number> = {
       FILE_IN_REPO: 1,
