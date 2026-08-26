@@ -9,15 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Code Mode response continuation**: Added direct stored-response paging through `sdl.retrieve` with the `responseGet` operation.
-
 ### Changed
+
+### Fixed
+
+## [0.13.5] - 2026-08-25
+
+### Added
+
+- **Code Mode response continuation**: Added direct stored-response paging through `sdl.retrieve` with the `responseGet` operation.
 
 ### Fixed
 
 - **Structured MCP output validation**: Ensure the strict `sdl.retrieve` and `sdl.workflow` public schemas accept emitted fields, including truncated symbol-card dependency counts and complete `delta.get` preview metadata, while rejecting incomplete delta preview metadata.
 
 - **Bounded Windows CI tests**: Stream per-file progress, terminate hung test process trees after ten minutes, and cap the cross-platform test job at 45 minutes instead of consuming GitHub's six-hour limit.
+
+_34 commits from 1 contributor_
 
 ## [0.13.4] - 2026-08-24
 
