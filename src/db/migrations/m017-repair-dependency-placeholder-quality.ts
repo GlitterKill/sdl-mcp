@@ -22,6 +22,9 @@ export async function up(conn: Connection): Promise<void> {
       // once current schema DDL is available.
       normalizeStableFields: false,
     });
-    await pruneIsolatedPlaceholderSymbols(conn, repo.repoId);
+    await pruneIsolatedPlaceholderSymbols(conn, repo.repoId, {
+      // v16 predates m026 and cannot contain SymbolVectorEmbedding rows.
+      deleteSymbolVectorEmbeddings: false,
+    });
   }
 }

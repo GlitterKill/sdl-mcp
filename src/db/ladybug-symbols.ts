@@ -965,6 +965,7 @@ async function countFileBackedDependencyMetadataRepairs(
 export async function pruneIsolatedPlaceholderSymbols(
   conn: Connection,
   repoId: string,
+  options: { deleteSymbolVectorEmbeddings?: boolean } = {},
 ): Promise<number> {
   const rows = await queryAll<{ symbolId: string }>(
     conn,
@@ -1165,7 +1166,9 @@ export async function pruneIsolatedPlaceholderSymbols(
       );
     }
     if (symbolIds.length > 0) {
-      await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
+      if (options.deleteSymbolVectorEmbeddings !== false) {
+        await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
+      }
       await exec(
         txConn,
         `MATCH (s:Symbol)
