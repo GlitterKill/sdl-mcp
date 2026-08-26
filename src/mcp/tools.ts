@@ -5459,8 +5459,9 @@ export function withProjectionSuccessOutputSchema(
     // response.get is byte-faithful recovery. Its explicit projected schemas
     // are the exhaustive public validators; re-adding the canonical unknown
     // content arm here would manufacture a second arbitrary-record contract.
-    // delta.get's projected schema is the canonical schema with only compact's
-    // optional empty blast radius, so it validates compact and full itself.
+    // delta.get's projected preview/normal union is likewise exhaustive: it
+    // accepts optional blast radius and large-delta warnings while rejecting
+    // incomplete preview metadata.
     ...(action === "response.get" || action === "delta.get"
       ? []
       : [strictCanonicalPublicSuccessSchema(action, canonicalSchema)]),
