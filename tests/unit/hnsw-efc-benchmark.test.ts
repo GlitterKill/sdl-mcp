@@ -195,4 +195,24 @@ describe("HNSW efc benchmark", () => {
       /RETURN node\.\$\{targetIdProperty\} AS id, distance/,
     );
   });
+
+  it("does not defer a one-symbol incremental embedding refresh", () => {
+    const source = readFileSync("src/indexer/embeddings.ts", "utf8");
+    const fnStart = source.indexOf(
+      "export async function refreshSymbolEmbeddings(",
+    );
+    const fnEnd = source.indexOf("\nexport ", fnStart + 1);
+    assert.ok(fnStart !== -1);
+    const fnBody = source.slice(
+      fnStart,
+      fnEnd === -1 ? source.length : fnEnd,
+    );
+
+    assert.ok(
+      !/return\s*\{\s*embedded:\s*0,\s*skipped,\s*deferred:\s*uncachedItems\.length\s*\}/.test(
+        fnBody,
+      ),
+      "one changed symbol should be persisted immediately",
+    );
+  });
 });

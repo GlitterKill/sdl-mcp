@@ -596,10 +596,9 @@ export const MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE = 16;
 export const DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS = 4096;
 
 /**
- * When the count of uncached vector rows to embed exceeds this threshold,
- * the symbol and FileSummary refreshers drop the HNSW vector index, perform
- * the bulk write without per-row index maintenance, then recreate the index
- * in a single rebuild pass.
+ * When the count of uncached FileSummary vector rows exceeds this threshold,
+ * the refresher drops the HNSW vector index, performs the bulk write without
+ * per-row index maintenance, then recreates the index in one rebuild pass.
  *
  * Pinned to 0 (always rebuild) to work around upstream LadybugDB issue #377
  * — the engine refuses ALL in-place writes to HNSW-indexed columns, so the
@@ -629,21 +628,6 @@ export const VECTOR_REBUILD_THRESHOLD = 0;
  * built index.
  */
 export const FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS = 50;
-
-/**
- * Debounce floor for Symbol HNSW rebuild cycles.
- *
- * Same rationale as FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS above: with
- * VECTOR_REBUILD_THRESHOLD pinned to 0 (LADYBUG#377), every Symbol embedding
- * refresh with >=1 uncached row runs the drop -> bulk write -> create cycle
- * per model. On 2026-07-08 that native cycle silently crashed the server
- * during the second model's rebuild (259 uncached rows triggered two full
- * 26k-row HNSW rebuilds), tearing the WAL. Refreshes defer the rebuild until
- * at least this many uncached rows accumulate; a full-scope refresh where
- * nothing is cached yet (bootstrap) always rebuilds. Deferred rows stay
- * hash-uncached, so a later refresh picks them up.
- */
-export const SYMBOL_VECTOR_REBUILD_MIN_ROWS = 50;
 
 /**
  * Default timeout for operations in milliseconds.

@@ -11,8 +11,6 @@ import {
   DEFAULT_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_CONCURRENCY,
-  SYMBOL_VECTOR_REBUILD_MIN_ROWS,
-  VECTOR_REBUILD_THRESHOLD,
 } from "../config/constants.js";
 import {
   createOnnxSession,
@@ -32,13 +30,13 @@ import {
 } from "../db/ladybug-symbol-embeddings.js";
 import {
   createVectorIndex,
-  dropVectorIndex,
   showIndexesStrict,
 } from "../retrieval/index-lifecycle.js";
 import {
   EMBEDDING_MODELS,
   getVecPropertyName,
   getVectorIndexName,
+  SYMBOL_VECTOR_EMBEDDING_TABLE,
 } from "../retrieval/model-mapping.js";
 import { prepareSymbolEmbeddingInputs } from "./symbol-embedding-context.js";
 import { buildSymbolEmbeddingText } from "./symbol-embedding-text.js";
@@ -338,12 +336,6 @@ export async function refreshSymbolEmbeddings(params: {
    * value can't OOM the tokenizer or break ONNX session shape contracts.
    */
   batchSize?: number;
-  /**
-   * Minimum uncached rows before the HNSW drop/rebuild cycle runs.
-   * Defaults to SYMBOL_VECTOR_REBUILD_MIN_ROWS; tests pass 1 to force
-   * the rebuild path.
-   */
-  rebuildMinUncachedRows?: number;
   vectorIndexName?: string;
   vectorEfc?: number;
   /** Preserve the repo-specific timeout for destructive rebuild sessions. */
@@ -465,37 +457,25 @@ export async function refreshSymbolEmbeddings(params: {
   // throughput optimisation.
   uncachedItems.sort((a, b) => a.prefixedText.length - b.prefixedText.length);
 
-  // Debounce the HNSW rebuild cycle. VECTOR_REBUILD_THRESHOLD is pinned to 0
-  // (LADYBUG#377), so every refresh with >=1 uncached row takes the drop ->
-  // bulk write -> create path below; that native cycle silently crashed the
-  // server on 2026-07-08 during the second model's Symbol rebuild (see
-  // SYMBOL_VECTOR_REBUILD_MIN_ROWS in constants.ts). Defer small refreshes
-  // until enough uncached rows accumulate. Full-scope refreshes where
-  // nothing is cached yet (bootstrap) always rebuild so small repositories
-  // still get vectors. Deferred rows stay hash-uncached in the DB, so a
-  // later refresh naturally picks them up.
   const vecProp = getVecPropertyName(modelName);
   const indexName = params.vectorIndexName ?? getVectorIndexName(modelName);
-  const rebuildMinUncachedRows =
-    params.rebuildMinUncachedRows ?? SYMBOL_VECTOR_REBUILD_MIN_ROWS;
-  const bootstrapRebuild =
-    params.symbols === undefined &&
-    uncachedItems.length > 0 &&
-    uncachedItems.length === symbols.length;
-  if (
-    vecProp !== null &&
-    indexName !== null &&
-    uncachedItems.length < rebuildMinUncachedRows &&
-    !bootstrapRebuild
-  ) {
-    if (uncachedItems.length > 0) {
-      logger.info("[embeddings] Symbol vector rebuild deferred", {
-        model: storageModel,
-        uncached: uncachedItems.length,
-        threshold: rebuildMinUncachedRows,
-      });
+  const modelInfo = EMBEDDING_MODELS[modelName];
+  let shouldBootstrapIndex = false;
+  if (vecProp !== null && indexName !== null && modelInfo) {
+    const configuredIndex = (await showIndexesStrict(conn)).find(
+      ({ tableName, name }) =>
+        tableName === SYMBOL_VECTOR_EMBEDDING_TABLE && name === indexName,
+    );
+    if (
+      configuredIndex &&
+      (configuredIndex.type !== "vector" ||
+        configuredIndex.property !== vecProp)
+    ) {
+      throw new IndexError(
+        `Configured vector index '${indexName}' belongs to ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${configuredIndex.property} (${configuredIndex.type}), not ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${vecProp}`,
+      );
     }
-    return { embedded: 0, skipped, deferred: uncachedItems.length };
+    shouldBootstrapIndex = configuredIndex === undefined;
   }
 
   // Resolve concurrency: clamp to [1, MAX_EMBEDDING_CONCURRENCY].
@@ -534,52 +514,7 @@ export async function refreshSymbolEmbeddings(params: {
   // pre-pass found cached embeddings — no surprise jump on first chunk).
   fireProgress();
 
-  // P2: HNSW drop+rebuild for bulk runs. When the uncached count exceeds
-  // VECTOR_REBUILD_THRESHOLD, dropping the vector index for the duration
-  // of the writes is much cheaper than per-row HNSW maintenance:
-  // O(N · log N · M · efc) becomes O(rebuild) ≈ a single pass at the end.
-  const useRebuildPath =
-    vecProp !== null &&
-    indexName !== null &&
-    uncachedItems.length >= VECTOR_REBUILD_THRESHOLD;
   const runPersistenceCycle = async () => {
-    let indexDropped = false;
-    if (useRebuildPath) {
-      // The outer HNSW lifecycle checkpoints before this session starts.
-      const dropResult = await measure("hnsw.drop", () =>
-        withWriteConn(async (wConn) => {
-          const existing = (await showIndexesStrict(wConn)).find(
-            ({ name }) => name === indexName,
-          );
-          if (
-            existing &&
-            (existing.tableName !== "Symbol" ||
-              existing.type !== "vector" ||
-              existing.property !== vecProp)
-          ) {
-            throw new IndexError(
-              `Configured vector index '${indexName}' belongs to ${existing.tableName ?? "unknown"}.${existing.property} (${existing.type}), not Symbol.${vecProp}`,
-            );
-          }
-          return dropVectorIndex(wConn, "Symbol", indexName);
-        }),
-      );
-      indexDropped = dropResult.status !== "failed";
-      if (dropResult.status === "dropped") {
-        logger.info(
-          `[embeddings] Bulk path: dropped vector index '${indexName}' for ${uncachedItems.length} writes (rebuild after)`,
-        );
-      } else if (dropResult.status === "absent") {
-        logger.debug(
-          `[embeddings] Vector index '${indexName}' already absent before bulk rebuild`,
-        );
-      } else {
-        logger.warn(
-          `[embeddings] Vector index '${indexName}' drop failed (${dropResult.error}); falling back to per-row HNSW maintenance`,
-        );
-      }
-    }
-
     // Resolve effective batch size: clamp caller-supplied value to a sane
     // window so a misconfigured `embeddingBatchSize` cannot OOM tokenizer
     // padding or violate the ONNX session's expected input shape.
@@ -610,30 +545,6 @@ export async function refreshSymbolEmbeddings(params: {
       terminal: boolean;
       failed: boolean;
       degraded?: boolean;
-    };
-
-    // P2.b: write-coalescing buffer for the rebuild path. Batching ~8 ONNX
-    // batches into one DB write cuts writeLimiter handshakes without changing
-    // correctness: the items are independent model-scoped embedding rows.
-    // Buffer is mutated only
-    // from non-concurrent code paths (inside processBatch's single tick of
-    // pendingWriteItems.push, and the chunk-boundary flush after allSettled),
-    // so no lock is required.
-    const COALESCE_WRITE_BUFFER_SIZE = 256;
-    const pendingWriteItems: SymbolVectorEmbeddingBatchItem[] = [];
-
-    const flushPendingWrites = async (force: boolean): Promise<void> => {
-      if (pendingWriteItems.length === 0) return;
-      if (!force && pendingWriteItems.length < COALESCE_WRITE_BUFFER_SIZE) return;
-      const toWrite = pendingWriteItems.splice(0);
-      await withWriteConn(async (wConn) => {
-        await setSymbolVectorEmbeddingBatch(
-          wConn,
-          params.repoId,
-          storageModel,
-          toWrite,
-        );
-      });
     };
 
     const processBatch = async (batch: UncachedBatch): Promise<BatchResult> => {
@@ -689,12 +600,11 @@ export async function refreshSymbolEmbeddings(params: {
       // P5: post-embed recheck for race avoidance is now an in-memory lookup
       // against the pre-pass snapshot rather than a fresh DB round-trip per
       // batch. Authoritative reasoning: parallel calls in metrics-updater.ts
-      // each pass a distinct `model`, and each model writes to disjoint
-      // Symbol properties (embeddingJinaCode* vs embeddingNomic*), so the
-      // per-model snapshots cannot race each other. If a future change adds
-      // a same-model parallel writer, this in-memory shortcut must be
-      // re-evaluated — writeLimiter serializes connections, not the in-
-      // memory snapshot, and two refreshes of the same model could write
+      // each pass a distinct `model`, and each model writes to disjoint rows,
+      // so the per-model snapshots cannot race each other. If a future change
+      // adds a same-model parallel writer, this in-memory shortcut must be
+      // re-evaluated — writeLimiter serializes connections, not the in-memory
+      // snapshot, and two refreshes of the same model could write
       // duplicate work. Cross-process races degrade to rare duplicate
       // identical writes (harmless).
       const postEmbedExisting = existingEmbeddings;
@@ -714,23 +624,14 @@ export async function refreshSymbolEmbeddings(params: {
       }
 
       if (batchItems.length > 0) {
-        if (indexDropped) {
-          // Coalesced path: append to shared buffer; flush is driven by the
-          // chunk-boundary in the dispatch loop (and the force-flush in
-          // `finally` before HNSW rebuild).
-          pendingWriteItems.push(...batchItems);
-        } else {
-          // Preserve the existing immediate-write fallback while the legacy
-          // Symbol HNSW lifecycle remains in this orchestration path.
-          await withWriteConn(async (wConn) => {
-            await setSymbolVectorEmbeddingBatch(
-              wConn,
-              params.repoId,
-              storageModel,
-              batchItems,
-            );
-          });
-        }
+        await withWriteConn(async (wConn) => {
+          await setSymbolVectorEmbeddingBatch(
+            wConn,
+            params.repoId,
+            storageModel,
+            batchItems,
+          );
+        });
       }
 
       return {
@@ -789,97 +690,67 @@ export async function refreshSymbolEmbeddings(params: {
         if (processedBatches > 0 && failedBatches / processedBatches > 0.5) {
           throw new IndexError("Embedding failure rate exceeds 50%");
         }
-
-        // P2.b: chunk-boundary opportunistic flush. Only flushes when the
-        // pending buffer has reached COALESCE_WRITE_BUFFER_SIZE so concurrency
-        // > 1 still amortises the writeLimiter handshake across the whole
-        // chunk. A flush failure is logged but does not abort the loop —
-        // the items remain in the buffer and the force-flush in `finally`
-        // will retry once.
-        if (indexDropped) {
-          try {
-            const flushPhaseName =
-              chunkStart + maxConcurrency >= batches.length
-                ? "persistence.finalFlush"
-                : "persistence.flush";
-            await measure(flushPhaseName, () => flushPendingWrites(false));
-          } catch (err) {
-            logger.warn(
-              "[embeddings] Coalesced write flush failed (will retry at end)",
-              {
-                error: err instanceof Error ? err.message : String(err),
-                pending: pendingWriteItems.length,
-              },
-            );
-          }
-        }
       }
       recordMemorySnapshot("afterInference");
     } finally {
-      // P2.b: drain any remaining coalesced writes BEFORE rebuilding the
-      // index. The rebuild scans Symbol.<vecProp>, so unflushed items would
-      // not appear in HNSW until the next refresh. Failures here are logged
-      // and counted toward `embedded` only after successful flush.
-      if (indexDropped && pendingWriteItems.length > 0) {
-        try {
-          await measure("persistence.finalFlush", () => flushPendingWrites(true));
-        } catch (err) {
-          logger.error(
-            `[embeddings] Final coalesced write flush failed — ${pendingWriteItems.length} vectors will not be persisted; vector retrieval may be stale`,
-            { error: err instanceof Error ? err.message : String(err) },
-          );
-        }
-      }
-
-      // P2: rebuild the dropped index regardless of write outcome.
-      if (indexDropped && vecProp !== null && indexName !== null) {
-        const modelInfo = EMBEDDING_MODELS[modelName];
-        if (modelInfo) {
-          recordMemorySnapshot("beforeHnsw");
-          params.onProgress?.({
-            stage: "embeddings",
-            substage: "symbolVectorIndex",
-            current: Math.min(skipped + embedded, symbols.length),
-            total: symbols.length,
-            model: storageModel,
-            message: "building HNSW",
-          });
-          let ok: boolean;
-          try {
-            ok = await measure("hnsw.create", () =>
-              withWriteConn((wConn) =>
-                createVectorIndex(
-                  wConn,
-                  "Symbol",
-                  vecProp,
-                  indexName,
-                  modelInfo.dimension,
-                  params.vectorEfc,
+      if (
+        shouldBootstrapIndex &&
+        vecProp !== null &&
+        indexName !== null &&
+        modelInfo
+      ) {
+        await runHnswRebuildCycle(
+          "symbol-vector-bootstrap-pre-create",
+          "symbol-vector-bootstrap-post-create",
+          async () => {
+            recordMemorySnapshot("beforeHnsw");
+            params.onProgress?.({
+              stage: "embeddings",
+              substage: "symbolVectorIndex",
+              current: Math.min(skipped + embedded, symbols.length),
+              total: symbols.length,
+              model: storageModel,
+              message: "building HNSW",
+            });
+            let ok: boolean;
+            try {
+              ok = await measure("hnsw.create", () =>
+                withWriteConn((wConn) =>
+                  createVectorIndex(
+                    wConn,
+                    SYMBOL_VECTOR_EMBEDDING_TABLE,
+                    vecProp,
+                    indexName,
+                    modelInfo.dimension,
+                    params.vectorEfc,
+                  ),
                 ),
-              ),
-            );
-          } finally {
-            recordMemorySnapshot("afterHnsw");
-          }
-          params.onProgress?.({
-            stage: "embeddings",
-            substage: "symbolVectorIndex",
-            current: Math.min(skipped + embedded, symbols.length),
-            total: symbols.length,
-            model: storageModel,
-            message: ok ? "ready" : "rebuild failed",
-          });
-          if (ok) {
-            logger.info(
-              `[embeddings] Vector index '${indexName}' rebuilt after bulk write`,
-            );
-          } else {
-            logger.error(
-              `[embeddings] Vector index '${indexName}' rebuild FAILED — vector retrieval for ${modelName} will degrade until next refresh`,
-            );
-          }
-          // The outer HNSW lifecycle checkpoints after this session releases.
-        }
+              );
+            } finally {
+              recordMemorySnapshot("afterHnsw");
+            }
+            params.onProgress?.({
+              stage: "embeddings",
+              substage: "symbolVectorIndex",
+              current: Math.min(skipped + embedded, symbols.length),
+              total: symbols.length,
+              model: storageModel,
+              message: ok ? "ready" : "creation failed",
+            });
+            if (ok) {
+              logger.info(
+                `[embeddings] Vector index '${indexName}' created on ${SYMBOL_VECTOR_EMBEDDING_TABLE}`,
+              );
+            } else {
+              logger.error(
+                `[embeddings] Vector index '${indexName}' creation FAILED — vector retrieval for ${modelName} will degrade until next refresh`,
+              );
+            }
+          },
+          params.postIndexSessionTimeoutMs,
+          params.recordTiming,
+          params.repoId,
+        );
       }
     }
 
@@ -894,13 +765,5 @@ export async function refreshSymbolEmbeddings(params: {
       ? { embedded, skipped, degraded: true }
       : { embedded, skipped };
   };
-  if (!useRebuildPath) return runPersistenceCycle();
-  return runHnswRebuildCycle(
-    "symbol-vector-rebuild-pre-drop",
-    "symbol-vector-rebuild-post-create",
-    runPersistenceCycle,
-    params.postIndexSessionTimeoutMs,
-    params.recordTiming,
-    params.repoId,
-  );
+  return runPersistenceCycle();
 }

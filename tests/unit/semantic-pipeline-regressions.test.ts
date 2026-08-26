@@ -89,6 +89,40 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
+  it("retains Symbol HNSW while preserving FileSummary rebuilds", () => {
+    const symbolSource = readSource("src/indexer/embeddings.ts");
+    const symbolStart = symbolSource.indexOf(
+      "export async function refreshSymbolEmbeddings(",
+    );
+    const symbolEnd = symbolSource.indexOf("\nexport ", symbolStart + 1);
+    assert.ok(symbolStart !== -1);
+    const symbolBody = symbolSource.slice(
+      symbolStart,
+      symbolEnd === -1 ? symbolSource.length : symbolEnd,
+    );
+
+    assert.ok(
+      !/dropVectorIndex\s*\(/.test(symbolBody),
+      "Symbol embedding refresh must not drop its live HNSW",
+    );
+    assert.ok(
+      !/rebuildMinUncachedRows|SYMBOL_VECTOR_REBUILD_MIN_ROWS|VECTOR_REBUILD_THRESHOLD|useRebuildPath/.test(
+        symbolBody,
+      ),
+      "Symbol embedding refresh must not defer small incremental writes behind a rebuild threshold",
+    );
+
+    const fileSummarySource = readSource(
+      "src/indexer/file-summary-embeddings.ts",
+    );
+    assert.match(fileSummarySource, /rebuildMinUncachedRows/);
+    assert.match(
+      fileSummarySource,
+      /dropVectorIndex\(wConn, "FileSummary", indexName\)/,
+      "FileSummary keeps its existing drop/rebuild lifecycle",
+    );
+  });
+
   it("runs semantic rebuilds outside ambient indexer sessions", () => {
     const indexer = readSource("src/indexer/indexer.ts");
     const metricsUpdater = readSource("src/indexer/metrics-updater.ts");
