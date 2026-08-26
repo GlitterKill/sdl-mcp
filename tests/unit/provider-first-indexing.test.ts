@@ -135,7 +135,7 @@ import {
   createBaseSchema,
   createSecondaryIndexes,
 } from "../../dist/db/ladybug-schema.js";
-import { setSymbolEmbeddingBatchOnNode } from "../../dist/db/ladybug-symbol-embeddings.js";
+import { setSymbolVectorEmbeddingBatch } from "../../dist/db/ladybug-symbol-embeddings.js";
 import { unresolvedCallSymbolId } from "../../dist/db/symbol-placeholders.js";
 import { ensureFtsIndexForNonEmptyTable } from "../../dist/retrieval/index-lifecycle.js";
 import { normalizePath } from "../../dist/util/paths.js";
@@ -8700,21 +8700,14 @@ describe("provider-first indexing foundation", () => {
       unresolvedTargets,
     );
     const mutatedPlaceholders = expectedPlaceholders.map((row) => {
-      const embeddingIndex = unresolvedTargets.indexOf(row.symbolId);
       return row.symbolId === unresolvedTargets.at(-1)
         ? {
             ...row,
             summary: "release-scale mutated placeholder summary",
             summaryQuality: 0.9,
             summarySource: "qa:release-scale",
-            embeddingJinaCode: `embedding-${embeddingIndex}`,
-            embeddingJinaCodeCardHash: `card-${embeddingIndex}`,
           }
-        : {
-            ...row,
-            embeddingJinaCode: `embedding-${embeddingIndex}`,
-            embeddingJinaCodeCardHash: `card-${embeddingIndex}`,
-          };
+        : row;
     });
     let activeConn: import("kuzu").Connection | undefined;
 
@@ -8812,13 +8805,15 @@ describe("provider-first indexing foundation", () => {
           "qa:release-scale",
           now,
         );
-        await setSymbolEmbeddingBatchOnNode(
+        await setSymbolVectorEmbeddingBatch(
           writeConn,
+          repoId,
           "jina-embeddings-v2-base-code",
           unresolvedTargets.map((symbolId, index) => ({
             symbolId,
             vector: `embedding-${index}`,
             cardHash: `card-${index}`,
+            vectorArray: new Array<number>(768).fill(0.001 + index / 100),
           })),
         );
         await assertReleaseScaleState(

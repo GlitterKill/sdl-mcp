@@ -30,10 +30,10 @@ describe("semantic pipeline regressions", () => {
     );
 
     // 2. Pre-pass batch load of existing embeddings
-    const prePassIdx = fnBody.indexOf("getSymbolEmbeddingsFromNodes");
+    const prePassIdx = fnBody.indexOf("getSymbolVectorEmbeddings");
     assert.ok(
       prePassIdx !== -1,
-      "refreshSymbolEmbeddings should use batch getSymbolEmbeddingsFromNodes",
+      "refreshSymbolEmbeddings should use batch getSymbolVectorEmbeddings",
     );
 
     // 3. cardHash computed per symbol in uncached filter loop

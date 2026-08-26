@@ -43,6 +43,9 @@ export const EMBEDDING_MODELS: Readonly<Record<string, EmbeddingModelInfo>> = {
   },
 } as const;
 
+/** Dedicated storage table for model-scoped Symbol vectors. */
+export const SYMBOL_VECTOR_EMBEDDING_TABLE = "SymbolVectorEmbedding";
+
 // ---------------------------------------------------------------------------
 // Property name helpers
 // ---------------------------------------------------------------------------

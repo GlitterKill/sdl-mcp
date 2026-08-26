@@ -769,30 +769,30 @@ describe("embedding persistence uses numeric arrays", () => {
     "utf8",
   );
 
-  it("setSymbolEmbeddingOnNode accepts vectorArray parameter", () => {
+  it("setSymbolVectorEmbedding requires a numeric vector", () => {
     assert.ok(
-      embSrc.includes("vectorArray?: number[]"),
-      "setSymbolEmbeddingOnNode should accept optional vectorArray",
+      embSrc.includes("vectorArray: number[]"),
+      "setSymbolVectorEmbedding should require a numeric vector",
     );
   });
 
-  it("setSymbolEmbeddingOnNode writes to DOUBLE[] column when vectorArray provided", () => {
+  it("writes vectors to the model-specific numeric column", () => {
     assert.ok(
-      embSrc.includes("DOUBLE[] column for vector indexing"),
-      "Should write to DOUBLE[] column",
+      embSrc.includes("e.${vectorProperty} = $vectorArray"),
+      "Should write to the selected numeric vector column",
     );
   });
 
-  it("resolvePropertyNames includes vecProp", () => {
+  it("resolves the model-specific vector property", () => {
     assert.ok(
-      embSrc.includes("vecProp: string | null"),
-      "resolvePropertyNames should return vecProp",
+      embSrc.includes("getVecPropertyName(model)"),
+      "storage should resolve the model-specific vector property",
     );
   });
 
   it("embedding caller passes raw vector array via batch", () => {
-    const callSite = callerSrc.indexOf("setSymbolEmbeddingBatchOnNode(");
-    assert.ok(callSite > 0, "Should have a call to setSymbolEmbeddingBatchOnNode");
+    const callSite = callerSrc.indexOf("setSymbolVectorEmbeddingBatch(");
+    assert.ok(callSite > 0, "Should call setSymbolVectorEmbeddingBatch");
     const batchItemSite = callerSrc.indexOf("vectorArray: batchVectors[");
     assert.ok(
       batchItemSite > 0,

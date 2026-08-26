@@ -58,7 +58,7 @@ export async function upsertSymbolEmbedding(
   );
 }
 
-/** @deprecated Use getSymbolEmbeddingFromNode from ladybug-symbol-embeddings.ts instead. */
+/** @deprecated Use getSymbolVectorEmbedding from ladybug-symbol-embeddings.ts instead. */
 export async function getSymbolEmbedding(
   conn: Connection,
   symbolId: string,
@@ -78,7 +78,7 @@ export async function getSymbolEmbedding(
   return row ?? null;
 }
 
-/** @deprecated Use getSymbolEmbeddingsFromNodes from ladybug-symbol-embeddings.ts instead. */
+/** @deprecated Use getSymbolVectorEmbeddings from ladybug-symbol-embeddings.ts instead. */
 export async function getSymbolEmbeddings(
   conn: Connection,
   symbolIds: string[],

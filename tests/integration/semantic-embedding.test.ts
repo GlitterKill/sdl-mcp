@@ -275,6 +275,123 @@ describe("Semantic Embedding Pipeline", () => {
     assert.strictEqual(embeddings[1].length, 64);
   });
 
+  it("stores model-specific symbol vectors as independent complete rows", async () => {
+    const conn = await getLadybugConn();
+    const symbolId = symbols[0].symbolId;
+    const nomicModel = "nomic-embed-text-v1.5";
+    const jinaVector = makeDeterministicVector("jina", 1, 0);
+    const nomicVector = makeDeterministicVector("nomic", 2, 0);
+
+    await withWriteConn(async (writeConn) => {
+      await ladybugDb.setSymbolVectorEmbeddingBatch(
+        writeConn,
+        repoId,
+        jinaModel,
+        [
+          {
+            symbolId,
+            vector: "jina-text-vector",
+            cardHash: "jina-card-hash",
+            vectorArray: jinaVector,
+          },
+        ],
+      );
+      await ladybugDb.setSymbolVectorEmbedding(
+        writeConn,
+        repoId,
+        symbolId,
+        nomicModel,
+        "nomic-text-vector",
+        "nomic-card-hash",
+        nomicVector,
+      );
+    });
+
+    const rows = await ladybugDb.queryAll<{
+      embeddingId: string;
+      repoId: string;
+      symbolId: string;
+      model: string;
+      vector: string;
+      cardHash: string;
+      updatedAt: string;
+      jinaVector: unknown;
+      nomicVector: unknown;
+    }>(
+      conn,
+      `MATCH (e:SymbolVectorEmbedding {symbolId: $symbolId})
+       RETURN e.embeddingId AS embeddingId,
+              e.repoId AS repoId,
+              e.symbolId AS symbolId,
+              e.model AS model,
+              e.embeddingVector AS vector,
+              e.cardHash AS cardHash,
+              e.updatedAt AS updatedAt,
+              e.embeddingJinaCodeVec AS jinaVector,
+              e.embeddingNomicVec AS nomicVector
+       ORDER BY e.model`,
+      { symbolId },
+    );
+    assert.deepStrictEqual(
+      rows.map(
+        ({ embeddingId, repoId: rowRepoId, symbolId: rowSymbolId, model }) => ({
+          embeddingId,
+          repoId: rowRepoId,
+          symbolId: rowSymbolId,
+          model,
+        }),
+      ),
+      [
+        {
+          embeddingId: `${jinaModel}:${symbolId}`,
+          repoId,
+          symbolId,
+          model: jinaModel,
+        },
+        {
+          embeddingId: `${nomicModel}:${symbolId}`,
+          repoId,
+          symbolId,
+          model: nomicModel,
+        },
+      ],
+    );
+    assert.deepStrictEqual(
+      rows.map(({ vector, cardHash }) => ({ vector, cardHash })),
+      [
+        { vector: "jina-text-vector", cardHash: "jina-card-hash" },
+        { vector: "nomic-text-vector", cardHash: "nomic-card-hash" },
+      ],
+    );
+    assert.ok(rows.every(({ updatedAt }) => updatedAt.length > 0));
+    assertStoredVectorArray(rows[0].jinaVector, "Jina row");
+    assert.strictEqual(rows[0].nomicVector, null);
+    assert.strictEqual(rows[1].jinaVector, null);
+    assertStoredVectorArray(rows[1].nomicVector, "Nomic row");
+
+    await ladybugDb.exec(
+      conn,
+      `MATCH (e:SymbolVectorEmbedding {embeddingId: $embeddingId})
+       SET e.embeddingJinaCodeVec = null`,
+      { embeddingId: `${jinaModel}:${symbolId}` },
+    );
+
+    const complete = await ladybugDb.getSymbolVectorEmbeddings(
+      conn,
+      [symbolId],
+      jinaModel,
+    );
+    assert.strictEqual(
+      complete.has(symbolId),
+      false,
+      "text and hash without the selected numeric vector must be recomputed",
+    );
+    assert.strictEqual(
+      await ladybugDb.getSymbolVectorEmbedding(conn, symbolId, jinaModel),
+      null,
+    );
+  });
+
   it("refreshSymbolEmbeddings skips persistence for mock-fallback embeddings", async () => {
     const result = await refreshSymbolEmbeddings({
       repoId,
@@ -419,7 +536,7 @@ describe("Semantic Embedding Pipeline", () => {
 
     const conn = await getLadybugConn();
     for (const symbol of symbols) {
-      const embedding = await ladybugDb.getSymbolEmbeddingFromNode(
+      const embedding = await ladybugDb.getSymbolVectorEmbedding(
         conn,
         symbol.symbolId,
         jinaModel,
@@ -536,6 +653,15 @@ describe("Semantic Embedding Pipeline", () => {
 
   it("rejects an HNSW probe that cannot recover a near-zero neighbor", async () => {
     const { provider } = createRecordingProvider();
+    const legacyProbe = makeDeterministicVector("legacy-hnsw-probe", 1, 0);
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         SET s.embeddingJinaCodeVec = $legacyProbe`,
+        { symbolId: symbols[0].symbolId, legacyProbe },
+      ),
+    );
     await refreshSymbolEmbeddings({
       repoId,
       provider: "local",

@@ -26,9 +26,9 @@ import {
 } from "./model-registry.js";
 import type { IndexProgress } from "./indexer.js";
 import {
-  getSymbolEmbeddingsFromNodes,
-  setSymbolEmbeddingBatchOnNode,
-  type SymbolEmbeddingBatchItem,
+  getSymbolVectorEmbeddings,
+  setSymbolVectorEmbeddingBatch,
+  type SymbolVectorEmbeddingBatchItem,
 } from "../db/ladybug-symbol-embeddings.js";
 import {
   createVectorIndex,
@@ -422,7 +422,7 @@ export async function refreshSymbolEmbeddings(params: {
 
   // Phase 4: Pre-pass - batch load existing embeddings for all symbols.
   const allSymbolIds = symbols.map((s) => s.symbolId);
-  const existingEmbeddings = await getSymbolEmbeddingsFromNodes(
+  const existingEmbeddings = await getSymbolVectorEmbeddings(
     conn,
     allSymbolIds,
     storageModel,
@@ -612,26 +612,27 @@ export async function refreshSymbolEmbeddings(params: {
       degraded?: boolean;
     };
 
-    // P2.b: write-coalescing buffer for the rebuild path. When the HNSW index is
-    // dropped, every per-ONNX-batch DB write is just an INSERT into a plain
-    // FLOAT[] column (no HNSW maintenance), so the per-write overhead is mostly
-    // writeLimiter handshake + tx round-trip. Batching ~8 ONNX batches into one
-    // DB write cuts those handshakes ~8x without any correctness risk: the items
-    // are independent SET ops on disjoint Symbol nodes. Buffer is mutated only
+    // P2.b: write-coalescing buffer for the rebuild path. Batching ~8 ONNX
+    // batches into one DB write cuts writeLimiter handshakes without changing
+    // correctness: the items are independent model-scoped embedding rows.
+    // Buffer is mutated only
     // from non-concurrent code paths (inside processBatch's single tick of
     // pendingWriteItems.push, and the chunk-boundary flush after allSettled),
     // so no lock is required.
     const COALESCE_WRITE_BUFFER_SIZE = 256;
-    const pendingWriteItems: SymbolEmbeddingBatchItem[] = [];
+    const pendingWriteItems: SymbolVectorEmbeddingBatchItem[] = [];
 
     const flushPendingWrites = async (force: boolean): Promise<void> => {
       if (pendingWriteItems.length === 0) return;
       if (!force && pendingWriteItems.length < COALESCE_WRITE_BUFFER_SIZE) return;
       const toWrite = pendingWriteItems.splice(0);
       await withWriteConn(async (wConn) => {
-        await setSymbolEmbeddingBatchOnNode(wConn, storageModel, toWrite, {
-          hnswIndexDropped: indexDropped,
-        });
+        await setSymbolVectorEmbeddingBatch(
+          wConn,
+          params.repoId,
+          storageModel,
+          toWrite,
+        );
       });
     };
 
@@ -697,7 +698,7 @@ export async function refreshSymbolEmbeddings(params: {
       // duplicate work. Cross-process races degrade to rare duplicate
       // identical writes (harmless).
       const postEmbedExisting = existingEmbeddings;
-      const batchItems: SymbolEmbeddingBatchItem[] = [];
+      const batchItems: SymbolVectorEmbeddingBatchItem[] = [];
       for (let i = 0; i < batch.length; i++) {
         const postExisting = postEmbedExisting.get(batch[i].symbol.symbolId);
         if (postExisting && postExisting.cardHash === batch[i].cardHash) {
@@ -719,14 +720,15 @@ export async function refreshSymbolEmbeddings(params: {
           // `finally` before HNSW rebuild).
           pendingWriteItems.push(...batchItems);
         } else {
-          // Per-batch immediate write: the index drop failed, so we are on
-          // the legacy per-row HNSW maintenance path that LADYBUG#377 likely
-          // rejects anyway. Preserved for parity with the pre-coalescing
-          // behaviour so a future upstream fix re-enables it cleanly.
+          // Preserve the existing immediate-write fallback while the legacy
+          // Symbol HNSW lifecycle remains in this orchestration path.
           await withWriteConn(async (wConn) => {
-            await setSymbolEmbeddingBatchOnNode(wConn, storageModel, batchItems, {
-              hnswIndexDropped: indexDropped,
-            });
+            await setSymbolVectorEmbeddingBatch(
+              wConn,
+              params.repoId,
+              storageModel,
+              batchItems,
+            );
           });
         }
       }
