@@ -19,6 +19,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
+import {
+  readReleaseInventory,
+  validateReleaseNoteCoverage,
+} from "./build-release-notes.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const CHANGELOG_PATH = join(ROOT, "CHANGELOG.md");
@@ -302,7 +307,20 @@ function fail(message) {
   throw new Error(message);
 }
 
+function readBaseTag(args) {
+  if (
+    args.length !== 2 ||
+    args[0] !== "--base-tag" ||
+    !args[1] ||
+    args[1].startsWith("-")
+  ) {
+    fail("--base-tag <tag> is required");
+  }
+  return args[1];
+}
+
 async function main() {
+  const baseTag = readBaseTag(process.argv.slice(2));
   const pkg = readJson(PACKAGE_PATH);
   const packageLock = readJson(PACKAGE_LOCK_PATH);
   const nativePkg = readJson(NATIVE_PACKAGE_PATH);
@@ -373,6 +391,14 @@ async function main() {
   if (!hasChangelogEntry(changelog, pkg.version)) {
     fail(`CHANGELOG.md is missing an entry for version ${pkg.version}`);
   }
+
+  const inventory = readReleaseInventory({ cwd: ROOT, baseTag, target: "HEAD" });
+  const { preReleaseTargetOid } = validateReleaseNoteCoverage({
+    markdown: changelog,
+    version: pkg.version,
+    inventory,
+  });
+  console.log(JSON.stringify({ preReleaseTargetOid }));
 
   try {
     const published = runCommand(

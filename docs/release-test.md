@@ -23,7 +23,7 @@ This document provides step-by-step testing for SDL-MCP releases. Start with the
 Run this first:
 
 ```powershell
-npm run prepare-release
+npm run prepare-release -- --base-tag <previous-tag>
 ```
 
 `prepare-release` hard-fails on:
@@ -32,6 +32,8 @@ npm run prepare-release
 - invalid self tarball dependency in `package.json` (for example `dependencies.sdl-mcp: "file:*.tgz"`)
 - published-version collision
 - missing changelog entry
+- missing or invalid explicit base tag
+- incomplete release-note coverage or target drift
 - build, lint, typecheck, or test failures
 - `npm audit` findings at `high` or above
 - missing package contents in `npm pack --json`
