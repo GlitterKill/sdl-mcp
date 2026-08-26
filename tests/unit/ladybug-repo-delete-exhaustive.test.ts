@@ -153,6 +153,20 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
     ]) {
       await exec(statement);
     }
+    for (const [model, suffix, value] of [
+      ["jina-embeddings-v2-base-code", "jina", 0.4],
+      ["nomic-embed-text-v1.5", "nomic", 0.5],
+    ] as const) {
+      await queries.setSymbolVectorEmbedding(
+        conn,
+        "remove-repo",
+        "shared_placeholder",
+        model,
+        `shared-${suffix}`,
+        `shared-${suffix}-hash`,
+        new Array<number>(768).fill(value),
+      );
+    }
   });
 
   after(async () => {
@@ -290,6 +304,18 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
         "MATCH (s:Symbol {symbolId: 'shared_placeholder', repoId: 'keep-repo'}) RETURN count(s) AS c",
       ),
       1,
+    );
+    assert.strictEqual(
+      await count(
+        "MATCH (e:SymbolVectorEmbedding {symbolId: 'shared_placeholder', repoId: 'keep-repo'}) RETURN count(e) AS c",
+      ),
+      2,
+    );
+    assert.strictEqual(
+      await count(
+        "MATCH (e:SymbolVectorEmbedding {symbolId: 'shared_placeholder', repoId: 'remove-repo'}) RETURN count(e) AS c",
+      ),
+      0,
     );
     for (const table of ["SymbolVersion", "Metrics", "SymbolEmbedding", "SummaryCache"]) {
       assert.strictEqual(

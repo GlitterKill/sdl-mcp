@@ -277,6 +277,13 @@ export async function deleteRepo(
          SET s.repoId = replacement.ownerRepoId`,
         { replacements, repoId },
       );
+      await exec(
+        txConn,
+        `UNWIND $replacements AS replacement
+         MATCH (e:SymbolVectorEmbedding {symbolId: replacement.symbolId, repoId: $repoId})
+         SET e.repoId = replacement.ownerRepoId`,
+        { replacements, repoId },
+      );
     }
     await exec(
       txConn,
