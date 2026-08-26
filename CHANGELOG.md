@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Incremental symbol embedding refresh**: Only changed `SymbolVectorEmbedding` rows are deleted and reinserted while a healthy HNSW is retained; the index is created only for bootstrap or missing-index recovery. In a direct spike, this was 18.5x faster than the prior drop-and-rebuild path for 50 changed rows out of 26,000, with ANN results durable after close/reopen; this is evidence, not an SLA. Migration 26 copies complete legacy vectors in-database. Legacy `Symbol` embedding columns remain inert for compatibility, and upgraded databases may also retain legacy `Symbol` HNSW indexes until a safe rebuild.
+
 ### Fixed
 
 ## [0.13.5] - 2026-08-25
