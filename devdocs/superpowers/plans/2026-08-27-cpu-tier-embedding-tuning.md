@@ -977,7 +977,7 @@ git diff --check
 
 Expected: all commands pass; lint has zero errors. Do not run `index.refresh`.
 
-- [ ] **Step 7: Commit documentation and request final review**
+- [x] **Step 7: Commit documentation and request final review**
 
 Stage only the reviewed paths, commit the final preset/evidence/docs, then run
 `@requesting-code-review` against `b5ffb751..HEAD`. Do not merge or push.
