@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "fs";
-import { freemem } from "node:os";
+import os from "node:os";
 import {
   AppConfig,
   AppConfigSchema,
@@ -137,7 +137,7 @@ export function loadConfig(configPath?: string): AppConfig {
       effectiveTier,
       rawConfig as Parameters<typeof resolvePerformancePresets>[1],
       cpuProfile,
-      freemem(),
+      os.freemem(),
     );
     // Re-parse each sub-section through its schema so that Zod fills in any
     // missing required fields before we overlay the preset values.

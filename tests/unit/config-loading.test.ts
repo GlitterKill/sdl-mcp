@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -18,7 +18,10 @@ const __dirname = dirname(__filename);
 
 function withTempConfig(
   overrides: Record<string, unknown>,
-  verify: (config: ReturnType<typeof loadConfig>) => void,
+  verify: (
+    config: ReturnType<typeof loadConfig>,
+    configPath: string,
+  ) => void,
 ): void {
   const dir = mkdtempSync(join(tmpdir(), "sdl-mcp-config-"));
   try {
@@ -29,8 +32,9 @@ function withTempConfig(
       "utf8",
     );
     invalidateConfigCache();
-    verify(loadConfig(configPath));
+    verify(loadConfig(configPath), configPath);
   } finally {
+    invalidateConfigCache();
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -56,47 +60,80 @@ describe("Config Loading (RR-H.8)", () => {
     );
   });
 
-  it("should load example config successfully", () => {
+  it("loads the example config at the 4 GiB free-memory boundary", (t) => {
+    const freeMemory = t.mock.method(os, "freemem", () => 4 * 1024 ** 3);
     const exampleConfigPath = resolve(
       __dirname,
       "../../config/sdlmcp.config.example.json",
     );
     invalidateConfigCache();
-    const config = loadConfig(exampleConfigPath);
-    const expectedWidth = resolveEmbeddingWidth(detectCpuProfile());
+    try {
+      const config = loadConfig(exampleConfigPath);
+      const expectedWidth = resolveEmbeddingWidth(detectCpuProfile());
 
-    assert.ok(
-      config.graphDatabase,
-      "Expected graphDatabase section in example config",
-    );
-    assert.strictEqual(typeof config.graphDatabase!.path, "string");
-    assert.ok(config.graphDatabase!.path!.length > 0);
-    assert.ok(
-      config.semantic!.embeddingBatchSize === 8 ||
-        config.semantic!.embeddingBatchSize === 16,
-    );
-    assert.ok(
-      config.semantic!.embeddingConcurrency >= 1 &&
-        config.semantic!.embeddingConcurrency <= expectedWidth,
-    );
-    assert.strictEqual(config.semantic!.fileSummaryEmbeddingBatchSize, 4);
+      assert.ok(
+        config.graphDatabase,
+        "Expected graphDatabase section in example config",
+      );
+      assert.strictEqual(typeof config.graphDatabase!.path, "string");
+      assert.ok(config.graphDatabase!.path!.length > 0);
+      assert.strictEqual(config.semantic!.embeddingBatchSize, 16);
+      assert.strictEqual(
+        config.semantic!.embeddingConcurrency,
+        Math.min(expectedWidth, 4),
+      );
+      assert.strictEqual(config.semantic!.fileSummaryEmbeddingBatchSize, 4);
+      assert.strictEqual(freeMemory.mock.callCount(), 1);
+    } finally {
+      invalidateConfigCache();
+    }
   });
 
-  it("applies presets for a pinned performance tier", () => {
+  it("applies pinned-tier presets at 2 GiB free memory", (t) => {
+    const freeMemory = t.mock.method(os, "freemem", () => 2 * 1024 ** 3);
+
     withTempConfig({ performanceTier: "extreme" }, (config) => {
       const expectedWidth = resolveEmbeddingWidth(detectCpuProfile());
 
       assert.strictEqual(config.indexing!.concurrency, 12);
-      assert.ok(
-        config.semantic!.embeddingBatchSize === 8 ||
-          config.semantic!.embeddingBatchSize === 16,
-      );
-      assert.ok(
-        config.semantic!.embeddingConcurrency >= 1 &&
-          config.semantic!.embeddingConcurrency <= expectedWidth,
+      assert.strictEqual(config.semantic!.embeddingBatchSize, 8);
+      assert.strictEqual(
+        config.semantic!.embeddingConcurrency,
+        Math.min(expectedWidth, 2),
       );
       assert.strictEqual(config.semantic!.fileSummaryEmbeddingBatchSize, 4);
+      assert.strictEqual(freeMemory.mock.callCount(), 1);
     });
+  });
+
+  it("samples free memory once and reuses the cached configuration", (t) => {
+    let freeMemoryBytes = 2 * 1024 ** 3;
+    const freeMemory = t.mock.method(os, "freemem", () => freeMemoryBytes);
+
+    withTempConfig(
+      { performanceTier: "extreme" },
+      (firstConfig, configPath) => {
+        const expectedWidth = resolveEmbeddingWidth(detectCpuProfile());
+
+        assert.strictEqual(firstConfig.semantic!.embeddingBatchSize, 8);
+        assert.strictEqual(
+          firstConfig.semantic!.embeddingConcurrency,
+          Math.min(expectedWidth, 2),
+        );
+        assert.strictEqual(freeMemory.mock.callCount(), 1);
+
+        freeMemoryBytes = 8 * 1024 ** 3;
+        const cachedConfig = loadConfig(configPath);
+
+        assert.strictEqual(cachedConfig, firstConfig);
+        assert.strictEqual(cachedConfig.semantic!.embeddingBatchSize, 8);
+        assert.strictEqual(
+          cachedConfig.semantic!.embeddingConcurrency,
+          Math.min(expectedWidth, 2),
+        );
+        assert.strictEqual(freeMemory.mock.callCount(), 1);
+      },
+    );
   });
 
   it("preserves explicit values over pinned tier presets", () => {
