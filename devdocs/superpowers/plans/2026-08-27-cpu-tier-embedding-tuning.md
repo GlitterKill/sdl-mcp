@@ -762,7 +762,7 @@ Expected: FAIL because the contract module does not exist.
 
 - [ ] **Step 3: Implement the minimum pure contract**
 
-Export only:
+Initially export:
 
 ```javascript
 export function aggregateShapeSamples(shape, samples, expectedSamples) { /* validate exact records; median throughput and RSS; worst RSS */ }
@@ -789,6 +789,7 @@ git commit -m "test(benchmark): pin production gate contract"
 ### Task 10: Measure fresh processes and gate the built production tuple
 
 **Files:**
+- Modify: `scripts/cpu-embedding-benchmark-contract.mjs`
 - Modify: `scripts/benchmark-cpu-embedding-tiers.mjs`
 - Modify: `tests/unit/cpu-embedding-benchmark-contract.test.ts`
 
@@ -832,6 +833,9 @@ Make the smallest runner changes:
 5. Aggregate with the Task 9 contract. Rank alternatives for evidence, but
    determine exit status from `evaluateProductionGate({ baseline,
    production })` only.
+
+Task 10 may add the wrapper export used directly by the runner and tests; do
+not add unrelated benchmark-framework exports.
 
 - [ ] **Step 4: Verify deterministic logic and quick plumbing**
 
