@@ -584,6 +584,8 @@ Out of scope (require a custom ONNX Runtime build): `rocm` (AMD on Linux), `open
 
 Expected speedup vs CPU-only on a workstation-class machine: **3-8× for transformer inference**. Combine with `modelVariant: "fp16"` for additive gains.
 
+DirectML sessions automatically use sequential execution, disable ONNX memory patterns, and serialize `Run()` calls per cached session. `embeddingConcurrency` can still overlap tokenization before each run, so do not reduce it to `1` solely for the DirectML session-safety contract.
+
 ### Throughput Tuning (`embeddingConcurrency`, `embeddingBatchSize`)
 
 | Knob                   | Default | Range   | Effect                                                                                  |
