@@ -591,7 +591,7 @@ DirectML sessions automatically use sequential execution, disable ONNX memory pa
 | Knob                   | Omitted-value behavior | Range   | Effect                                                                                  |
 | :--------------------- | :--------------------- | :------ | :-------------------------------------------------------------------------------------- |
 | `embeddingConcurrency` | `min(cpuWidth, memoryWidth)` | `1-8`   | `cpuWidth` is `min(8, estimated physical cores)`. `memoryWidth` is `clamp(floor(free memory at startup / 1 GiB), 1, 8)`. Higher values overlap tokenization with inference. |
-| `embeddingBatchSize`   | `8` below 4 GiB free; otherwise `16` | `1-128` | Rows per ONNX inference call for symbols. Smaller auto batches bound peak memory while retaining tokenizer and session amortization. |
+| `embeddingBatchSize`   | `8` | `1-128` | Rows per ONNX inference call for symbols. The automatic batch bounds peak memory while retaining tokenizer and session amortization. |
 | `fileSummaryEmbeddingBatchSize` | `4` | `1-16` | Rows per ONNX inference call for FileSummary vectors. It remains fixed because file payloads are larger. |
 | `fileSummaryEmbeddingMaxChars` | `4096` | `512-32768` | Character cap for FileSummary embedding text; stored summaries and FTS text remain complete. |
 
@@ -600,7 +600,9 @@ The JSON Schema fallbacks remain `1` for `embeddingConcurrency` and `32` for `em
 FileSummary embedding model lanes run serially for resource safety; `embeddingsSequential`
 controls the symbol embedding model lanes.
 
-On a Ryzen 9 9950X3D, the full CPU benchmark selected `embeddingConcurrency: 8`, `embeddingBatchSize: 16`, and the CPU memory arena. It processed 15.10 texts/s in 12,714.09 ms with 1,447.6 MiB peak RSS, versus the batch-32/concurrency-1 baseline at 13.09 texts/s in 14,664.61 ms with 3,003.2 MiB peak RSS: a 15.34% throughput improvement. Disabling the arena reduced peak RSS to 973.9 MiB but dropped throughput to 7.21 texts/s, so it was rejected. These measurements cover the embedding inference path only, not total indexing wall time.
+On a Ryzen 9 9950X3D, each full-run shape used three fresh sequential child processes. The selection sweep qualified arena-on batches 8 and 12; batch 8 was faster.
+
+After rebuilding, the exact production tuple (`embeddingConcurrency: 8`, `embeddingBatchSize: 8`, CPU memory arena on) processed 18.23 texts/s in 10,532.88 ms with 947.1 MiB worst peak RSS, versus the batch-32/concurrency-1 baseline at 13.39 texts/s in 14,341.47 ms with 2,995.2 MiB worst peak RSS: a 36.16% median-throughput improvement. The 3,294.5 MiB RSS limit also passed. Disabling the arena reduced worst peak RSS to 678.8 MiB but dropped throughput to 7.97 texts/s, so it remained observational and ineligible. These measurements cover embedding inference only, not total indexing wall time.
 
 ### Multi-Model Sequencing (`embeddingsSequential`)
 
@@ -807,7 +809,7 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     // -- ONNX Inference Performance ------------------------------
     // Omit both fields to use CPU/free-memory auto-tuning.
     // "embeddingConcurrency": 8, // Example ample-memory override.
-    // "embeddingBatchSize": 16, // Example ample-memory override.
+    // "embeddingBatchSize": 8, // Example measured CPU override.
     "fileSummaryEmbeddingBatchSize": 4, // 1-16: rows per FileSummary ONNX call
     "fileSummaryEmbeddingMaxChars": 4096, // bounds FileSummary vector payloads
     "embeddingsSequential": false, // run multi-model embedding in series (vs Promise.all)

@@ -717,7 +717,7 @@ rebuilt production tuple passes its own gate.
 - Create: `scripts/cpu-embedding-benchmark-contract.mjs`
 - Create: `tests/unit/cpu-embedding-benchmark-contract.test.ts`
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Cover these behaviors with synthetic records:
 
@@ -752,7 +752,7 @@ Use complete records with `id`, `batchSize`, `concurrency`, `texts`,
 not exactly match the requested shape. Tests assert returned behavior, not
 mock-call existence.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 ```powershell
 node --experimental-strip-types --test --test-isolation=none tests/unit/cpu-embedding-benchmark-contract.test.ts
@@ -760,7 +760,7 @@ node --experimental-strip-types --test --test-isolation=none tests/unit/cpu-embe
 
 Expected: FAIL because the contract module does not exist.
 
-- [ ] **Step 3: Implement the minimum pure contract**
+- [x] **Step 3: Implement the minimum pure contract**
 
 Initially export:
 
@@ -775,11 +775,11 @@ The RSS limit is
 `evaluateProductionGate` compares the production shape's worst RSS to that
 limit. No timing assertion enters CI.
 
-- [ ] **Step 4: Run the contract tests and verify GREEN**
+- [x] **Step 4: Run the contract tests and verify GREEN**
 
 Run the Step 2 command. Expected: all tests pass.
 
-- [ ] **Step 5: Commit the contract**
+- [x] **Step 5: Commit the contract**
 
 ```powershell
 git add scripts/cpu-embedding-benchmark-contract.mjs tests/unit/cpu-embedding-benchmark-contract.test.ts
@@ -793,7 +793,7 @@ git commit -m "test(benchmark): pin production gate contract"
 - Modify: `scripts/benchmark-cpu-embedding-tiers.mjs`
 - Modify: `tests/unit/cpu-embedding-benchmark-contract.test.ts`
 
-- [ ] **Step 1: Add failing shape and subprocess coverage**
+- [x] **Step 1: Add failing shape and subprocess coverage**
 
 Add a test proving the fixed sweep contains baseline, the exact production
 shape, arena-on batches 8/12/16/20/24 without duplicating production, and one
@@ -806,12 +806,12 @@ stdout/stderr streams. Verify spawn errors, signal exits, nonzero exits, empty
 stdout, malformed JSON, and a returned tuple that differs from the requested
 shape all reject. Verify exactly three samples are required before aggregation.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run the Task 9 test command. Expected: FAIL because production-shape
 construction is not implemented.
 
-- [ ] **Step 3: Implement fresh-process sampling**
+- [x] **Step 3: Implement fresh-process sampling**
 
 Make the smallest runner changes:
 
@@ -837,7 +837,7 @@ Make the smallest runner changes:
 Task 10 may add the wrapper export used directly by the runner and tests; do
 not add unrelated benchmark-framework exports.
 
-- [ ] **Step 4: Verify deterministic logic and quick plumbing**
+- [x] **Step 4: Verify deterministic logic and quick plumbing**
 
 ```powershell
 npm run build:all
@@ -847,7 +847,7 @@ node scripts/benchmark-cpu-embedding-tiers.mjs --quick
 
 Expected: tests pass; quick mode completes without a performance-pass claim.
 
-- [ ] **Step 5: Commit the stable runner**
+- [x] **Step 5: Commit the stable runner**
 
 ```powershell
 git add scripts/benchmark-cpu-embedding-tiers.mjs tests/unit/cpu-embedding-benchmark-contract.test.ts
@@ -860,7 +860,7 @@ git commit -m "fix(benchmark): gate the built embedding preset"
 - Modify: `src/config/loadConfig.ts`
 - Modify: `tests/unit/config-loading.test.ts`
 
-- [ ] **Step 1: Add failing exact-memory tests**
+- [x] **Step 1: Add failing exact-memory tests**
 
 Use Node's test-context `mock.method` on the default `node:os` export while
 exercising real `loadConfig` calls. Prove:
@@ -871,7 +871,7 @@ exercising real `loadConfig` calls. Prove:
   returns the same values after the mock's closure changes to 8 GiB and does
   not call `freemem()` again.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 npm run build:all
@@ -881,22 +881,26 @@ node --experimental-strip-types --test --test-isolation=none tests/unit/config-l
 Expected: the exact tests fail because the current named import cannot be
 replaced through the shared default `node:os` object.
 
-- [ ] **Step 3: Make the minimum loader change**
+- [x] **Step 3: Make the minimum loader change**
 
 Replace the named `freemem` import with the default `node:os` object and call
 `os.freemem()` once at preset resolution. Do not add a production injection
 interface or test-only method.
 
-- [ ] **Step 4: Build and verify GREEN**
+- [x] **Step 4: Build and verify GREEN**
 
 Run the Step 2 commands. Expected: exact boundary and cache tests pass.
 
-- [ ] **Step 5: Commit deterministic loader coverage**
+- [x] **Step 5: Commit deterministic loader coverage**
 
 ```powershell
 git add src/config/loadConfig.ts tests/unit/config-loading.test.ts
 git commit -m "test(config): pin free-memory preset loading"
 ```
+
+Task 11 recorded the then-current 4 GiB batch-16 boundary. Task 12's measured
+selection supersedes that batch value with batch 8 at every memory level while
+retaining the same one-snapshot concurrency bound.
 
 ### Task 12: Select, apply, and revalidate the production candidate
 
@@ -909,7 +913,7 @@ git commit -m "test(config): pin free-memory preset loading"
 - Modify: `devdocs/superpowers/specs/2026-08-27-cpu-tier-embedding-tuning-design.md`
 - Modify: `devdocs/superpowers/plans/2026-08-27-cpu-tier-embedding-tuning.md`
 
-- [ ] **Step 1: Run the full sweep against the current built preset**
+- [x] **Step 1: Run the full sweep against the current built preset**
 
 ```powershell
 npm run build:all
@@ -921,19 +925,19 @@ an alternative clears both gates, record that candidate. If none qualifies,
 restore automatic batch 32/concurrency 1 and remove the unproven speedup claim;
 do not lower the 15% threshold.
 
-- [ ] **Step 2: Write the failing preset expectation**
+- [x] **Step 2: Write the failing preset expectation**
 
 When an alternative qualifies, change the pure preset test to the measured
 batch/concurrency and run it before production code. Expected: FAIL against the
 old preset. If none qualifies, write the baseline fallback expectation instead.
 
-- [ ] **Step 3: Apply only the measured preset**
+- [x] **Step 3: Apply only the measured preset**
 
 Change the ample-memory automatic batch/concurrency values in
 `src/util/cpu-presets.ts`. Preserve free-memory scaling, explicit overrides,
 FileSummary batch 4, CPU width, and ONNX session behavior.
 
-- [ ] **Step 4: Rebuild and gate the exact production shape**
+- [x] **Step 4: Rebuild and gate the exact production shape**
 
 ```powershell
 npm run build:all
@@ -946,14 +950,20 @@ uplift and the peak-RSS limit. An experimental winner cannot substitute. If the
 fallback baseline is retained, report that the optimization was withheld and
 do not claim a passing performance gate.
 
-- [ ] **Step 5: Update release and evidence documentation**
+- [x] **Step 5: Update release and evidence documentation**
 
 Add one Unreleased `Changed` bullet to `CHANGELOG.md` covering automatic CPU/
 free-memory defaults, pinned tiers, override precedence, and removing explicit
 fields to opt in. Replace prior benchmark claims with the final three-process
 evidence or state that the preset was withheld.
 
-- [ ] **Step 6: Run affected verification**
+Outcome: the first sweep rejected built production batch 16 at 14.16% uplift,
+then qualified batches 8 and 12. Batch 8 was fastest at 37.78% uplift and 993.8
+MiB worst peak RSS. After rebuilding, exact production batch 8/concurrency 8
+passed at 36.16% uplift and 947.1 MiB worst peak RSS against a 3,294.5 MiB
+limit. All figures cover inference only, not total indexing.
+
+- [x] **Step 6: Run affected verification**
 
 ```powershell
 npm run build:all

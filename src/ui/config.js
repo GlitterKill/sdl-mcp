@@ -235,7 +235,7 @@ const FIELD_EFFECTS = Object.freeze({
   "/semantic/enabled": "Turns embedding-backed semantic retrieval features on or off.",
   "/semantic/generateSummaries": "Turns LLM summary generation on or off during semantic indexing.",
   "/semantic/embeddingConcurrency": "When omitted, runs the smaller of CPU width and free-memory width (both capped at 8) embedding batches in parallel; an explicit value wins.",
-  "/semantic/embeddingBatchSize": "When omitted, uses 8 symbols below 4 GiB free memory at startup or 16 otherwise; an explicit value wins.",
+  "/semantic/embeddingBatchSize": "When omitted, uses 8 symbols per inference batch; an explicit value wins.",
   "/semantic/onnx/intraOpNumThreads": "When set to 0, uses the estimated physical-core width capped at 8 for CPU embedding inference; a positive value wins.",
   "/semantic/onnx/interOpNumThreads": "When set to 0, uses one ONNX inter-op thread; it matters only with parallel graph execution.",
   "/semantic/onnx/executionMode": "Chooses ONNX graph execution. Sequential is the CPU default for sentence-transformer embedding models.",

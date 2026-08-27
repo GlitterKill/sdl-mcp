@@ -55,22 +55,24 @@ session. The accepted width-8 shape must improve median throughput by at least
 15% while keeping peak RSS within the larger of 10% or 128 MiB above the
 current baseline.
 
-The initial isolated three-warm-run revision appeared to select the
-ample-memory shape:
+The first three-fresh-process sweep rejected the built batch-16 production
+shape at 14.16% uplift and qualified arena-on batches 8 and 12. Batch 8 was the
+fastest eligible candidate at 37.78% uplift with 993.8 MiB worst peak RSS. The
+rebuilt exact-production validation produced:
 
-| Width-8 shape | Median | Throughput | Peak RSS | Uplift |
-|---------------|-------:|-----------:|---------:|-------:|
-| baseline: batch 32, concurrency 1, arena on | 14,664.61 ms | 13.09 texts/s | 3,003.2 MiB | - |
-| batch 32, concurrency 8, arena on | 14,710.15 ms | 13.05 texts/s | 3,054.0 MiB | -0.31% |
-| batch 16, concurrency 8, arena on | 12,714.09 ms | 15.10 texts/s | 1,447.6 MiB | 15.34% |
-| batch 16, concurrency 8, arena off | 26,617.17 ms | 7.21 texts/s | 973.9 MiB | -44.91% |
+| Width-8 shape | Median | Throughput | Worst peak RSS | Uplift |
+|---------------|-------:|-----------:|---------------:|-------:|
+| baseline: batch 32, concurrency 1, arena on | 14,341.47 ms | 13.39 texts/s | 2,995.2 MiB | - |
+| production: batch 8, concurrency 8, arena on | 10,532.88 ms | 18.23 texts/s | 947.1 MiB | 36.16% |
+| batch 12, concurrency 8, arena on | 12,038.40 ms | 15.95 texts/s | 1,317.3 MiB | 19.13% |
+| batch 16, concurrency 8, arena on | 13,023.87 ms | 14.74 texts/s | 1,739.4 MiB | 10.12% |
+| batch 20, concurrency 8, arena on | 13,216.69 ms | 14.53 texts/s | 2,480.4 MiB | 8.51% |
+| batch 24, concurrency 8, arena on | 13,953.73 ms | 13.76 texts/s | 2,695.1 MiB | 2.78% |
+| batch 8, concurrency 8, arena off | 24,076.50 ms | 7.97 texts/s | 678.8 MiB | -40.43% |
 
-An independent review run did not reproduce the throughput gate: the same
-batch-16 production shape reached 14.75 texts/s against a 12.96 texts/s
-baseline, a 13.79% uplift. Its 1,667.4 MiB peak RSS remained below the 3,305.8
-MiB limit, but throughput failed the required 15% gate. The shape is therefore
-not accepted for production. Disabling the arena remains rejected because its
-large wall-time regression conflicts with the minimum-wall-time objective.
+The exact production tuple passed the unchanged 15% throughput gate and the
+3,294.5 MiB RSS limit. Arena-off remains ineligible and observational because
+its wall-time regression conflicts with the minimum-wall-time objective.
 
 The remediation replaces three warm measurements inside one child with three
 fresh child processes per shape. Each child performs one warm-up and one
@@ -143,14 +145,14 @@ When the corresponding field is not explicitly configured, every detected or
 pinned tier receives:
 
 ```text
-semantic.embeddingBatchSize       = freeMemoryGiB < 4 ? 8 : measuredDefaultBatchSize
+semantic.embeddingBatchSize       = 8
 semantic.embeddingConcurrency     = min(embeddingWidth, memoryWidth)
 semantic.onnx.intraOpNumThreads    = embeddingWidth
 ```
 
-The final ample-memory batch is selected from the revised throughput/RSS
-benchmark. Candidate concurrency remains equal to CPU width; production free
-memory may lower it but never raises it beyond that bound.
+The revised throughput/RSS benchmark selected batch 8. Candidate concurrency
+remains equal to CPU width; production free memory may lower it but never
+raises it beyond that bound.
 
 ### Free-memory bound
 
@@ -163,13 +165,12 @@ The initial policy is intentionally simple and testable:
 ```text
 memoryWidth = clamp(floor(freeMemoryGiB), 1, 8)
 embeddingConcurrency = min(embeddingCpuWidth, memoryWidth)
-embeddingBatchSize = freeMemoryGiB < 4 ? 8 : measuredDefaultBatchSize
+embeddingBatchSize = 8
 ```
 
 This leaves roughly one GiB of currently free memory per concurrent inference
-call and gives explicitly configured values final authority. The benchmark may
-reduce the ample-memory batch if the accepted wall-time/RSS shape requires it;
-it must not add a runtime calibrator or dependency.
+call and gives explicitly configured values final authority. The measured
+batch remains fixed at 8; no runtime calibrator or dependency is added.
 
 The CPU execution path explicitly enables ONNX memory patterns and full graph
 optimization. The fastest candidate satisfying the RSS limit determines one
@@ -284,7 +285,7 @@ own the full boundary matrix.
 Update the CPU preset table, configuration reference, semantic embedding setup
 guide, and generated configuration schema descriptions so they agree on:
 
-- the measured ample-memory symbol batch and batch 8 below 4 GiB free,
+- the measured automatic symbol batch 8,
 - concurrency bounded by physical-core width and whole GiB of free memory,
 - physical-core-derived ONNX intra-op width capped at 8,
 - FileSummary batch size remaining 4,
@@ -307,9 +308,8 @@ remove-explicit-fields migration step.
   execution.
 - Lower detected core counts scale concurrency and intra-op threads to the
   estimated physical-core count, capped at 8.
-- Lower free-memory snapshots reduce automatic concurrency and, below 4 GiB,
-  symbol batch size; the snapshot is stable for the lifetime of the loaded
-  configuration.
+- Lower free-memory snapshots reduce automatic concurrency; the snapshot is
+  stable for the lifetime of the loaded configuration.
 - Pinned tiers apply presets instead of silently retaining schema defaults.
 - Explicit semantic settings remain byte-for-byte authoritative.
 - FileSummary embeddings retain batch 4 while using the derived concurrency.

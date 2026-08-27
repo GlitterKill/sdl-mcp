@@ -77,7 +77,7 @@ describe("Config Loading (RR-H.8)", () => {
       );
       assert.strictEqual(typeof config.graphDatabase!.path, "string");
       assert.ok(config.graphDatabase!.path!.length > 0);
-      assert.strictEqual(config.semantic!.embeddingBatchSize, 16);
+      assert.strictEqual(config.semantic!.embeddingBatchSize, 8);
       assert.strictEqual(
         config.semantic!.embeddingConcurrency,
         Math.min(expectedWidth, 4),

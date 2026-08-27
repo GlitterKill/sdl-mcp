@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CPU embedding auto-tuning**: Omitted local CPU settings now use physical-core and startup free-memory bounds for embedding concurrency, symbol batch 8, and the physical-core width for automatic ONNX intra-op threads. Auto-detected and pinned performance tiers share these presets, while explicit settings remain authoritative; remove explicit `embeddingConcurrency`, `embeddingBatchSize`, or positive `onnx.intraOpNumThreads` fields to adopt the automatic values.
 - **Incremental symbol embedding refresh**: Only changed `SymbolVectorEmbedding` rows are deleted and reinserted while a healthy HNSW is retained; the index is created only for bootstrap or missing-index recovery after at least one complete model row exists. Repository-local cleanup removes only changed-file ownership links, preserves shared Symbol vectors, and deterministically transfers their canonical owner. Symbol ANN queries filter through repository-scoped projected graphs before ranking. In a direct spike, this was 18.5x faster than the prior drop-and-rebuild path for 50 changed rows out of 26,000, with ANN results durable after close/reopen; this is evidence, not an SLA. Migration 26 copies complete legacy vectors in-database. Legacy `Symbol` embedding columns remain inert for compatibility, and upgraded databases may also retain legacy `Symbol` HNSW indexes until a safe rebuild.
 
 ### Fixed

@@ -961,7 +961,7 @@
         },
         "embeddingBatchSize": {
           "type": "integer",
-          "description": "ONNX inference batch width for symbol embedding refresh. The schema fallback is 32; when omitted, runtime auto-tuning uses 8 below 4 GiB startup free memory and 16 otherwise. Explicit values win. Larger batches raise peak memory roughly with the longest sequence in the batch. Length-bucketing before splitting keeps tokenizer pad waste bounded.",
+          "description": "ONNX inference batch width for symbol embedding refresh. The schema fallback is 32; when omitted, runtime auto-tuning uses 8. Explicit values win. Larger batches raise peak memory roughly with the longest sequence in the batch. Length-bucketing before splitting keeps tokenizer pad waste bounded.",
           "minimum": 1,
           "maximum": 128,
           "default": 32

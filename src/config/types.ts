@@ -609,8 +609,7 @@ export const SemanticConfigSchema = z.object({
     .default(DEFAULT_EMBEDDING_CONCURRENCY),
   /**
    * ONNX inference batch width for symbol embedding refresh. The schema
-   * fallback is 32; when omitted from raw config, `loadConfig()` uses 8 below
-   * 4 GiB free at startup and 16 otherwise.
+   * fallback is 32; when omitted from raw config, `loadConfig()` uses 8.
    * Larger batches (64-128) amortise tokenizer + session bind/unbind costs
    * across more rows per round-trip but raise peak memory roughly with the
    * longest sequence in the batch. Length-bucketing before splitting keeps

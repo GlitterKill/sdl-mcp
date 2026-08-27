@@ -36,7 +36,7 @@ describe("CPU-tier embedding presets", () => {
     for (const [tier, cpuProfile, embeddingConcurrency, indexingConcurrency] of cases) {
       const presets = resolvePerformancePresets(tier, {}, cpuProfile, 16 * GIB);
       assert.strictEqual(presets.embeddingConcurrency, embeddingConcurrency);
-      assert.strictEqual(presets.embeddingBatchSize, 16);
+      assert.strictEqual(presets.embeddingBatchSize, 8);
       assert.strictEqual(presets.indexingConcurrency, indexingConcurrency);
     }
   });

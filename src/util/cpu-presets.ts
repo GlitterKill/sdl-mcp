@@ -25,7 +25,7 @@ import { type AppConfig } from "../config/types.js";
  * | indexing.pass2Concurrency        | 1         | 3           | 6             |
  * | scip.ingestConcurrency           | 1         | 2           | 3             |
  * | semantic.embeddingConcurrency    | min(CPU width, free-memory GiB), capped at 8 |
- * | semantic.embeddingBatchSize      | 8 below 4 GiB free; otherwise 16            |
+ * | semantic.embeddingBatchSize      | 8                                            |
  *
  * Tuning notes:
  *   - dispatch:readPool ratio kept at 2:1 so read connections are not
@@ -227,6 +227,6 @@ export function resolvePerformancePresets(
 
     embeddingBatchSize:
       userConfig.semantic?.embeddingBatchSize ??
-      (freeMemoryBytes < 4 * GIB ? 8 : 16),
+      8,
   };
 }
