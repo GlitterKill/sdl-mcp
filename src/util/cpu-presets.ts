@@ -24,6 +24,8 @@ import { type AppConfig } from "../config/types.js";
  * | parallelScorer.poolSize          | null      | 4           | 8             |
  * | indexing.pass2Concurrency        | 1         | 3           | 6             |
  * | scip.ingestConcurrency           | 1         | 2           | 3             |
+ * | semantic.embeddingConcurrency    | min(CPU width, free-memory GiB), capped at 8 |
+ * | semantic.embeddingBatchSize      | 8 below 4 GiB free; otherwise 16            |
  *
  * Tuning notes:
  *   - dispatch:readPool ratio kept at 2:1 so read connections are not
@@ -61,6 +63,8 @@ export interface ResolvedPerformancePresets extends PerformancePresets {
   embeddingBatchSize: number;
 }
 
+const GIB = 1024 ** 3;
+
 /**
  * A classic Zen CCD has at most eight physical cores; this cap stays
  * cross-platform where portable APIs do not expose cache topology.
@@ -74,6 +78,13 @@ export function resolveEmbeddingWidth(
     MAX_EMBEDDING_CONCURRENCY,
     Math.max(1, estimatedPhysicalCores),
   );
+}
+
+export function resolveEmbeddingMemoryWidth(freeMemoryBytes: number): number {
+  // One concurrent inference call per whole GiB keeps automatic throughput
+  // scaling inside the memory the operating system currently reports free.
+  const wholeGiB = Math.floor(Math.max(0, freeMemoryBytes) / GIB);
+  return Math.min(MAX_EMBEDDING_CONCURRENCY, Math.max(1, wholeGiB));
 }
 
 /**
@@ -165,8 +176,13 @@ export function resolvePerformancePresets(
   tier: CpuTier,
   userConfig: DeepPartial<AppConfig>,
   cpuProfile: Pick<CpuProfile, "logicalCores" | "physicalCores">,
+  freeMemoryBytes: number,
 ): ResolvedPerformancePresets {
   const presets = getTierPresets(tier);
+  const embeddingWidth = Math.min(
+    resolveEmbeddingWidth(cpuProfile),
+    resolveEmbeddingMemoryWidth(freeMemoryBytes),
+  );
 
   return {
     indexingConcurrency:
@@ -207,8 +223,10 @@ export function resolvePerformancePresets(
 
     embeddingConcurrency:
       userConfig.semantic?.embeddingConcurrency ??
-      resolveEmbeddingWidth(cpuProfile),
+      embeddingWidth,
 
-    embeddingBatchSize: userConfig.semantic?.embeddingBatchSize ?? 16,
+    embeddingBatchSize:
+      userConfig.semantic?.embeddingBatchSize ??
+      (freeMemoryBytes < 4 * GIB ? 8 : 16),
   };
 }

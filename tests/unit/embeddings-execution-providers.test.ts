@@ -157,6 +157,8 @@ describe("resolveEmbeddingSessionOptions", () => {
         interOpNumThreads: 1,
         executionMode: "sequential",
         enableMemPattern: true,
+        enableCpuMemArena: true,
+        graphOptimizationLevel: "all",
         serializeRuns: false,
       },
     );
@@ -186,6 +188,8 @@ describe("resolveEmbeddingSessionOptions", () => {
         interOpNumThreads: 2,
         executionMode: "sequential",
         enableMemPattern: false,
+        enableCpuMemArena: true,
+        graphOptimizationLevel: "all",
         serializeRuns: true,
       },
     );
@@ -215,6 +219,8 @@ describe("resolveEmbeddingSessionOptions", () => {
         interOpNumThreads: 2,
         executionMode: "parallel",
         enableMemPattern: true,
+        enableCpuMemArena: true,
+        graphOptimizationLevel: "all",
         serializeRuns: false,
       },
     );
@@ -246,6 +252,8 @@ describe("resolveEmbeddingSessionOptions", () => {
         interOpNumThreads: 1,
         executionMode: "sequential",
         enableMemPattern: true,
+        enableCpuMemArena: true,
+        graphOptimizationLevel: "all",
         serializeRuns: false,
       },
     );

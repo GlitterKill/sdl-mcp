@@ -71,8 +71,14 @@ describe("Config Loading (RR-H.8)", () => {
     );
     assert.strictEqual(typeof config.graphDatabase!.path, "string");
     assert.ok(config.graphDatabase!.path!.length > 0);
-    assert.strictEqual(config.semantic!.embeddingBatchSize, 16);
-    assert.strictEqual(config.semantic!.embeddingConcurrency, expectedWidth);
+    assert.ok(
+      config.semantic!.embeddingBatchSize === 8 ||
+        config.semantic!.embeddingBatchSize === 16,
+    );
+    assert.ok(
+      config.semantic!.embeddingConcurrency >= 1 &&
+        config.semantic!.embeddingConcurrency <= expectedWidth,
+    );
     assert.strictEqual(config.semantic!.fileSummaryEmbeddingBatchSize, 4);
   });
 
@@ -81,8 +87,14 @@ describe("Config Loading (RR-H.8)", () => {
       const expectedWidth = resolveEmbeddingWidth(detectCpuProfile());
 
       assert.strictEqual(config.indexing!.concurrency, 12);
-      assert.strictEqual(config.semantic!.embeddingBatchSize, 16);
-      assert.strictEqual(config.semantic!.embeddingConcurrency, expectedWidth);
+      assert.ok(
+        config.semantic!.embeddingBatchSize === 8 ||
+          config.semantic!.embeddingBatchSize === 16,
+      );
+      assert.ok(
+        config.semantic!.embeddingConcurrency >= 1 &&
+          config.semantic!.embeddingConcurrency <= expectedWidth,
+      );
       assert.strictEqual(config.semantic!.fileSummaryEmbeddingBatchSize, 4);
     });
   });

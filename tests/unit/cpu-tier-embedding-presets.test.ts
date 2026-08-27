@@ -1,9 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  resolveEmbeddingMemoryWidth,
   resolveEmbeddingWidth,
   resolvePerformancePresets,
 } from "../../dist/util/cpu-presets.js";
+
+const GIB = 1024 ** 3;
 
 describe("CPU-tier embedding presets", () => {
   it("bounds embedding width from physical-core capacity", () => {
@@ -31,7 +34,7 @@ describe("CPU-tier embedding presets", () => {
     ] as const;
 
     for (const [tier, cpuProfile, embeddingConcurrency, indexingConcurrency] of cases) {
-      const presets = resolvePerformancePresets(tier, {}, cpuProfile);
+      const presets = resolvePerformancePresets(tier, {}, cpuProfile, 16 * GIB);
       assert.strictEqual(presets.embeddingConcurrency, embeddingConcurrency);
       assert.strictEqual(presets.embeddingBatchSize, 16);
       assert.strictEqual(presets.indexingConcurrency, indexingConcurrency);
@@ -43,9 +46,34 @@ describe("CPU-tier embedding presets", () => {
       "extreme",
       { semantic: { embeddingConcurrency: 3, embeddingBatchSize: 24 } },
       { logicalCores: 32, physicalCores: 16 },
+      GIB,
     );
 
     assert.strictEqual(presets.embeddingConcurrency, 3);
     assert.strictEqual(presets.embeddingBatchSize, 24);
+  });
+
+  it("bounds automatic concurrency by whole GiB of free memory", () => {
+    for (const [freeMemoryBytes, expected] of [
+      [0, 1],
+      [GIB - 1, 1],
+      [2 * GIB, 2],
+      [7.9 * GIB, 7],
+      [8 * GIB, 8],
+      [32 * GIB, 8],
+    ] as const) {
+      assert.strictEqual(resolveEmbeddingMemoryWidth(freeMemoryBytes), expected);
+    }
+  });
+
+  it("uses constrained-memory defaults", () => {
+    const constrained = resolvePerformancePresets(
+      "extreme",
+      {},
+      { logicalCores: 32, physicalCores: 16 },
+      2 * GIB,
+    );
+    assert.strictEqual(constrained.embeddingConcurrency, 2);
+    assert.strictEqual(constrained.embeddingBatchSize, 8);
   });
 });

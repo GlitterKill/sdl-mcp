@@ -58,6 +58,7 @@ interface OrtModule {
         interOpNumThreads?: number;
         executionMode?: "sequential" | "parallel";
         enableMemPattern?: boolean;
+        enableCpuMemArena?: boolean;
         graphOptimizationLevel?: "disabled" | "basic" | "extended" | "all";
         logSeverityLevel?: 0 | 1 | 2 | 3 | 4;
       },
@@ -288,6 +289,8 @@ export function resolveEmbeddingSessionOptions({
   interOpNumThreads: number;
   executionMode: "sequential" | "parallel";
   enableMemPattern: boolean;
+  enableCpuMemArena: boolean;
+  graphOptimizationLevel: "all";
   serializeRuns: boolean;
 } {
   const resolvedAutoThreads = autoThreads ?? resolveEmbeddingWidth(cpuProfile);
@@ -298,6 +301,8 @@ export function resolveEmbeddingSessionOptions({
       interOpNumThreads: 1,
       executionMode: "sequential",
       enableMemPattern: true,
+      enableCpuMemArena: true,
+      graphOptimizationLevel: "all",
       serializeRuns: false,
     };
   }
@@ -320,6 +325,8 @@ export function resolveEmbeddingSessionOptions({
       ? "sequential"
       : (onnxConfig?.executionMode ?? "sequential"),
     enableMemPattern: !usesDirectMl,
+    enableCpuMemArena: true,
+    graphOptimizationLevel: "all",
     serializeRuns: usesDirectMl,
   };
 }
@@ -367,6 +374,8 @@ async function createOnnxSessionInternal(
     interOpNumThreads,
     executionMode,
     enableMemPattern,
+    enableCpuMemArena,
+    graphOptimizationLevel,
     serializeRuns,
   } = resolveEmbeddingSessionOptions({
     requestedProviders: appConfig.semantic?.executionProviders,
@@ -384,6 +393,8 @@ async function createOnnxSessionInternal(
     interOpNumThreads,
     executionMode,
     enableMemPattern,
+    enableCpuMemArena,
+    graphOptimizationLevel,
     logSeverityLevel: 3,
   });
 
