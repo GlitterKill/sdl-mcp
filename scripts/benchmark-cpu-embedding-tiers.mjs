@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { access, readdir, readFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,12 +5,23 @@ import { fileURLToPath } from "node:url";
 import * as ort from "onnxruntime-node";
 import { Tokenizer } from "tokenizers";
 
-import { runBatchInference } from "../dist/indexer/embeddings-local.js";
+import {
+  resolveEmbeddingSessionOptions,
+  runBatchInference,
+} from "../dist/indexer/embeddings-local.js";
 import {
   getModelInfo,
   resolveModelPath,
   resolveTokenizerPath,
 } from "../dist/indexer/model-registry.js";
+import { resolvePerformancePresets } from "../dist/util/cpu-presets.js";
+import {
+  aggregateShapeSamples,
+  buildBenchmarkShapes,
+  evaluateProductionGate,
+  rankQualifyingCandidates,
+  runBenchmarkChild,
+} from "./cpu-embedding-benchmark-contract.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -22,14 +32,28 @@ const MIN_EXCERPT_LENGTH = 80;
 const MAX_EXCERPT_LENGTH = 1_800;
 const MODEL_NAME = "jina-embeddings-v2-base-code";
 const WIDTH = 8;
-const FULL_MEASURED_RUNS = 3;
-const QUICK_MEASURED_RUNS = 1;
-const SHAPES = [
-  { id: "baseline", batchSize: 32, concurrency: 1, enableCpuMemArena: true },
-  { id: "concurrency-8", batchSize: 32, concurrency: 8, enableCpuMemArena: true },
-  { id: "batch-16", batchSize: 16, concurrency: 8, enableCpuMemArena: true },
-  { id: "arena-off", batchSize: 16, concurrency: 8, enableCpuMemArena: false },
-];
+const GIB = 1024 ** 3;
+const FULL_SAMPLES = 3;
+const QUICK_SAMPLES = 1;
+const productionPresets = resolvePerformancePresets(
+  "extreme",
+  {},
+  { logicalCores: 16, physicalCores: 8 },
+  8 * GIB,
+);
+const { serializeRuns: _serializeRuns, ...productionSessionOptions } =
+  resolveEmbeddingSessionOptions({
+    requestedProviders: ["cpu"],
+    onnxConfig: undefined,
+    deterministic: false,
+    autoThreads: WIDTH,
+    platformOverride: ["cpu"],
+  });
+const SHAPES = buildBenchmarkShapes({
+  batchSize: productionPresets.embeddingBatchSize,
+  concurrency: productionPresets.embeddingConcurrency,
+  ...productionSessionOptions,
+});
 
 function compareText(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -81,11 +105,6 @@ async function collectCorpus(size) {
   return excerpts.slice(0, size).map(({ text }) => text);
 }
 
-function median(samples) {
-  const sorted = [...samples].sort((left, right) => left - right);
-  return sorted[Math.floor(sorted.length / 2)];
-}
-
 function batches(texts, batchSize) {
   return Array.from(
     { length: Math.ceil(texts.length / batchSize) },
@@ -109,14 +128,14 @@ async function runShape({ session, tokenizer, dimension, texts, batchSize, concu
   }
 }
 
-async function measureShape(shape, quick) {
+async function measureShape(shape) {
   const [modelPath, tokenizerPath] = [
     resolveModelPath(MODEL_NAME),
     resolveTokenizerPath(MODEL_NAME),
   ];
   await Promise.all([access(modelPath), access(tokenizerPath)]);
 
-  const texts = await collectCorpus(quick ? QUICK_CORPUS_SIZE : CORPUS_SIZE);
+  const texts = await collectCorpus(shape.texts);
   const model = getModelInfo(MODEL_NAME);
   const tokenizer = Tokenizer.fromFile(tokenizerPath);
   tokenizer.setPadding({ padId: 0, padToken: "[PAD]" });
@@ -124,62 +143,41 @@ async function measureShape(shape, quick) {
 
   let session;
   try {
-    session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ["cpu"],
-      intraOpNumThreads: WIDTH,
-      interOpNumThreads: 1,
-      executionMode: "sequential",
-      enableMemPattern: true,
-      enableCpuMemArena: shape.enableCpuMemArena,
-      graphOptimizationLevel: "all",
-      logSeverityLevel: 3,
-    });
+    const {
+      id: _id,
+      batchSize,
+      concurrency,
+      texts: _texts,
+      ...sessionOptions
+    } = shape;
+    session = await ort.InferenceSession.create(modelPath, sessionOptions);
 
-    await runShape({ session, tokenizer, dimension: model.dimension, texts, ...shape });
-    const samples = [];
-    for (let run = 0; run < (quick ? QUICK_MEASURED_RUNS : FULL_MEASURED_RUNS); run++) {
-      const started = performance.now();
-      await runShape({ session, tokenizer, dimension: model.dimension, texts, ...shape });
-      samples.push(performance.now() - started);
-    }
-    const milliseconds = median(samples);
+    await runShape({
+      session,
+      tokenizer,
+      dimension: model.dimension,
+      texts,
+      batchSize,
+      concurrency,
+    });
+    const started = performance.now();
+    await runShape({
+      session,
+      tokenizer,
+      dimension: model.dimension,
+      texts,
+      batchSize,
+      concurrency,
+    });
+    const milliseconds = performance.now() - started;
     return {
       ...shape,
-      texts: texts.length,
       milliseconds,
       textsPerSecond: (texts.length * 1_000) / milliseconds,
     };
   } finally {
     if (session) await session.release();
   }
-}
-
-async function runChild(shape, quick) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(
-      process.execPath,
-      [SCRIPT_PATH, "--child", JSON.stringify(shape), ...(quick ? ["--quick"] : [])],
-      { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`Child ${shape.id} exited ${code}: ${stderr.trim()}`));
-        return;
-      }
-      try {
-        resolvePromise(JSON.parse(stdout));
-      } catch (error) {
-        reject(new Error(`Child ${shape.id} returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`));
-      }
-    });
-  });
 }
 
 function formatMilliseconds(value) {
@@ -190,47 +188,76 @@ function formatRate(value) {
   return `${value.toFixed(2)} texts/s`;
 }
 
-function formatMiB(bytes) {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+function formatMiB(kibibytes) {
+  return `${(kibibytes / 1_024).toFixed(1)} MiB`;
 }
 
 async function runParent(quick) {
+  const sampleCount = quick ? QUICK_SAMPLES : FULL_SAMPLES;
+  const textCount = quick ? QUICK_CORPUS_SIZE : CORPUS_SIZE;
   const results = [];
   for (const shape of SHAPES) {
-    results.push(await runChild(shape, quick));
+    const measuredShape = { ...shape, texts: textCount };
+    const samples = [];
+    // Await each child so every sample starts with a fresh, uncontended process.
+    for (let sample = 0; sample < sampleCount; sample++) {
+      samples.push(
+        await runBenchmarkChild({
+          scriptPath: SCRIPT_PATH,
+          cwd: ROOT,
+          shape: measuredShape,
+        }),
+      );
+    }
+    results.push(aggregateShapeSamples(measuredShape, samples, sampleCount));
   }
-  const baseline = results[0];
-  const baselineRssBytes = baseline.maxRssKiB * 1_024;
-  const memoryLimitBytes = baselineRssBytes + Math.max(baselineRssBytes * 0.1, 128 * 1024 * 1024);
+  const baseline = results.find(({ id }) => id === "baseline");
+  const production = results.find(({ id }) => id === "production");
+  if (!baseline || !production) {
+    throw new Error("Benchmark shape construction omitted baseline or production");
+  }
 
   console.log(
-    `CPU embedding tier benchmark (${quick ? "quick" : "full"}): width=${WIDTH}, inference path only (not persistence, HNSW, or total index time).`,
+    `CPU embedding tier benchmark (${quick ? "quick" : "full"}): width=${WIDTH}, samples=${sampleCount}, inference path only (not persistence, HNSW, or total index time).`,
   );
   for (const result of results) {
-    const uplift = ((result.textsPerSecond / baseline.textsPerSecond) - 1) * 100;
+    const uplift = ((result.medianTextsPerSecond / baseline.medianTextsPerSecond) - 1) * 100;
     console.log(
-      `${result.id}: batch=${result.batchSize}, concurrency=${result.concurrency}, arena=${result.enableCpuMemArena ? "on" : "off"}; median=${formatMilliseconds(result.milliseconds)} (${formatRate(result.textsPerSecond)}); peakRSS=${formatMiB(result.maxRssKiB * 1_024)}; uplift=${uplift.toFixed(2)}%`,
+      `${result.id}: batch=${result.batchSize}, concurrency=${result.concurrency}, arena=${result.enableCpuMemArena ? "on" : "off"}; median=${formatMilliseconds(result.medianMilliseconds)} (${formatRate(result.medianTextsPerSecond)}); worstPeakRSS=${formatMiB(result.worstMaxRssKiB)}; uplift=${uplift.toFixed(2)}%`,
     );
   }
 
-  const qualifying = results.slice(1).filter((result) => result.maxRssKiB * 1_024 <= memoryLimitBytes);
-  const selected = qualifying.sort(
-    (left, right) => right.textsPerSecond - left.textsPerSecond || compareText(left.id, right.id),
-  )[0];
-  if (!selected) {
-    console.log(`FAIL: no candidate stayed within the peak RSS limit of ${formatMiB(memoryLimitBytes)}.`);
-    process.exitCode = 1;
+  const rankedCandidates = rankQualifyingCandidates({
+    baseline,
+    candidates: results.filter(({ id }) => id.startsWith("batch-")),
+  });
+  console.log(
+    rankedCandidates.length > 0
+      ? `experimental recommendation evidence=${rankedCandidates.map(({ id }) => id).join(",")}`
+      : "experimental recommendation evidence=none qualified",
+  );
+
+  if (quick) {
+    // Quick mode validates the process boundary, never the performance gate.
+    console.log("NOT GATED: quick mode validates process and record plumbing only.");
     return;
   }
 
-  const uplift = ((selected.textsPerSecond / baseline.textsPerSecond) - 1) * 100;
-  console.log(`selected=${selected.id}; peakRSS limit=${formatMiB(memoryLimitBytes)}; uplift=${uplift.toFixed(2)}%`);
-  if (uplift < 15) {
-    console.log("FAIL: selected width-8 throughput uplift is below 15%.");
+  const gate = evaluateProductionGate({ baseline, production });
+  console.log(
+    `production gate: peakRSS limit=${formatMiB(gate.memoryLimitKiB)}; uplift=${gate.upliftPercent.toFixed(2)}%`,
+  );
+  if (!gate.passed) {
+    console.log(
+      `FAIL: built production tuple missed ${[
+        !gate.throughputPassed && "throughput",
+        !gate.memoryPassed && "peak RSS",
+      ].filter(Boolean).join(" and ")} gate.`,
+    );
     process.exitCode = 1;
     return;
   }
-  console.log("PASS: selected width-8 candidate meets throughput and peak RSS gates.");
+  console.log("PASS: built production tuple meets throughput and peak RSS gates.");
 }
 
 async function main() {
@@ -238,7 +265,7 @@ async function main() {
   const childIndex = process.argv.indexOf("--child");
   if (childIndex !== -1) {
     const shape = JSON.parse(process.argv[childIndex + 1]);
-    const result = await measureShape(shape, quick);
+    const result = await measureShape(shape);
     console.log(JSON.stringify({ ...result, maxRssKiB: process.resourceUsage().maxRSS }));
     return;
   }

@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { describe, it, type TestContext } from "node:test";
 
 import {
   aggregateShapeSamples,
+  buildBenchmarkShapes,
   evaluateProductionGate,
   rankQualifyingCandidates,
+  runBenchmarkChild,
 } from "../../scripts/cpu-embedding-benchmark-contract.mjs";
 
 const BASELINE_SHAPE = {
@@ -24,7 +29,20 @@ const BASELINE_SHAPE = {
 const PRODUCTION_SHAPE = {
   ...BASELINE_SHAPE,
   id: "production",
+  batchSize: 16,
   concurrency: 8,
+};
+
+const PRODUCTION_TUPLE = {
+  batchSize: PRODUCTION_SHAPE.batchSize,
+  concurrency: PRODUCTION_SHAPE.concurrency,
+  executionProviders: PRODUCTION_SHAPE.executionProviders,
+  intraOpNumThreads: PRODUCTION_SHAPE.intraOpNumThreads,
+  interOpNumThreads: PRODUCTION_SHAPE.interOpNumThreads,
+  executionMode: PRODUCTION_SHAPE.executionMode,
+  enableCpuMemArena: PRODUCTION_SHAPE.enableCpuMemArena,
+  enableMemPattern: PRODUCTION_SHAPE.enableMemPattern,
+  graphOptimizationLevel: PRODUCTION_SHAPE.graphOptimizationLevel,
 };
 
 function sample(
@@ -54,6 +72,175 @@ function aggregate(
     worstMaxRssKiB,
   };
 }
+
+function mockSpawn(
+  t: TestContext,
+  {
+    stdout = "",
+    stderr = "",
+    code = 0,
+    signal = null,
+    error,
+  }: {
+    stdout?: string;
+    stderr?: string;
+    code?: number | null;
+    signal?: NodeJS.Signals | null;
+    error?: Error;
+  },
+) {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: PassThrough;
+    stderr: PassThrough;
+  };
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  t.mock.method(childProcess, "spawn", () => {
+    queueMicrotask(() => {
+      child.stdout.end(stdout);
+      child.stderr.end(stderr);
+      setImmediate(() => {
+        if (error) child.emit("error", error);
+        else child.emit("close", code, signal);
+      });
+    });
+    return child as unknown as ReturnType<typeof childProcess.spawn>;
+  });
+}
+
+function runMockedChild() {
+  return runBenchmarkChild({
+    scriptPath: "benchmark.mjs",
+    cwd: "benchmark-root",
+    shape: BASELINE_SHAPE,
+  });
+}
+
+describe("buildBenchmarkShapes", () => {
+  it("builds the stable sweep without duplicating the exact production tuple", () => {
+    const shapes = buildBenchmarkShapes(PRODUCTION_TUPLE);
+
+    assert.deepStrictEqual(
+      shapes.map(({ id, batchSize, concurrency, enableCpuMemArena }) => ({
+        id,
+        batchSize,
+        concurrency,
+        enableCpuMemArena,
+      })),
+      [
+        { id: "baseline", batchSize: 32, concurrency: 1, enableCpuMemArena: true },
+        { id: "production", batchSize: 16, concurrency: 8, enableCpuMemArena: true },
+        { id: "batch-8", batchSize: 8, concurrency: 8, enableCpuMemArena: true },
+        { id: "batch-12", batchSize: 12, concurrency: 8, enableCpuMemArena: true },
+        { id: "batch-20", batchSize: 20, concurrency: 8, enableCpuMemArena: true },
+        { id: "batch-24", batchSize: 24, concurrency: 8, enableCpuMemArena: true },
+        { id: "arena-off", batchSize: 16, concurrency: 8, enableCpuMemArena: false },
+      ],
+    );
+    for (const shape of shapes) {
+      assert.deepStrictEqual(shape.executionProviders, ["cpu"]);
+      assert.equal(shape.intraOpNumThreads, 8);
+      assert.equal(shape.interOpNumThreads, 1);
+      assert.equal(shape.executionMode, "sequential");
+      assert.equal(shape.enableMemPattern, true);
+      assert.equal(shape.graphOptimizationLevel, "all");
+    }
+
+    const production = shapes.find(({ id }) => id === "production");
+    assert.ok(production);
+    assert.equal(
+      shapes.filter(({ id, ...shape }) => {
+        const { id: _productionId, ...productionTuple } = production;
+        return id !== "production" &&
+          JSON.stringify(shape) === JSON.stringify(productionTuple);
+      }).length,
+      0,
+    );
+  });
+});
+
+describe("runBenchmarkChild", () => {
+  it("resolves one valid JSON record", async (t) => {
+    const record = sample(BASELINE_SHAPE);
+    mockSpawn(t, { stdout: JSON.stringify(record) });
+
+    assert.deepStrictEqual(await runMockedChild(), record);
+  });
+
+  it("rejects a spawn error", async (t) => {
+    mockSpawn(t, { error: new Error("spawn EPERM") });
+
+    await assert.rejects(runMockedChild(), /spawn EPERM/u);
+  });
+
+  it("rejects a signal exit", async (t) => {
+    mockSpawn(t, { signal: "SIGTERM" });
+
+    await assert.rejects(runMockedChild(), /signal SIGTERM/u);
+  });
+
+  it("rejects a nonzero exit and bounds captured stderr", async (t) => {
+    mockSpawn(t, { code: 2, stderr: `diagnostic:${"x".repeat(20_000)}` });
+
+    await assert.rejects(runMockedChild(), (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /exited 2.*diagnostic:/u);
+      assert.ok(error.message.length < 10_000);
+      return true;
+    });
+  });
+
+  it("rejects empty stdout", async (t) => {
+    mockSpawn(t, { stdout: "  \n" });
+
+    await assert.rejects(runMockedChild(), /empty stdout/u);
+  });
+
+  it("rejects malformed JSON", async (t) => {
+    mockSpawn(t, { stdout: "{" });
+
+    await assert.rejects(runMockedChild(), /invalid JSON/u);
+  });
+
+  it("rejects returned identity and session tuple mismatches", async (t) => {
+    for (const [field, value] of [
+      ["id", "wrong"],
+      ["batchSize", 8],
+      ["concurrency", 2],
+      ["executionProviders", ["cpu", "fallback"]],
+      ["intraOpNumThreads", 4],
+      ["interOpNumThreads", 2],
+      ["executionMode", "parallel"],
+      ["enableCpuMemArena", false],
+      ["enableMemPattern", false],
+      ["graphOptimizationLevel", "basic"],
+    ] as const) {
+      await t.test(field, async (t) => {
+        mockSpawn(t, {
+          stdout: JSON.stringify(sample(BASELINE_SHAPE, { [field]: value })),
+        });
+
+        await assert.rejects(runMockedChild(), new RegExp(field, "u"));
+      });
+    }
+  });
+
+  it("rejects invalid metrics", async (t) => {
+    for (const [field, value] of [
+      ["milliseconds", 0],
+      ["textsPerSecond", Number.NaN],
+      ["maxRssKiB", 1.5],
+    ] as const) {
+      await t.test(field, async (t) => {
+        mockSpawn(t, {
+          stdout: JSON.stringify(sample(BASELINE_SHAPE, { [field]: value })),
+        });
+
+        await assert.rejects(runMockedChild(), new RegExp(field, "u"));
+      });
+    }
+  });
+});
 
 describe("aggregateShapeSamples", () => {
   it("aggregates a one-sample quick run", () => {
@@ -128,8 +315,13 @@ describe("aggregateShapeSamples", () => {
 
   it("rejects incomplete sample sets and non-object records", () => {
     assert.throws(
-      () => aggregateShapeSamples(BASELINE_SHAPE, [], 1),
-      /exactly 1 sample/u,
+      () =>
+        aggregateShapeSamples(
+          PRODUCTION_SHAPE,
+          [sample(PRODUCTION_SHAPE), sample(PRODUCTION_SHAPE)],
+          3,
+        ),
+      /exactly 3 samples/u,
     );
     assert.throws(
       () => aggregateShapeSamples(BASELINE_SHAPE, [null], 1),
