@@ -31,6 +31,7 @@ import {
 } from "../db/ladybug-symbol-embeddings.js";
 import {
   createVectorIndex,
+  dropVectorIndex,
   showIndexesStrict,
 } from "../retrieval/index-lifecycle.js";
 import {
@@ -422,63 +423,59 @@ export async function refreshSymbolEmbeddings(params: {
     shouldBootstrapIndex = configuredIndex === undefined;
   }
 
-  const bootstrapVectorIndex = async (): Promise<void> => {
-    if (
-      !shouldBootstrapIndex ||
-      vecProp === null ||
-      indexName === null ||
-      !modelInfo
-    ) {
-      return;
+  const createRequiredVectorIndex = async (): Promise<void> => {
+    if (vecProp === null || indexName === null || !modelInfo) return;
+    recordMemorySnapshot("beforeHnsw");
+    params.onProgress?.({
+      stage: "embeddings",
+      substage: "symbolVectorIndex",
+      current: Math.min(skipped + embedded, symbols.length),
+      total: symbols.length,
+      model: storageModel,
+      message: "building HNSW",
+    });
+    let ok: boolean;
+    try {
+      ok = await measure("hnsw.create", () =>
+        withWriteConn((wConn) =>
+          createVectorIndex(
+            wConn,
+            SYMBOL_VECTOR_EMBEDDING_TABLE,
+            vecProp,
+            indexName,
+            modelInfo.dimension,
+            params.vectorEfc,
+          ),
+        ),
+      );
+    } finally {
+      recordMemorySnapshot("afterHnsw");
     }
+    params.onProgress?.({
+      stage: "embeddings",
+      substage: "symbolVectorIndex",
+      current: Math.min(skipped + embedded, symbols.length),
+      total: symbols.length,
+      model: storageModel,
+      message: ok ? "ready" : "creation failed",
+    });
+    if (!ok) {
+      throw new IndexError(
+        `Failed to create required vector index '${indexName}' on ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${vecProp}`,
+      );
+    }
+    logger.info(
+      `[embeddings] Vector index '${indexName}' created on ${SYMBOL_VECTOR_EMBEDDING_TABLE}`,
+    );
+  };
+
+  const bootstrapVectorIndex = async (): Promise<void> => {
+    if (!shouldBootstrapIndex) return;
     if (!(await hasCompleteSymbolVectorEmbedding(conn, modelName))) return;
     await runHnswRebuildCycle(
       "symbol-vector-bootstrap-pre-create",
       "symbol-vector-bootstrap-post-create",
-      async () => {
-        recordMemorySnapshot("beforeHnsw");
-        params.onProgress?.({
-          stage: "embeddings",
-          substage: "symbolVectorIndex",
-          current: Math.min(skipped + embedded, symbols.length),
-          total: symbols.length,
-          model: storageModel,
-          message: "building HNSW",
-        });
-        let ok: boolean;
-        try {
-          ok = await measure("hnsw.create", () =>
-            withWriteConn((wConn) =>
-              createVectorIndex(
-                wConn,
-                SYMBOL_VECTOR_EMBEDDING_TABLE,
-                vecProp,
-                indexName,
-                modelInfo.dimension,
-                params.vectorEfc,
-              ),
-            ),
-          );
-        } finally {
-          recordMemorySnapshot("afterHnsw");
-        }
-        params.onProgress?.({
-          stage: "embeddings",
-          substage: "symbolVectorIndex",
-          current: Math.min(skipped + embedded, symbols.length),
-          total: symbols.length,
-          model: storageModel,
-          message: ok ? "ready" : "creation failed",
-        });
-        if (!ok) {
-          throw new IndexError(
-            `Failed to create required vector index '${indexName}' on ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${vecProp}`,
-          );
-        }
-        logger.info(
-          `[embeddings] Vector index '${indexName}' created on ${SYMBOL_VECTOR_EMBEDDING_TABLE}`,
-        );
-      },
+      createRequiredVectorIndex,
       params.postIndexSessionTimeoutMs,
       params.recordTiming,
       params.repoId,
@@ -541,6 +538,16 @@ export async function refreshSymbolEmbeddings(params: {
   // Note: callers must not depend on write order — sort is purely a
   // throughput optimisation.
   uncachedItems.sort((a, b) => a.prefixedText.length - b.prefixedText.length);
+
+  // LadybugDB can terminate the process when a large live HNSW receives new
+  // vector rows. Keep every changed Symbol write inside one drop/recreate
+  // cycle; an absent bootstrap index remains on the cheaper create-only path.
+  const useRebuildPath =
+    !shouldBootstrapIndex &&
+    vecProp !== null &&
+    indexName !== null &&
+    modelInfo !== undefined &&
+    uncachedItems.length > 0;
 
   // Resolve concurrency: clamp to [1, MAX_EMBEDDING_CONCURRENCY].
   const maxConcurrency = Math.max(
@@ -757,7 +764,7 @@ export async function refreshSymbolEmbeddings(params: {
       }
       recordMemorySnapshot("afterInference");
     } finally {
-      await bootstrapVectorIndex();
+      if (!useRebuildPath) await bootstrapVectorIndex();
     }
 
     // Progress: fire at end through fireProgress() so the monotonic clamp
@@ -771,5 +778,36 @@ export async function refreshSymbolEmbeddings(params: {
       ? { embedded, skipped, degraded: true }
       : { embedded, skipped };
   };
-  return runPersistenceCycle();
+  if (!useRebuildPath || indexName === null) return runPersistenceCycle();
+  return runHnswRebuildCycle(
+    "symbol-vector-rebuild-pre-drop",
+    "symbol-vector-rebuild-post-create",
+    async () => {
+      const dropResult = await measure("hnsw.drop", () =>
+        withWriteConn((wConn) =>
+          dropVectorIndex(
+            wConn,
+            SYMBOL_VECTOR_EMBEDDING_TABLE,
+            indexName,
+          ),
+        ),
+      );
+      if (dropResult.status === "failed") {
+        throw new IndexError(
+          `Failed to drop required vector index '${indexName}' before Symbol embedding writes: ${dropResult.error}`,
+        );
+      }
+      logger.info(
+        `[embeddings] Dropped vector index '${indexName}' for ${uncachedItems.length} changed Symbol vector(s)`,
+      );
+      try {
+        return await runPersistenceCycle();
+      } finally {
+        await createRequiredVectorIndex();
+      }
+    },
+    params.postIndexSessionTimeoutMs,
+    params.recordTiming,
+    params.repoId,
+  );
 }

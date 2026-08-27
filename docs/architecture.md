@@ -305,7 +305,7 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | **SummaryCache**    | symbolId, summary, provider, model, cardHash, costUsd |
 | **SymbolReference** | referenceId, symbolId, file, line                     |
 
-Production Symbol vectors live in `SymbolVectorEmbedding`, with one complete row per Symbol and model. Model-specific HNSW indexes target this table. Incremental indexing and background semantic repair delete and replace only changed embedding rows while retaining a healthy HNSW; index bootstrap occurs only when the exact table/name/type/property identity is absent and at least one complete row exists. Symbol ANN queries rank candidates inside a repository-scoped projected graph, so matching Symbol-to-File-to-Repo ownership filters the graph before the top-K search.
+Production Symbol vectors live in `SymbolVectorEmbedding`, with one complete row per Symbol and model. Model-specific HNSW indexes target this table. Incremental indexing and background semantic repair delete and replace only changed embedding rows inside one checkpointed HNSW drop/write/recreate cycle; index bootstrap occurs only when the exact table/name/type/property identity is absent and at least one complete row exists. Symbol ANN queries rank candidates inside a repository-scoped projected graph, so matching Symbol-to-File-to-Repo ownership filters the graph before the top-K search.
 
 **Sync, policy, and memory nodes:**
 

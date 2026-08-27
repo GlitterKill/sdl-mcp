@@ -89,7 +89,7 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
-  it("retains Symbol HNSW while preserving FileSummary rebuilds", () => {
+  it("rebuilds Symbol HNSW around incremental writes", () => {
     const symbolSource = readSource("src/indexer/embeddings.ts");
     const symbolStart = symbolSource.indexOf(
       "export async function refreshSymbolEmbeddings(",
@@ -101,40 +101,40 @@ describe("semantic pipeline regressions", () => {
       symbolEnd === -1 ? symbolSource.length : symbolEnd,
     );
 
-    assert.ok(
-      !/dropVectorIndex\s*\(/.test(symbolBody),
-      "Symbol embedding refresh must not drop its live HNSW",
-    );
-    assert.ok(
-      !/rebuildMinUncachedRows|SYMBOL_VECTOR_REBUILD_MIN_ROWS|VECTOR_REBUILD_THRESHOLD|useRebuildPath/.test(
-        symbolBody,
-      ),
-      "Symbol embedding refresh must not defer small incremental writes behind a rebuild threshold",
-    );
-
-    const fileSummarySource = readSource(
-      "src/indexer/file-summary-embeddings.ts",
-    );
-    assert.match(fileSummarySource, /rebuildMinUncachedRows/);
     assert.match(
-      fileSummarySource,
-      /dropVectorIndex\(wConn, "FileSummary", indexName\)/,
-      "FileSummary keeps its existing drop/rebuild lifecycle",
+      symbolBody,
+      /dropVectorIndex\(\s*wConn,\s*SYMBOL_VECTOR_EMBEDDING_TABLE,\s*indexName/s,
+      "Symbol embedding refresh must remove the shared-table HNSW before writes",
+    );
+    assert.match(
+      symbolBody,
+      /symbol-vector-rebuild-pre-drop[\s\S]*symbol-vector-rebuild-post-create/,
+      "Symbol embedding refresh must checkpoint the drop/write/recreate cycle",
+    );
+    assert.match(
+      symbolBody,
+      /dropResult\.status === "failed"[\s\S]*throw new IndexError/,
+      "Symbol embedding refresh must fail before writes when HNSW drop fails",
+    );
+    assert.doesNotMatch(
+      symbolBody,
+      /rebuildMinUncachedRows|SYMBOL_VECTOR_REBUILD_MIN_ROWS/,
+      "the safety lifecycle must not defer changed Symbol vectors",
     );
   });
 
   it("fails refresh when a required Symbol HNSW bootstrap fails", () => {
     const source = readSource("src/indexer/embeddings.ts");
-    const bootstrapStart = source.indexOf(
+    const createStart = source.indexOf(
+      "const createRequiredVectorIndex = async (): Promise<void> =>",
+    );
+    const createEnd = source.indexOf(
       "const bootstrapVectorIndex = async (): Promise<void> =>",
+      createStart,
     );
-    const bootstrapEnd = source.indexOf(
-      "if (storageModel === \"mock-fallback\")",
-      bootstrapStart,
-    );
-    const bootstrapBody = source.slice(bootstrapStart, bootstrapEnd);
+    const createBody = source.slice(createStart, createEnd);
 
-    assert.match(bootstrapBody, /if \(!ok\)[\s\S]*throw new IndexError/);
+    assert.match(createBody, /if \(!ok\)[\s\S]*throw new IndexError/);
   });
 
   it("runs semantic rebuilds outside ambient indexer sessions", () => {

@@ -891,7 +891,7 @@ describe("Semantic Embedding Pipeline", () => {
     );
   });
 
-  it("bootstraps HNSW once and retains it during incremental refresh", async () => {
+  it("bootstraps HNSW and rebuilds it during incremental refresh", async () => {
     const { provider: recordingProvider } = createRecordingProvider();
     let embeddingCallsStarted = 0;
     let releaseConcurrentCalls!: () => void;
@@ -1012,11 +1012,23 @@ describe("Semantic Embedding Pipeline", () => {
     });
     assert.deepStrictEqual(second, { embedded: 1, skipped: 0 });
     assert.deepStrictEqual(
-      incrementalPhases.filter(
-        (phaseName) => phaseName === "hnsw.drop" || phaseName === "hnsw.create",
+      incrementalPhases.filter((phaseName) =>
+        [
+          "checkpoint.pre",
+          "hnsw.drop",
+          "inference",
+          "hnsw.create",
+          "checkpoint.post",
+        ].includes(phaseName),
       ),
-      [],
-      "incremental Symbol writes must retain the live HNSW",
+      [
+        "checkpoint.pre",
+        "hnsw.drop",
+        "inference",
+        "hnsw.create",
+        "checkpoint.post",
+      ],
+      "incremental Symbol writes must run with the shared-table HNSW absent",
     );
     assert.strictEqual(await countSymbolVectorRows(conn), rowCountBefore);
 
