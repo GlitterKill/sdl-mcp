@@ -393,6 +393,87 @@ describe("provider-first SCIP materialization", () => {
     assert.ok(Math.abs(neighbors[0]?.distance ?? Number.POSITIVE_INFINITY) <= 1e-6);
   });
 
+  it("preserves shared SCIP external Symbols and vectors during repo-local pruning", async () => {
+    graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-db-"));
+    await initRepo(graphDbPath);
+    const otherRepoId = "provider-first-scip-shared-owner";
+
+    const facts = normalizeScipProviderFacts({
+      repoId: REPO_ID,
+      generationId: "gen-shared-vector-prune",
+      providerId: "scip-typescript",
+      providerVersion: "1.0.0",
+      documents: [documentForExternal("sharedApi")],
+      externalSymbols: [externalSymbol("sharedApi")],
+    });
+    await materializeFacts(facts);
+
+    const conn = await getLadybugConn();
+    const shared = await ladybugDb.querySingle<{ symbolId: string }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.external = true AND s.source = 'scip'
+       RETURN s.symbolId AS symbolId`,
+      { repoId: REPO_ID },
+    );
+    assert.ok(shared);
+    await withWriteConn(async (writeConn) => {
+      await ladybugDb.upsertRepo(writeConn, {
+        repoId: otherRepoId,
+        rootPath: join(graphDbPath, "other"),
+        configJson: "{}",
+        createdAt: NOW,
+      });
+      await ladybugDb.exec(
+        writeConn,
+        `MATCH (s:Symbol {symbolId: $symbolId}), (r:Repo {repoId: $otherRepoId})
+         CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+        { symbolId: shared.symbolId, otherRepoId },
+      );
+      await ladybugDb.setSymbolVectorEmbedding(
+        writeConn,
+        REPO_ID,
+        shared.symbolId,
+        "jina-embeddings-v2-base-code",
+        "shared-scip-vector",
+        "shared-scip-vector-hash",
+        [1, ...new Array<number>(767).fill(0)],
+      );
+
+      assert.equal(
+        await ladybugDb.pruneStaleScipExternalSymbols(
+          writeConn,
+          REPO_ID,
+          [],
+        ),
+        1,
+      );
+    });
+
+    assert.deepEqual(
+      await ladybugDb.querySingle<{
+        repoId: string;
+        otherMemberships: unknown;
+      }>(
+        conn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         RETURN s.repoId AS repoId,
+                count { MATCH (s)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $otherRepoId}) } AS otherMemberships`,
+        { symbolId: shared.symbolId, otherRepoId },
+      ),
+      { repoId: otherRepoId, otherMemberships: 1 },
+    );
+    assert.deepEqual(
+      await ladybugDb.querySingle<{ repoId: string; cardHash: string }>(
+        conn,
+        `MATCH (e:SymbolVectorEmbedding {symbolId: $symbolId})
+         RETURN e.repoId AS repoId, e.cardHash AS cardHash`,
+        { symbolId: shared.symbolId },
+      ),
+      { repoId: otherRepoId, cardHash: "shared-scip-vector-hash" },
+    );
+  });
+
   it("materializes multiple SCIP external symbols through the real DB batch path", async () => {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-db-"));
     await initRepo(graphDbPath);

@@ -2,7 +2,10 @@ import type { Connection } from "kuzu";
 
 import { IndexError } from "../domain/errors.js";
 import { resolveLadybugWriteChunkSize } from "./ladybug-batching.js";
-import { LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT } from "./ladybug-symbols.js";
+import {
+  LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT,
+  prepareSymbolsForFileDeletionInTransaction,
+} from "./ladybug-symbols.js";
 import {
   exec,
   execDdl,
@@ -101,11 +104,18 @@ export async function deleteProviderReplacementSymbols(
     resolveLadybugWriteChunkSize("symbols"),
     PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE * 4,
   );
+  const targetFileIds = [...new Set(fileIds)];
   for (let i = 0; i < uniqueSymbolIds.length; i += symbolChunkSize) {
     const chunk = uniqueSymbolIds.slice(i, i + symbolChunkSize);
-    const fileCleanupIds = i === 0 ? [...fileIds] : [];
+    const fileCleanupIds = i === 0 ? targetFileIds : [];
     await withTransaction(conn, async (txConn) => {
-      await retireProviderSymbolsByIds(txConn, repoId, chunk, fileCleanupIds);
+      await retireProviderSymbolsByIds(
+        txConn,
+        repoId,
+        chunk,
+        targetFileIds,
+        fileCleanupIds,
+      );
     });
   }
 }
@@ -114,82 +124,131 @@ async function retireProviderSymbolsByIds(
   conn: Connection,
   repoId: string,
   symbolIds: string[],
-  fileIds: string[],
+  targetFileIds: string[],
+  fileCleanupIds: string[],
 ): Promise<void> {
-  await deleteSymbolVectorEmbeddingsBySymbolIds(conn, symbolIds);
+  const targetFileRows =
+    targetFileIds.length === 0
+      ? []
+      : await queryAll<{ symbolId: string }>(
+          conn,
+          `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
+           WHERE s.symbolId IN $symbolIds AND f.fileId IN $fileIds
+           RETURN DISTINCT s.symbolId AS symbolId`,
+          { symbolIds, fileIds: targetFileIds },
+        );
+  const targetFileSymbolIds = targetFileRows.map(({ symbolId }) => symbolId);
+  const targetFileSymbolIdSet = new Set(targetFileSymbolIds);
+  const fileScopedDeleteIds =
+    targetFileSymbolIds.length === 0
+      ? []
+      : await prepareSymbolsForFileDeletionInTransaction(
+          conn,
+          targetFileIds,
+          targetFileSymbolIds,
+        );
+  const incomingOnlySymbolIds = symbolIds.filter(
+    (symbolId) => !targetFileSymbolIdSet.has(symbolId),
+  );
+  const sharedRows =
+    incomingOnlySymbolIds.length === 0
+      ? []
+      : await queryAll<{ symbolId: string; repoId: string }>(
+          conn,
+          `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(other:Repo)
+           WHERE s.symbolId IN $symbolIds AND other.repoId <> $repoId
+           RETURN s.symbolId AS symbolId, other.repoId AS repoId
+           ORDER BY s.symbolId, other.repoId`,
+          { symbolIds: incomingOnlySymbolIds, repoId },
+        );
+  const sharedIncomingSymbolIds = new Set<string>();
+  for (const row of sharedRows) {
+    sharedIncomingSymbolIds.add(row.symbolId);
+  }
+  const deletedSymbolIds = [
+    ...fileScopedDeleteIds,
+    ...incomingOnlySymbolIds.filter(
+      (symbolId) => !sharedIncomingSymbolIds.has(symbolId),
+    ),
+  ];
+
+  await deleteSymbolVectorEmbeddingsBySymbolIds(conn, deletedSymbolIds);
   for (const [query, params] of [
     [
       `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
-       WHERE s.symbolId IN $symbolIds
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE d`,
-      { symbolIds },
+      { deletedSymbolIds },
     ],
     [
       `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
-       WHERE s.symbolId IN $symbolIds
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE d`,
-      { symbolIds },
+      { deletedSymbolIds },
     ],
     [
       `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
-       WHERE s.symbolId IN $symbolIds
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE r`,
-      { symbolIds },
+      { deletedSymbolIds },
     ],
     [
       `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File)
-       WHERE s.symbolId IN $symbolIds
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE r`,
-      { symbolIds },
+      { deletedSymbolIds },
     ],
     [
       `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
-       WHERE s.symbolId IN $symbolIds
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE r`,
-      { symbolIds },
+      { deletedSymbolIds },
     ],
     [
       `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
-       WHERE s.symbolId IN $symbolIds
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE r`,
-      { symbolIds },
+      { deletedSymbolIds },
     ],
     [
       `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
-       WHERE s.symbolId IN $symbolIds
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE r`,
-      { symbolIds },
-    ],
-    [`MATCH (m:Metrics) WHERE m.symbolId IN $symbolIds DELETE m`, { symbolIds }],
-    [
-      `MATCH (e:SymbolEmbedding) WHERE e.symbolId IN $symbolIds DELETE e`,
-      { symbolIds },
+      { deletedSymbolIds },
     ],
     [
-      `MATCH (sc:SummaryCache) WHERE sc.symbolId IN $symbolIds DELETE sc`,
-      { symbolIds },
+      `MATCH (m:Metrics) WHERE m.symbolId IN $deletedSymbolIds DELETE m`,
+      { deletedSymbolIds },
+    ],
+    [
+      `MATCH (e:SymbolEmbedding) WHERE e.symbolId IN $deletedSymbolIds DELETE e`,
+      { deletedSymbolIds },
+    ],
+    [
+      `MATCH (sc:SummaryCache) WHERE sc.symbolId IN $deletedSymbolIds DELETE sc`,
+      { deletedSymbolIds },
     ],
     [
       `MATCH (sr:SymbolReference) WHERE sr.fileId IN $fileIds DELETE sr`,
-      { fileIds },
+      { fileIds: fileCleanupIds },
     ],
     [
       `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
-       WHERE s.symbolId IN $symbolIds
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE r`,
-      { symbolIds },
+      { deletedSymbolIds },
     ],
     [
       `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File)
        WHERE f.fileId IN $fileIds
        DELETE r`,
-      { fileIds },
+      { fileIds: fileCleanupIds },
     ],
     [
-      `MATCH (s:Symbol {repoId: $repoId})
-       WHERE s.symbolId IN $symbolIds
+      `MATCH (s:Symbol)
+       WHERE s.symbolId IN $deletedSymbolIds
        DELETE s`,
-      { repoId, symbolIds },
+      { deletedSymbolIds },
     ],
   ] as const) {
     if ("fileIds" in params && params.fileIds.length === 0) continue;

@@ -547,13 +547,14 @@ This batching reduces ONNX inference overhead and speeds up re-indexing of large
 
 ### Embedding Storage
 
-Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB. Each model gets its own set of properties:
+Symbol embeddings are stored as **model-scoped `SymbolVectorEmbedding` rows** in LadybugDB. Each row has a stable model-plus-symbol identity and one model-specific numeric vector:
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Symbol["Symbol node"] e1@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt<br/>embeddingJinaCodeVec"]
-    Symbol e2@--> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt<br/>embeddingNomicVec"]
+    Symbol["Symbol node"] e1@--> Row["SymbolVectorEmbedding<br/>repoId + symbolId + model<br/>embeddingVector + cardHash + updatedAt"]
+    Row e2@--> Jina["embeddingJinaCodeVec"]
+    Row e3@--> Nomic["embeddingNomicVec"]
 
     classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
     classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
@@ -562,14 +563,14 @@ flowchart TD
     classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
     classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
     classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2 animate;
+    class e1,e2,e3 animate;
 ```
 
-Vectors are compressed for storage: `Float32 -> multiply by 10,000 -> round to Int16 -> base64 encode` (~50% savings vs raw float32, negligible precision loss for cosine similarity).
+Each row keeps the compact cache representation (`Float32 -> multiply by 10,000 -> round to Int16 -> base64 encode`) and the numeric `DOUBLE[768]` array required by Ladybug HNSW.
 
 Each embedding is tagged with a `cardHash` (SHA-256 of the symbol data + text format used). When the symbol changes or the text format changes, the embedding is automatically refreshed during indexing.
 
-> **Migration note**: Prior to the hybrid retrieval rollout, embeddings were stored in a separate `SymbolEmbedding` node table. Migration m007 automatically copies embeddings to the inline Symbol properties. The old `SymbolEmbedding` table is deprecated and will be removed in a future release.
+> **Migration note**: Migration m007 copied the deprecated `SymbolEmbedding` table into inline Symbol compatibility columns. Migration m026 copies complete supported inline vectors into `SymbolVectorEmbedding`. Current writes and HNSW indexes use the dedicated table; the older storage remains compatibility-only.
 
 ### Vector Indexes
 
@@ -579,8 +580,8 @@ Hybrid retrieval uses native Ladybug vector indexes for fast approximate nearest
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     subgraph Indexes["Native Ladybug Vector Indexes"]
-        JinaIndex["symbol_vec_jina_code_v2<br/>Property: Symbol.embeddingJinaCode<br/>Dimensions: 768"]
-        NomicIndex["symbol_vec_nomic_embed_v15<br/>Property: Symbol.embeddingNomic<br/>Dimensions: 768"]
+        JinaIndex["symbol_vec_jina_code_v2<br/>Property: SymbolVectorEmbedding.embeddingJinaCodeVec<br/>Dimensions: 768"]
+        NomicIndex["symbol_vec_nomic_embed_v15<br/>Property: SymbolVectorEmbedding.embeddingNomicVec<br/>Dimensions: 768"]
     end
 
     Config["semantic.retrieval.vector<br/>vector.enabled = true<br/>vector.topK = 75<br/>vector.efs = 200"] e1@--> Indexes
@@ -594,6 +595,8 @@ flowchart TD
     classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
     class e1 animate;
 ```
+
+Once bootstrapped, Symbol refresh replaces only changed model rows and retains the healthy HNSW. Symbol ANN queries rank candidates inside a repository-scoped projected graph, so matching Symbol-to-File-to-Repo ownership filters the graph before the top-K search.
 
 The current recommended configuration surface is `semantic.retrieval.vector`. Retired sidecar ANN configuration is intentionally omitted from current examples.
 

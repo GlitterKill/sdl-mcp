@@ -30,7 +30,6 @@ import { IndexError } from "../domain/errors.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { resolveSemanticEmbeddingModelPlan } from "../config/semantic-embedding-model-plan.js";
-import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "./model-mapping.js";
 import {
   SYMBOL_SEARCH_MAX_QUERY_TOKENS,
   SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH,
@@ -502,6 +501,32 @@ function vectorRowId(row: VectorRawRow, idField = "symbolId"): string {
   ];
   return candidates.find((value): value is string => typeof value === "string") ?? "";
 }
+
+async function queryRepoSymbolVectorIndex(
+  conn: Connection,
+  repoId: string,
+  indexName: string,
+  embedding: number[],
+  topK: number,
+): Promise<{ symbolId: string; score: number }[]> {
+  assertIndexName(indexName);
+  const k = assertPositiveInt(topK, "topK");
+  const projectionName = await ladybugDb.ensureRepoSymbolVectorProjection(conn, repoId);
+  assertTableName(projectionName);
+  const rows = await queryStoredProcAll<VectorRawRow>(
+    conn,
+    `CALL QUERY_VECTOR_INDEX('${projectionName}', '${indexName}', ${cypherNumberArray(embedding)}, ${k}) RETURN node, distance`,
+  );
+  return sortVectorRowsByDistance(rows).map((row) => ({
+    symbolId: vectorRowId(row),
+    score:
+      (row.score ?? row._score) != null
+        ? Number(row.score ?? row._score)
+        : (row.distance ?? row._distance) != null
+          ? 1 / (1 + Number(row.distance ?? row._distance))
+          : 0,
+  }));
+}
 function timingKeySegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
 }
@@ -593,30 +618,20 @@ function vectorSourceForModel(model: string): RetrievalSource {
  */
 async function queryVectorIndex(
   conn: Connection,
+  repoId: string,
   indexName: string,
   embedding: number[],
   topK: number,
   onResult?: (succeeded: boolean) => void,
 ): Promise<{ symbolId: string; score: number }[]> {
   try {
-    assertIndexName(indexName);
-    const k = assertPositiveInt(topK, "topK");
-    const vectorLiteral = cypherNumberArray(embedding);
-    const rows = await queryStoredProcAll<VectorRawRow>(
+    const results = await queryRepoSymbolVectorIndex(
       conn,
-      `CALL QUERY_VECTOR_INDEX('${SYMBOL_VECTOR_EMBEDDING_TABLE}', '${indexName}', ${vectorLiteral}, ${k}) RETURN node, distance`,
+      repoId,
+      indexName,
+      embedding,
+      topK,
     );
-    const results = sortVectorRowsByDistance(rows).map((r) => ({
-      symbolId: vectorRowId(r),
-      // Kuzu vector index returns distance; convert to a similarity score.
-      // Lower distance = more similar, so score = 1 / (1 + distance).
-      score:
-        (r.score ?? r._score) != null
-          ? Number(r.score ?? r._score)
-          : (r.distance ?? r._distance) != null
-            ? 1 / (1 + Number(r.distance ?? r._distance))
-            : 0,
-    }));
     onResult?.(true);
     return results;
   } catch (err) {
@@ -918,6 +933,7 @@ export async function hybridSearch(
       const vectorStartedAt = performance.now();
       const vecResults = await queryVectorIndex(
         conn,
+        options.repoId,
         indexName,
         queryEmbedding,
         vectorTopK,
@@ -1456,40 +1472,37 @@ async function runEntitySearch<T = never>(
         const vectorQueryStartedAt = performance.now();
         const vectorLane = `${entityType}:${vectorSourceForModel(modelName)}`;
         try {
-          const vectorTableName =
-            entityType === "symbol"
-              ? SYMBOL_VECTOR_EMBEDDING_TABLE
-              : entityFtsCfg.tableName;
-          assertTableName(vectorTableName);
-          assertIndexName(indexName);
           const k = assertPositiveInt(vectorTopK, "topK");
-          const vectorLiteral = cypherNumberArray(queryEmbedding);
-          const rawRows = await queryStoredProcAll<VectorRawRow>(
-            conn,
-            `CALL QUERY_VECTOR_INDEX('${vectorTableName}', '${indexName}', ${vectorLiteral}, ${k}) RETURN node, distance`,
-          );
-          vecRows = sortVectorRowsByDistance(
-            rawRows,
-            entityVecCfg.idField,
-          ).map((r) => {
-            // The id field varies by entity type.
-            const idField = entityVecCfg.idField;
-            const entityId =
-              ((r as Record<string, unknown>)[idField] as string | undefined) ??
-              (r.node?.[idField] as string | undefined) ??
-              (r._node?.[idField] as string | undefined) ??
-              r.symbolId ?? // legacy fallback for Symbol
-              r.node?.symbolId ??
-              r._node?.symbolId ??
-              "";
-            const score =
-              (r.score ?? r._score) != null
-                ? Number(r.score ?? r._score)
-                : (r.distance ?? r._distance) != null
-                  ? 1 / (1 + Number(r.distance ?? r._distance))
-                  : 0;
-            return { symbolId: entityId, score };
-          });
+          if (entityType === "symbol") {
+            vecRows = await queryRepoSymbolVectorIndex(
+              conn,
+              options.repoId,
+              indexName,
+              queryEmbedding,
+              k,
+            );
+          } else {
+            const vectorTableName = entityFtsCfg.tableName;
+            assertTableName(vectorTableName);
+            assertIndexName(indexName);
+            const rawRows = await queryStoredProcAll<VectorRawRow>(
+              conn,
+              `CALL QUERY_VECTOR_INDEX('${vectorTableName}', '${indexName}', ${cypherNumberArray(queryEmbedding)}, ${k}) RETURN node, distance`,
+            );
+            vecRows = sortVectorRowsByDistance(
+              rawRows,
+              entityVecCfg.idField,
+            ).map((row) => {
+              const entityId = vectorRowId(row, entityVecCfg.idField);
+              const score =
+                (row.score ?? row._score) != null
+                  ? Number(row.score ?? row._score)
+                  : (row.distance ?? row._distance) != null
+                    ? 1 / (1 + Number(row.distance ?? row._distance))
+                    : 0;
+              return { symbolId: entityId, score };
+            });
+          }
           markLaneResult(queryContext, vectorLane, true);
         } catch (err) {
           markLaneResult(queryContext, vectorLane, false);
@@ -1811,7 +1824,7 @@ export async function narrowFilesForQuery(
 
   let conn;
   try {
-    conn = await getLadybugConn();
+    conn = queryContext?.connection ?? (await getLadybugConn());
   } catch (err) {
     logger.debug(
       `[narrow-files] getLadybugConn failed: ${
@@ -1825,15 +1838,18 @@ export async function narrowFilesForQuery(
   }
 
   try {
-    const symbols = await ladybugDb.getSymbolsByIds(conn, symbolIds);
+    const symbolFileIds = await ladybugDb.getRepoSymbolFileIdsByIds(
+      conn,
+      options.repoId,
+      symbolIds,
+    );
     const fileIds: string[] = [];
     const seenFileIds = new Set<string>();
     for (const sid of symbolIds) {
-      const sym = symbols.get(sid);
-      if (!sym || sym.repoId !== options.repoId) continue;
-      if (seenFileIds.has(sym.fileId)) continue;
-      seenFileIds.add(sym.fileId);
-      fileIds.push(sym.fileId);
+      const fileId = symbolFileIds.get(sid);
+      if (!fileId || seenFileIds.has(fileId)) continue;
+      seenFileIds.add(fileId);
+      fileIds.push(fileId);
     }
     if (fileIds.length === 0) {
       return {

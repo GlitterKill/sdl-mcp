@@ -40,6 +40,25 @@ function getEmbeddingId(symbolId: string, model: string): string {
   return `${model}:${symbolId}`;
 }
 
+/** True when the selected model has at least one complete persisted vector row. */
+export async function hasCompleteSymbolVectorEmbedding(
+  conn: Connection,
+  model: string,
+): Promise<boolean> {
+  const vectorProperty = resolveVectorProperty(model);
+  const row = await querySingle<{ embeddingId: string }>(
+    conn,
+    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE} {model: $model})
+     WHERE e.embeddingVector IS NOT NULL
+       AND e.cardHash IS NOT NULL
+       AND e.${vectorProperty} IS NOT NULL
+     RETURN e.embeddingId AS embeddingId
+     LIMIT 1`,
+    { model },
+  );
+  return row !== null;
+}
+
 export async function deleteSymbolVectorEmbeddingsBySymbolIds(
   conn: Connection,
   symbolIds: readonly string[],
@@ -140,27 +159,11 @@ export async function setSymbolVectorEmbedding(
   cardHash: string,
   vectorArray: number[],
 ): Promise<void> {
-  const vectorProperty = resolveVectorProperty(model);
-  await exec(
+  await setSymbolVectorEmbeddingBatch(
     conn,
-    `MERGE (e:${SYMBOL_VECTOR_EMBEDDING_TABLE} {embeddingId: $embeddingId})
-     SET e.repoId = $repoId,
-         e.symbolId = $symbolId,
-         e.model = $model,
-         e.embeddingVector = $vector,
-         e.cardHash = $cardHash,
-         e.updatedAt = $updatedAt,
-         e.${vectorProperty} = $vectorArray`,
-    {
-      embeddingId: getEmbeddingId(symbolId, model),
-      repoId,
-      symbolId,
-      model,
-      vector,
-      cardHash,
-      updatedAt: new Date().toISOString(),
-      vectorArray,
-    },
+    repoId,
+    model,
+    [{ symbolId, vector, cardHash, vectorArray }],
   );
 }
 

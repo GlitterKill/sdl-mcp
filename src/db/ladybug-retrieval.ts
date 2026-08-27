@@ -1,10 +1,63 @@
+import { createHash } from "node:crypto";
+
 import type { Connection } from "kuzu";
 
-import { queryAll } from "./ladybug-core.js";
+import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "../retrieval/model-mapping.js";
+import { execStoredProc, queryAll } from "./ladybug-core.js";
+
+const symbolVectorProjectionPromises = new WeakMap<
+  Connection,
+  Map<string, Promise<string>>
+>();
+
+function cypherSingleQuotedString(value: string): string {
+  return `'${value
+    .replace(/\\/g, "\\\\")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t")
+    .replace(/'/g, "\\'")}'`;
+}
 
 export interface RetrievalSeedCandidateRow {
   symbolId: string;
   score: number;
+}
+
+/** Ensure Symbol vector ANN ranking is scoped to one repository before top-K. */
+export async function ensureRepoSymbolVectorProjection(
+  conn: Connection,
+  repoId: string,
+): Promise<string> {
+  const projectionName = `sdl_symbol_vectors_${createHash("sha256")
+    .update(repoId)
+    .digest("hex")
+    .slice(0, 16)}`;
+  let projections = symbolVectorProjectionPromises.get(conn);
+  if (!projections) {
+    projections = new Map();
+    symbolVectorProjectionPromises.set(conn, projections);
+  }
+  const existing = projections.get(projectionName);
+  if (existing) return existing;
+
+  const projectionQuery =
+    `MATCH (r:Repo {repoId: ${cypherSingleQuotedString(repoId)}})<-[:FILE_IN_REPO]-(:File)` +
+    `<-[:SYMBOL_IN_FILE]-(s:Symbol), (e:${SYMBOL_VECTOR_EMBEDDING_TABLE}) ` +
+    "WHERE e.symbolId = s.symbolId WITH DISTINCT e RETURN e";
+  const creating = execStoredProc(
+    conn,
+    `CALL PROJECT_GRAPH_CYPHER(${cypherSingleQuotedString(projectionName)}, ${cypherSingleQuotedString(projectionQuery)})`,
+  ).then(() => projectionName);
+  projections.set(projectionName, creating);
+  try {
+    return await creating;
+  } catch (err) {
+    if (projections.get(projectionName) === creating) {
+      projections.delete(projectionName);
+    }
+    throw err;
+  }
 }
 
 /** Resolve a full symbol ID without leaking Cypher into retrieval orchestration. */

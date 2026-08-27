@@ -39,9 +39,9 @@ export async function getSymbolRetrievalCoverage(
   );
   const covered = await querySingle<{ covered: unknown }>(
     conn,
-    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE} {repoId: $repoId, model: $model})
+    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE} {model: $model})
      MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)-[:SYMBOL_IN_REPO]->(r)
-     WHERE e.symbolId = s.symbolId
+     WHERE e.embeddingId = $model + ':' + s.symbolId
        AND e.${property} IS NOT NULL
        AND coalesce(s.symbolStatus, 'real') = 'real'
        AND coalesce(s.external, false) = false

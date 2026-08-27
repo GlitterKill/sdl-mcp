@@ -30,6 +30,10 @@ const orchestratorSrc = readFileSync(
   join(process.cwd(), "src/retrieval/orchestrator.ts"),
   "utf8",
 );
+const retrievalDbSrc = readFileSync(
+  join(process.cwd(), "src/db/ladybug-retrieval.ts"),
+  "utf8",
+);
 
 describe("request-scoped retrieval work", () => {
   it("preserves the checked-out connection and initializes backend outcomes", () => {
@@ -237,13 +241,23 @@ describe("request-scoped retrieval work", () => {
   });
 
   it("queries symbol ANN on SymbolVectorEmbedding and returns symbol IDs", () => {
-    assert.ok(orchestratorSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
+    assert.ok(retrievalDbSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
     assert.ok(
       orchestratorSrc.includes(
-        "`CALL QUERY_VECTOR_INDEX('${SYMBOL_VECTOR_EMBEDDING_TABLE}'",
+        "`CALL QUERY_VECTOR_INDEX('${projectionName}'",
       ),
     );
-    assert.ok(orchestratorSrc.includes('idField: "symbolId"'));
+    assert.ok(orchestratorSrc.includes("symbolId: vectorRowId(row)"));
+  });
+
+  it("runs both Symbol ANN paths through a repository-filtered projection", () => {
+    assert.ok(retrievalDbSrc.includes("CALL PROJECT_GRAPH_CYPHER"));
+    assert.strictEqual(
+      orchestratorSrc.match(
+        /queryRepoSymbolVectorIndex\(/g,
+      )?.length,
+      3,
+    );
   });
 
   it("uses the stable ID tie-break for non-finite vector distances", () => {

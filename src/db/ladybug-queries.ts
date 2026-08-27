@@ -162,6 +162,7 @@ export {
   viewerSettingsSnapshot,
 } from "./ladybug-viewer.js";
 export {
+  ensureRepoSymbolVectorProjection,
   findRetrievalSeedSymbolsByIdPrefix,
   findRetrievalSeedSymbolsByName,
   hasRetrievalSeedSymbol,

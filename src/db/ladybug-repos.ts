@@ -23,6 +23,7 @@ import {
   deleteParserProvenanceForRepoInTransaction,
 } from "./ladybug-parser-provenance.js";
 import { deleteSymbolVectorEmbeddingsBySymbolIds } from "./ladybug-symbol-embeddings.js";
+import { prepareSymbolsForFileDeletionInTransaction } from "./ladybug-symbols.js";
 
 export interface MetricsRow {
   symbolId: string;
@@ -653,9 +654,18 @@ async function _deleteFilesByIdsInner(
      RETURN s.symbolId AS symbolId`,
     { fileIds: uniqueFileIds },
   );
-  const symbolIds = symbolRows
-    .map((r) => r.symbolId)
-    .filter((symbolId) => !preservedSymbolIds.has(symbolId));
+  const candidateSymbolIds = [
+    ...new Set(
+      symbolRows
+        .map((r) => r.symbolId)
+        .filter((symbolId) => !preservedSymbolIds.has(symbolId)),
+    ),
+  ];
+  const symbolIds = await prepareSymbolsForFileDeletionInTransaction(
+    conn,
+    uniqueFileIds,
+    candidateSymbolIds,
+  );
 
   if (symbolIds.length > 0) {
     // Step 2: Batch-delete DEPENDS_ON edges (both directions)

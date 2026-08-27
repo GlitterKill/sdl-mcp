@@ -1049,6 +1049,24 @@ export async function pruneIsolatedPlaceholderSymbols(
     { symbolIds: staleMembershipIds },
   );
   const symbolIds = deletableRows.map((row) => row.symbolId);
+  const replacementRows = await queryAll<{ symbolId: string; repoId: string }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo)
+     WHERE s.symbolId IN $symbolIds AND r.repoId <> $repoId
+     RETURN s.symbolId AS symbolId, r.repoId AS repoId
+     ORDER BY symbolId, repoId`,
+    { symbolIds: staleMembershipIds, repoId },
+  );
+  const replacementOwnerBySymbol = new Map<string, string>();
+  for (const row of replacementRows) {
+    if (!replacementOwnerBySymbol.has(row.symbolId)) {
+      replacementOwnerBySymbol.set(row.symbolId, row.repoId);
+    }
+  }
+  const ownershipReplacements = Array.from(
+    replacementOwnerBySymbol,
+    ([symbolId, ownerRepoId]) => ({ symbolId, ownerRepoId }),
+  );
 
   const cleanup = symbolIds.length > 0 ? {
     symbolInFile: await cleanupPatternExists(
@@ -1092,6 +1110,10 @@ export async function pruneIsolatedPlaceholderSymbols(
        WHERE s.symbolId IN $staleMembershipIds
        DELETE rel`,
       { repoId, staleMembershipIds },
+    );
+    await transferSymbolOwnershipInTransaction(
+      txConn,
+      ownershipReplacements,
     );
     if (cleanup?.symbolInFile) {
       await exec(
@@ -1180,6 +1202,33 @@ export async function pruneIsolatedPlaceholderSymbols(
   });
 
   return symbolIds.length;
+}
+
+interface SymbolOwnershipReplacement {
+  symbolId: string;
+  ownerRepoId: string;
+}
+
+async function transferSymbolOwnershipInTransaction(
+  conn: Connection,
+  replacements: SymbolOwnershipReplacement[],
+): Promise<void> {
+  if (replacements.length === 0) return;
+
+  await exec(
+    conn,
+    `UNWIND $replacements AS replacement
+     MATCH (s:Symbol {symbolId: replacement.symbolId})
+     SET s.repoId = replacement.ownerRepoId`,
+    { replacements },
+  );
+  await exec(
+    conn,
+    `UNWIND $replacements AS replacement
+     MATCH (e:SymbolVectorEmbedding {symbolId: replacement.symbolId})
+     SET e.repoId = replacement.ownerRepoId`,
+    { replacements },
+  );
 }
 
 async function cleanupPatternExists(
@@ -2008,6 +2057,31 @@ export async function getSymbolsByIds(
   return result;
 }
 
+/** Resolve candidate symbols only through file and repository relationships that agree. */
+export async function getRepoSymbolFileIdsByIds(
+  conn: Connection,
+  repoId: string,
+  symbolIds: string[],
+): Promise<Map<string, string>> {
+  if (symbolIds.length === 0) return new Map();
+
+  const rows = await queryAll<{ symbolId: string; fileId: string }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
+     MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)-[:FILE_IN_REPO]->(r)
+     WHERE s.symbolId IN $symbolIds
+     RETURN s.symbolId AS symbolId, f.fileId AS fileId
+     ORDER BY s.symbolId, f.fileId`,
+    { repoId, symbolIds },
+  );
+
+  const result = new Map<string, string>();
+  for (const row of rows) {
+    if (!result.has(row.symbolId)) result.set(row.symbolId, row.fileId);
+  }
+  return result;
+}
+
 export interface SymbolBasicInfo {
   symbolId: string;
   name: string;
@@ -2167,11 +2241,149 @@ export async function findSymbolsInRange(
   }));
 }
 
+/**
+ * Detach file-local ownership while retaining globally shared Symbol rows.
+ * Returns only symbols that have no surviving repository owner and are safe
+ * for the caller to delete with their symbol-keyed adjunct rows.
+ */
+export async function prepareSymbolsForFileDeletionInTransaction(
+  conn: Connection,
+  fileIds: string[],
+  symbolIds: string[],
+): Promise<string[]> {
+  if (fileIds.length === 0 || symbolIds.length === 0) return [];
+
+  const targetOwnershipRows = await queryAll<{
+    symbolId: string;
+    currentRepoId: string | null;
+    repoId: string;
+  }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)-[:FILE_IN_REPO]->(r:Repo)
+     WHERE s.symbolId IN $symbolIds AND f.fileId IN $fileIds
+     RETURN DISTINCT s.symbolId AS symbolId,
+                     s.repoId AS currentRepoId,
+                     r.repoId AS repoId
+     ORDER BY symbolId, repoId`,
+    { fileIds, symbolIds },
+  );
+  const survivingFileRows = await queryAll<{
+    symbolId: string;
+    currentRepoId: string | null;
+    repoId: string;
+  }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)-[:FILE_IN_REPO]->(r:Repo)
+     WHERE s.symbolId IN $symbolIds AND NOT f.fileId IN $fileIds
+     RETURN DISTINCT s.symbolId AS symbolId,
+                     s.repoId AS currentRepoId,
+                     r.repoId AS repoId
+     ORDER BY symbolId, repoId`,
+    { fileIds, symbolIds },
+  );
+  const membershipRows = await queryAll<{
+    symbolId: string;
+    currentRepoId: string | null;
+    repoId: string;
+  }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo)
+     WHERE s.symbolId IN $symbolIds
+     RETURN DISTINCT s.symbolId AS symbolId,
+                     s.repoId AS currentRepoId,
+                     r.repoId AS repoId
+     ORDER BY symbolId, repoId`,
+    { symbolIds },
+  );
+
+  const targetReposBySymbol = new Map<string, Set<string>>();
+  const survivingReposBySymbol = new Map<string, Set<string>>();
+  const currentRepoBySymbol = new Map<string, string>();
+  const addRepo = (
+    target: Map<string, Set<string>>,
+    symbolId: string,
+    repoId: string,
+  ): void => {
+    const repoIds = target.get(symbolId) ?? new Set<string>();
+    repoIds.add(repoId);
+    target.set(symbolId, repoIds);
+  };
+  for (const row of targetOwnershipRows) {
+    addRepo(targetReposBySymbol, row.symbolId, row.repoId);
+    if (row.currentRepoId !== null) {
+      currentRepoBySymbol.set(row.symbolId, row.currentRepoId);
+    }
+  }
+  for (const row of survivingFileRows) {
+    addRepo(survivingReposBySymbol, row.symbolId, row.repoId);
+    if (row.currentRepoId !== null) {
+      currentRepoBySymbol.set(row.symbolId, row.currentRepoId);
+    }
+  }
+  for (const row of membershipRows) {
+    const targetRepoIds = targetReposBySymbol.get(row.symbolId);
+    if (!targetRepoIds?.has(row.repoId)) {
+      addRepo(survivingReposBySymbol, row.symbolId, row.repoId);
+    }
+    if (row.currentRepoId !== null) {
+      currentRepoBySymbol.set(row.symbolId, row.currentRepoId);
+    }
+  }
+
+  const deletedSymbolIds: string[] = [];
+  const sharedSymbolIds: string[] = [];
+  const staleMemberships: Array<{ symbolId: string; repoId: string }> = [];
+  const replacements: SymbolOwnershipReplacement[] = [];
+  for (const symbolId of symbolIds) {
+    const survivingRepoIds = survivingReposBySymbol.get(symbolId);
+    if (!survivingRepoIds || survivingRepoIds.size === 0) {
+      deletedSymbolIds.push(symbolId);
+      continue;
+    }
+
+    sharedSymbolIds.push(symbolId);
+    const currentRepoId = currentRepoBySymbol.get(symbolId);
+    const ownerRepoId =
+      currentRepoId && survivingRepoIds.has(currentRepoId)
+        ? currentRepoId
+        : [...survivingRepoIds].sort()[0];
+    replacements.push({ symbolId, ownerRepoId });
+    for (const targetRepoId of targetReposBySymbol.get(symbolId) ?? []) {
+      if (!survivingRepoIds.has(targetRepoId)) {
+        staleMemberships.push({ symbolId, repoId: targetRepoId });
+      }
+    }
+  }
+
+  if (sharedSymbolIds.length > 0) {
+    await exec(
+      conn,
+      `MATCH (s:Symbol)-[rel:SYMBOL_IN_FILE]->(f:File)
+       WHERE s.symbolId IN $sharedSymbolIds AND f.fileId IN $fileIds
+       DELETE rel`,
+      { sharedSymbolIds, fileIds },
+    );
+  }
+  if (staleMemberships.length > 0) {
+    await exec(
+      conn,
+      `UNWIND $staleMemberships AS stale
+       MATCH (s:Symbol {symbolId: stale.symbolId})-[rel:SYMBOL_IN_REPO]->(r:Repo {repoId: stale.repoId})
+       DELETE rel`,
+      { staleMemberships },
+    );
+  }
+  await transferSymbolOwnershipInTransaction(conn, replacements);
+  return deletedSymbolIds;
+}
+
 export async function deleteSymbolsByFileIds(
   conn: Connection,
   fileIds: string[],
 ): Promise<void> {
   if (fileIds.length === 0) return;
+
+  const uniqueFileIds = [...new Set(fileIds)];
 
   await withTransaction(conn, async (txConn) => {
     const symbolRows = await queryAll<{ symbolId: string }>(
@@ -2179,65 +2391,71 @@ export async function deleteSymbolsByFileIds(
       `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
        WHERE f.fileId IN $fileIds
        RETURN s.symbolId AS symbolId`,
-      { fileIds },
+      { fileIds: uniqueFileIds },
     );
 
     if (symbolRows.length === 0) return;
 
-    const symbolIds = symbolRows.map((r) => r.symbolId);
+    const candidateSymbolIds = [...new Set(symbolRows.map((r) => r.symbolId))];
+    const symbolIds = await prepareSymbolsForFileDeletionInTransaction(
+      txConn,
+      uniqueFileIds,
+      candidateSymbolIds,
+    );
 
-    await exec(
-      txConn,
-      `MATCH (m:Metrics)
-     WHERE m.symbolId IN $symbolIds
-     DELETE m`,
-      { symbolIds },
-    );
-    await exec(
-      txConn,
-      `MATCH (e:SymbolEmbedding)
-     WHERE e.symbolId IN $symbolIds
-     DELETE e`,
-      { symbolIds },
-    );
-    await exec(
-      txConn,
-      `MATCH (sc:SummaryCache)
-     WHERE sc.symbolId IN $symbolIds
-     DELETE sc`,
-      { symbolIds },
-    );
+    if (symbolIds.length > 0) {
+      await exec(
+        txConn,
+        `MATCH (m:Metrics)
+         WHERE m.symbolId IN $symbolIds
+         DELETE m`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (e:SymbolEmbedding)
+         WHERE e.symbolId IN $symbolIds
+         DELETE e`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (sc:SummaryCache)
+         WHERE sc.symbolId IN $symbolIds
+         DELETE sc`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         DELETE r`,
+        { symbolIds },
+      );
+      await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
+      // Symbol graph relationships are all incident to Symbol nodes. DETACH
+      // DELETE removes them without touching shared rows filtered above.
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         DETACH DELETE s`,
+        { symbolIds },
+      );
+    }
     await exec(
       txConn,
       `MATCH (sr:SymbolReference)
-     WHERE sr.fileId IN $fileIds
-     DELETE sr`,
-      { fileIds },
-    );
-    await exec(
-      txConn,
-      `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-      { symbolIds },
+       WHERE sr.fileId IN $fileIds
+       DELETE sr`,
+      { fileIds: uniqueFileIds },
     );
     await exec(
       txConn,
       `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File)
-     WHERE f.fileId IN $fileIds
-     DELETE r`,
-      { fileIds },
-    );
-    await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
-    // Symbol graph relationships are all incident to Symbol nodes. DETACH DELETE
-    // lets LadybugDB remove them in one indexed symbol pass instead of scanning
-    // every relationship type separately during full-refresh stale cleanup.
-    await exec(
-      txConn,
-      `MATCH (s:Symbol)
-       WHERE s.symbolId IN $symbolIds
-       DETACH DELETE s`,
-      { symbolIds },
+       WHERE f.fileId IN $fileIds
+       DELETE r`,
+      { fileIds: uniqueFileIds },
     );
   });
 }
@@ -2246,136 +2464,7 @@ export async function deleteSymbolsByFileId(
   conn: Connection,
   fileId: string,
 ): Promise<void> {
-  await withTransaction(conn, async (txConn) => {
-    const symbolRows = await queryAll<{ symbolId: string }>(
-      txConn,
-      `MATCH (f:File {fileId: $fileId})<-[:SYMBOL_IN_FILE]-(s:Symbol)
-       RETURN s.symbolId AS symbolId`,
-      { fileId },
-    );
-
-    if (symbolRows.length === 0) return;
-
-    const symbolIds = symbolRows.map((r) => r.symbolId);
-
-    // Batch delete all relationships and nodes for the collected symbols
-    await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
-    await exec(
-      txConn,
-      `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
-       WHERE s.symbolId IN $symbolIds
-       DELETE d`,
-      { symbolIds },
-    );
-
-    await exec(
-      txConn,
-      `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
-       WHERE s.symbolId IN $symbolIds
-       DELETE d`,
-      { symbolIds },
-    );
-
-    await exec(
-      txConn,
-      `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    );
-
-    await exec(
-      txConn,
-      `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File {fileId: $fileId})
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds, fileId },
-    );
-
-    await exec(
-      txConn,
-      `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    );
-
-    await exec(
-      txConn,
-      `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    );
-
-    await exec(
-      txConn,
-      `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    );
-
-    await exec(
-      txConn,
-      `MATCH (m:Metrics)
-       WHERE m.symbolId IN $symbolIds
-       DELETE m`,
-      { symbolIds },
-    );
-
-    // Delete SymbolEmbedding nodes
-    await exec(
-      txConn,
-      `MATCH (e:SymbolEmbedding)
-       WHERE e.symbolId IN $symbolIds
-       DELETE e`,
-      { symbolIds },
-    );
-
-    // Delete SummaryCache nodes
-    await exec(
-      txConn,
-      `MATCH (sc:SummaryCache)
-       WHERE sc.symbolId IN $symbolIds
-       DELETE sc`,
-      { symbolIds },
-    );
-
-    // Delete SymbolReference nodes for this file
-    await exec(
-      txConn,
-      `MATCH (sr:SymbolReference)
-       WHERE sr.fileId = $fileId
-       DELETE sr`,
-      { fileId },
-    );
-
-    // Delete MEMORY_OF edges (Memory -> deleted Symbol)
-    await exec(
-      txConn,
-      `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    );
-
-    // Delete MEMORY_OF_FILE edges (Memory -> deleted File)
-    await exec(
-      txConn,
-      `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File {fileId: $fileId})
-       DELETE r`,
-      { fileId },
-    );
-
-    await exec(
-      txConn,
-      `MATCH (s:Symbol)
-       WHERE s.symbolId IN $symbolIds
-       DELETE s`,
-      { symbolIds },
-    );
-  });
+  await deleteSymbolsByFileIds(conn, [fileId]);
 }
 
 /**

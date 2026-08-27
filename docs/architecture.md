@@ -261,7 +261,7 @@ flowchart TD
 
 Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write serialization prevents graph corruption.
 
-### Graph Schema (24 Node Tables, 16 Edge Tables)
+### Graph Schema
 
 **Core nodes:**
 
@@ -269,7 +269,7 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | :---------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Repo**          | repoId, rootPath, configJson, createdAt                                                                                                                           |
 | **File**          | fileId, relPath, byteSize, contentHash, language, lastIndexedAt, directory                                                                                        |
-| **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingJinaCode*, embeddingNomic*                 |
+| **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag; legacy inline embedding columns remain compatibility-only |
 | **Version**       | versionId, repoId, timestamp, indexedAt                                                                                                                           |
 | **SymbolVersion** | symbolId, versionId, signatureJson, summary                                                                                                                       |
 | **Metrics**       | symbolId, repoId, fanIn, fanOut, churn, testRefs                                                                                                                  |
@@ -301,8 +301,11 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | Node Table          | Key Fields                                            |
 | :------------------ | :---------------------------------------------------- |
 | **SymbolEmbedding** | symbolId, embedding, model (deprecated compatibility table) |
+| **SymbolVectorEmbedding** | embeddingId, repoId, symbolId, model, embeddingVector, cardHash, updatedAt, model-specific numeric vector |
 | **SummaryCache**    | symbolId, summary, provider, model, cardHash, costUsd |
 | **SymbolReference** | referenceId, symbolId, file, line                     |
+
+Production Symbol vectors live in `SymbolVectorEmbedding`, with one complete row per Symbol and model. Model-specific HNSW indexes target this table. Incremental indexing and background semantic repair delete and replace only changed embedding rows while retaining a healthy HNSW; index bootstrap occurs only when the exact table/name/type/property identity is absent and at least one complete row exists. Symbol ANN queries rank candidates inside a repository-scoped projected graph, so matching Symbol-to-File-to-Repo ownership filters the graph before the top-K search.
 
 **Sync, policy, and memory nodes:**
 
@@ -350,7 +353,7 @@ Each module owns a specific domain of queries:
 | `ladybug-clusters.ts`          | Cluster membership, label queries                                                   |
 | `ladybug-processes.ts`         | Process steps, role queries                                                         |
 | `ladybug-embeddings.ts`        | **Deprecated** — legacy SymbolEmbedding node queries                                |
-| `ladybug-symbol-embeddings.ts` | Inline embedding properties on Symbol nodes (replacement for ladybug-embeddings.ts) |
+| `ladybug-symbol-embeddings.ts` | Model-aware rows in `SymbolVectorEmbedding`, including incremental replacement and repository-scoped cleanup |
 | `ladybug-metrics.ts`           | Fan-in/out, churn, test refs                                                        |
 | `ladybug-feedback.ts`          | Agent feedback, audit events, searchText + embeddings for retrieval boosting        |
 | `ladybug-slices.ts`            | Slice handles, lease expiry                                                         |

@@ -482,7 +482,7 @@ Configure each lane directly; there is no legacy mode switch.
         "conjunctive": false, // true = AND all terms; false = OR
       },
       "vector": {
-        "enabled": true, // Vector search on inline embeddings
+        "enabled": true, // SymbolVectorEmbedding and FileSummary HNSW search
         "topK": 75, // Max candidates per model
         "efs": 200, // Query-time accuracy parameter
       },
@@ -498,8 +498,8 @@ Configure each lane directly; there is no legacy mode switch.
 
 ### How It Works
 
-1. **FTS and vector indexes are created automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; vector indexes cover `Symbol.embeddingJinaCode` and `Symbol.embeddingNomic`.
-2. **At query time**, FTS and vector searches run in parallel. Each source produces a ranked candidate list.
+1. **FTS and vector indexes are ensured automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; Symbol vector indexes cover model-specific numeric columns on `SymbolVectorEmbedding` after at least one complete row exists.
+2. **At query time**, FTS and vector searches run in parallel. Symbol vector search uses a repository-scoped LadybugDB projected graph, so repository filtering happens before ANN ranking and unrelated repositories cannot consume the top-K window. Each source produces a ranked candidate list.
 3. **RRF fuses** the rank lists: `score(d) = S 1/(k + rank_i(d))` � symbols ranked highly by multiple sources rise to the top.
 4. **If an extension is unavailable** (for example, `fts` or `vector` is not loaded), the system omits that lane, renormalizes the remaining weights, and records the reduced coverage in telemetry.
 
@@ -521,7 +521,7 @@ Retrieval extensions ...................... PASS
 
 ### Migration from SymbolEmbedding
 
-Prior to hybrid retrieval, embeddings were stored in a separate `SymbolEmbedding` node table. Migration m007 automatically copies embeddings to inline Symbol properties (`embeddingJinaCode`, `embeddingNomic`) on DB init. Mock-fallback rows are skipped. The old `SymbolEmbedding` table is deprecated but retained for backward compatibility.
+Prior to hybrid retrieval, embeddings were stored in a separate `SymbolEmbedding` node table. Migration m007 copied those values to inline Symbol properties. Migration m026 copies complete supported inline vectors into model-scoped `SymbolVectorEmbedding` rows. Mock-fallback and incomplete rows are skipped. The old `SymbolEmbedding` table and inline Symbol columns remain compatibility-only; current writes and HNSW indexes use `SymbolVectorEmbedding`.
 
 The current recommended configuration surface is `semantic.retrieval.*`. Retired compatibility knobs are intentionally omitted from this setup guide.
 
@@ -630,14 +630,14 @@ The `intraOpNumThreads` setting is the single most impactful knob after model va
 
 ## Embedding Vector Storage
 
-Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB:
+Symbol embeddings are stored as **model-scoped rows in `SymbolVectorEmbedding`**. FileSummary and AgentFeedback embeddings remain on their own entity nodes.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Symbol["Symbol node"] e1@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
-    Symbol e2@--> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
-    Symbol e3@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
+    Symbol["Symbol node"] e1@--> Row["SymbolVectorEmbedding row<br/>repoId + symbolId + model<br/>text + hash + updatedAt"]
+    Row e2@--> Jina["embeddingJinaCodeVec<br/>Jina HNSW"]
+    Row e3@--> Nomic["embeddingNomicVec<br/>Nomic HNSW"]
 
     classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
     classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
@@ -648,6 +648,8 @@ flowchart TD
     classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
     class e1,e2,e3 animate;
 ```
+
+After bootstrap, incremental indexing and the background semantic repair worker replace only changed model rows and retain the live Symbol HNSW. Retrieval ranks candidates inside a repository-scoped projected graph. Startup and health checks accept an HNSW only when its table, name, type, and property all match the configured model.
 
 Vectors are compressed using Float16 quantization:
 

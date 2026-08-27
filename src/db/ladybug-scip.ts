@@ -777,8 +777,26 @@ export async function pruneStaleScipExternalSymbols(
 
   const chunkSize = resolveLadybugWriteChunkSize("symbols", SYMBOL_BATCH_SIZE);
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < staleSymbolIds.length; i += chunkSize) {
-      const symbolIds = staleSymbolIds.slice(i, i + chunkSize);
+    const sharedRows = await queryAll<{ symbolId: string; repoId: string }>(
+      txConn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(other:Repo)
+       WHERE s.symbolId IN $symbolIds AND other.repoId <> $repoId
+       RETURN s.symbolId AS symbolId, other.repoId AS repoId
+       ORDER BY s.symbolId, other.repoId`,
+      { symbolIds: staleSymbolIds, repoId },
+    );
+    const replacementOwnerBySymbol = new Map<string, string>();
+    for (const row of sharedRows) {
+      if (!replacementOwnerBySymbol.has(row.symbolId)) {
+        replacementOwnerBySymbol.set(row.symbolId, row.repoId);
+      }
+    }
+    const deletedSymbolIds = staleSymbolIds.filter(
+      (symbolId) => !replacementOwnerBySymbol.has(symbolId),
+    );
+
+    for (let i = 0; i < deletedSymbolIds.length; i += chunkSize) {
+      const symbolIds = deletedSymbolIds.slice(i, i + chunkSize);
       await exec(
         txConn,
         `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
@@ -859,10 +877,32 @@ export async function pruneStaleScipExternalSymbols(
       await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
       await exec(
         txConn,
-        `MATCH (s:Symbol {repoId: $repoId})
+        `MATCH (s:Symbol)
          WHERE s.symbolId IN $symbolIds
          DELETE s`,
-        { repoId, symbolIds },
+        { symbolIds },
+      );
+    }
+
+    if (replacementOwnerBySymbol.size > 0) {
+      const replacements = Array.from(
+        replacementOwnerBySymbol,
+        ([symbolId, ownerRepoId]) => ({ symbolId, ownerRepoId }),
+      );
+      await exec(
+        txConn,
+        `UNWIND $replacements AS replacement
+         MATCH (s:Symbol {symbolId: replacement.symbolId})-[r:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+         DELETE r
+         SET s.repoId = replacement.ownerRepoId`,
+        { replacements, repoId },
+      );
+      await exec(
+        txConn,
+        `UNWIND $replacements AS replacement
+         MATCH (e:SymbolVectorEmbedding {symbolId: replacement.symbolId, repoId: $repoId})
+         SET e.repoId = replacement.ownerRepoId`,
+        { replacements, repoId },
       );
     }
   });

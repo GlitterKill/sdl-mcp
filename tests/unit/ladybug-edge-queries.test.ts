@@ -892,6 +892,69 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
+    "pruneIsolatedPlaceholderSymbols transfers shared placeholder ownership",
+    { skip: !ladybugAvailable },
+    async () => {
+      const otherRepoId = "edge-other-repo";
+      const symbolId = "unresolved:call:sharedStale";
+      const kuzuConn = conn as unknown as import("kuzu").Connection;
+      await queries.upsertRepo(kuzuConn, {
+        repoId: otherRepoId,
+        rootPath: "C:/tmp/edge-other-repo",
+        configJson: "{}",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await exec(
+        conn,
+        `MATCH (target:Repo {repoId: '${repoId}'})
+         MATCH (other:Repo {repoId: '${otherRepoId}'})
+         CREATE (s:Symbol {
+           symbolId: '${symbolId}',
+           repoId: '${repoId}',
+           symbolStatus: 'unresolved',
+           placeholderKind: 'call',
+           placeholderTarget: 'sharedStale',
+           external: false
+         })
+         CREATE (s)-[:SYMBOL_IN_REPO]->(target)
+         CREATE (s)-[:SYMBOL_IN_REPO]->(other)`,
+      );
+      await queries.setSymbolVectorEmbedding(
+        kuzuConn,
+        repoId,
+        symbolId,
+        "jina-embeddings-v2-base-code",
+        "shared-stale-vector",
+        "shared-stale-vector-hash",
+        new Array<number>(768).fill(0.25),
+      );
+
+      assert.strictEqual(
+        await queries.pruneIsolatedPlaceholderSymbols(kuzuConn, repoId),
+        0,
+      );
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: '${symbolId}'})
+         MATCH (e:SymbolVectorEmbedding {symbolId: '${symbolId}'})
+         MATCH (s)-[:SYMBOL_IN_REPO]->(r:Repo)
+         RETURN s.repoId AS repoId,
+                e.repoId AS embeddingRepoId,
+                r.repoId AS membershipRepoId`,
+      );
+      const rows = await result.getAll();
+      result.close();
+      assert.deepStrictEqual(rows, [
+        {
+          repoId: otherRepoId,
+          embeddingRepoId: otherRepoId,
+          membershipRepoId: otherRepoId,
+        },
+      ]);
+    },
+  );
+
+  it(
     "getEdgesFromSymbols / projections",
     { skip: !ladybugAvailable },
     async () => {

@@ -17,7 +17,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { IndexHealthResult } from "../../dist/retrieval/index-lifecycle.js";
+import {
+  indexMatchesExactIdentity,
+  type IndexHealthResult,
+} from "../../dist/retrieval/index-lifecycle.js";
 
 // ---------------------------------------------------------------------------
 // Source text fixture
@@ -153,6 +156,15 @@ describe("ensureIndexes source verification", () => {
     assert.ok(
       fnBody.includes("options.includeVectorIndexes !== false"),
       "ensureIndexes should leave vectors enabled by default",
+    );
+  });
+
+  it("ensureIndexes skips Symbol HNSW creation until the model has a complete row", () => {
+    const fnStart = src.indexOf("export async function ensureIndexes");
+    const fnBody = src.slice(fnStart, fnStart + 7000);
+    assert.ok(
+      fnBody.includes("hasCompleteSymbolVectorEmbedding(conn, model)"),
+      "ensureIndexes should not create an empty model-specific Symbol HNSW",
     );
   });
 
@@ -327,12 +339,17 @@ describe("showIndexes — SHOW_INDEXES() RETURN * compatibility", () => {
 });
 
 describe("checkIndexHealth table-aware vector health", () => {
-  it("requires SymbolVectorEmbedding for vector health checks", () => {
+  it("requires exact SymbolVectorEmbedding identity for vector health checks", () => {
     const fnStart = src.indexOf("export async function checkIndexHealth");
     const fnBody = src.slice(fnStart, fnStart + 1800);
     assert.ok(
-      fnBody.includes("index.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE"),
-      "Symbol vector health should use the dedicated embedding table",
+      fnBody.includes("indexMatchesExactIdentity("),
+      "Symbol vector health should use the exact identity predicate",
+    );
+    assert.ok(
+      fnBody.includes("SYMBOL_VECTOR_EMBEDDING_TABLE") &&
+        fnBody.includes("propName"),
+      "Symbol vector health should require the dedicated table and model property",
     );
     assert.ok(
       !fnBody.includes("index.tableName === undefined"),
@@ -347,11 +364,13 @@ describe("checkIndexHealth table-aware vector health", () => {
 
 describe("ensureIndexes vector table awareness", () => {
   it("uses table-aware vector checks for Symbol and entity vector indexes", () => {
+    const fnStart = src.indexOf("export async function ensureIndexes");
+    const fnBody = src.slice(fnStart, fnStart + 7000);
     assert.ok(
-      /indexExistsForTable\(\s*existing,\s*SYMBOL_VECTOR_EMBEDDING_TABLE,\s*indexName,\s*"vector"/u.test(
-        src,
-      ),
-      "Symbol vector ensure should use the dedicated embedding table",
+      fnBody.includes("indexMatchesExactIdentity(") &&
+        fnBody.includes("SYMBOL_VECTOR_EMBEDDING_TABLE") &&
+        fnBody.includes("propName"),
+      "Symbol vector ensure should require exact table and property identity",
     );
     assert.ok(
       src.includes(
@@ -543,6 +562,42 @@ describe("createVectorIndex — current Kuzu API", () => {
         "required healthy SymbolVectorEmbedding vector index",
       ),
       "safe rebuild validation error should name the required table",
+    );
+  });
+});
+
+describe("indexMatchesExactIdentity", () => {
+  const index = {
+    name: "symbol_vec_jina_code_v2",
+    type: "vector" as const,
+    property: "embeddingJinaCodeVec",
+    tableName: "SymbolVectorEmbedding",
+    status: "healthy" as const,
+  };
+
+  it("rejects a configured name attached to another model property", () => {
+    assert.equal(
+      indexMatchesExactIdentity(
+        { ...index, property: "embeddingNomicVec" },
+        "SymbolVectorEmbedding",
+        "symbol_vec_jina_code_v2",
+        "vector",
+        "embeddingJinaCodeVec",
+      ),
+      false,
+    );
+  });
+
+  it("accepts only the exact table, name, type, and property", () => {
+    assert.equal(
+      indexMatchesExactIdentity(
+        index,
+        "SymbolVectorEmbedding",
+        "symbol_vec_jina_code_v2",
+        "vector",
+        "embeddingJinaCodeVec",
+      ),
+      true,
     );
   });
 });
@@ -810,9 +865,23 @@ describe("embedding persistence uses numeric arrays", () => {
 
   it("writes vectors to the model-specific numeric column", () => {
     assert.ok(
-      embSrc.includes("e.${vectorProperty} = $vectorArray"),
+      embSrc.includes("e.${vectorProperty} = r.vectorArray"),
       "Should write to the selected numeric vector column",
     );
+  });
+
+  it("routes single-row replacement through the batch delete/reinsert path", () => {
+    const fnStart = embSrc.indexOf(
+      "export async function setSymbolVectorEmbedding(",
+    );
+    const fnEnd = embSrc.indexOf(
+      "export async function setSymbolVectorEmbeddingBatch(",
+      fnStart,
+    );
+    const fnBody = embSrc.slice(fnStart, fnEnd);
+
+    assert.match(fnBody, /setSymbolVectorEmbeddingBatch\(/);
+    assert.doesNotMatch(fnBody, /MERGE \(e:/);
   });
 
   it("resolves the model-specific vector property", () => {

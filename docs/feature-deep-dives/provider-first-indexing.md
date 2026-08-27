@@ -138,16 +138,16 @@ The current full-build path is:
 
 ### Graph Readiness Versus Semantic Readiness
 
-Embeddings, LLM summaries, retrieval-index bootstrap, and semantic enrichment are not part of the first ready gate. They advance a separate semantic readiness state. Provider-first graph finalization skips inline semantic work so the active graph can become graph-ready first.
+Embeddings, LLM summaries, retrieval-index bootstrap, and semantic enrichment are not part of the first ready gate. They advance a separate semantic readiness state. Provider-first graph finalization skips semantic work so the active graph can become graph-ready first.
 
 After graph finalization, SDL-MCP runs the configured semantic readiness refresh against the active DB:
 
 - Summaries run when `semantic.generateSummaries` is enabled.
 - Symbol and FileSummary embeddings run from the configured semantic model plan.
-- Deferred retrieval indexes are rebuilt.
+- Deferred retrieval indexes are ensured or bootstrapped when complete rows exist.
 - Semantic dirty flags are cleared only for completed work; an intentional embedding backlog leaves only the embedding flag dirty.
 
-If semantic refresh fails or an embedding provider degrades, the CLI reports `Semantic readiness: deferred`, records the derived-state error, and aborts readiness finalization. Sub-threshold FileSummary or Symbol vector work is different: SDL-MCP records it as an intentional backlog, continues the remaining semantic lanes and deferred-index work, clears any earlier semantic error plus completed summary work, and leaves `DerivedState.embeddingsDirty` set. The backlog accumulates until it reaches the protected HNSW rebuild floor or an explicit safe rebuild completes it. Mock fallback remains degraded and its rows are not reported as embedded. Repeated provider-first runs that reuse already-current active provider rows run the same post-graph semantic refresh rather than reporting a clean graph prematurely.
+If semantic refresh fails or an embedding provider degrades, the CLI reports `Semantic readiness: deferred`, records the derived-state error, and aborts readiness finalization. Sub-threshold FileSummary vector work is different: SDL-MCP records it as an intentional backlog, continues the remaining semantic lanes and deferred-index work, clears any earlier semantic error plus completed summary work, and leaves `DerivedState.embeddingsDirty` set until the FileSummary HNSW rebuild floor is reached or an explicit safe rebuild completes it. Symbol embeddings do not use that rebuild floor: changed model rows are deleted and reinserted while a healthy `SymbolVectorEmbedding` HNSW remains live. Mock fallback remains degraded and its rows are not reported as embedded. Repeated provider-first runs that reuse already-current active provider rows run the same post-graph semantic refresh rather than reporting a clean graph prematurely.
 
 
 ### Persisted Graph Integrity
@@ -466,7 +466,7 @@ This keeps placeholder metadata, repo links, rare C++ provenance with commas, qu
 
 ## Derived State, Metrics, And Summaries
 
-Semantic refresh is skipped in provider-first post-index finalization and tracked as deferred semantic readiness so index wall time is no longer dominated by the `Summary Embeddings` and `Symbol Embeddings` phases. When semantic refresh is deferred, the deferred index build leaves Symbol FTS, entity FTS, Symbol vectors, and FileSummary vectors for later retrieval readiness/bootstrap work rather than charging those builds to the first provider-first index wall-clock.
+Semantic refresh is skipped in provider-first post-index finalization and tracked as deferred semantic readiness so index wall time is no longer dominated by the `Summary Embeddings` and `Symbol Embeddings` phases. When semantic refresh is deferred, the deferred index build leaves Symbol FTS, entity FTS, initial `SymbolVectorEmbedding` HNSW bootstrap, and FileSummary vectors for later retrieval readiness work rather than charging those builds to the first provider-first index wall-clock.
 
 PageRank and K-core run by default for the readiness-critical centrality signal. Louvain shadow communities remain optional derived enrichment and are policy-skipped above `indexing.algorithmRefresh.louvain.maxCallEdges`, which defaults to `10000` call edges so provider-first full indexes do not spend most of their wall time in LadybugDB community detection.
 

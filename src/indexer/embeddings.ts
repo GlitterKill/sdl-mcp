@@ -25,6 +25,7 @@ import {
 import type { IndexProgress } from "./indexer.js";
 import {
   getSymbolVectorEmbeddings,
+  hasCompleteSymbolVectorEmbedding,
   setSymbolVectorEmbeddingBatch,
   type SymbolVectorEmbeddingBatchItem,
 } from "../db/ladybug-symbol-embeddings.js";
@@ -430,6 +431,7 @@ export async function refreshSymbolEmbeddings(params: {
     ) {
       return;
     }
+    if (!(await hasCompleteSymbolVectorEmbedding(conn, modelName))) return;
     await runHnswRebuildCycle(
       "symbol-vector-bootstrap-pre-create",
       "symbol-vector-bootstrap-post-create",
@@ -468,15 +470,14 @@ export async function refreshSymbolEmbeddings(params: {
           model: storageModel,
           message: ok ? "ready" : "creation failed",
         });
-        if (ok) {
-          logger.info(
-            `[embeddings] Vector index '${indexName}' created on ${SYMBOL_VECTOR_EMBEDDING_TABLE}`,
-          );
-        } else {
-          logger.error(
-            `[embeddings] Vector index '${indexName}' creation FAILED — vector retrieval for ${modelName} will degrade until next refresh`,
+        if (!ok) {
+          throw new IndexError(
+            `Failed to create required vector index '${indexName}' on ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${vecProp}`,
           );
         }
+        logger.info(
+          `[embeddings] Vector index '${indexName}' created on ${SYMBOL_VECTOR_EMBEDDING_TABLE}`,
+        );
       },
       params.postIndexSessionTimeoutMs,
       params.recordTiming,
@@ -739,14 +740,14 @@ export async function refreshSymbolEmbeddings(params: {
               aborted = true;
             }
           } else {
-            // processBatch should not throw (all errors handled internally),
-            // but guard defensively.
-            logger.warn("Unexpected processBatch rejection", {
-              reason: String(result.reason),
-            });
             recordEmbeddingFailure();
-            failedBatches++;
-            processedBatches++;
+            const reason =
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason);
+            throw new IndexError(
+              `Symbol embedding persistence failed: ${reason}`,
+            );
           }
         }
 

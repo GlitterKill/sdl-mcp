@@ -53,5 +53,5 @@ Plugin system: `adapter/plugin/` (external adapter loading via manifest)
 
 ## EMBEDDINGS (`embeddings.ts`, `embeddings-local.ts`)
 - `refreshSymbolEmbeddings` accepts `concurrency` (1-8) and `batchSize` (1-128) from `semantic.embeddingConcurrency` / `semantic.embeddingBatchSize`.
-- HNSW drop+rebuild path (`VECTOR_REBUILD_THRESHOLD = 0`) is the only working write path on LadybugDB 0.16.x (`LADYBUG#377`). When drop succeeds, the function coalesces ONNX batch results into a 256-item write buffer flushed once per chunk boundary (force-flush in `finally` before HNSW rebuild).
+- Symbol embeddings use model-scoped `SymbolVectorEmbedding` rows. Bootstrap creates the exact model HNSW after the first complete row; incremental and background repair delete/reinsert only changed rows and retain a healthy index. FileSummary embeddings keep their separate thresholded HNSW rebuild path.
 - Model variant + execution provider config: see `semantic.modelVariant` and `semantic.executionProviders`. Variants live in the `variants` map of each `ModelInfo` (`model-registry.ts`); platform allow-list for providers in `platformAllowedProviders()` (`embeddings-local.ts`).

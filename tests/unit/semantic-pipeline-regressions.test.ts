@@ -123,6 +123,20 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
+  it("fails refresh when a required Symbol HNSW bootstrap fails", () => {
+    const source = readSource("src/indexer/embeddings.ts");
+    const bootstrapStart = source.indexOf(
+      "const bootstrapVectorIndex = async (): Promise<void> =>",
+    );
+    const bootstrapEnd = source.indexOf(
+      "if (storageModel === \"mock-fallback\")",
+      bootstrapStart,
+    );
+    const bootstrapBody = source.slice(bootstrapStart, bootstrapEnd);
+
+    assert.match(bootstrapBody, /if \(!ok\)[\s\S]*throw new IndexError/);
+  });
+
   it("runs semantic rebuilds outside ambient indexer sessions", () => {
     const indexer = readSource("src/indexer/indexer.ts");
     const metricsUpdater = readSource("src/indexer/metrics-updater.ts");

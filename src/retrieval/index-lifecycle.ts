@@ -12,6 +12,7 @@ import {
   queryStoredProcAll,
 } from "../db/ladybug-core.js";
 import { countRowsInNodeTable } from "../db/ladybug-index-lifecycle.js";
+import { hasCompleteSymbolVectorEmbedding } from "../db/ladybug-symbol-embeddings.js";
 import { getExtensionCapabilities } from "../db/extension-caps.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
@@ -145,6 +146,22 @@ export function indexExistsForTable(
       index.name === indexName &&
       index.type === type &&
       index.tableName === tableName,
+  );
+}
+
+/** Match the complete physical identity of an index, including its property. */
+export function indexMatchesExactIdentity(
+  index: IndexInfo,
+  tableName: string,
+  indexName: string,
+  type: IndexInfo["type"],
+  property: string,
+): boolean {
+  return (
+    index.name === indexName &&
+    index.type === type &&
+    index.tableName === tableName &&
+    index.property === property
   );
 }
 
@@ -729,14 +746,18 @@ export async function checkIndexHealth(
     const fallbackName = getVectorIndexName(model);
     const propName =
       getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
-    // Check by property name match as well as the derived index name
-    const match = indexes.find(
-      (index) =>
-        index.type === "vector" &&
-        index.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE &&
-        ((fallbackName !== null && index.name === fallbackName) ||
-          (propName !== null && index.property === propName)),
-    );
+    const match =
+      fallbackName === null || propName === null
+        ? undefined
+        : indexes.find((index) =>
+            indexMatchesExactIdentity(
+              index,
+              SYMBOL_VECTOR_EMBEDDING_TABLE,
+              fallbackName,
+              "vector",
+              propName,
+            ),
+          );
     const exists = match !== undefined;
     return {
       model,
@@ -897,15 +918,39 @@ export async function ensureIndexes(
               `symbol_vec_${propName.toLowerCase()}`;
 
             if (
-              indexExistsForTable(
-                existing,
-                SYMBOL_VECTOR_EMBEDDING_TABLE,
-                indexName,
-                "vector",
+              existing.some((index) =>
+                indexMatchesExactIdentity(
+                  index,
+                  SYMBOL_VECTOR_EMBEDDING_TABLE,
+                  indexName,
+                  "vector",
+                  propName,
+                ),
               )
             ) {
               logger.debug(
                 `[index-lifecycle] Vector index '${indexName}' already exists, skipping`,
+              );
+              result.skipped.push(indexName);
+              continue;
+            }
+
+            const conflictingIndex = existing.find(
+              (index) =>
+                index.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE &&
+                index.name === indexName,
+            );
+            if (conflictingIndex) {
+              logger.warn(
+                `[index-lifecycle] Vector index '${indexName}' is attached to ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${conflictingIndex.property} (${conflictingIndex.type}), expected ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${propName}`,
+              );
+              result.failed.push(indexName);
+              continue;
+            }
+
+            if (!(await hasCompleteSymbolVectorEmbedding(conn, model))) {
+              logger.debug(
+                `[index-lifecycle] No complete '${model}' rows, skipping vector index '${indexName}'`,
               );
               result.skipped.push(indexName);
               continue;

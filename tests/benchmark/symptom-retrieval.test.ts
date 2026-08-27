@@ -66,6 +66,10 @@ describe("semantic retrieval quality baseline", () => {
     join(process.cwd(), "src/retrieval/orchestrator.ts"),
     "utf8",
   );
+  const retrievalDbSrc = readFileSync(
+    join(process.cwd(), "src/db/ladybug-retrieval.ts"),
+    "utf8",
+  );
 
   it("orchestrator supports model-aware vector retrieval", () => {
     assert.ok(
@@ -88,7 +92,7 @@ describe("semantic retrieval quality baseline", () => {
       "Symbol vector indexes should target the dedicated embedding table",
     );
     assert.ok(
-      orchSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"),
+      retrievalDbSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"),
       "Symbol ANN retrieval should target the dedicated embedding table",
     );
   });

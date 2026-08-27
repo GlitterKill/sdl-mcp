@@ -8323,12 +8323,13 @@ describe("provider-first indexing foundation", () => {
     });
 
     await materializeProviderFacts(
-      createFakeConnection(statements, (statement) =>
-        statement.includes("s.symbolId IN $symbolIds") &&
-        statement.includes("RETURN s.symbolId AS symbolId")
+      createFakeConnection(statements, (statement) => {
+        if (statement.includes("other.repoId <> $repoId")) return [];
+        return statement.includes("s.symbolId IN $symbolIds") &&
+          statement.includes("RETURN s.symbolId AS symbolId")
           ? [{ symbolId: "symbol-orphan" }]
-          : [],
-      ),
+          : [];
+      }),
       rows,
       {
         replaceFileSymbols: true,
@@ -8337,7 +8338,8 @@ describe("provider-first indexing foundation", () => {
 
     const symbolDeleteIndex = statements.findIndex(
       (statement) =>
-        statement.includes("MATCH (s:Symbol {repoId: $repoId})") &&
+        statement.includes("MATCH (s:Symbol)") &&
+        statement.includes("s.symbolId IN $deletedSymbolIds") &&
         statement.includes("DELETE s"),
     );
     const symbolMergeIndex = statements.findIndex((statement) =>
@@ -8346,7 +8348,7 @@ describe("provider-first indexing foundation", () => {
 
     assert.ok(
       symbolDeleteIndex >= 0,
-      "provider replacement should delete stale/orphan symbol nodes by incoming ids",
+      "provider replacement should delete exclusive stale/orphan symbol nodes by incoming ids",
     );
     assert.ok(
       symbolDeleteIndex < symbolMergeIndex,

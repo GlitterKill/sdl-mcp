@@ -418,6 +418,122 @@ describe("upsertSymbolBatch — integration", () => {
   );
 
   it(
+    "provider retirement preserves shared Symbols, unchanged-file links, and vectors",
+    { skip: !ladybugAvailable },
+    async () => {
+      const conn_ = conn as unknown as import("kuzu").Connection;
+      const otherRepoId = "provider-retirement-other-repo";
+      const sameRepoFileId = "provider-retirement-same-repo-file";
+      const otherFileId = "provider-retirement-shared-file";
+      const shared = makeSymbol(
+        "provider-retirement-shared",
+        repoId,
+        fileId,
+        "shared",
+      );
+      await queries.upsertRepo(conn_, {
+        repoId: otherRepoId,
+        rootPath: "/tmp/provider-retirement-other-repo",
+        configJson: "{}",
+        createdAt: "2026-04-14T00:00:00Z",
+      });
+      await queries.upsertFile(conn_, {
+        fileId: sameRepoFileId,
+        repoId,
+        relPath: "src/shared-unchanged.ts",
+        contentHash: "shared-unchanged-hash",
+        language: "ts",
+        byteSize: 50,
+        lastIndexedAt: null,
+      });
+      await queries.upsertFile(conn_, {
+        fileId: otherFileId,
+        repoId: otherRepoId,
+        relPath: "src/shared.ts",
+        contentHash: "shared-hash",
+        language: "ts",
+        byteSize: 50,
+        lastIndexedAt: null,
+      });
+      await queries.upsertSymbolBatch(conn_, [shared]);
+      await queries.exec(
+        conn_,
+        `MATCH (s:Symbol {symbolId: $symbolId}), (r:Repo {repoId: $otherRepoId})
+         CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+        { symbolId: shared.symbolId, otherRepoId },
+      );
+      await queries.exec(
+        conn_,
+        `MATCH (s:Symbol {symbolId: $symbolId}),
+               (sameRepoFile:File {fileId: $sameRepoFileId}),
+               (otherFile:File {fileId: $otherFileId})
+         CREATE (s)-[:SYMBOL_IN_FILE]->(sameRepoFile)
+         CREATE (s)-[:SYMBOL_IN_FILE]->(otherFile)`,
+        { symbolId: shared.symbolId, sameRepoFileId, otherFileId },
+      );
+      await queries.setSymbolVectorEmbedding(
+        conn_,
+        repoId,
+        shared.symbolId,
+        "jina-embeddings-v2-base-code",
+        "shared-vector",
+        "shared-vector-hash",
+        new Array<number>(768).fill(0.3),
+      );
+
+      await queries.deleteProviderReplacementSymbols(
+        conn_,
+        repoId,
+        [fileId],
+        [],
+      );
+
+      const symbol = await queries.querySingle<{
+        repoId: string;
+        currentMemberships: unknown;
+        otherMemberships: unknown;
+        targetFiles: unknown;
+        sameRepoFiles: unknown;
+        otherFiles: unknown;
+      }>(
+        conn_,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         RETURN s.repoId AS repoId,
+                count { MATCH (s)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId}) } AS currentMemberships,
+                count { MATCH (s)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $otherRepoId}) } AS otherMemberships,
+                count { MATCH (s)-[:SYMBOL_IN_FILE]->(:File {fileId: $fileId}) } AS targetFiles,
+                count { MATCH (s)-[:SYMBOL_IN_FILE]->(:File {fileId: $sameRepoFileId}) } AS sameRepoFiles,
+                count { MATCH (s)-[:SYMBOL_IN_FILE]->(:File {fileId: $otherFileId}) } AS otherFiles`,
+        {
+          symbolId: shared.symbolId,
+          repoId,
+          otherRepoId,
+          fileId,
+          sameRepoFileId,
+          otherFileId,
+        },
+      );
+      assert.deepStrictEqual(symbol, {
+        repoId,
+        currentMemberships: 1,
+        otherMemberships: 1,
+        targetFiles: 0,
+        sameRepoFiles: 1,
+        otherFiles: 1,
+      });
+      assert.deepStrictEqual(
+        await queries.querySingle<{ repoId: string; cardHash: string }>(
+          conn_,
+          `MATCH (e:SymbolVectorEmbedding {symbolId: $symbolId})
+           RETURN e.repoId AS repoId, e.cardHash AS cardHash`,
+          { symbolId: shared.symbolId },
+        ),
+        { repoId, cardHash: "shared-vector-hash" },
+      );
+    },
+  );
+
+  it(
     "rejects oversized provider replacement before deleting any Symbol rows",
     { skip: !ladybugAvailable },
     async () => {
