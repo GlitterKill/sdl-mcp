@@ -155,11 +155,13 @@ describe("resolveEmbeddingSessionOptions", () => {
         intraOpNumThreads: 1,
         interOpNumThreads: 1,
         executionMode: "sequential",
+        enableMemPattern: true,
+        serializeRuns: false,
       },
     );
   });
 
-  it("preserves configured throughput inference settings", async () => {
+  it("enforces DirectML session safety while preserving provider and thread settings", async () => {
     const module =
       await import("../../dist/indexer/embeddings-local.js");
     const resolver = Reflect.get(module, "resolveEmbeddingSessionOptions");
@@ -181,7 +183,38 @@ describe("resolveEmbeddingSessionOptions", () => {
         executionProviders: ["dml", "cpu"],
         intraOpNumThreads: 4,
         interOpNumThreads: 2,
+        executionMode: "sequential",
+        enableMemPattern: false,
+        serializeRuns: true,
+      },
+    );
+  });
+
+  it("preserves configured CPU throughput inference settings", async () => {
+    const module =
+      await import("../../dist/indexer/embeddings-local.js");
+    const resolver = Reflect.get(module, "resolveEmbeddingSessionOptions");
+    assert.strictEqual(typeof resolver, "function");
+
+    assert.deepStrictEqual(
+      resolver({
+        requestedProviders: ["cpu"],
+        onnxConfig: {
+          intraOpNumThreads: 4,
+          interOpNumThreads: 2,
+          executionMode: "parallel",
+        },
+        deterministic: false,
+        autoThreads: 32,
+        platformOverride: WIN32,
+      }),
+      {
+        executionProviders: ["cpu"],
+        intraOpNumThreads: 4,
+        interOpNumThreads: 2,
         executionMode: "parallel",
+        enableMemPattern: true,
+        serializeRuns: false,
       },
     );
   });

@@ -55,6 +55,7 @@ interface OrtModule {
         intraOpNumThreads?: number;
         interOpNumThreads?: number;
         executionMode?: "sequential" | "parallel";
+        enableMemPattern?: boolean;
         graphOptimizationLevel?: "disabled" | "basic" | "extended" | "all";
         logSeverityLevel?: 0 | 1 | 2 | 3 | 4;
       },
@@ -282,6 +283,8 @@ export function resolveEmbeddingSessionOptions({
   intraOpNumThreads: number;
   interOpNumThreads: number;
   executionMode: "sequential" | "parallel";
+  enableMemPattern: boolean;
+  serializeRuns: boolean;
 } {
   if (deterministic) {
     return {
@@ -289,13 +292,17 @@ export function resolveEmbeddingSessionOptions({
       intraOpNumThreads: 1,
       interOpNumThreads: 1,
       executionMode: "sequential",
+      enableMemPattern: true,
+      serializeRuns: false,
     };
   }
+  const executionProviders = resolveExecutionProviders(
+    requestedProviders,
+    platformOverride,
+  );
+  const usesDirectMl = executionProviders.includes("dml");
   return {
-    executionProviders: resolveExecutionProviders(
-      requestedProviders,
-      platformOverride,
-    ),
+    executionProviders,
     intraOpNumThreads:
       onnxConfig?.intraOpNumThreads && onnxConfig.intraOpNumThreads > 0
         ? onnxConfig.intraOpNumThreads
@@ -304,7 +311,11 @@ export function resolveEmbeddingSessionOptions({
       onnxConfig?.interOpNumThreads && onnxConfig.interOpNumThreads > 0
         ? onnxConfig.interOpNumThreads
         : 1,
-    executionMode: onnxConfig?.executionMode ?? "sequential",
+    executionMode: usesDirectMl
+      ? "sequential"
+      : (onnxConfig?.executionMode ?? "sequential"),
+    enableMemPattern: !usesDirectMl,
+    serializeRuns: usesDirectMl,
   };
 }
 
@@ -350,6 +361,7 @@ async function createOnnxSessionInternal(
     intraOpNumThreads,
     interOpNumThreads,
     executionMode,
+    enableMemPattern,
   } = resolveEmbeddingSessionOptions({
     requestedProviders: appConfig.semantic?.executionProviders,
     onnxConfig,
@@ -365,6 +377,7 @@ async function createOnnxSessionInternal(
     intraOpNumThreads,
     interOpNumThreads,
     executionMode,
+    enableMemPattern,
     logSeverityLevel: 3,
   });
 
