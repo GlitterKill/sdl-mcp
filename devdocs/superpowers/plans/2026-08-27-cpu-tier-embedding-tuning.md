@@ -461,6 +461,11 @@ git commit -m "perf(config): apply CPU embedding tier presets"
 
 ## Chunk 3: Reproducible Benchmark and Documentation
 
+> **Historical completion note:** Tasks 6-8 record the first implementation
+> and its original evidence. Independent review invalidated that benchmark
+> acceptance. Chunk 4 supersedes its sampling, selection, production gate, and
+> release-readiness steps; do not use Tasks 6-8 as the merge gate.
+
 ### Approved revision: free-memory and peak-RSS contract
 
 Before Task 6 is accepted:
@@ -697,3 +702,254 @@ Use `@requesting-code-review` against the complete implementation diff. Address
 only verified findings through `@receiving-code-review`, rerun the smallest
 affected checks after each code change, and then repeat final verification if
 production code changed.
+
+---
+
+## Chunk 4: Independent Review Remediation
+
+This chunk supersedes the Task 6-8 benchmark acceptance. Keep the 15% and peak-
+RSS thresholds unchanged. Do not alter production defaults until a rebuilt
+production tuple passes its own gate.
+
+### Task 9: Pin deterministic aggregation and production-gate behavior
+
+**Files:**
+- Create: `scripts/cpu-embedding-benchmark-contract.mjs`
+- Create: `tests/unit/cpu-embedding-benchmark-contract.test.ts`
+
+- [ ] **Step 1: Write failing contract tests**
+
+Cover these behaviors with synthetic records:
+
+```typescript
+test("an experimental winner cannot pass a failing production shape", () => {
+  const result = evaluateProductionGate({
+    baseline: aggregateShapeSamples(BASELINE, baselineSamples, 3),
+    production: aggregateShapeSamples(PRODUCTION, productionBelowGate, 3),
+  });
+  assert.equal(result.passed, false);
+  assert.equal(result.upliftPercent, 14);
+});
+
+test("uses median throughput and worst candidate RSS", () => {
+  const production = aggregateShapeSamples(PRODUCTION, variedSamples, 3);
+  assert.equal(production.textsPerSecond, 15);
+  assert.equal(production.worstMaxRssKiB, 1_700_000);
+});
+
+test("rejects incomplete, mismatched, and invalid samples", () => {
+  assert.throws(() => aggregateShapeSamples(PRODUCTION, twoSamples, 3));
+  assert.throws(() => aggregateShapeSamples(PRODUCTION, wrongIdSamples, 3));
+  assert.throws(() => aggregateShapeSamples(PRODUCTION, nonFiniteSamples, 3));
+});
+```
+
+Use complete records with `id`, `batchSize`, `concurrency`,
+`enableCpuMemArena`, `texts`, `milliseconds`, `textsPerSecond`, and
+`maxRssKiB`. Tests assert behavior, not mock calls.
+
+- [ ] **Step 2: Run the tests and verify RED**
+
+```powershell
+node --experimental-strip-types --test --test-isolation=none tests/unit/cpu-embedding-benchmark-contract.test.ts
+```
+
+Expected: FAIL because the contract module does not exist.
+
+- [ ] **Step 3: Implement the minimum pure contract**
+
+Export only:
+
+```javascript
+export function aggregateShapeSamples(shape, samples, expectedSamples) { /* validate exact records; median throughput and RSS; worst RSS */ }
+export function evaluateProductionGate({ baseline, production, minimumUpliftPercent = 15 }) { /* production only */ }
+export function rankQualifyingCandidates({ baseline, candidates, minimumUpliftPercent = 15 }) { /* reporting/selection evidence */ }
+```
+
+The RSS limit is
+`medianBaselineKiB + max(medianBaselineKiB * 0.10, 128 * 1024)`.
+`evaluateProductionGate` compares the production shape's worst RSS to that
+limit. No timing assertion enters CI.
+
+- [ ] **Step 4: Run the contract tests and verify GREEN**
+
+Run the Step 2 command. Expected: all tests pass.
+
+- [ ] **Step 5: Commit the contract**
+
+```powershell
+git add scripts/cpu-embedding-benchmark-contract.mjs tests/unit/cpu-embedding-benchmark-contract.test.ts
+git commit -m "test(benchmark): pin production gate contract"
+```
+
+### Task 10: Measure fresh processes and gate the built production tuple
+
+**Files:**
+- Modify: `scripts/benchmark-cpu-embedding-tiers.mjs`
+- Modify: `tests/unit/cpu-embedding-benchmark-contract.test.ts`
+
+- [ ] **Step 1: Add failing shape-construction coverage**
+
+Add a test proving the fixed sweep contains baseline, the exact production
+shape, arena-on batches 8/12/16/20/24 without duplicating production, and one
+arena-off observational control. Prove only the exact `production` aggregate
+is passed to `evaluateProductionGate`.
+
+- [ ] **Step 2: Run and verify RED**
+
+Run the Task 9 test command. Expected: FAIL because production-shape
+construction is not implemented.
+
+- [ ] **Step 3: Implement fresh-process sampling**
+
+Make the smallest runner changes:
+
+1. Import `resolvePerformancePresets` and `resolveEmbeddingSessionOptions` from
+   `dist`; derive the ample-memory width-8 batch/concurrency and CPU session
+   options from the built production code.
+2. Each child warms once, measures once, releases the ONNX session in
+   `finally`, and emits one JSON record.
+3. A full parent run starts exactly three sequential child processes per
+   shape. `--quick` uses one process and reports plumbing only; it cannot print
+   performance `PASS`.
+4. Treat spawn error, signal/nonzero exit, missing/malformed JSON, mismatched
+   shape data, or any invalid metric as a command failure. Never aggregate a
+   surviving subset.
+5. Aggregate with the Task 9 contract. Rank alternatives for evidence, but
+   determine exit status from `evaluateProductionGate({ baseline,
+   production })` only.
+
+- [ ] **Step 4: Verify deterministic logic and quick plumbing**
+
+```powershell
+npm run build:all
+node --experimental-strip-types --test --test-isolation=none tests/unit/cpu-embedding-benchmark-contract.test.ts
+node scripts/benchmark-cpu-embedding-tiers.mjs --quick
+```
+
+Expected: tests pass; quick mode completes without a performance-pass claim.
+
+- [ ] **Step 5: Commit the stable runner**
+
+```powershell
+git add scripts/benchmark-cpu-embedding-tiers.mjs tests/unit/cpu-embedding-benchmark-contract.test.ts
+git commit -m "fix(benchmark): gate the built embedding preset"
+```
+
+### Task 11: Make free-memory loader coverage exact and stable
+
+**Files:**
+- Modify: `src/config/loadConfig.ts`
+- Modify: `tests/unit/config-loading.test.ts`
+
+- [ ] **Step 1: Add failing exact-memory tests**
+
+Use Node's test-context `mock.method` on the default `node:os` export while
+exercising real `loadConfig` calls. Prove:
+
+- 2 GiB free resolves batch 8 and concurrency `min(cpuWidth, 2)`;
+- 4 GiB free resolves batch 16 and concurrency `min(cpuWidth, 4)`; and
+- one uncached load calls `freemem()` exactly once, while a cached second load
+  returns the same values after the mock's closure changes to 8 GiB and does
+  not call `freemem()` again.
+
+- [ ] **Step 2: Run and verify RED**
+
+```powershell
+npm run build:all
+node --experimental-strip-types --test --test-isolation=none tests/unit/config-loading.test.ts
+```
+
+Expected: the exact tests fail because the current named import cannot be
+replaced through the shared default `node:os` object.
+
+- [ ] **Step 3: Make the minimum loader change**
+
+Replace the named `freemem` import with the default `node:os` object and call
+`os.freemem()` once at preset resolution. Do not add a production injection
+interface or test-only method.
+
+- [ ] **Step 4: Build and verify GREEN**
+
+Run the Step 2 commands. Expected: exact boundary and cache tests pass.
+
+- [ ] **Step 5: Commit deterministic loader coverage**
+
+```powershell
+git add src/config/loadConfig.ts tests/unit/config-loading.test.ts
+git commit -m "test(config): pin free-memory preset loading"
+```
+
+### Task 12: Select, apply, and revalidate the production candidate
+
+**Files:**
+- Modify after measurement: `src/util/cpu-presets.ts`
+- Modify after measurement: `tests/unit/cpu-tier-embedding-presets.test.ts`
+- Modify: `CHANGELOG.md`
+- Modify if evidence changes: `docs/configuration-reference.md`
+- Modify if evidence changes: `docs/feature-deep-dives/semantic-embeddings-setup.md`
+- Modify: `devdocs/superpowers/specs/2026-08-27-cpu-tier-embedding-tuning-design.md`
+- Modify: `devdocs/superpowers/plans/2026-08-27-cpu-tier-embedding-tuning.md`
+
+- [ ] **Step 1: Run the full sweep against the current built preset**
+
+```powershell
+npm run build:all
+node scripts/benchmark-cpu-embedding-tiers.mjs
+```
+
+Expected: three fresh samples for every fixed shape. If production fails but
+an alternative clears both gates, record that candidate. If none qualifies,
+restore automatic batch 32/concurrency 1 and remove the unproven speedup claim;
+do not lower the 15% threshold.
+
+- [ ] **Step 2: Write the failing preset expectation**
+
+When an alternative qualifies, change the pure preset test to the measured
+batch/concurrency and run it before production code. Expected: FAIL against the
+old preset. If none qualifies, write the baseline fallback expectation instead.
+
+- [ ] **Step 3: Apply only the measured preset**
+
+Change the ample-memory automatic batch/concurrency values in
+`src/util/cpu-presets.ts`. Preserve free-memory scaling, explicit overrides,
+FileSummary batch 4, CPU width, and ONNX session behavior.
+
+- [ ] **Step 4: Rebuild and gate the exact production shape**
+
+```powershell
+npm run build:all
+node --experimental-strip-types --test --test-isolation=none tests/unit/cpu-tier-embedding-presets.test.ts tests/unit/cpu-embedding-benchmark-contract.test.ts
+node scripts/benchmark-cpu-embedding-tiers.mjs
+```
+
+Expected: the rebuilt production shape itself clears at least 15% throughput
+uplift and the peak-RSS limit. An experimental winner cannot substitute. If the
+fallback baseline is retained, report that the optimization was withheld and
+do not claim a passing performance gate.
+
+- [ ] **Step 5: Update release and evidence documentation**
+
+Add one Unreleased `Changed` bullet to `CHANGELOG.md` covering automatic CPU/
+free-memory defaults, pinned tiers, override precedence, and removing explicit
+fields to opt in. Replace prior benchmark claims with the final three-process
+evidence or state that the preset was withheld.
+
+- [ ] **Step 6: Run affected verification**
+
+```powershell
+npm run build:all
+npm run typecheck
+npm run check:config-sync
+node --experimental-strip-types --test --test-isolation=none tests/unit/cpu-embedding-benchmark-contract.test.ts tests/unit/cpu-tier-embedding-presets.test.ts tests/unit/config-loading.test.ts tests/unit/embeddings-execution-providers.test.ts
+npm run test:harness
+npm run lint
+git diff --check
+```
+
+Expected: all commands pass; lint has zero errors. Do not run `index.refresh`.
+
+- [ ] **Step 7: Commit documentation and request final review**
+
+Stage only the reviewed paths, commit the final preset/evidence/docs, then run
+`@requesting-code-review` against `b5ffb751..HEAD`. Do not merge or push.

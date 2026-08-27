@@ -86,6 +86,23 @@ from the built preset rather than whichever experimental candidate happens to
 be fastest. If no candidate repeatedly clears both gates, automatic tuning
 reverts to the prior baseline instead of weakening the 15% requirement.
 
+For this benchmark, the complete CPU session tuple is provider `cpu`, intra-op
+threads 8, inter-op threads 1, sequential execution, CPU arena enabled, memory
+pattern enabled, and graph optimization `all`. The production shape adds the
+built ample-memory preset's batch size and concurrency to that tuple. The
+control baseline is the same session tuple with batch 32 and concurrency 1;
+the no-qualifier fallback is exactly that control tuple. Arena-off remains an
+observational memory control and can never be selected for production.
+
+Candidate handoff is explicit: run the sweep, choose the fastest candidate
+that clears both gates, update only the ample-memory batch/concurrency preset,
+rebuild `dist`, and rerun the complete probe. The second run derives its
+production shape from the rebuilt preset and must pass using that exact shape
+before documentation may claim the optimization. If no candidate qualifies,
+restore the control batch/concurrency, remove the unproven speedup claim, and
+report that the preset was withheld rather than treating another shape as a
+pass.
+
 These measurements establish a CPU-inference default, not total index wall
 time. A disposable full-index A/B remains a separate verification step that
 requires explicit index-refresh authorization.
@@ -244,11 +261,19 @@ existing shape across three fresh processes. It qualifies when its worst
 cannot make the command pass. The script is manual and must not introduce
 timing or RSS assertions into CI.
 
+The parent accepts exactly three valid samples for every full-run shape. A
+child spawn error, signal or nonzero exit, missing record, mismatched shape ID,
+malformed JSON, or non-finite/non-positive timing, throughput, or RSS fails the
+entire command. It never aggregates a surviving subset. The aggregation and
+gate rules have deterministic unit coverage using synthetic records; only the
+real performance threshold remains manual.
+
 Config-loading integration coverage mocks only `node:os.freemem()` while
 exercising the real loader. It proves exact results below and at the 4 GiB
 boundary and proves the first resolved free-memory snapshot remains stable for
-the lifetime of a cached configuration. Pure preset tests continue to own the
-full boundary matrix.
+the lifetime of a cached configuration. One uncached load samples free memory
+exactly once; cache hits do not sample it again. Pure preset tests continue to
+own the full boundary matrix.
 
 ## Documentation
 
@@ -267,6 +292,9 @@ the shipped example config so new copied configs inherit tier-derived values.
 Keep the Zod/schema fallback defaults for validation compatibility, but label
 them as schema fallbacks that are superseded when tier presets resolve omitted
 fields. Document that existing users opt in by deleting their explicit values.
+Add an Unreleased `CHANGELOG.md` Changed entry covering the automatic CPU/free-
+memory defaults, pinned-tier behavior, explicit-override precedence, and the
+remove-explicit-fields migration step.
 
 ## Success Criteria
 
