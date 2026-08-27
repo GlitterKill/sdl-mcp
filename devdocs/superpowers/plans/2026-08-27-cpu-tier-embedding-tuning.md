@@ -708,8 +708,8 @@ production code changed.
 ## Chunk 4: Independent Review Remediation
 
 This chunk supersedes the Task 6-8 benchmark acceptance. Keep the 15% and peak-
-RSS thresholds unchanged. Do not alter production defaults until a rebuilt
-production tuple passes its own gate.
+RSS thresholds unchanged. Do not retain or commit production defaults until a
+rebuilt production tuple passes its own gate.
 
 ### Task 9: Pin deterministic aggregation and production-gate behavior
 
@@ -744,9 +744,13 @@ test("rejects incomplete, mismatched, and invalid samples", () => {
 });
 ```
 
-Use complete records with `id`, `batchSize`, `concurrency`,
-`enableCpuMemArena`, `texts`, `milliseconds`, `textsPerSecond`, and
-`maxRssKiB`. Tests assert behavior, not mock calls.
+Use complete records with `id`, `batchSize`, `concurrency`, `texts`,
+`milliseconds`, `textsPerSecond`, `maxRssKiB`, and the full session tuple:
+`executionProviders`, `intraOpNumThreads`, `interOpNumThreads`,
+`executionMode`, `enableCpuMemArena`, `enableMemPattern`, and
+`graphOptimizationLevel`. Aggregation must reject any sample whose tuple does
+not exactly match the requested shape. Tests assert returned behavior, not
+mock-call existence.
 
 - [ ] **Step 2: Run the tests and verify RED**
 
@@ -788,12 +792,18 @@ git commit -m "test(benchmark): pin production gate contract"
 - Modify: `scripts/benchmark-cpu-embedding-tiers.mjs`
 - Modify: `tests/unit/cpu-embedding-benchmark-contract.test.ts`
 
-- [ ] **Step 1: Add failing shape-construction coverage**
+- [ ] **Step 1: Add failing shape and subprocess coverage**
 
 Add a test proving the fixed sweep contains baseline, the exact production
 shape, arena-on batches 8/12/16/20/24 without duplicating production, and one
 arena-off observational control. Prove only the exact `production` aggregate
 is passed to `evaluateProductionGate`.
+
+Add RED tests for the real process wrapper using `t.mock.method` on the default
+`node:child_process` export and a minimal `EventEmitter` child with readable
+stdout/stderr streams. Verify spawn errors, signal exits, nonzero exits, empty
+stdout, malformed JSON, and a returned tuple that differs from the requested
+shape all reject. Verify exactly three samples are required before aggregation.
 
 - [ ] **Step 2: Run and verify RED**
 
@@ -808,13 +818,17 @@ Make the smallest runner changes:
    `dist`; derive the ample-memory width-8 batch/concurrency and CPU session
    options from the built production code.
 2. Each child warms once, measures once, releases the ONNX session in
-   `finally`, and emits one JSON record.
+   `finally`, and emits one JSON record containing the full requested session
+   tuple and metrics.
 3. A full parent run starts exactly three sequential child processes per
    shape. `--quick` uses one process and reports plumbing only; it cannot print
    performance `PASS`.
-4. Treat spawn error, signal/nonzero exit, missing/malformed JSON, mismatched
-   shape data, or any invalid metric as a command failure. Never aggregate a
-   surviving subset.
+4. Move the parent/child completion wrapper into the benchmark contract module.
+   It calls the default `node:child_process` object's `spawn`, rejects spawn
+   errors, signal/nonzero exits, missing/malformed JSON, mismatched full tuple,
+   or invalid metrics, and never aggregates a surviving subset. This keeps the
+   test seam at the actual process boundary without a production-only injection
+   parameter.
 5. Aggregate with the Task 9 contract. Rank alternatives for evidence, but
    determine exit status from `evaluateProductionGate({ baseline,
    production })` only.

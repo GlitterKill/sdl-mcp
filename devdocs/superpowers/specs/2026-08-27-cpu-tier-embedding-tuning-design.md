@@ -264,8 +264,12 @@ timing or RSS assertions into CI.
 The parent accepts exactly three valid samples for every full-run shape. A
 child spawn error, signal or nonzero exit, missing record, mismatched shape ID,
 malformed JSON, or non-finite/non-positive timing, throughput, or RSS fails the
-entire command. It never aggregates a surviving subset. The aggregation and
-gate rules have deterministic unit coverage using synthetic records; only the
+entire command. Every child record echoes batch size, concurrency, provider,
+intra/inter-op threads, execution mode, arena, memory-pattern, and graph-
+optimization settings; the parent rejects any mismatch with the requested
+shape. It never aggregates a surviving subset. The aggregation, exact-tuple
+comparison, process failure, and gate rules have deterministic unit coverage
+using synthetic records and a mocked `child_process.spawn` boundary; only the
 real performance threshold remains manual.
 
 Config-loading integration coverage mocks only `node:os.freemem()` while
