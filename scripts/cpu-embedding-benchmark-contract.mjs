@@ -123,7 +123,7 @@ function validateAggregate(aggregate, label) {
     aggregate.medianTextsPerSecond,
     `${label} medianTextsPerSecond`,
   );
-  requirePositiveNumber(aggregate.medianMaxRssKiB, `${label} medianMaxRssKiB`, true);
+  requirePositiveNumber(aggregate.medianMaxRssKiB, `${label} medianMaxRssKiB`);
   requirePositiveNumber(aggregate.worstMaxRssKiB, `${label} worstMaxRssKiB`, true);
 }
 

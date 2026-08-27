@@ -183,6 +183,28 @@ describe("aggregateShapeSamples", () => {
 });
 
 describe("production benchmark gate", () => {
+  it("accepts a fractional median RSS produced from integer samples", () => {
+    const baseline = aggregateShapeSamples(
+      BASELINE_SHAPE,
+      [
+        sample(BASELINE_SHAPE, { maxRssKiB: 100 }),
+        sample(BASELINE_SHAPE, { maxRssKiB: 101 }),
+      ],
+      2,
+    );
+    const production = aggregateShapeSamples(
+      PRODUCTION_SHAPE,
+      [
+        sample(PRODUCTION_SHAPE, { textsPerSecond: 115, maxRssKiB: 100 }),
+        sample(PRODUCTION_SHAPE, { textsPerSecond: 115, maxRssKiB: 101 }),
+      ],
+      2,
+    );
+
+    assert.equal(baseline.medianMaxRssKiB, 100.5);
+    assert.equal(evaluateProductionGate({ baseline, production }).passed, true);
+  });
+
   it("does not let an experimental winner make production pass", () => {
     const baseline = aggregate(BASELINE_SHAPE, 100);
     const production = aggregate(PRODUCTION_SHAPE, 114.99);
