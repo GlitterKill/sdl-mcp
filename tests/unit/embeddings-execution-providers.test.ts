@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { availableParallelism } from "node:os";
 
 /**
  * Tests for `resolveExecutionProviders` in embeddings-local.ts.
@@ -213,6 +214,37 @@ describe("resolveEmbeddingSessionOptions", () => {
         intraOpNumThreads: 4,
         interOpNumThreads: 2,
         executionMode: "parallel",
+        enableMemPattern: true,
+        serializeRuns: false,
+      },
+    );
+  });
+
+  it("derives automatic CPU threads from the bounded embedding width", async () => {
+    const module =
+      await import("../../dist/indexer/embeddings-local.js");
+    const resolver = Reflect.get(module, "resolveEmbeddingSessionOptions");
+    assert.strictEqual(typeof resolver, "function");
+
+    const expectedWidth = availableParallelism() === 8 ? 1 : 8;
+    const cpuProfile =
+      expectedWidth === 1
+        ? { logicalCores: 1, physicalCores: 1 }
+        : { logicalCores: 32, physicalCores: 16 };
+
+    assert.deepStrictEqual(
+      resolver({
+        requestedProviders: ["cpu"],
+        onnxConfig: undefined,
+        deterministic: false,
+        cpuProfile,
+        platformOverride: WIN32,
+      }),
+      {
+        executionProviders: ["cpu"],
+        intraOpNumThreads: expectedWidth,
+        interOpNumThreads: 1,
+        executionMode: "sequential",
         enableMemPattern: true,
         serializeRuns: false,
       },

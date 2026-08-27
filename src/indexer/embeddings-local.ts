@@ -7,9 +7,10 @@
  *
  * Falls back gracefully when onnxruntime-node or tokenizers packages are unavailable.
  */
-import { availableParallelism } from "node:os";
 import { loadConfig } from "../config/loadConfig.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
+import { detectCpuProfile, type CpuProfile } from "../util/cpu-detect.js";
+import { resolveEmbeddingWidth } from "../util/cpu-presets.js";
 import { logger } from "../util/logger.js";
 import {
   getModelInfo,
@@ -265,7 +266,8 @@ export function resolveEmbeddingSessionOptions({
   requestedProviders,
   onnxConfig,
   deterministic,
-  autoThreads = availableParallelism(),
+  autoThreads,
+  cpuProfile = detectCpuProfile(),
   platformOverride,
 }: {
   requestedProviders: readonly string[] | undefined;
@@ -278,6 +280,7 @@ export function resolveEmbeddingSessionOptions({
     | undefined;
   deterministic: boolean;
   autoThreads?: number;
+  cpuProfile?: CpuProfile;
   platformOverride?: readonly string[];
 }): {
   executionProviders: string[];
@@ -287,6 +290,7 @@ export function resolveEmbeddingSessionOptions({
   enableMemPattern: boolean;
   serializeRuns: boolean;
 } {
+  const resolvedAutoThreads = autoThreads ?? resolveEmbeddingWidth(cpuProfile);
   if (deterministic) {
     return {
       executionProviders: ["cpu"],
@@ -307,7 +311,7 @@ export function resolveEmbeddingSessionOptions({
     intraOpNumThreads:
       onnxConfig?.intraOpNumThreads && onnxConfig.intraOpNumThreads > 0
         ? onnxConfig.intraOpNumThreads
-        : autoThreads,
+        : resolvedAutoThreads,
     interOpNumThreads:
       onnxConfig?.interOpNumThreads && onnxConfig.interOpNumThreads > 0
         ? onnxConfig.interOpNumThreads

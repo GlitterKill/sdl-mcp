@@ -1,4 +1,5 @@
-import { type CpuTier } from "./cpu-detect.js";
+import { MAX_EMBEDDING_CONCURRENCY } from "../config/constants.js";
+import { type CpuProfile, type CpuTier } from "./cpu-detect.js";
 import { type AppConfig } from "../config/types.js";
 
 /**
@@ -53,6 +54,26 @@ export interface PerformancePresets {
   parallelScorerPoolSize: number | null;
   pass2Concurrency: number;
   scipIngestConcurrency: number;
+}
+
+export interface ResolvedPerformancePresets extends PerformancePresets {
+  embeddingConcurrency: number;
+  embeddingBatchSize: number;
+}
+
+/**
+ * A classic Zen CCD has at most eight physical cores; this cap stays
+ * cross-platform where portable APIs do not expose cache topology.
+ */
+export function resolveEmbeddingWidth(
+  profile: Pick<CpuProfile, "logicalCores" | "physicalCores">,
+): number {
+  const estimatedPhysicalCores =
+    profile.physicalCores ?? Math.ceil(profile.logicalCores / 2);
+  return Math.min(
+    MAX_EMBEDDING_CONCURRENCY,
+    Math.max(1, estimatedPhysicalCores),
+  );
 }
 
 /**
@@ -143,7 +164,8 @@ type DeepPartial<T> = {
 export function resolvePerformancePresets(
   tier: CpuTier,
   userConfig: DeepPartial<AppConfig>,
-): PerformancePresets {
+  cpuProfile: Pick<CpuProfile, "logicalCores" | "physicalCores">,
+): ResolvedPerformancePresets {
   const presets = getTierPresets(tier);
 
   return {
@@ -182,5 +204,11 @@ export function resolvePerformancePresets(
     scipIngestConcurrency:
       (userConfig.scip as { ingestConcurrency?: number } | undefined)
         ?.ingestConcurrency ?? presets.scipIngestConcurrency,
+
+    embeddingConcurrency:
+      userConfig.semantic?.embeddingConcurrency ??
+      resolveEmbeddingWidth(cpuProfile),
+
+    embeddingBatchSize: userConfig.semantic?.embeddingBatchSize ?? 16,
   };
 }

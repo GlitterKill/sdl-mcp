@@ -135,6 +135,7 @@ export function loadConfig(configPath?: string): AppConfig {
       const presets = resolvePerformancePresets(
         tier,
         rawConfig as Parameters<typeof resolvePerformancePresets>[1],
+        cpuProfile,
       );
       // Re-parse each sub-section through its schema so that Zod fills in any
       // missing required fields before we overlay the preset values.
