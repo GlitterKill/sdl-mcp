@@ -92,6 +92,40 @@ describe("aggregateShapeSamples", () => {
     assert.equal(result.worstMaxRssKiB, 700_000);
   });
 
+  it("averages the two middle values for an even sample count", () => {
+    const result = aggregateShapeSamples(
+      BASELINE_SHAPE,
+      [
+        sample(BASELINE_SHAPE, {
+          milliseconds: 800,
+          textsPerSecond: 80,
+          maxRssKiB: 400_000,
+        }),
+        sample(BASELINE_SHAPE, {
+          milliseconds: 1_000,
+          textsPerSecond: 100,
+          maxRssKiB: 500_000,
+        }),
+        sample(BASELINE_SHAPE, {
+          milliseconds: 1_200,
+          textsPerSecond: 120,
+          maxRssKiB: 600_000,
+        }),
+        sample(BASELINE_SHAPE, {
+          milliseconds: 1_400,
+          textsPerSecond: 140,
+          maxRssKiB: 700_000,
+        }),
+      ],
+      4,
+    );
+
+    assert.equal(result.medianMilliseconds, 1_100);
+    assert.equal(result.medianTextsPerSecond, 110);
+    assert.equal(result.medianMaxRssKiB, 550_000);
+    assert.equal(result.worstMaxRssKiB, 700_000);
+  });
+
   it("rejects incomplete sample sets and non-object records", () => {
     assert.throws(
       () => aggregateShapeSamples(BASELINE_SHAPE, [], 1),
