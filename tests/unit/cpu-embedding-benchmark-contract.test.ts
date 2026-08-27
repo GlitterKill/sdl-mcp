@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
+import { readFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { describe, it, type TestContext } from "node:test";
 
@@ -159,6 +160,26 @@ describe("buildBenchmarkShapes", () => {
   });
 });
 
+describe("quick benchmark reporting", () => {
+  it("returns after NOT GATED before recommendation evidence", async () => {
+    const source = await readFile(
+      new URL("../../scripts/benchmark-cpu-embedding-tiers.mjs", import.meta.url),
+      "utf8",
+    );
+    const notGatedIndex = source.indexOf("NOT GATED:");
+    const quickBranchIndex = source.lastIndexOf("if (quick)", notGatedIndex);
+    const returnIndex = source.indexOf("return;", notGatedIndex);
+    const recommendationIndex = source.indexOf(
+      "experimental recommendation evidence=",
+    );
+
+    assert.ok(quickBranchIndex >= 0);
+    assert.ok(quickBranchIndex < notGatedIndex);
+    assert.ok(notGatedIndex < returnIndex);
+    assert.ok(returnIndex < recommendationIndex);
+  });
+});
+
 describe("runBenchmarkChild", () => {
   it("resolves one valid JSON record", async (t) => {
     const record = sample(BASELINE_SHAPE);
@@ -200,6 +221,14 @@ describe("runBenchmarkChild", () => {
     mockSpawn(t, { stdout: "{" });
 
     await assert.rejects(runMockedChild(), /invalid JSON/u);
+  });
+
+  it("rejects oversized stdout after draining the child output", async (t) => {
+    mockSpawn(t, {
+      stdout: `${JSON.stringify(sample(BASELINE_SHAPE))}${"x".repeat(20_000)}`,
+    });
+
+    await assert.rejects(runMockedChild(), /stdout exceeded/u);
   });
 
   it("rejects returned identity and session tuple mismatches", async (t) => {
@@ -412,6 +441,32 @@ describe("production benchmark gate", () => {
       ["experimental"],
     );
     assert.equal(evaluateProductionGate({ baseline, production }).passed, false);
+  });
+
+  it("rejects an experimental aggregate supplied as production", () => {
+    const baseline = aggregate(BASELINE_SHAPE, 100);
+    const experimental = aggregate(
+      { ...PRODUCTION_SHAPE, id: "batch-8" },
+      140,
+    );
+
+    assert.throws(
+      () => evaluateProductionGate({ baseline, production: experimental }),
+      /production id must be "production"/u,
+    );
+  });
+
+  it("rejects a non-baseline aggregate supplied as baseline", () => {
+    const wrongBaseline = aggregate(
+      { ...BASELINE_SHAPE, id: "control" },
+      100,
+    );
+    const production = aggregate(PRODUCTION_SHAPE, 115);
+
+    assert.throws(
+      () => evaluateProductionGate({ baseline: wrongBaseline, production }),
+      /baseline id must be "baseline"/u,
+    );
   });
 
   it("uses median throughput and worst production RSS", () => {

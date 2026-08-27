@@ -35,6 +35,7 @@ const WIDTH = 8;
 const GIB = 1024 ** 3;
 const FULL_SAMPLES = 3;
 const QUICK_SAMPLES = 1;
+// Fixed synthetic resources define the reproducible ample-memory width-8 profile.
 const productionPresets = resolvePerformancePresets(
   "extreme",
   {},
@@ -227,6 +228,12 @@ async function runParent(quick) {
     );
   }
 
+  if (quick) {
+    // Quick mode validates the process boundary, never the performance gate.
+    console.log("NOT GATED: quick mode validates process and record plumbing only.");
+    return;
+  }
+
   const rankedCandidates = rankQualifyingCandidates({
     baseline,
     candidates: results.filter(({ id }) => id.startsWith("batch-")),
@@ -236,12 +243,6 @@ async function runParent(quick) {
       ? `experimental recommendation evidence=${rankedCandidates.map(({ id }) => id).join(",")}`
       : "experimental recommendation evidence=none qualified",
   );
-
-  if (quick) {
-    // Quick mode validates the process boundary, never the performance gate.
-    console.log("NOT GATED: quick mode validates process and record plumbing only.");
-    return;
-  }
 
   const gate = evaluateProductionGate({ baseline, production });
   console.log(

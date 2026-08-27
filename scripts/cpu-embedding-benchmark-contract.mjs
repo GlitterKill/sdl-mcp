@@ -14,6 +14,7 @@ const BOOLEAN_FIELDS = [
 ];
 const CANDIDATE_BATCH_SIZES = [8, 12, 16, 20, 24];
 const CANDIDATE_CONCURRENCY = 8;
+const STDOUT_LIMIT = 4_096;
 const STDERR_LIMIT = 4_096;
 
 function requireObject(value, label) {
@@ -147,6 +148,7 @@ export function runBenchmarkChild({ scriptPath, cwd, shape }) {
 
   return new Promise((resolvePromise, reject) => {
     let stdout = "";
+    let stdoutOverflow = false;
     let stderr = "";
     let settled = false;
     const fail = (error) => {
@@ -162,7 +164,9 @@ export function runBenchmarkChild({ scriptPath, cwd, shape }) {
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      const text = String(chunk);
+      stdoutOverflow ||= stdout.length + text.length > STDOUT_LIMIT;
+      stdout = appendBounded(stdout, text, STDOUT_LIMIT);
     });
     child.stderr.on("data", (chunk) => {
       stderr = appendBounded(stderr, chunk, STDERR_LIMIT);
@@ -182,6 +186,10 @@ export function runBenchmarkChild({ scriptPath, cwd, shape }) {
       }
       if (code !== 0) {
         fail(new Error(`Child ${shape.id} exited ${String(code)}: ${stderr.trim()}`));
+        return;
+      }
+      if (stdoutOverflow) {
+        fail(new Error(`Child ${shape.id} stdout exceeded ${STDOUT_LIMIT} characters`));
         return;
       }
 
@@ -265,25 +273,25 @@ function validateAggregate(aggregate, label) {
   requirePositiveNumber(aggregate.worstMaxRssKiB, `${label} worstMaxRssKiB`, true);
 }
 
-export function evaluateProductionGate({
+function evaluateAggregateGate({
   baseline,
-  production,
+  candidate,
   minimumUpliftPercent = 15,
 }) {
   validateAggregate(baseline, "baseline");
-  validateAggregate(production, "production");
+  validateAggregate(candidate, "candidate");
   if (!Number.isFinite(minimumUpliftPercent) || minimumUpliftPercent < 0) {
     throw new TypeError("minimumUpliftPercent must be a finite non-negative number");
   }
 
   const upliftPercent =
-    ((production.medianTextsPerSecond - baseline.medianTextsPerSecond) /
+    ((candidate.medianTextsPerSecond - baseline.medianTextsPerSecond) /
       baseline.medianTextsPerSecond) * 100;
   const memoryLimitKiB =
     baseline.medianMaxRssKiB +
     Math.max(baseline.medianMaxRssKiB * 0.1, 128 * 1_024);
   const throughputPassed = upliftPercent >= minimumUpliftPercent;
-  const memoryPassed = production.worstMaxRssKiB <= memoryLimitKiB;
+  const memoryPassed = candidate.worstMaxRssKiB <= memoryLimitKiB;
 
   return {
     passed: throughputPassed && memoryPassed,
@@ -292,6 +300,26 @@ export function evaluateProductionGate({
     throughputPassed,
     memoryPassed,
   };
+}
+
+export function evaluateProductionGate({
+  baseline,
+  production,
+  minimumUpliftPercent = 15,
+}) {
+  requireObject(baseline, "baseline");
+  requireObject(production, "production");
+  if (baseline.id !== "baseline") {
+    throw new TypeError('baseline id must be "baseline"');
+  }
+  if (production.id !== "production") {
+    throw new TypeError('production id must be "production"');
+  }
+  return evaluateAggregateGate({
+    baseline,
+    candidate: production,
+    minimumUpliftPercent,
+  });
 }
 
 export function rankQualifyingCandidates({
@@ -306,9 +334,9 @@ export function rankQualifyingCandidates({
   // Candidate ranking is evidence only; the production gate receives one shape.
   return candidates
     .filter((candidate) =>
-      evaluateProductionGate({
+      evaluateAggregateGate({
         baseline,
-        production: candidate,
+        candidate,
         minimumUpliftPercent,
       }).passed,
     )
