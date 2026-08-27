@@ -55,7 +55,8 @@ session. The accepted width-8 shape must improve median throughput by at least
 15% while keeping peak RSS within the larger of 10% or 128 MiB above the
 current baseline.
 
-The isolated three-run revision selected the ample-memory shape:
+The initial isolated three-warm-run revision appeared to select the
+ample-memory shape:
 
 | Width-8 shape | Median | Throughput | Peak RSS | Uplift |
 |---------------|-------:|-----------:|---------:|-------:|
@@ -64,8 +65,26 @@ The isolated three-run revision selected the ample-memory shape:
 | batch 16, concurrency 8, arena on | 12,714.09 ms | 15.10 texts/s | 1,447.6 MiB | 15.34% |
 | batch 16, concurrency 8, arena off | 26,617.17 ms | 7.21 texts/s | 973.9 MiB | -44.91% |
 
-The selected arena-on shape passes both gates. Disabling the arena saves more
-memory but nearly doubles wall time, so it is not a minimum-wall-time default.
+An independent review run did not reproduce the throughput gate: the same
+batch-16 production shape reached 14.75 texts/s against a 12.96 texts/s
+baseline, a 13.79% uplift. Its 1,667.4 MiB peak RSS remained below the 3,305.8
+MiB limit, but throughput failed the required 15% gate. The shape is therefore
+not accepted for production. Disabling the arena remains rejected because its
+large wall-time regression conflicts with the minimum-wall-time objective.
+
+The remediation replaces three warm measurements inside one child with three
+fresh child processes per shape. Each child performs one warm-up and one
+measured pass. The parent aggregates median throughput and uses the worst
+candidate peak RSS against the median baseline peak RSS plus
+`max(10%, 128 MiB)`. This bounds process-start and allocator-state variance
+without adding timing assertions to CI.
+
+The full probe keeps the existing baseline and arena-off comparison, and
+evaluates arena-on width-8 batches 8, 12, 16, 20, and 24. It reports all
+alternatives, but pass/fail is bound to the exact production shape derived
+from the built preset rather than whichever experimental candidate happens to
+be fastest. If no candidate repeatedly clears both gates, automatic tuning
+reverts to the prior baseline instead of weakening the 15% requirement.
 
 These measurements establish a CPU-inference default, not total index wall
 time. A disposable full-index A/B remains a separate verification step that
@@ -206,22 +225,30 @@ Wall-clock assertions do not belong in the unit suite because scheduler and
 host variance would make them flaky. The measured probe is verification
 evidence, while deterministic tests protect the configuration contract.
 
-Add `scripts/benchmark-cpu-embedding-tiers.mjs` as the reproducible manual
-probe. It compares the existing shape with a bounded set of batch/concurrency
-and CPU-arena candidates using the installed quantized Jina model and
-length-sorted SDL-MCP source excerpts. Every shape runs in a fresh child
-process and reports median throughput plus `process.resourceUsage().maxRSS`.
+Use `scripts/benchmark-cpu-embedding-tiers.mjs` as the reproducible manual
+probe. It compares the existing shape with the bounded batch sweep and the
+CPU-arena control using the installed quantized Jina model and length-sorted
+SDL-MCP source excerpts. A full run executes three fresh child processes per
+shape; each child warms once, measures once, releases its session, and reports
+throughput plus `process.resourceUsage().maxRSS`.
 
 ```powershell
 node scripts/benchmark-cpu-embedding-tiers.mjs
 ```
 
-The verification pass condition on the 9950X3D is a median width-8 throughput
-at least 15% higher than the width-8 existing shape over three warm runs. A
-candidate qualifies when
-`candidateKiB <= baselineKiB + max(baselineKiB * 0.10, 128 * 1024)`; the
-fastest qualifying candidate is selected. The script is manual and must not
-introduce timing or RSS assertions into CI.
+The verification pass condition on the 9950X3D is that the exact built
+production shape has median width-8 throughput at least 15% higher than the
+existing shape across three fresh processes. It qualifies when its worst
+`candidateKiB <= medianBaselineKiB + max(medianBaselineKiB * 0.10,
+128 * 1024)`. Experimental candidates are ranked for selection evidence but
+cannot make the command pass. The script is manual and must not introduce
+timing or RSS assertions into CI.
+
+Config-loading integration coverage mocks only `node:os.freemem()` while
+exercising the real loader. It proves exact results below and at the 4 GiB
+boundary and proves the first resolved free-memory snapshot remains stable for
+the lifetime of a cached configuration. Pure preset tests continue to own the
+full boundary matrix.
 
 ## Documentation
 
@@ -255,7 +282,9 @@ fields. Document that existing users opt in by deleting their explicit values.
 - Explicit semantic settings remain byte-for-byte authoritative.
 - FileSummary embeddings retain batch 4 while using the derived concurrency.
 - Focused tests, typecheck, build, and documentation checks pass.
-- The manual benchmark meets both the documented 15% width-8 improvement gate
-  and the 10%/128 MiB peak-RSS guardrail on the 9950X3D. Total index wall-time
+- The exact production shape, not an arbitrary experimental winner, meets the
+  documented 15% width-8 improvement gate and the 10%/128 MiB peak-RSS
+  guardrail across three fresh processes on the 9950X3D. If none does, the
+  prior automatic baseline remains production behavior. Total index wall-time
   acceptance is reported only after a separately authorized, disposable
   full-index A/B.
