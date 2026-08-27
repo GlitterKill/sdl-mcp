@@ -596,11 +596,10 @@ export const SemanticConfigSchema = z.object({
   summaryBatchSize: z.number().int().min(1).max(50).default(20),
   /**
    * Number of embedding batches to process concurrently during
-   * `refreshSymbolEmbeddings()`. Defaults to 1 (sequential). Increasing
-   * this can improve throughput on multi-core machines but ONNX Runtime's
-   * internal thread pool is shared across all concurrent calls; consider
-   * reducing `intraOpNumThreads` proportionally when raising above 1.
-   * Capped at MAX_EMBEDDING_CONCURRENCY (8).
+   * `refreshSymbolEmbeddings()`. The schema fallback is 1; when omitted from
+   * raw config, `loadConfig()` uses the smaller of the physical-core-derived
+   * width and whole GiB of free memory measured at startup. Explicit values
+   * remain authoritative. Capped at MAX_EMBEDDING_CONCURRENCY (8).
    */
   embeddingConcurrency: z
     .number()
@@ -609,8 +608,9 @@ export const SemanticConfigSchema = z.object({
     .max(MAX_EMBEDDING_CONCURRENCY)
     .default(DEFAULT_EMBEDDING_CONCURRENCY),
   /**
-   * ONNX inference batch width for symbol embedding refresh. Default 32
-   * matches `LocalEmbeddingProvider`'s tokenizer + session expectations.
+   * ONNX inference batch width for symbol embedding refresh. The schema
+   * fallback is 32; when omitted from raw config, `loadConfig()` uses 8 below
+   * 4 GiB free at startup and 16 otherwise.
    * Larger batches (64-128) amortise tokenizer + session bind/unbind costs
    * across more rows per round-trip but raise peak memory roughly with the
    * longest sequence in the batch. Length-bucketing before splitting keeps
@@ -708,14 +708,9 @@ export const SemanticConfigSchema = z.object({
   /**
    * ONNX Runtime thread-pool configuration for local embedding inference.
    *
-   * ORT defaults `intra_op_num_threads` to **physical** core count, which on
-   * SMT/HT CPUs (and on AMD CPUs whose Provider Driver pins the Node process
-   * to a single CCD) leaves half the logical threads idle. Setting this
-   * explicitly to `os.availableParallelism()` saturates available threads.
-   *
    * Both fields default to 0 â€” the helper interprets 0 as "auto" and resolves
-   * to `os.availableParallelism()` for `intraOpNumThreads`, 1 for
-   * `interOpNumThreads`. Set explicit positive values to override.
+   * `intraOpNumThreads` to estimated physical-core width capped at 8, and
+   * `interOpNumThreads` to 1. Set explicit positive values to override.
    *
    * Notes:
    *   - Two embedding models run concurrently via Promise.all and share ORT's
@@ -1213,7 +1208,8 @@ export type PerformanceTier = z.infer<typeof PerformanceTierSchema>;
 export const AppConfigSchema = z.object({
   repos: z.array(RepoConfigSchema),
   /**
-   * CPU performance tier for auto-tuning concurrency defaults.
+   * CPU performance tier for auto-tuning concurrency defaults. Embedding
+   * concurrency is additionally bounded by free memory sampled at startup.
    *
    * - "auto" (default): detect hardware at startup and select a tier.
    * - "mid":    conservative defaults (1â€“8 logical cores).

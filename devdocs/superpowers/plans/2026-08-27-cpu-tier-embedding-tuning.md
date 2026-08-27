@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make omitted CPU embedding settings scale to estimated physical-core width, capped at eight, with a symbol batch size of 16 and an optimized 9950X3D extreme-tier result.
+**Goal:** Make omitted CPU embedding settings scale to estimated physical-core width and startup free memory, with a measured minimum-wall-time 9950X3D result that stays within the approved peak-RSS guardrail.
 
-**Architecture:** Keep CPU topology estimation in `cpu-detect.ts`, derive one reusable embedding width in `cpu-presets.ts`, and consume it in both config preset resolution and ONNX runtime auto-thread resolution. Apply detected and pinned tier presets through the same `loadConfig()` path while preserving every raw user override. Keep FileSummary batch size 4, execution providers, models, inter-op threads, and execution mode unchanged.
+**Architecture:** Keep CPU topology estimation in `cpu-detect.ts`, derive reusable CPU and free-memory bounds in `cpu-presets.ts`, and consume the CPU width in ONNX runtime auto-thread resolution. Sample `os.freemem()` once in `loadConfig()`, apply detected and pinned tier presets through the same path, and preserve every raw user override. Keep FileSummary batch size 4, execution providers, models, inter-op threads, and execution mode unchanged.
 
 **Tech Stack:** TypeScript 5.9, Node.js 24 built-in test runner, Zod 4 configuration schemas, `onnxruntime-node@1.24.3`, native `tokenizers`.
 
@@ -45,7 +45,7 @@
 - Create: `tests/unit/cpu-tier-embedding-presets.test.ts`
 - Test: `tests/unit/cpu-tier-embedding-presets.test.ts`
 
-- [ ] **Step 1: Create the focused test file**
+- [x] **Step 1: Create the focused test file**
 
 Add tests that import the future exports from compiled `dist`:
 
@@ -114,7 +114,7 @@ describe("CPU-tier embedding presets", () => {
 });
 ```
 
-- [ ] **Step 2: Build current source and verify RED**
+- [x] **Step 2: Build current source and verify RED**
 
 Run:
 
@@ -134,7 +134,7 @@ embedding fields.
 - Modify: `src/config/loadConfig.ts:132-138`
 - Test: `tests/unit/cpu-tier-embedding-presets.test.ts`
 
-- [ ] **Step 1: Add the minimum imports and resolved fields**
+- [x] **Step 1: Add the minimum imports and resolved fields**
 
 Import `MAX_EMBEDDING_CONCURRENCY` and the `CpuProfile` type. Add only these
 fields to the resolved preset result:
@@ -149,7 +149,7 @@ export interface ResolvedPerformancePresets extends PerformancePresets {
 Do not add FileSummary batch, execution provider, inter-op, or execution-mode
 fields to the tier preset.
 
-- [ ] **Step 2: Add the pure width helper**
+- [x] **Step 2: Add the pure width helper**
 
 ```typescript
 export function resolveEmbeddingWidth(
@@ -166,7 +166,7 @@ export function resolveEmbeddingWidth(
 }
 ```
 
-- [ ] **Step 3: Extend `resolvePerformancePresets`**
+- [x] **Step 3: Extend `resolvePerformancePresets`**
 
 Change its signature to accept a profile and return
 `ResolvedPerformancePresets`:
@@ -196,13 +196,13 @@ route `semantic.onnx.intraOpNumThreads` through this config result; runtime
 auto-thread resolution consumes the same width helper in Task 3 without
 materializing a previously absent nested `onnx` object.
 
-- [ ] **Step 4: Keep the existing loader caller compiling**
+- [x] **Step 4: Keep the existing loader caller compiling**
 
 Pass the already-detected `cpuProfile` as the third argument at the current
 `resolvePerformancePresets(...)` call in `loadConfig.ts`. Do not yet change the
 auto-tier gate or apply semantic values; Chunk 2 owns that behavior change.
 
-- [ ] **Step 5: Build and verify GREEN**
+- [x] **Step 5: Build and verify GREEN**
 
 Run:
 
@@ -220,7 +220,7 @@ Expected: all three tests pass.
 - Modify: `tests/unit/embeddings-execution-providers.test.ts:193-220`
 - Test: `tests/unit/embeddings-execution-providers.test.ts`
 
-- [ ] **Step 1: Add a failing CPU auto-thread test**
+- [x] **Step 1: Add a failing CPU auto-thread test**
 
 Import `availableParallelism` from `node:os`, then add one test beside the
 current CPU throughput option test. Choose a fake profile whose width is
@@ -260,12 +260,12 @@ Expected before the fix: the resolver ignores `cpuProfile` and returns the
 host's `availableParallelism()` value, which differs from `expectedWidth` by
 construction.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run the focused execution-provider test and confirm the new behavioral case
 fails. Do not add a source-text assertion.
 
-- [ ] **Step 3: Replace the runtime default**
+- [x] **Step 3: Replace the runtime default**
 
 Remove the existing `autoThreads = availableParallelism()` parameter default.
 Keep `autoThreads` optional, add an optional `cpuProfile` input for deterministic
@@ -283,7 +283,7 @@ Update imports accordingly and remove `availableParallelism` when unused.
 Explicit positive `onnx.intraOpNumThreads` still wins. Explicit `0` continues
 to mean automatic and therefore resolves through `resolvedAutoThreads`.
 
-- [ ] **Step 4: Build and run focused tests**
+- [x] **Step 4: Build and run focused tests**
 
 Run:
 
@@ -294,7 +294,7 @@ node --experimental-strip-types --test tests/unit/cpu-tier-embedding-presets.tes
 
 Expected: both files pass with no warnings.
 
-- [ ] **Step 5: Commit Chunk 1**
+- [x] **Step 5: Commit Chunk 1**
 
 ```powershell
 git add src/util/cpu-presets.ts src/config/loadConfig.ts src/indexer/embeddings-local.ts tests/unit/cpu-tier-embedding-presets.test.ts tests/unit/embeddings-execution-providers.test.ts
@@ -311,7 +311,7 @@ git commit -m "perf(index): derive CPU embedding width"
 - Modify: `tests/unit/config-loading.test.ts:1-70`
 - Test: `tests/unit/config-loading.test.ts`
 
-- [ ] **Step 1: Add temporary-config helpers**
+- [x] **Step 1: Add temporary-config helpers**
 
 Import `mkdtempSync`, `rmSync`, and `writeFileSync` from `node:fs`, `tmpdir`
 from `node:os`, `join` from `node:path`, plus `invalidateConfigCache`,
@@ -322,7 +322,7 @@ new temporary directory, calls `invalidateConfigCache()` before loading, and
 removes the directory in `finally`. Keep each test responsible for its own
 temporary directory.
 
-- [ ] **Step 2: Add the failing example/auto-tier test**
+- [x] **Step 2: Add the failing example/auto-tier test**
 
 Extend `should load example config successfully`:
 
@@ -336,7 +336,7 @@ assert.equal(config.semantic?.fileSummaryEmbeddingBatchSize, 4);
 Expected before the fix: batch remains 32 and concurrency remains 1 because
 the example config pins both fields.
 
-- [ ] **Step 3: Add the failing pinned-tier test**
+- [x] **Step 3: Add the failing pinned-tier test**
 
 Load a temporary config with `performanceTier: "extreme"` and no explicit
 performance fields. Assert:
@@ -350,7 +350,7 @@ assert.equal(config.semantic?.fileSummaryEmbeddingBatchSize, 4);
 
 Expected before the fix: pinned `extreme` bypasses preset application.
 
-- [ ] **Step 4: Add explicit override coverage**
+- [x] **Step 4: Add explicit override coverage**
 
 Load a pinned config containing:
 
@@ -372,7 +372,7 @@ schema fallback, and unrelated preset fields such as `pass2Concurrency` come
 from the selected tier. Before the fix, the explicit values remain green but
 the selected-tier assertion is RED because pinned tiers bypass presets.
 
-- [ ] **Step 5: Run and verify RED**
+- [x] **Step 5: Run and verify RED**
 
 Run:
 
@@ -392,7 +392,7 @@ green while the selected-tier `pass2Concurrency` assertion fails.
 - Modify: `config/sdlmcp.config.example.json:173-178`
 - Test: `tests/unit/config-loading.test.ts`
 
-- [ ] **Step 1: Resolve the CPU profile and effective tier once**
+- [x] **Step 1: Resolve the CPU profile and effective tier once**
 
 Replace the `if (config.performanceTier === "auto")` gate with:
 
@@ -413,7 +413,7 @@ Apply the existing tier-adjusted config construction for both auto and pinned
 tiers. Preserve the current raw pre-Zod override behavior for every existing
 field.
 
-- [ ] **Step 2: Overlay only the two semantic config fields**
+- [x] **Step 2: Overlay only the two semantic config fields**
 
 Within the existing `semantic` construction, add:
 
@@ -426,7 +426,7 @@ Do not create or rewrite `semantic.onnx`; `embeddings-local.ts` handles the
 automatic intra-op width at session resolution. Spreading `baseSemantic`
 preserves explicit FileSummary and nested ONNX values.
 
-- [ ] **Step 3: Stop the example config from defeating presets**
+- [x] **Step 3: Stop the example config from defeating presets**
 
 Remove only these lines from `config/sdlmcp.config.example.json`:
 
@@ -438,7 +438,7 @@ Remove only these lines from `config/sdlmcp.config.example.json`:
 Keep `fileSummaryEmbeddingBatchSize: 4` because it is deliberately not
 tier-derived.
 
-- [ ] **Step 4: Build and verify GREEN**
+- [x] **Step 4: Build and verify GREEN**
 
 Run:
 
@@ -450,7 +450,7 @@ node --experimental-strip-types --test tests/unit/cpu-tier-embedding-presets.tes
 Expected: all focused tests pass. Confirm the explicit override test reports
 24/3/7/0/parallel exactly.
 
-- [ ] **Step 5: Commit Chunk 2**
+- [x] **Step 5: Commit Chunk 2**
 
 ```powershell
 git add src/config/loadConfig.ts config/sdlmcp.config.example.json tests/unit/config-loading.test.ts
@@ -461,13 +461,32 @@ git commit -m "perf(config): apply CPU embedding tier presets"
 
 ## Chunk 3: Reproducible Benchmark and Documentation
 
+### Approved revision: free-memory and peak-RSS contract
+
+Before Task 6 is accepted:
+
+- run each benchmark shape in a fresh child process;
+- report `process.resourceUsage().maxRSS` beside median throughput;
+- test the CPU memory arena explicitly while retaining memory patterns and
+  full graph optimization;
+- require width-8 throughput uplift of at least 15%; and
+- require peak RSS no higher than baseline plus the larger of 10% or 128 MiB.
+
+After the benchmark selects the ample-memory shape, add pure preset tests for
+free-memory snapshots below 2, 4, 8, and 16 GiB. Automatic concurrency must be
+`min(cpuWidth, memoryWidth)`, where `memoryWidth` is the free-memory GiB count
+clamped to 1-8. Below 4 GiB, use symbol batch 8; otherwise use the measured
+default batch. Explicit `embeddingConcurrency` and `embeddingBatchSize` remain
+authoritative. Sample `os.freemem()` once in `loadConfig()` so settings remain
+stable throughout a refresh.
+
 ### Task 6: Add the manual CPU embedding benchmark
 
 **Files:**
 - Create: `scripts/benchmark-cpu-embedding-tiers.mjs`
 - Verify: `scripts/benchmark-cpu-embedding-tiers.mjs`
 
-- [ ] **Step 1: Implement the fixed-scope benchmark**
+- [x] **Step 1: Implement the fixed-scope benchmark**
 
 The script must:
 
@@ -479,21 +498,23 @@ The script must:
    use deterministic excerpt boundaries and length/path tie-breakers, and keep
    the first 192 length-sorted inputs between 80 and 1,800 characters. Use no
    random sampling.
-4. For widths 2, 4, 6, and 8, compare:
-   - existing: `batch=32`, `concurrency=1`, `intraOpNumThreads=width`;
-   - scaled: `batch=16`, `concurrency=width`,
-     `intraOpNumThreads=width`.
-5. Warm each session, run each shape three times, and report median
-   milliseconds, texts/s, and uplift.
-6. Print `PASS` when the width-8 uplift is at least 15%; otherwise print
-   `FAIL` and set `process.exitCode = 1`.
+4. Compare the existing width-8 shape against a small explicit candidate set
+   covering batch and CPU-arena on/off with candidate concurrency fixed at
+   width 8. Do not use a combinatorial sweep.
+5. Run every shape in a separate child process, warm its session, run three
+   measured iterations, and report median milliseconds, texts/s, and peak RSS.
+6. A candidate qualifies when
+   `candidateKiB <= baselineKiB + max(baselineKiB * 0.10, 128 * 1024)`.
+   Select the fastest qualifying candidate. Print `PASS` only when it improves
+   width-8 throughput by at least 15%; otherwise print `FAIL` and set
+   `process.exitCode = 1`.
 
 Use `executionProviders: ["cpu"]`, `interOpNumThreads: 1`, sequential mode,
 memory patterns enabled, and graph optimization level `all` for both shapes.
 Release every session in `finally`. Add comments explaining that the benchmark
 checks inference-path tuning only, not persistence, HNSW, or total index time.
 
-- [ ] **Step 2: Build and run the benchmark**
+- [x] **Step 2: Build and run the benchmark**
 
 Run:
 
@@ -502,11 +523,11 @@ npm run build
 node scripts/benchmark-cpu-embedding-tiers.mjs
 ```
 
-Expected on the 9950X3D: widths 2/4/6/8 are printed; width 8 reports `PASS`
-with at least 15% median uplift. Record the actual medians in the task handoff.
-Do not run an index refresh.
+Expected on the 9950X3D: every candidate prints throughput and isolated peak
+RSS; the accepted candidate reports `PASS` for both gates. Record actual
+medians and peak RSS in the task handoff. Do not run an index refresh.
 
-- [ ] **Step 3: Commit the benchmark**
+- [x] **Step 3: Commit the benchmark**
 
 ```powershell
 git add scripts/benchmark-cpu-embedding-tiers.mjs
@@ -516,6 +537,12 @@ git commit -m "perf(index): add CPU embedding tier benchmark"
 ### Task 7: Synchronize configuration documentation
 
 **Files:**
+- Modify: `src/util/cpu-presets.ts`
+- Modify: `src/config/loadConfig.ts`
+- Modify: `src/indexer/embeddings-local.ts`
+- Modify: `tests/unit/cpu-tier-embedding-presets.test.ts`
+- Modify: `tests/unit/config-loading.test.ts`
+- Modify: `tests/unit/embeddings-execution-providers.test.ts`
 - Modify: `src/config/types.ts:597-735,1213-1226`
 - Modify: `src/util/cpu-presets.ts:5-45`
 - Modify: `config/sdlmcp.config.schema.json:188-196,955-970`
@@ -523,26 +550,44 @@ git commit -m "perf(index): add CPU embedding tier benchmark"
 - Modify: `docs/feature-deep-dives/semantic-embeddings-setup.md:589-630,805-820`
 - Modify: `src/ui/config.js:237-238`
 
-- [ ] **Step 1: Update source comments and the preset table**
+- [x] **Step 1: Implement and test the free-memory bound**
+
+Add a pure free-memory-width helper that converts bytes to whole GiB and
+clamps the result to 1-8. Pass a single `os.freemem()` snapshot from
+`loadConfig()` into `resolvePerformancePresets()`. For omitted fields, set
+concurrency to `min(cpuWidth, memoryWidth)` and use batch 8 below 4 GiB;
+otherwise use the benchmark-selected ample-memory batch. Preserve explicit
+semantic overrides exactly. Add pure boundary tests and config-loading tests
+with injected free-memory values; do not poll memory during inference.
+
+Apply the benchmark-selected global CPU arena setting in
+`embeddings-local.ts`, and explicitly set graph optimization to `all` for the
+CPU path. Preserve DirectML behavior. Cover the resolved session options in
+the existing execution-provider test.
+
+- [x] **Step 2: Update source comments and the preset table**
 
 Document the effective formula:
 
 ```text
-embeddingWidth = min(8, estimatedPhysicalCores)
+cpuWidth = min(8, estimatedPhysicalCores)
+memoryWidth = clamp(floor(freeMemoryGiB), 1, 8)
+embeddingConcurrency = min(cpuWidth, memoryWidth)
 ```
 
-State that omitted symbol batch size becomes 16, omitted concurrency and
-automatic ONNX intra-op width become `embeddingWidth`, and FileSummary batch
-remains 4. Clarify that Zod's 1/32/0 values are schema fallbacks; the loader and
-runtime replace them only when the raw field was omitted or explicitly set to
-ONNX auto (`0`).
+State that omitted symbol batch size becomes 8 below 4 GiB free and the
+measured ample-memory batch otherwise. Omitted concurrency becomes the smaller
+of CPU and memory width; automatic ONNX intra-op width remains CPU-derived.
+FileSummary batch remains 4. Clarify that Zod's 1/32/0 values are schema
+fallbacks; the loader and runtime replace them only when the raw field was
+omitted or explicitly set to ONNX auto (`0`).
 
-- [ ] **Step 2: Update public docs and migration guidance**
+- [x] **Step 3: Update public docs and migration guidance**
 
 In both public documents:
 
 - replace the old 9950X3D advice (`batch=32`, concurrency 4, threads 16),
-- show the measured extreme profile (`batch=16`, concurrency 8, threads 8),
+- show the measured ample-memory extreme profile selected by Task 6,
 - add `embeddingBatchSize` and `embeddingConcurrency` to the
   `performanceTier`-affected field list in `configuration-reference.md`,
 - replace the `onnx.intraOpNumThreads: 0` claim that uses
@@ -555,14 +600,14 @@ In both public documents:
 - retain explicit override guidance for unusual no-SMT, ARM, VM, or
   misreported hosts.
 
-- [ ] **Step 3: Update schema and UI descriptions without changing schema defaults**
+- [x] **Step 4: Update schema and UI descriptions without changing schema defaults**
 
 Keep JSON-schema `default` annotations at 1 and 32 for compatibility. Change
 their descriptions to call them schema fallbacks and describe the effective
-tier behavior. Update UI tooltips to say `auto` uses physical-core-derived
-width capped at 8 and symbol batch 16.
+tier behavior. Update UI tooltips to describe the CPU/free-memory concurrency
+bound and the constrained/ample symbol batches.
 
-- [ ] **Step 4: Run documentation/config checks**
+- [x] **Step 5: Run documentation/config checks**
 
 Run:
 
@@ -578,10 +623,10 @@ Expected: all commands exit 0. If lint reports pre-existing unrelated files,
 run ESLint on the changed `src` files and report both results without editing
 unrelated code.
 
-- [ ] **Step 5: Commit documentation**
+- [x] **Step 6: Commit documentation**
 
 ```powershell
-git add src/config/types.ts src/util/cpu-presets.ts config/sdlmcp.config.schema.json docs/configuration-reference.md docs/feature-deep-dives/semantic-embeddings-setup.md src/ui/config.js
+git add src/config/loadConfig.ts src/config/types.ts src/indexer/embeddings-local.ts src/util/cpu-presets.ts tests/unit/cpu-tier-embedding-presets.test.ts tests/unit/config-loading.test.ts tests/unit/embeddings-execution-providers.test.ts config/sdlmcp.config.schema.json docs/configuration-reference.md docs/feature-deep-dives/semantic-embeddings-setup.md src/ui/config.js
 git commit -m "docs: explain CPU-tier embedding defaults"
 ```
 
@@ -590,7 +635,7 @@ git commit -m "docs: explain CPU-tier embedding defaults"
 **Files:**
 - Verify all changed paths.
 
-- [ ] **Step 1: Determine the targeted suite from the final diff**
+- [x] **Step 1: Determine the targeted suite from the final diff**
 
 Run:
 
@@ -604,7 +649,7 @@ unit tests, configuration sync, the adapter harness because
 `src/config/**` changed. Native parity, golden snapshots, property tests, and
 stress tests are not triggered by these paths.
 
-- [ ] **Step 2: Run focused verification from a fresh build**
+- [x] **Step 2: Run focused verification from a fresh build**
 
 ```powershell
 npm run build:all
@@ -617,7 +662,7 @@ npm run test:harness
 
 Expected: every command exits 0.
 
-- [ ] **Step 3: Run the full suite required for config changes**
+- [x] **Step 3: Run the full suite required for config changes**
 
 ```powershell
 npm test
@@ -627,7 +672,7 @@ Expected: full suite passes. If known shared temporary-state failures recur,
 report the aggregate result and rerun only those files with fresh `TEMP` and
 `TMP` roots; do not describe the aggregate suite as green unless it is green.
 
-- [ ] **Step 4: Re-run the manual performance gate**
+- [x] **Step 4: Re-run the manual performance gate**
 
 ```powershell
 node scripts/benchmark-cpu-embedding-tiers.mjs
@@ -636,7 +681,7 @@ node scripts/benchmark-cpu-embedding-tiers.mjs
 Expected on the 9950X3D: width-8 scaled median is at least 15% faster and the
 script prints `PASS`. This is not a full-index claim.
 
-- [ ] **Step 5: Inspect repository hygiene**
+- [x] **Step 5: Inspect repository hygiene**
 
 ```powershell
 git diff --check
@@ -646,7 +691,7 @@ git status --short --branch
 Expected: no whitespace errors and no unrelated paths. The branch is local-only
 and ahead of `origin/main`; do not push.
 
-- [ ] **Step 6: Request code review before integration**
+- [x] **Step 6: Request code review before integration**
 
 Use `@requesting-code-review` against the complete implementation diff. Address
 only verified findings through `@receiving-code-review`, rerun the smallest

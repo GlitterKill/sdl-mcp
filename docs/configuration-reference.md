@@ -196,17 +196,21 @@ This override only accepts partial fields. Unspecified values inherit from the t
 | ----------------- | -------- | -------- | ---------------------------------------- |
 | `performanceTier` | `string` | `"auto"` | `"mid"`, `"high"`, `"extreme"`, `"auto"` |
 
-`"auto"` detects the machine tier at startup and only fills fields you did not set explicitly. It currently influences:
+Every tier fills only fields you did not set explicitly; `"auto"` selects the tier from detected hardware. The tier currently influences:
 
 - `indexing.concurrency`
+- `indexing.pass2Concurrency`
 - `concurrency.maxSessions`
 - `concurrency.maxToolConcurrency`
 - `concurrency.readPoolSize`
 - `runtime.maxConcurrentJobs`
 - `liveIndex.reconcileConcurrency`
 - `semantic.summaryMaxConcurrency`
+- `semantic.embeddingConcurrency`
+- `semantic.embeddingBatchSize`
 - `parallelScorer.enabled`
 - `parallelScorer.poolSize`
+- `scip.ingestConcurrency`
 
 ## `graphDatabase`
 
@@ -361,6 +365,8 @@ FileSummary vector writes debounce the LadybugDB HNSW rebuild until 50 rows are 
 
 The wizard's Language Providers prompt writes `indexing.pipeline: "auto"` for Yes and `"legacy"` for No. Strict `"providerFirst"` remains an advanced manual setting.
 
+When local CPU embedding settings are omitted, SDL-MCP samples free memory once at startup and applies the same preset for `performanceTier: "auto"` and pinned tiers. It uses `min(8, estimated physical cores)` as the CPU width; `clamp(floor(free memory / 1 GiB), 1, 8)` as the memory width; and the smaller width for embedding concurrency. Symbol batches are `8` below 4 GiB free and `16` otherwise. Explicit values always win. The JSON Schema values of `1` for concurrency and `32` for symbol batch size remain validation fallbacks, not these runtime defaults; FileSummary batches remain `4`.
+
 | Field                           | Type                                    | Default                            | Notes                                                                                                                                                                                                                                                                                               |
 | ------------------------------- | --------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`                       | `boolean`                               | `true`                             |                                                                                                                                                                                                                                                                                                     |
@@ -378,14 +384,14 @@ The wizard's Language Providers prompt writes `indexing.pipeline: "auto"` for Ye
 | `summaryApiBaseUrl`             | `string \| null`                        | `null`                             | OpenAI-compatible local endpoints                                                                                                                                                                                                                                                                   |
 | `summaryMaxConcurrency`         | `number`                                | `5`                                | `1-32`                                                                                                                                                                                                                                                                                              |
 | `summaryBatchSize`              | `number`                                | `20`                               | `1-50`                                                                                                                                                                                                                                                                                              |
-| `embeddingConcurrency`          | `number`                                | `1`                                | `1-8`. Number of embedding batches in flight per model. Higher values overlap tokenisation (single-thread JS) with ONNX inference. DirectML serializes `Run()` per cached session but still allows tokenisation overlap, so its contract alone does not require setting this to `1`. Watch for ORT thread oversubscription on shared thread pools.              |
-| `embeddingBatchSize`            | `number`                                | `32`                               | `1-128`. ONNX inference batch width. Larger batches amortise tokenizer + session bind/unbind costs. Length-bucketing keeps tokenizer pad waste bounded.                                                                                                                                             |
+| `embeddingConcurrency`          | `number`                                | auto (`1` schema fallback)         | `1-8`. When omitted, `min(cpuWidth, memoryWidth)`, where each width is capped at 8 and memory width uses whole GiB free at startup. Higher values overlap tokenisation with ONNX inference. DirectML serializes `Run()` per cached session but still allows tokenisation overlap. Explicit values win. |
+| `embeddingBatchSize`            | `number`                                | auto (`32` schema fallback)        | `1-128`. When omitted, `8` below 4 GiB free at startup or `16` otherwise. Larger batches amortise tokenizer and session bind/unbind costs, but raise peak memory. Length-bucketing keeps tokenizer pad waste bounded. Explicit values win. |
 | `fileSummaryEmbeddingBatchSize` | `number`                                | `4`                                | `1-16`. ONNX inference batch width for hybrid `FileSummary` vectors. Defaults lower than symbol embeddings because file-level payloads are much larger.                                                                                                                                             |
 | `fileSummaryEmbeddingMaxChars`  | `number`                                | `4096`                             | `512-32768`. Maximum characters sent to the embedding provider for each `FileSummary`; stored summaries and FTS text remain complete.                                                                                                                                                               |
 | `embeddingsSequential`          | `boolean`                               | `false`                            | Run multiple embedding models in series instead of via `Promise.all`. Set `true` on systems where ORT serializes parallel sessions at the thread-pool layer (alternation pattern in CLI progress).                                                                                                  |
 | `modelVariant`                  | `string`                                | _model-defined_                    | ONNX file variant to load. Common: `"default"` / `"int8"`, `"fp16"`, `"fp32"`. nomic also publishes `"uint8"`, `"q4"`, `"q4f16"`, `"bnb4"`. Falls back to model's `defaultVariant` with a warning if unsupported. See [semantic-embeddings-setup](feature-deep-dives/semantic-embeddings-setup.md). |
 | `executionProviders`            | `string[]`                              | `["cpu"]`                          | ONNX Runtime execution providers in priority order. Bundled with default `onnxruntime-node` package: Windows x64 `["cpu","dml","webgpu"]`, macOS `["cpu","coreml"]`, Linux x64 `["cpu","cuda","tensorrt"]`, Linux arm64 `["cpu"]`. Unsupported entries dropped; `cpu` auto-appended. DirectML automatically forces sequential execution, disables ONNX memory patterns, and serializes `Run()` per cached session. |
-| `onnx.intraOpNumThreads`        | `number`                                | `0` (auto)                         | `0-256`. ORT intra-op thread pool. `0` = `os.availableParallelism()`. For inference, set to physical core count (e.g. 16 on a 9950X3D); higher counts hit hyperthreading penalty.                                                                                                                   |
+| `onnx.intraOpNumThreads`        | `number`                                | `0` (auto)                         | `0-256`. ORT intra-op thread pool. `0` resolves to the estimated physical-core width capped at 8. Explicit positive values win.                                                                                                                   |
 | `onnx.interOpNumThreads`        | `number`                                | `0` (auto)                         | `0-64`. Only used in `executionMode: "parallel"`. Keep at 1 for transformer-style models.                                                                                                                                                                                                           |
 | `onnx.executionMode`            | `"sequential" \| "parallel"`            | `"sequential"`                     | ORT graph execution. Sequential is usually optimal for sentence-transformer ONNX graphs.                                                                                                                                                                                                            |
 | `retrieval.extensionsOptional`  | `boolean`                               | `true`                             |                                                                                                                                                                                                                                                                                                     |
@@ -401,6 +407,8 @@ The wizard's Language Providers prompt writes `indexing.pipeline: "auto"` for Ye
 | `retrieval.fusion.strategy`     | `"rrf"`                                 | `"rrf"`                            |                                                                                                                                                                                                                                                                                                     |
 | `retrieval.fusion.rrfK`         | `number`                                | `60`                               |                                                                                                                                                                                                                                                                                                     |
 | `retrieval.candidateLimit`      | `number`                                | `100`                              |                                                                                                                                                                                                                                                                                                     |
+
+CPU sessions enable ONNX memory patterns, the CPU memory arena, and full graph optimization. DirectML disables memory patterns and still forces sequential execution.
 
 Default vector indexes:
 

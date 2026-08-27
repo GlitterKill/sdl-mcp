@@ -1,14 +1,15 @@
 # CPU-Tier Embedding Tuning Design
 
 **Date:** 2026-08-27
-**Status:** Approved for implementation planning
+**Status:** Approved for implementation (memory-aware revision)
 
 ## Objective
 
 Reduce local CPU embedding wall time by extending SDL-MCP's existing CPU-tier
 presets to cover symbol embedding batch width, embedding concurrency, and ONNX
-Runtime thread settings. The defaults must scale from small CPUs through the
-`extreme` tier while preserving explicit user configuration.
+Runtime thread settings. Automatic settings must be bounded by both CPU width
+and free system memory measured once during configuration loading, while
+preserving explicit user configuration.
 
 The primary acceptance machine is an AMD Ryzen 9 9950X3D. It has 16 physical
 cores across two eight-core CCDs. SDL-MCP should use one CCD's physical width
@@ -34,24 +35,37 @@ model-specific CPU detection.
 
 ## Measured Evidence
 
-The read-only probe used `onnxruntime-node@1.24.3`, the shipped quantized Jina
-model, native tokenization, tensor construction, ONNX inference, masked mean
-pooling, and L2 normalization. Inputs were length-sorted excerpts sampled from
-SDL-MCP source files.
+The first reproducible run used `onnxruntime-node@1.24.3`, the shipped
+quantized Jina model, native tokenization, tensor construction, ONNX inference,
+masked mean pooling, and L2 normalization over 192 deterministic source
+excerpts. It invalidated the earlier exploratory estimate and correctly failed
+the 15% gate:
 
 | Width | Existing shape (`batch=32`, `concurrency=1`) | Scaled shape (`batch=16`, `concurrency=threads=width`) | Throughput gain |
 |------:|---------------------------------------------:|------------------------------------------------------:|----------------:|
-| 2     | 31.67 texts/s | 39.41 texts/s | 24% |
-| 4     | 50.01 texts/s | 67.66 texts/s | 35% |
-| 6     | 59.71 texts/s | 80.99 texts/s | 36% |
-| 8     | 67.28 texts/s | 89.75 texts/s | 33% |
+| 2     | 7.27 texts/s | 8.07 texts/s | 10.93% |
+| 4     | 10.90 texts/s | 11.94 texts/s | 9.60% |
+| 6     | 12.27 texts/s | 13.85 texts/s | 12.83% |
+| 8     | 13.08 texts/s | 14.13 texts/s | 8.03% |
 
-On the 9950X3D, the proposed extreme settings reached approximately 90 texts/s
-versus 64-67 texts/s for the current effective defaults. A separate Nomic
-FileSummary probe showed 9.57 texts/s at batch 4, concurrency 8, and eight
-intra-op threads versus 9.21 texts/s at batch 4, concurrency 1, and 16 intra-op
-threads. Nomic batch sizes 8 and 16 were slower, so the FileSummary batch
-remains unchanged while it shares the tier-derived concurrency.
+The benchmark must therefore search a small, explicit candidate set rather
+than publish the unproven `batch=16, concurrency=8` shape. Each shape runs in
+its own child process so its peak RSS is not contaminated by an earlier ONNX
+session. The accepted width-8 shape must improve median throughput by at least
+15% while keeping peak RSS within the larger of 10% or 128 MiB above the
+current baseline.
+
+The isolated three-run revision selected the ample-memory shape:
+
+| Width-8 shape | Median | Throughput | Peak RSS | Uplift |
+|---------------|-------:|-----------:|---------:|-------:|
+| baseline: batch 32, concurrency 1, arena on | 14,664.61 ms | 13.09 texts/s | 3,003.2 MiB | - |
+| batch 32, concurrency 8, arena on | 14,710.15 ms | 13.05 texts/s | 3,054.0 MiB | -0.31% |
+| batch 16, concurrency 8, arena on | 12,714.09 ms | 15.10 texts/s | 1,447.6 MiB | 15.34% |
+| batch 16, concurrency 8, arena off | 26,617.17 ms | 7.21 texts/s | 973.9 MiB | -44.91% |
+
+The selected arena-on shape passes both gates. Disabling the arena saves more
+memory but nearly doubles wall time, so it is not a minimum-wall-time default.
 
 These measurements establish a CPU-inference default, not total index wall
 time. A disposable full-index A/B remains a separate verification step that
@@ -93,10 +107,40 @@ When the corresponding field is not explicitly configured, every detected or
 pinned tier receives:
 
 ```text
-semantic.embeddingBatchSize       = 16
-semantic.embeddingConcurrency     = embeddingWidth
+semantic.embeddingBatchSize       = freeMemoryGiB < 4 ? 8 : measuredDefaultBatchSize
+semantic.embeddingConcurrency     = min(embeddingWidth, memoryWidth)
 semantic.onnx.intraOpNumThreads    = embeddingWidth
 ```
+
+The final ample-memory batch is selected from the revised throughput/RSS
+benchmark. Candidate concurrency remains equal to CPU width; production free
+memory may lower it but never raises it beyond that bound.
+
+### Free-memory bound
+
+Read `os.freemem()` once beside CPU detection in `loadConfig()`. Convert it to
+a small pure memory profile passed to `resolvePerformancePresets`; do not poll
+memory during inference or change settings mid-refresh.
+
+The initial policy is intentionally simple and testable:
+
+```text
+memoryWidth = clamp(floor(freeMemoryGiB), 1, 8)
+embeddingConcurrency = min(embeddingCpuWidth, memoryWidth)
+embeddingBatchSize = freeMemoryGiB < 4 ? 8 : measuredDefaultBatchSize
+```
+
+This leaves roughly one GiB of currently free memory per concurrent inference
+call and gives explicitly configured values final authority. The benchmark may
+reduce the ample-memory batch if the accepted wall-time/RSS shape requires it;
+it must not add a runtime calibrator or dependency.
+
+The CPU execution path explicitly enables ONNX memory patterns and full graph
+optimization. The fastest candidate satisfying the RSS limit determines one
+global CPU-memory-arena setting; profile-specific arena behavior is not added
+without separate evidence. Unsupported Node binding controls such as shared
+allocators, global thread pools, affinity, spinning configuration, and
+mimalloc remain out of scope because they require a custom ONNX Runtime build.
 
 The design deliberately does not change:
 
@@ -138,8 +182,9 @@ The minimum implementation should touch only:
 - one reproducible, non-CI CPU embedding benchmark script, and
 - public configuration and semantic-embedding documentation.
 
-No new dependency, CPU model allowlist, runtime autotuner, model artifact, or
-index lifecycle change is needed.
+No new dependency, CPU model allowlist, continuously adaptive runtime
+autotuner, custom ONNX Runtime build, model artifact, or index lifecycle change
+is needed.
 
 ## Test and Verification Strategy
 
@@ -162,26 +207,30 @@ host variance would make them flaky. The measured probe is verification
 evidence, while deterministic tests protect the configuration contract.
 
 Add `scripts/benchmark-cpu-embedding-tiers.mjs` as the reproducible manual
-probe. It compares the existing shape (`batch=32`, `concurrency=1`) with the
-scaled shape (`batch=16`, `concurrency=threads=width`) at widths 2, 4, 6, and 8
-using the installed quantized Jina model and length-sorted SDL-MCP source
-excerpts:
+probe. It compares the existing shape with a bounded set of batch/concurrency
+and CPU-arena candidates using the installed quantized Jina model and
+length-sorted SDL-MCP source excerpts. Every shape runs in a fresh child
+process and reports median throughput plus `process.resourceUsage().maxRSS`.
 
 ```powershell
 node scripts/benchmark-cpu-embedding-tiers.mjs
 ```
 
-The verification pass condition on the 9950X3D is a median width-8 scaled
-throughput at least 15% higher than the width-8 existing shape over three warm
-runs. The script is manual and must not introduce a timing assertion into CI.
+The verification pass condition on the 9950X3D is a median width-8 throughput
+at least 15% higher than the width-8 existing shape over three warm runs. A
+candidate qualifies when
+`candidateKiB <= baselineKiB + max(baselineKiB * 0.10, 128 * 1024)`; the
+fastest qualifying candidate is selected. The script is manual and must not
+introduce timing or RSS assertions into CI.
 
 ## Documentation
 
 Update the CPU preset table, configuration reference, semantic embedding setup
 guide, and generated configuration schema descriptions so they agree on:
 
-- symbol batch size 16 for tier-derived defaults,
-- physical-core-derived concurrency and ONNX intra-op width capped at 8,
+- the measured ample-memory symbol batch and batch 8 below 4 GiB free,
+- concurrency bounded by physical-core width and whole GiB of free memory,
+- physical-core-derived ONNX intra-op width capped at 8,
 - FileSummary batch size remaining 4,
 - explicit override precedence, and
 - pinned tiers applying their presets.
@@ -194,15 +243,19 @@ fields. Document that existing users opt in by deleting their explicit values.
 
 ## Success Criteria
 
-- The 9950X3D auto-detects as `extreme` and resolves symbol embedding settings
-  to batch 16, concurrency 8, and intra-op threads 8 while retaining the
-  existing inter-op and execution-mode defaults.
+- The 9950X3D auto-detects as `extreme`; ample free memory selects the measured
+  width-8 batch/concurrency shape while retaining inter-op 1 and sequential
+  execution.
 - Lower detected core counts scale concurrency and intra-op threads to the
   estimated physical-core count, capped at 8.
+- Lower free-memory snapshots reduce automatic concurrency and, below 4 GiB,
+  symbol batch size; the snapshot is stable for the lifetime of the loaded
+  configuration.
 - Pinned tiers apply presets instead of silently retaining schema defaults.
 - Explicit semantic settings remain byte-for-byte authoritative.
 - FileSummary embeddings retain batch 4 while using the derived concurrency.
 - Focused tests, typecheck, build, and documentation checks pass.
-- The manual benchmark meets the documented 15% width-8 improvement gate on
-  the 9950X3D. Total index wall-time acceptance is reported only after a
-  separately authorized, disposable full-index A/B.
+- The manual benchmark meets both the documented 15% width-8 improvement gate
+  and the 10%/128 MiB peak-RSS guardrail on the 9950X3D. Total index wall-time
+  acceptance is reported only after a separately authorized, disposable
+  full-index A/B.

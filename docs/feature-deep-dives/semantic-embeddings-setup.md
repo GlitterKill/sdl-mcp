@@ -588,21 +588,19 @@ DirectML sessions automatically use sequential execution, disable ONNX memory pa
 
 ### Throughput Tuning (`embeddingConcurrency`, `embeddingBatchSize`)
 
-| Knob                   | Default | Range   | Effect                                                                                  |
-| :--------------------- | :------ | :------ | :-------------------------------------------------------------------------------------- |
-| `embeddingConcurrency` | `1`     | `1-8`   | ONNX batches in flight per model. Higher = more overlap of tokenization with inference. |
-| `embeddingBatchSize`   | `32`    | `1-128` | Rows per ONNX inference call for symbols. Larger = fewer round trips but higher peak memory. |
-| `fileSummaryEmbeddingBatchSize` | `4` | `1-16` | Rows per ONNX inference call for FileSummary vectors. Keep lower because file payloads are larger. |
+| Knob                   | Omitted-value behavior | Range   | Effect                                                                                  |
+| :--------------------- | :--------------------- | :------ | :-------------------------------------------------------------------------------------- |
+| `embeddingConcurrency` | `min(cpuWidth, memoryWidth)` | `1-8`   | `cpuWidth` is `min(8, estimated physical cores)`. `memoryWidth` is `clamp(floor(free memory at startup / 1 GiB), 1, 8)`. Higher values overlap tokenization with inference. |
+| `embeddingBatchSize`   | `8` below 4 GiB free; otherwise `16` | `1-128` | Rows per ONNX inference call for symbols. Smaller auto batches bound peak memory while retaining tokenizer and session amortization. |
+| `fileSummaryEmbeddingBatchSize` | `4` | `1-16` | Rows per ONNX inference call for FileSummary vectors. It remains fixed because file payloads are larger. |
 | `fileSummaryEmbeddingMaxChars` | `4096` | `512-32768` | Character cap for FileSummary embedding text; stored summaries and FTS text remain complete. |
+
+The JSON Schema fallbacks remain `1` for `embeddingConcurrency` and `32` for `embeddingBatchSize`; they are not the runtime auto-tuned values. Pinned CPU performance tiers receive the same embedding preset. Set an explicit value to override any automatic setting.
 
 FileSummary embedding model lanes run serially for resource safety; `embeddingsSequential`
 controls the symbol embedding model lanes.
 
-Tuning advice for a 16-physical-core CPU (e.g. 9950X3D):
-
-- Start with `embeddingConcurrency: 4`, `embeddingBatchSize: 32`, `intraOpNumThreads: 16` (= physical cores).
-- If CPU stays below 70% during the embedding phase, the tokenizer (single-thread JS) is the bottleneck — raise `embeddingConcurrency` to 6 or 8 to keep more batches in tokenization while ORT computes.
-- If wall time stops improving past concurrency 4, the bottleneck has shifted to ORT compute; tweak `intraOpNumThreads` instead (set to physical core count, not logical — hyperthreading hurts inference).
+On a Ryzen 9 9950X3D, the full CPU benchmark selected `embeddingConcurrency: 8`, `embeddingBatchSize: 16`, and the CPU memory arena. It processed 15.10 texts/s in 12,714.09 ms with 1,447.6 MiB peak RSS, versus the batch-32/concurrency-1 baseline at 13.09 texts/s in 14,664.61 ms with 3,003.2 MiB peak RSS: a 15.34% throughput improvement. Disabling the arena reduced peak RSS to 973.9 MiB but dropped throughput to 7.21 texts/s, so it was rejected. These measurements cover the embedding inference path only, not total indexing wall time.
 
 ### Multi-Model Sequencing (`embeddingsSequential`)
 
@@ -622,11 +620,11 @@ Set `embeddingsSequential: true` to run models in series instead. Each model the
 
 | Field                    | Default                    | Notes                                                                                                               |
 | :----------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------ |
-| `onnx.intraOpNumThreads` | `0` (auto = logical cores) | Set to **physical** core count for best inference (transformer matmul/attention). Hyperthreading slows ORT compute. |
+| `onnx.intraOpNumThreads` | `0` (auto = CPU width) | Auto resolves to `min(8, estimated physical cores)`. Set a positive value only to override it. |
 | `onnx.interOpNumThreads` | `0` (auto = 1)             | Only used in `executionMode: "parallel"`. Keep at 1 for sentence-transformer ONNX graphs.                           |
 | `onnx.executionMode`     | `"sequential"`             | Sequential is usually optimal — these models have linear graphs.                                                    |
 
-The `intraOpNumThreads` setting is the single most impactful knob after model variant + execution provider selection.
+For CPU sessions, SDL-MCP enables ONNX memory patterns, the CPU memory arena, and full graph optimization. The arena retains reusable allocations, so the benchmark evaluates peak RSS as well as throughput. DirectML disables memory patterns and continues to force sequential execution.
 
 ---
 
@@ -807,15 +805,16 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     "summaryBatchSize": 20, // Symbols per batch (1-50)
 
     // -- ONNX Inference Performance ------------------------------
-    "embeddingConcurrency": 1, // 1-8: ONNX batches in flight per model
-    "embeddingBatchSize": 32, // 1-128: rows per symbol ONNX inference call
+    // Omit both fields to use CPU/free-memory auto-tuning.
+    // "embeddingConcurrency": 8, // Example ample-memory override.
+    // "embeddingBatchSize": 16, // Example ample-memory override.
     "fileSummaryEmbeddingBatchSize": 4, // 1-16: rows per FileSummary ONNX call
     "fileSummaryEmbeddingMaxChars": 4096, // bounds FileSummary vector payloads
     "embeddingsSequential": false, // run multi-model embedding in series (vs Promise.all)
     "modelVariant": "default", // "default" | "fp16" | "fp32" | "int8" | nomic-only "uint8"/"q4"/"q4f16"/"bnb4"
     "executionProviders": ["cpu"], // ORT EPs: ["dml","cpu"] (Win), ["coreml","cpu"] (macOS), ["cuda","cpu"] (Linux NVIDIA)
     "onnx": {
-      "intraOpNumThreads": 0, // 0 = auto (logical cores). Set to physical core count for best inference perf.
+      "intraOpNumThreads": 0, // 0 = min(8, estimated physical cores).
       "interOpNumThreads": 0, // 0 = 1. Only used in executionMode "parallel".
       "executionMode": "sequential", // "sequential" | "parallel"
     },
