@@ -126,75 +126,74 @@ export function loadConfig(configPath?: string): AppConfig {
     // -------------------------------------------------------------------------
     // Pass the raw (pre-Zod) config object so that resolvePerformancePresets
     // can distinguish user-explicit values from Zod-filled defaults.
-    // Only apply when performanceTier is "auto" (the default).
     const rawConfig = expandedConfig as Record<string, unknown>;
-    let tierAdjustedConfig = config;
-    if (config.performanceTier === "auto") {
-      const cpuProfile = detectCpuProfile();
-      const tier = cpuProfile.detectedTier;
-      const presets = resolvePerformancePresets(
-        tier,
-        rawConfig as Parameters<typeof resolvePerformancePresets>[1],
-        cpuProfile,
-      );
-      // Re-parse each sub-section through its schema so that Zod fills in any
-      // missing required fields before we overlay the preset values.
-      const baseIndexing = IndexingConfigSchema.parse(config.indexing ?? {});
-      const baseConcurrency = ConcurrencyConfigSchema.parse(
-        config.concurrency ?? {},
-      );
-      const baseLiveIndex = LiveIndexConfigSchema.parse(config.liveIndex ?? {});
-      const baseParallelScorer = ParallelScorerConfigSchema.parse(
-        config.parallelScorer ?? {},
-      );
+    const cpuProfile = detectCpuProfile();
+    const effectiveTier =
+      config.performanceTier === "auto"
+        ? cpuProfile.detectedTier
+        : config.performanceTier;
+    const presets = resolvePerformancePresets(
+      effectiveTier,
+      rawConfig as Parameters<typeof resolvePerformancePresets>[1],
+      cpuProfile,
+    );
+    // Re-parse each sub-section through its schema so that Zod fills in any
+    // missing required fields before we overlay the preset values.
+    const baseIndexing = IndexingConfigSchema.parse(config.indexing ?? {});
+    const baseConcurrency = ConcurrencyConfigSchema.parse(
+      config.concurrency ?? {},
+    );
+    const baseLiveIndex = LiveIndexConfigSchema.parse(config.liveIndex ?? {});
+    const baseParallelScorer = ParallelScorerConfigSchema.parse(
+      config.parallelScorer ?? {},
+    );
 
-      tierAdjustedConfig = {
-        ...config,
-        indexing: {
-          ...baseIndexing,
-          concurrency: presets.indexingConcurrency,
-          pass2Concurrency: presets.pass2Concurrency,
-        },
-        concurrency: {
-          ...baseConcurrency,
-          maxToolConcurrency: presets.maxToolConcurrency,
-          readPoolSize: presets.readPoolSize,
-          maxSessions: presets.maxSessions,
-        },
-        runtime: (() => {
-          const baseRuntime = RuntimeConfigSchema.parse(config.runtime ?? {});
-          return {
-            ...baseRuntime,
-            maxConcurrentJobs: presets.runtimeMaxConcurrentJobs,
-          };
-        })(),
-        liveIndex: {
-          ...baseLiveIndex,
-          reconcileConcurrency: presets.reconcileConcurrency,
-        },
-        semantic: (() => {
-          const baseSemantic = SemanticConfigSchema.parse(
-            config.semantic ?? {},
-          );
-          return {
-            ...baseSemantic,
-            summaryMaxConcurrency: presets.summaryMaxConcurrency,
-          };
-        })(),
-        parallelScorer: {
-          ...baseParallelScorer,
-          enabled: presets.parallelScorerEnabled,
-          poolSize: presets.parallelScorerPoolSize,
-        },
-        scip: (() => {
-          const baseScip = ScipConfigSchema.parse(config.scip ?? {});
-          return {
-            ...baseScip,
-            ingestConcurrency: presets.scipIngestConcurrency,
-          };
-        })(),
-      };
-    }
+    const tierAdjustedConfig = {
+      ...config,
+      indexing: {
+        ...baseIndexing,
+        concurrency: presets.indexingConcurrency,
+        pass2Concurrency: presets.pass2Concurrency,
+      },
+      concurrency: {
+        ...baseConcurrency,
+        maxToolConcurrency: presets.maxToolConcurrency,
+        readPoolSize: presets.readPoolSize,
+        maxSessions: presets.maxSessions,
+      },
+      runtime: (() => {
+        const baseRuntime = RuntimeConfigSchema.parse(config.runtime ?? {});
+        return {
+          ...baseRuntime,
+          maxConcurrentJobs: presets.runtimeMaxConcurrentJobs,
+        };
+      })(),
+      liveIndex: {
+        ...baseLiveIndex,
+        reconcileConcurrency: presets.reconcileConcurrency,
+      },
+      semantic: (() => {
+        const baseSemantic = SemanticConfigSchema.parse(config.semantic ?? {});
+        return {
+          ...baseSemantic,
+          summaryMaxConcurrency: presets.summaryMaxConcurrency,
+          embeddingConcurrency: presets.embeddingConcurrency,
+          embeddingBatchSize: presets.embeddingBatchSize,
+        };
+      })(),
+      parallelScorer: {
+        ...baseParallelScorer,
+        enabled: presets.parallelScorerEnabled,
+        poolSize: presets.parallelScorerPoolSize,
+      },
+      scip: (() => {
+        const baseScip = ScipConfigSchema.parse(config.scip ?? {});
+        return {
+          ...baseScip,
+          ingestConcurrency: presets.scipIngestConcurrency,
+        };
+      })(),
+    };
 
     // Merge SDL_ALLOWED_REPO_ROOTS env var (comma-separated absolute paths)
     // into config.security.allowedRepoRoots at load time.

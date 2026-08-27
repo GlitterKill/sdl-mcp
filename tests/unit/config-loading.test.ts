@@ -1,13 +1,39 @@
-import { describe, it } from "node:test";
 import assert from "node:assert";
-import { loadConfig } from "../../dist/config/loadConfig.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+import {
+  invalidateConfigCache,
+  loadConfig,
+} from "../../dist/config/loadConfig.js";
 import { SemanticConfigSchema } from "../../dist/config/types.js";
 import { createAsyncFsOperations } from "../../dist/util/asyncFs.js";
-import { fileURLToPath } from "url";
-import { resolve, dirname } from "path";
+import { detectCpuProfile } from "../../dist/util/cpu-detect.js";
+import { resolveEmbeddingWidth } from "../../dist/util/cpu-presets.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+function withTempConfig(
+  overrides: Record<string, unknown>,
+  verify: (config: ReturnType<typeof loadConfig>) => void,
+): void {
+  const dir = mkdtempSync(join(tmpdir(), "sdl-mcp-config-"));
+  try {
+    const configPath = join(dir, "sdlmcp.config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ repos: [], policy: {}, ...overrides }),
+      "utf8",
+    );
+    invalidateConfigCache();
+    verify(loadConfig(configPath));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 describe("Config Loading (RR-H.8)", () => {
   it("should resolve default path relative to module (RR-H.8.1)", () => {
@@ -35,7 +61,9 @@ describe("Config Loading (RR-H.8)", () => {
       __dirname,
       "../../config/sdlmcp.config.example.json",
     );
+    invalidateConfigCache();
     const config = loadConfig(exampleConfigPath);
+    const expectedWidth = resolveEmbeddingWidth(detectCpuProfile());
 
     assert.ok(
       config.graphDatabase,
@@ -43,6 +71,45 @@ describe("Config Loading (RR-H.8)", () => {
     );
     assert.strictEqual(typeof config.graphDatabase!.path, "string");
     assert.ok(config.graphDatabase!.path!.length > 0);
+    assert.strictEqual(config.semantic!.embeddingBatchSize, 16);
+    assert.strictEqual(config.semantic!.embeddingConcurrency, expectedWidth);
+    assert.strictEqual(config.semantic!.fileSummaryEmbeddingBatchSize, 4);
+  });
+
+  it("applies presets for a pinned performance tier", () => {
+    withTempConfig({ performanceTier: "extreme" }, (config) => {
+      const expectedWidth = resolveEmbeddingWidth(detectCpuProfile());
+
+      assert.strictEqual(config.indexing!.concurrency, 12);
+      assert.strictEqual(config.semantic!.embeddingBatchSize, 16);
+      assert.strictEqual(config.semantic!.embeddingConcurrency, expectedWidth);
+      assert.strictEqual(config.semantic!.fileSummaryEmbeddingBatchSize, 4);
+    });
+  });
+
+  it("preserves explicit values over pinned tier presets", () => {
+    withTempConfig(
+      {
+        performanceTier: "extreme",
+        indexing: { concurrency: 5 },
+        semantic: {
+          embeddingBatchSize: 24,
+          embeddingConcurrency: 3,
+          fileSummaryEmbeddingBatchSize: 7,
+          onnx: { intraOpNumThreads: 0, executionMode: "parallel" },
+        },
+      },
+      (config) => {
+        assert.strictEqual(config.indexing!.concurrency, 5);
+        assert.strictEqual(config.indexing!.pass2Concurrency, 12);
+        assert.strictEqual(config.semantic!.embeddingBatchSize, 24);
+        assert.strictEqual(config.semantic!.embeddingConcurrency, 3);
+        assert.strictEqual(config.semantic!.fileSummaryEmbeddingBatchSize, 7);
+        assert.strictEqual(config.semantic!.onnx!.intraOpNumThreads, 0);
+        assert.strictEqual(config.semantic!.onnx!.executionMode, "parallel");
+        assert.strictEqual(config.semantic!.onnx!.interOpNumThreads, 0);
+      },
+    );
   });
 
   it("defaults FileSummary embeddings to conservative resource controls", () => {
