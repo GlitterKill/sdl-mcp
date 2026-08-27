@@ -152,8 +152,10 @@ Implementation follows test-first development:
    tiers.
 4. Prove partial nested ONNX configuration and explicit
    `intraOpNumThreads: 0` override only their corresponding derived fields.
-5. Prove FileSummary batch 4 and existing non-semantic preset overrides remain
-   unchanged, then implement the smallest preset/config changes that pass.
+5. Prove explicit `embeddingBatchSize`, `embeddingConcurrency`, and
+   `fileSummaryEmbeddingBatchSize` values win; prove the omitted FileSummary
+   batch remains 4 and existing non-semantic preset overrides remain unchanged.
+   Then implement the smallest preset/config changes that pass.
 
 Wall-clock assertions do not belong in the unit suite because scheduler and
 host variance would make them flaky. The measured probe is verification
