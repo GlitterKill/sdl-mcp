@@ -9,6 +9,7 @@
  */
 import { availableParallelism } from "node:os";
 import { loadConfig } from "../config/loadConfig.js";
+import { ConcurrencyLimiter } from "../util/concurrency.js";
 import { logger } from "../util/logger.js";
 import {
   getModelInfo,
@@ -362,6 +363,7 @@ async function createOnnxSessionInternal(
     interOpNumThreads,
     executionMode,
     enableMemPattern,
+    serializeRuns,
   } = resolveEmbeddingSessionOptions({
     requestedProviders: appConfig.semantic?.executionProviders,
     onnxConfig,
@@ -387,6 +389,9 @@ async function createOnnxSessionInternal(
   tokenizer.setTruncation(modelInfo.maxSequenceLength);
 
   const dimension = modelInfo.dimension;
+  const sessionRunLimiter = serializeRuns
+    ? new ConcurrencyLimiter({ maxConcurrency: 1 })
+    : undefined;
 
   logger.info(
     `ONNX model "${modelName}" loaded (dim=${dimension}, maxSeqLen=${modelInfo.maxSequenceLength})`,
@@ -412,6 +417,7 @@ async function createOnnxSessionInternal(
           batch,
           dimension,
           ort,
+          sessionRunLimiter,
         );
         allEmbeddings.push(...batchEmbeddings);
       }
@@ -429,12 +435,14 @@ async function createOnnxSessionInternal(
 
 // ── Inference internals ──────────────────────────────────────────────────────
 
-async function runBatchInference(
+/** @internal Exported for focused session-concurrency tests. */
+export async function runBatchInference(
   session: OrtSession,
   tokenizer: HfTokenizer,
   texts: string[],
   dimension: number,
   ort: OrtModule,
+  sessionRunLimiter?: ConcurrencyLimiter,
 ): Promise<number[][]> {
   const batchSize = texts.length;
 
@@ -477,7 +485,9 @@ async function runBatchInference(
   }
 
   // 5. Run inference
-  const output = await session.run(feeds);
+  const output = sessionRunLimiter
+    ? await sessionRunLimiter.run(() => session.run(feeds))
+    : await session.run(feeds);
 
   // 6. Extract hidden states — output key varies by model export
   const outputKey =
