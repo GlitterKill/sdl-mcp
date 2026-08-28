@@ -13,7 +13,9 @@ import { detectCpuProfile, type CpuProfile } from "../util/cpu-detect.js";
 import { resolveEmbeddingWidth } from "../util/cpu-presets.js";
 import { logger } from "../util/logger.js";
 import {
+  type EmbeddingModelCandidate,
   getModelInfo,
+  resolveEmbeddingModelCandidates,
   resolveModelPath,
   resolveTokenizerPath,
 } from "./model-registry.js";
@@ -82,11 +84,33 @@ export interface OnnxEmbeddingSession {
   embed(texts: string[]): Promise<number[][]>;
   dimension: number;
   modelName: string;
+  variantName: string;
+  modelFile: string;
+  executionProviders: readonly string[];
+  cacheCompatibilityKey?: string;
   dispose(): void;
 }
 
 export interface OnnxEmbeddingSessionOptions {
   deterministic?: boolean;
+  /** @internal Focused override for a requested model variant. */
+  modelVariant?: string;
+  /** @internal Focused override for requested execution providers. */
+  executionProviders?: readonly string[];
+}
+
+type CandidateSessionLoader = (
+  modelName: string,
+  candidate: EmbeddingModelCandidate,
+  options: OnnxEmbeddingSessionOptions,
+) => Promise<OnnxEmbeddingSession>;
+
+/** @internal Marks an ONNX InferenceSession creation failure eligible for candidate fallback. */
+export class OnnxSessionCreationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "OnnxSessionCreationError";
+  }
 }
 
 // ── Runtime detection ────────────────────────────────────────────────────────
@@ -151,6 +175,13 @@ const sessionCache = new Map<string, Promise<OnnxEmbeddingSession>>();
 /** Maximum texts per ONNX inference call */
 const INFERENCE_BATCH_SIZE = 32;
 
+function normalizeCacheRequestProviders(
+  requestedProviders: readonly string[] | undefined,
+): string[] {
+  const providers = requestedProviders?.map((provider) => provider.toLowerCase()) ?? [];
+  return [...new Set(providers.length > 0 ? providers : ["cpu"])];
+}
+
 /**
  * Create (or retrieve cached) ONNX embedding session for the given model.
  *
@@ -162,26 +193,90 @@ const INFERENCE_BATCH_SIZE = 32;
 export async function createOnnxSession(
   modelName: string,
   options: OnnxEmbeddingSessionOptions = {},
+  loader?: CandidateSessionLoader,
 ): Promise<OnnxEmbeddingSession> {
-  const cacheKey = `${modelName}\u0000${
-    options.deterministic === true ? "deterministic" : "throughput"
-  }`;
+  const appConfig = loadConfig();
+  const requestedVariant =
+    options.modelVariant ?? appConfig.semantic?.modelVariant;
+  const requestedProviders =
+    options.executionProviders ?? appConfig.semantic?.executionProviders;
+  const candidates = resolveEmbeddingModelCandidates({
+    name: modelName,
+    requestedVariant,
+    deterministic: options.deterministic === true,
+    requestedProviders,
+  });
+  const canonicalVariant =
+    requestedVariant === undefined || requestedVariant === "default"
+      ? "default"
+      : requestedVariant;
+  const normalizedRequestProviders = normalizeCacheRequestProviders(
+    requestedProviders,
+  );
+  const cacheKey = JSON.stringify([
+    modelName,
+    options.deterministic === true ? "deterministic" : "throughput",
+    canonicalVariant,
+    normalizedRequestProviders,
+  ]);
   const existing = sessionCache.get(cacheKey);
   if (existing) {
     return existing;
   }
 
-  const sessionPromise = createOnnxSessionInternal(
-    modelName,
-    cacheKey,
-    options,
-  );
+  const sessionLoader =
+    loader ??
+    ((name, candidate, sessionOptions) =>
+      createOnnxSessionInternal(
+        name,
+        candidate,
+        sessionOptions,
+        appConfig.semantic?.onnx,
+      ));
+  const sessionPromise: Promise<OnnxEmbeddingSession> = (async () => {
+    for (const [index, candidate] of candidates.entries()) {
+      try {
+        const session = await sessionLoader(modelName, candidate, options);
+        const dispose = session.dispose.bind(session);
+        let disposed = false;
+        return {
+          ...session,
+          dispose(): void {
+            if (disposed) return;
+            disposed = true;
+            try {
+              dispose();
+            } finally {
+              if (sessionCache.get(cacheKey) === sessionPromise) {
+                sessionCache.delete(cacheKey);
+              }
+            }
+          },
+        };
+      } catch (error) {
+        const fallback = candidates[index + 1];
+        if (!(error instanceof OnnxSessionCreationError) || !fallback) {
+          throw error;
+        }
+        logger.warn(
+          `[embeddings-local] ONNX session creation failed for "${modelName}" candidate "${candidate.variantName}" (${candidate.modelFile}); retrying fallback "${fallback.variantName}" (${fallback.modelFile}).`,
+        );
+      }
+    }
+    throw new Error("Embedding model candidate list was empty");
+  })();
   sessionCache.set(cacheKey, sessionPromise);
 
   try {
-    return await sessionPromise;
+    const session = await sessionPromise;
+    logger.info(
+      `ONNX model "${modelName}" selected variant="${session.variantName}" artifact="${session.modelFile}" providers=[${session.executionProviders.join(", ")}].`,
+    );
+    return session;
   } catch (error) {
-    sessionCache.delete(cacheKey);
+    if (sessionCache.get(cacheKey) === sessionPromise) {
+      sessionCache.delete(cacheKey);
+    }
     throw error;
   }
 }
@@ -333,8 +428,15 @@ export function resolveEmbeddingSessionOptions({
 
 async function createOnnxSessionInternal(
   modelName: string,
-  cacheKey: string,
+  candidate: EmbeddingModelCandidate,
   options: OnnxEmbeddingSessionOptions,
+  onnxConfig:
+    | {
+        intraOpNumThreads?: number;
+        interOpNumThreads?: number;
+        executionMode?: "sequential" | "parallel";
+      }
+    | undefined,
 ): Promise<OnnxEmbeddingSession> {
   const runtime = await ensureLocalEmbeddingRuntime();
   if (!runtime.available) {
@@ -342,18 +444,15 @@ async function createOnnxSessionInternal(
   }
 
   const modelInfo = getModelInfo(modelName);
-  const appConfig = loadConfig();
-  const onnxConfig = appConfig.semantic?.onnx;
-  const requestedVariant = appConfig.semantic?.modelVariant;
 
   // Ensure model files are available (downloads if needed for non-bundled models)
-  await ensureModelAvailable(modelName, requestedVariant);
+  await ensureModelAvailable(modelName, candidate.variantName);
 
-  const modelPath = resolveModelPath(modelName, requestedVariant);
+  const modelPath = resolveModelPath(modelName, candidate.variantName);
   const tokenizerPath = resolveTokenizerPath(modelName);
 
   logger.info(
-    `Loading ONNX model "${modelName}" (${modelInfo.dimension}-dim, variant="${requestedVariant ?? modelInfo.defaultVariant}")...`,
+    `Loading ONNX model "${modelName}" (${modelInfo.dimension}-dim, variant="${candidate.variantName}")...`,
   );
 
   // Dynamic imports — these are optional dependencies
@@ -378,7 +477,7 @@ async function createOnnxSessionInternal(
     graphOptimizationLevel,
     serializeRuns,
   } = resolveEmbeddingSessionOptions({
-    requestedProviders: appConfig.semantic?.executionProviders,
+    requestedProviders: candidate.requestedProviders,
     onnxConfig,
     deterministic: options.deterministic === true,
   });
@@ -387,16 +486,24 @@ async function createOnnxSessionInternal(
     `ONNX session "${modelName}" thread config: intra=${intraOpNumThreads}, inter=${interOpNumThreads}, mode=${executionMode}, providers=[${executionProviders.join(", ")}]`,
   );
 
-  const session = await ort.InferenceSession.create(modelPath, {
-    executionProviders,
-    intraOpNumThreads,
-    interOpNumThreads,
-    executionMode,
-    enableMemPattern,
-    enableCpuMemArena,
-    graphOptimizationLevel,
-    logSeverityLevel: 3,
-  });
+  let session: OrtSession;
+  try {
+    session = await ort.InferenceSession.create(modelPath, {
+      executionProviders,
+      intraOpNumThreads,
+      interOpNumThreads,
+      executionMode,
+      enableMemPattern,
+      enableCpuMemArena,
+      graphOptimizationLevel,
+      logSeverityLevel: 3,
+    });
+  } catch (error) {
+    throw new OnnxSessionCreationError(
+      `Failed to create ONNX session for "${modelName}" variant "${candidate.variantName}": ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
 
   // Tokenizer.fromFile() is synchronous (napi-rs binding)
   const tokenizer = tokenizersMod.Tokenizer.fromFile(tokenizerPath);
@@ -415,6 +522,10 @@ async function createOnnxSessionInternal(
   const onnxSession: OnnxEmbeddingSession = {
     dimension,
     modelName,
+    variantName: candidate.variantName,
+    modelFile: candidate.modelFile,
+    executionProviders,
+    cacheCompatibilityKey: candidate.cacheCompatibilityKey,
 
     async embed(texts: string[]): Promise<number[][]> {
       if (texts.length === 0) {
@@ -440,9 +551,7 @@ async function createOnnxSessionInternal(
       return allEmbeddings;
     },
 
-    dispose(): void {
-      sessionCache.delete(cacheKey);
-    },
+    dispose(): void {},
   };
 
   return onnxSession;
