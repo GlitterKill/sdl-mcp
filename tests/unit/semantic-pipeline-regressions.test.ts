@@ -38,7 +38,7 @@ describe("semantic pipeline regressions", () => {
 
     // 3. cardHash computed per symbol in uncached filter loop
     const cardHashIdx = fnBody.indexOf(
-      "const cardHash = buildCardHash(symbol, prefixedText)",
+      "const cardHash = buildCardHash(\n      symbol,\n      prefixedText,\n      jinaCacheCompatibilityKey,\n    )",
     );
     assert.ok(
       cardHashIdx !== -1,
@@ -401,10 +401,13 @@ describe("semantic pipeline regressions", () => {
       symbolEnd === -1 ? symbolSource.length : symbolEnd,
     );
     const symbolInitialize = symbolBody.indexOf("await provider.initialize?.()");
+    const symbolCompatibilityKey = symbolBody.indexOf(
+      "provider.getCacheCompatibilityKey?.()",
+    );
     const symbolConnection = symbolBody.indexOf("await getLadybugConn()");
     const symbolCachePrepass = symbolBody.indexOf("getSymbolVectorEmbeddings(");
     const symbolHashPrepass = symbolBody.indexOf(
-      "buildCardHash(symbol, prefixedText)",
+      "buildCardHash(\n      symbol,\n      prefixedText,\n      jinaCacheCompatibilityKey,\n    )",
     );
 
     assert.ok(
@@ -412,9 +415,27 @@ describe("semantic pipeline regressions", () => {
       "Symbol provider must initialize before LadybugDB opens",
     );
     assert.ok(
-      symbolInitialize < symbolCachePrepass &&
+      symbolInitialize < symbolCompatibilityKey &&
+        symbolCompatibilityKey < symbolHashPrepass &&
+        symbolInitialize < symbolCachePrepass &&
         symbolInitialize < symbolHashPrepass,
-      "Symbol provider must initialize before cache and hash prepasses",
+      "Symbol provider must settle its compatibility key before cache hashing",
+    );
+    assert.strictEqual(
+      (symbolBody.match(/provider\.getCacheCompatibilityKey\?\.\(\)/g) ?? [])
+        .length,
+      1,
+      "Symbol persistence must capture the settled compatibility key once",
+    );
+    assert.match(
+      symbolBody,
+      /storageModel === "jina-embeddings-v2-base-code"[\s\S]*provider\.getCacheCompatibilityKey\?\.\(\)[\s\S]*buildCardHash\([\s\S]*jinaCacheCompatibilityKey/,
+      "Symbol persistence must pass the settled Jina key into its hash",
+    );
+    assert.doesNotMatch(
+      symbolBody,
+      /model_fp16\.onnx/,
+      "Symbol persistence must not assume FP16 before initialization",
     );
     assert.match(
       symbolBody,
@@ -432,17 +453,41 @@ describe("semantic pipeline regressions", () => {
       fileEnd === -1 ? fileSource.length : fileEnd,
     );
     const fileInitialize = fileBody.indexOf("await provider.initialize?.()");
+    const fileCompatibilityKey = fileBody.indexOf(
+      "provider.getCacheCompatibilityKey?.()",
+    );
     const fileConnection = fileBody.indexOf("await getLadybugConn()");
     const fileCachePrepass = fileBody.indexOf("inspectSummaries(summaries)");
-    const fileHashPrepass = fileBody.indexOf("const cardHash = hashContent(");
+    const fileHashPrepass = fileBody.indexOf(
+      "hashEmbeddingPayload(\n        [summary.fileId, prefixedText],\n        jinaCacheCompatibilityKey,\n      )",
+    );
 
     assert.ok(
       fileInitialize !== -1 && fileInitialize < fileConnection,
       "FileSummary provider must initialize before LadybugDB opens",
     );
     assert.ok(
-      fileInitialize < fileCachePrepass && fileInitialize < fileHashPrepass,
-      "FileSummary provider must initialize before cache and hash prepasses",
+      fileInitialize < fileCompatibilityKey &&
+        fileCompatibilityKey < fileHashPrepass &&
+        fileInitialize < fileCachePrepass &&
+        fileInitialize < fileHashPrepass,
+      "FileSummary provider must settle its compatibility key before cache hashing",
+    );
+    assert.strictEqual(
+      (fileBody.match(/provider\.getCacheCompatibilityKey\?\.\(\)/g) ?? [])
+        .length,
+      1,
+      "FileSummary persistence must capture the settled compatibility key once",
+    );
+    assert.match(
+      fileBody,
+      /storageModel === "jina-embeddings-v2-base-code"[\s\S]*provider\.getCacheCompatibilityKey\?\.\(\)[\s\S]*hashEmbeddingPayload\([\s\S]*jinaCacheCompatibilityKey/,
+      "FileSummary persistence must pass the settled Jina key into its hash",
+    );
+    assert.doesNotMatch(
+      fileBody,
+      /model_fp16\.onnx/,
+      "FileSummary persistence must not assume FP16 before initialization",
     );
     assert.match(
       fileSource,

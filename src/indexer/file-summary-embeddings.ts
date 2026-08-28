@@ -23,11 +23,11 @@ import {
   EMBEDDING_MODELS,
   getVecPropertyName,
 } from "../retrieval/model-mapping.js";
-import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 import type { IndexProgress } from "./indexer.js";
 import {
   getEmbeddingProvider,
+  hashEmbeddingPayload,
   toFloat16Blob,
   type EmbeddingProvider,
 } from "./embeddings.js";
@@ -83,6 +83,10 @@ export async function refreshFileSummaryEmbeddings(params: {
       : await ladybugDb.getFileSummariesForRepo(conn, params.repoId);
 
   const storageModel = params.model;
+  const jinaCacheCompatibilityKey =
+    storageModel === "jina-embeddings-v2-base-code"
+      ? provider.getCacheCompatibilityKey?.()
+      : undefined;
   if (!EMBEDDING_MODELS[storageModel]) {
     return {
       embedded: 0,
@@ -106,7 +110,10 @@ export async function refreshFileSummaryEmbeddings(params: {
       const text = buildFileSummaryEmbeddingText(summary, params.maxChars);
       const hasPayload = text.trim().length > 0;
       const prefixedText = applyDocumentPrefix(storageModel, text);
-      const cardHash = hashContent([summary.fileId, prefixedText].join("|"));
+      const cardHash = hashEmbeddingPayload(
+        [summary.fileId, prefixedText],
+        jinaCacheCompatibilityKey,
+      );
       const existingHash =
         storageModel === "jina-embeddings-v2-base-code"
           ? summary.embeddingJinaCodeCardHash

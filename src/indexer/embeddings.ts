@@ -300,11 +300,23 @@ export function toFloat16Blob(vector: number[]): string {
   return Buffer.from(ints.buffer).toString("base64");
 }
 
+export function hashEmbeddingPayload(
+  parts: readonly string[],
+  cacheCompatibilityKey?: string,
+): string {
+  return hashContent(
+    (cacheCompatibilityKey ? [...parts, cacheCompatibilityKey] : parts).join(
+      "|",
+    ),
+  );
+}
+
 function buildCardHash(
   symbol: ladybugDb.SymbolRow,
   extraContext?: string,
+  cacheCompatibilityKey?: string,
 ): string {
-  return hashContent(
+  return hashEmbeddingPayload(
     [
       symbol.symbolId,
       symbol.name,
@@ -313,7 +325,8 @@ function buildCardHash(
       // Phase 4: Removed symbol.summary - extraContext carries summary state
       symbol.signatureJson ?? "",
       extraContext ?? "",
-    ].join("|"),
+    ],
+    cacheCompatibilityKey,
   );
 }
 
@@ -441,6 +454,10 @@ export async function refreshSymbolEmbeddings(params: {
   const storageModel = provider.isMockFallback?.()
     ? "mock-fallback"
     : modelName;
+  const jinaCacheCompatibilityKey =
+    storageModel === "jina-embeddings-v2-base-code"
+      ? provider.getCacheCompatibilityKey?.()
+      : undefined;
   let embedded = 0;
   let skipped = 0;
 
@@ -561,7 +578,11 @@ export async function refreshSymbolEmbeddings(params: {
     const prepared = preparedInputs[i];
     const text = buildSymbolEmbeddingText(modelName, prepared);
     const prefixedText = applyDocumentPrefix(modelName, text);
-    const cardHash = buildCardHash(symbol, prefixedText);
+    const cardHash = buildCardHash(
+      symbol,
+      prefixedText,
+      jinaCacheCompatibilityKey,
+    );
 
     const existing = existingEmbeddings.get(symbol.symbolId);
     if (existing && existing.cardHash === cardHash) {
