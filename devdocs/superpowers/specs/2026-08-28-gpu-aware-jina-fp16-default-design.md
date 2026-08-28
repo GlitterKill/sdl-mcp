@@ -40,7 +40,8 @@ an explicit override and follows the existing registry validation.
 
 | Jina request | Runtime context | Effective graph and provider |
 |--------------|-----------------|------------------------------|
-| automatic | non-deterministic, provider order starts with `dml` and includes `cpu` | FP16 on DirectML; quantized CPU is the session-creation fallback |
+| automatic | non-deterministic, provider order starts with `dml,cpu` | FP16 on the configured DirectML-leading path; quantized CPU is the session-creation fallback |
+| automatic | non-deterministic, provider order starts with `dml` but CPU is not second | FP16 on the configured DirectML-leading path; no automatic variant fallback |
 | automatic | non-deterministic CPU path | quantized on CPU |
 | automatic | deterministic query or prewarm | quantized on the existing forced-CPU path |
 | explicit variant | any path | requested registry variant with existing provider behavior; no hidden variant substitution |
@@ -51,9 +52,13 @@ defaults need their own evidence before they select FP16 automatically. Nomic
 selection and artifacts remain unchanged.
 
 Provider order remains meaningful. A configuration that puts CPU first stays
-on the quantized CPU path. Automatic DirectML fallback requires CPU to appear
-after DirectML; the implementation does not silently add providers that the
-configuration omitted.
+on the quantized CPU path. Automatic DirectML fallback requires CPU to be the
+immediate next provider, so `dml,cpu` is eligible, while `dml`,
+`dml,cuda,cpu`, and other non-adjacent orders are not. The FP16 DirectML
+attempt still uses the configured provider list; if that session fails without
+an eligible CPU fallback, provider creation fails through the existing caller
+contract. The implementation does not add, skip, or reorder configured
+providers.
 
 ## Runtime Design
 
@@ -61,14 +66,36 @@ Add the minimum provider-aware resolution to the existing model registry and
 local embedding construction path. Do not add a hardware detector, factory
 hierarchy, or new configuration field.
 
+The existing model registry owns one pure, private resolution contract. Its
+inputs are model name, requested variant, deterministic mode, and normalized
+execution-provider order. Its ordered output contains, for each candidate, the
+canonical registry variant and exact session provider list. Automatic
+`dml,cpu` produces an FP16 candidate followed by a quantized CPU candidate;
+automatic DML without adjacent CPU and every explicit variant produce one
+candidate.
+
+The local embedding constructor owns candidate iteration and ONNX session
+creation. It returns only after one session is initialized, exposing:
+
+- the provider used for embedding calls;
+- a cache-compatibility key containing model name and canonical artifact
+  variant; and
+- a diagnostic identity containing model, variant, and concrete provider list.
+
+The indexer constructs this initialized provider before checking cached symbol
+or file-summary rows, then passes only the cache-compatibility key to the
+existing hash builder. The diagnostic identity is for logs and acceptance
+assertions. The embedding provider owns later inference calls and never changes
+candidates after initialization.
+
 The runtime resolves an ordered candidate list before cache comparison:
 
 1. Resolve automatic or explicit variant intent.
 2. Apply deterministic CPU constraints before choosing the Jina artifact.
 3. For automatic `dml,cpu` indexing, try an FP16 DirectML session first.
 4. If ONNX returns a session-creation error, try one quantized CPU session.
-5. Expose the successfully initialized candidate's model, variant, and provider
-   as the effective embedding identity.
+5. Expose the successfully initialized candidate's cache-compatibility key and
+   separate diagnostic identity.
 
 The indexer computes cache hits only after that identity is final. A quantized
 fallback must never carry an FP16 cache hash. If no candidate initializes, the
@@ -87,18 +114,23 @@ machine path, provider, or session fields.
 
 ## Cache Identity and Migration
 
-Include the resolved persistence variant in the existing content/card hash for
+Include the Jina cache-compatibility key in the existing content/card hash for
 both symbol and file-summary embeddings. Keep the current embedding row IDs and
-LadybugDB schema; no migration table or new index is needed.
+LadybugDB schema; no migration table or new index is needed. Other model hashes,
+including Nomic, remain unchanged in this scoped change.
 
-The identity uses the canonical resolved registry variant, not the raw alias.
-For example, aliases that resolve to the same quantized artifact share one
-identity. Automatic FP16 and automatic quantized runs have different identities.
+The cache-compatibility key uses model name and canonical resolved registry
+variant, not the raw alias or execution provider. For example, aliases that
+resolve to the same quantized artifact share one key, and the same quantized
+artifact can reuse rows across CPU and DirectML execution. Automatic FP16 and
+automatic quantized runs have different keys. Provider details remain in the
+diagnostic identity and never invalidate compatible cached vectors.
 
-Existing rows lack the variant component and therefore become stale the next
-time semantic indexing is explicitly run under the new build. This deliberate
-one-time semantic rebuild prevents a partially quantized, partially FP16 index.
-Installation and configuration changes do not trigger that rebuild.
+Existing Jina rows lack the compatibility-key component and therefore become
+stale the next time semantic indexing is explicitly run under the new build.
+This deliberate one-time Jina rebuild prevents a partially quantized, partially
+FP16 index without unnecessarily invalidating Nomic rows. Installation and
+configuration changes do not trigger that rebuild.
 
 Switching the same database between automatic DirectML and CPU indexing also
 invalidates semantic cache rows. That cost is preferable to silently mixing
@@ -132,22 +164,25 @@ quantized CPU fallback. The configured graph path remains unchanged.
 - Missing or corrupt artifacts use the existing verified download path; strict
   global activation fails if verification still cannot succeed.
 - An automatic FP16 DirectML session-creation error logs one warning and retries
-  quantized CPU once when CPU is configured as the next provider.
+  quantized CPU once only when CPU is the immediate next configured provider.
+- DML-only and non-adjacent CPU orders have no automatic variant fallback and
+  return the existing provider-creation failure if the FP16 session fails.
 - An explicit `fp16` request never changes silently to quantized; it returns the
   existing typed failure or degraded result according to the caller contract.
 - A failed model pass writes no mock vectors and never changes cache identity to
   claim a variant that did not execute.
-- A fatal native DirectML termination fails the acceptance probe and blocks
-  activation. Recovering from that case would require a separately designed
-  worker-process boundary.
+- A fatal native DirectML termination fails the child-process acceptance probe
+  and blocks the configuration change. The active CPU configuration remains
+  untouched, so no in-process rollback is needed. Recovering during production
+  indexing would require a separately designed worker-process boundary.
 
 ## Test-First Implementation
 
 Use the existing Node test runner and current provider/session test seams.
 
 1. Add a table-driven unit test for automatic Jina selection across
-   deterministic CPU, CPU-only, ordered `dml,cpu`, CPU-first, and explicit
-   variant cases.
+   deterministic CPU, CPU-only, ordered `dml,cpu`, DML-only, non-adjacent CPU,
+   CPU-first, and explicit variant cases.
 2. Add one fallback test that makes FP16 DirectML session creation throw and
    proves quantized CPU becomes the final identity before persistence. Prove an
    explicit FP16 request does not substitute variants.
@@ -173,10 +208,13 @@ LadybugDB:
    quantized/CPU, returns the same shape, and repeats byte-stably.
 4. Force a recoverable DirectML session-creation error and prove the automatic
    path selects quantized/CPU rather than mock; prove explicit FP16 does not.
-5. Reuse the existing deterministic semantic fixture to compare paired FP16 and
-   quantized vectors. Every pair must have cosine similarity of at least 0.99,
-   and every existing expected retrieval target must remain inside its required
-   top-k result.
+5. Reuse the existing deterministic semantic fixture for an in-memory
+   cross-variant retrieval probe. Embed corpus documents with FP16 DirectML and
+   queries with deterministic quantized CPU, then rank the FP16 corpus with the
+   quantized query vectors. Every paired same-text FP16/quantized vector must
+   have cosine similarity of at least 0.99, and every existing expected target
+   must remain inside its required top-k result. Run the existing all-quantized
+   query/corpus topology as the control.
 
 The probe reports CPU and DirectML inference wall times but makes no speed claim
 or timing gate. Total index wall time remains a separate, explicitly authorized
@@ -205,12 +243,17 @@ existing scripts rather than edited independently.
 
 1. Implement and pass focused tests plus build/documentation gates.
 2. Install the built package globally as a copy and strictly verify both Jina
-   artifacts.
-3. Update only the current semantic provider order and automatic variant fields;
-   preserve its graph database path and unrelated settings.
-4. Run the database-free DirectML, CPU, fallback, determinism, and quality probes.
+   artifacts. Keep the active CPU configuration unchanged.
+3. Run the database-free DirectML, CPU, fallback, determinism, and quality
+   probes in child processes with explicit probe settings. A fatal DirectML
+   termination therefore cannot alter the active configuration.
+4. Only after every probe passes, atomically replace the current configuration
+   with the `dml,cpu` automatic settings while preserving its graph database
+   path and unrelated fields. Read the file back and validate the effective
+   configuration.
 5. Leave the HTTP server stopped and do not run `index.refresh` or `sdl-mcp
-   index`.
+   index`. If any earlier step fails, stop with the original CPU configuration
+   still active.
 
 Rollback requires only restoring CPU-first providers or an explicit quantized
 variant. The extra cached FP16 artifact is harmless and can remain installed.
