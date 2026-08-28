@@ -6,13 +6,13 @@
  * user-level cache directory so the first semantic query doesn't pay the
  * download cost. Runs on `npm install` via scripts/postinstall.mjs.
  *
- * Tries the primary URL (HuggingFace) first, falls back to the project's
- * GitHub Releases mirror on any failure. Never aborts npm install.
+ * Tries the primary URL (HuggingFace) first, then any configured GitHub
+ * Releases mirror. Never aborts npm install.
  *
  * Keep this script dependency-free (plain Node 20+ fetch) so it works
  * before the dist/ tree is imported at runtime.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   createWriteStream,
@@ -21,12 +21,13 @@ import {
   openSync,
   readFileSync,
   readSync,
+  renameSync,
   statSync,
-  unlinkSync,
 } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
+import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
@@ -43,9 +44,16 @@ const MODELS = [
   {
     name: "jina-embeddings-v2-base-code",
     revision: JINA_REVISION,
-    files: ["model_quantized.onnx", "tokenizer.json", "config.json"],
-    maxBytes: 200_000_000,
+    files: [
+      "model_fp16.onnx",
+      "model_quantized.onnx",
+      "tokenizer.json",
+      "config.json",
+    ],
+    maxBytes: 400_000_000,
     sha256: {
+      "model_fp16.onnx":
+        "1aafc4fcd63d2e6899e88402ff731e7c646c2e435048294a3cbc908a40d45d7c",
       "model_quantized.onnx":
         "ed45870251c9f0cf656e78aab0d37a23489066df8a222bb1c8caf8a45f2cb16d",
       "tokenizer.json":
@@ -54,6 +62,8 @@ const MODELS = [
         "e426aa684c7f9a95c5f020aa855faf93a24f065f5fad0c9e17b124670cabdea6",
     },
     primary: {
+      "model_fp16.onnx":
+        `https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/${JINA_REVISION}/onnx/model_fp16.onnx`,
       "model_quantized.onnx":
         `https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/${JINA_REVISION}/onnx/model_quantized.onnx`,
       "tokenizer.json":
@@ -153,41 +163,45 @@ function sha256File(filePath) {
   return hash.digest("hex");
 }
 
+function verifyModelArtifact(model, fileName, filePath) {
+  const errors = [];
+  if (!existsSync(filePath)) {
+    return [`${fileName} is missing`];
+  }
+
+  const stats = statSync(filePath);
+  if (!stats.isFile() || stats.size === 0 || stats.size > model.maxBytes) {
+    return [
+      `${fileName} must be a non-empty regular file no larger than ${model.maxBytes} bytes`,
+    ];
+  }
+
+  const expectedHash = model.sha256[fileName];
+  if (!expectedHash || sha256File(filePath) !== expectedHash) {
+    return [`${fileName} failed SHA-256 verification`];
+  }
+
+  if (fileName.endsWith(".json")) {
+    try {
+      JSON.parse(readFileSync(filePath, "utf8"));
+    } catch {
+      errors.push(`${fileName} must contain valid JSON`);
+    }
+  }
+  return errors;
+}
+
 export function verifyModelArtifacts(model, modelDir) {
   const errors = [];
   for (const fileName of model.files) {
-    const filePath = join(modelDir, fileName);
-    if (!existsSync(filePath)) {
-      errors.push(`${fileName} is missing`);
-      continue;
-    }
-
-    const stats = statSync(filePath);
-    if (!stats.isFile() || stats.size === 0 || stats.size > model.maxBytes) {
-      errors.push(
-        `${fileName} must be a non-empty regular file no larger than ${model.maxBytes} bytes`,
-      );
-      continue;
-    }
-
-    const expectedHash = model.sha256[fileName];
-    if (!expectedHash || sha256File(filePath) !== expectedHash) {
-      errors.push(`${fileName} failed SHA-256 verification`);
-      continue;
-    }
-
-    if (fileName.endsWith(".json")) {
-      try {
-        JSON.parse(readFileSync(filePath, "utf8"));
-      } catch {
-        errors.push(`${fileName} must contain valid JSON`);
-      }
-    }
+    errors.push(
+      ...verifyModelArtifact(model, fileName, join(modelDir, fileName)),
+    );
   }
   return { ok: errors.length === 0, errors };
 }
 
-async function downloadTo(url, destPath, maxBytes) {
+export async function downloadTo(url, destPath, maxBytes) {
   const controller = new AbortController();
   const response = await fetch(url, {
     redirect: "follow",
@@ -214,8 +228,24 @@ async function downloadTo(url, destPath, maxBytes) {
   }
   if (!response.body) throw new Error("Empty response body");
   const out = createWriteStream(destPath);
+  let streamedBytes = 0;
+  const byteLimiter = new Transform({
+    transform(chunk, _encoding, callback) {
+      streamedBytes += chunk.length;
+      if (maxBytes && streamedBytes > maxBytes) {
+        controller.abort();
+        callback(
+          new Error(
+            `Downloaded file exceeds cap: ${streamedBytes} > ${maxBytes}`,
+          ),
+        );
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
   try {
-    await pipeline(response.body, out);
+    await pipeline(response.body, byteLimiter, out);
   } catch (err) {
     try {
       await rm(destPath, { force: true });
@@ -236,56 +266,73 @@ async function downloadTo(url, destPath, maxBytes) {
 async function fetchFile(model, fileName, destPath) {
   const primary = model.primary[fileName];
   const fallback = model.fallback?.[fileName];
+  const downloadAndVerify = async (url, source) => {
+    await rm(destPath, { force: true });
+    await downloadTo(url, destPath, model.maxBytes);
+    const errors = verifyModelArtifact(model, fileName, destPath);
+    if (errors.length > 0) throw new Error(errors.join("; "));
+    return { source };
+  };
   try {
-    await downloadTo(primary, destPath, model.maxBytes);
-    return { source: "primary" };
+    return await downloadAndVerify(primary, "primary");
   } catch (primaryErr) {
     if (!fallback) throw primaryErr;
-    console.log(`  primary failed (${primaryErr.message}); trying fallback...`);
+    const primaryMessage =
+      primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+    console.log(`  primary failed (${primaryMessage}); trying fallback...`);
     try {
-      await downloadTo(fallback, destPath, model.maxBytes);
-      return { source: "fallback" };
+      return await downloadAndVerify(fallback, "fallback");
     } catch (fallbackErr) {
+      const fallbackMessage =
+        fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
       throw new Error(
-        `both primary and fallback failed. primary=${primaryErr.message}; fallback=${fallbackErr.message}`,
+        `both primary and fallback failed. primary=${primaryMessage}; fallback=${fallbackMessage}`,
       );
     }
   }
 }
 
-async function ensureModel(model, strict) {
+export async function ensureModel(model, strict) {
   const dir = join(getModelCacheDir(), model.name);
-  const verification = strict ? verifyModelArtifacts(model, dir) : undefined;
-  const ready = strict
-    ? verification.ok
-    : model.files.every((fileName) => existsSync(join(dir, fileName)));
-  if (ready) {
+  const filesToFetch = model.files.filter((fileName) =>
+    strict
+      ? verifyModelArtifact(model, fileName, join(dir, fileName)).length > 0
+      : !existsSync(join(dir, fileName)),
+  );
+  if (filesToFetch.length === 0) {
     console.log(`sdl-mcp: model "${model.name}" already cached at ${dir}`);
     return;
   }
 
   if (strict && model.files.some((fileName) => existsSync(join(dir, fileName)))) {
     console.log(
-      `sdl-mcp: model "${model.name}" cache failed verification; refreshing all artifacts`,
+      `sdl-mcp: model "${model.name}" cache failed verification; refreshing invalid artifacts`,
     );
-    for (const fileName of model.files) {
-      const filePath = join(dir, fileName);
-      if (existsSync(filePath)) unlinkSync(filePath);
-    }
   }
 
   console.log(`sdl-mcp: fetching model "${model.name}" → ${dir}`);
   mkdirSync(dir, { recursive: true });
-  for (const fileName of model.files) {
+  const failures = [];
+  for (const fileName of filesToFetch) {
     const destPath = join(dir, fileName);
-    if (existsSync(destPath)) {
-      console.log(`  [skip] ${fileName}`);
-      continue;
-    }
+    // Stage beside the destination so failed downloads never disturb a valid cache.
+    const stagedPath = `${destPath}.${process.pid}-${randomUUID()}.tmp`;
     process.stdout.write(`  downloading ${fileName}... `);
-    const { source } = await fetchFile(model, fileName, destPath);
-    const sizeMB = (statSync(destPath).size / (1024 * 1024)).toFixed(1);
-    console.log(`${sizeMB} MB (${source})`);
+    try {
+      const { source } = await fetchFile(model, fileName, stagedPath);
+      renameSync(stagedPath, destPath);
+      const sizeMB = (statSync(destPath).size / (1024 * 1024)).toFixed(1);
+      console.log(`${sizeMB} MB (${source})`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failures.push(`${fileName}: ${message}`);
+      console.log(`failed (${message})`);
+    } finally {
+      await rm(stagedPath, { force: true });
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(failures.join("; "));
   }
   console.log(`sdl-mcp: model "${model.name}" ready`);
 
