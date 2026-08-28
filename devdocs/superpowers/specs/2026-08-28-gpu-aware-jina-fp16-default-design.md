@@ -6,9 +6,9 @@
 ## Objective
 
 Install both supported Jina ONNX artifacts and make SDL-MCP's automatic model
-selection match the execution path. DirectML indexing uses FP16, while CPU and
-deterministic query sessions use the quantized model. Existing explicit model
-variant settings remain authoritative.
+selection match the execution path. Windows DirectML indexing uses FP16, while
+CPU, non-Windows automatic, and deterministic query sessions use the quantized
+model. Existing explicit model variant settings remain authoritative.
 
 The change must not start the HTTP server, refresh an index, or mutate the
 current graph database. Global activation updates the installed package, model
@@ -40,8 +40,9 @@ an explicit override and follows the existing registry validation.
 
 | Jina request | Runtime context | Effective graph and provider |
 |--------------|-----------------|------------------------------|
-| automatic | non-deterministic, provider order starts with `dml,cpu` | FP16 on the configured DirectML-leading path; quantized CPU is the session-creation fallback |
-| automatic | non-deterministic, provider order starts with `dml` but CPU is not second | FP16 on the configured DirectML-leading path; no automatic variant fallback |
+| automatic | Windows, non-deterministic, provider order starts with `dml,cpu` | FP16 on the configured DirectML-leading path; quantized CPU is the session-creation fallback |
+| automatic | Windows, non-deterministic, provider order starts with `dml` but CPU is not second | FP16 on the configured DirectML-leading path; no automatic variant fallback |
+| automatic | non-Windows, including a copied DML-leading provider order | quantized; the existing session helper removes unsupported providers and retains or appends CPU |
 | automatic | non-deterministic CPU path | quantized on CPU |
 | automatic | deterministic query or prewarm | quantized on the existing forced-CPU path |
 | explicit variant | any path | requested registry variant with existing provider behavior; no hidden variant substitution |
@@ -51,14 +52,20 @@ is the validated Windows provider. CUDA, CoreML, and other provider-specific
 defaults need their own evidence before they select FP16 automatically. Nomic
 selection and artifacts remain unchanged.
 
+Automatic DirectML selection also requires `process.platform === "win32"`.
+The pure resolver accepts the runtime platform as an optional input that
+defaults to `process.platform`; focused tests inject Linux and macOS values.
+This guard prevents a copied Windows `dml,cpu` configuration from selecting an
+FP16 graph before the session helper removes unsupported DML. Explicit FP16
+requests remain authoritative on every operating system.
+
 Provider order remains meaningful. A configuration that puts CPU first stays
-on the quantized CPU path. Automatic DirectML fallback requires CPU to be the
-immediate next provider, so `dml,cpu` is eligible, while `dml`,
-`dml,cuda,cpu`, and other non-adjacent orders are not. The FP16 DirectML
-attempt still uses the configured provider list; if that session fails without
-an eligible CPU fallback, provider creation fails through the existing caller
-contract. The implementation does not add, skip, or reorder configured
-providers.
+on the quantized CPU path. Automatic Windows DirectML fallback requires CPU to
+be the immediate next provider, so `dml,cpu` is eligible, while `dml`,
+`dml,cuda,cpu`, and other non-adjacent orders are not. The initial Windows FP16
+attempt uses the configured provider list without adding, skipping, or
+reordering entries. The existing session helper still filters unsupported
+providers and appends CPU when needed after candidate selection.
 
 ## Runtime Design
 
@@ -67,12 +74,14 @@ local embedding construction path. Do not add a hardware detector, factory
 hierarchy, or new configuration field.
 
 The existing model registry owns one pure, private resolution contract. Its
-inputs are model name, requested variant, deterministic mode, and normalized
-execution-provider order. Its ordered output contains, for each candidate, the
-canonical registry variant and exact session provider list. Automatic
-`dml,cpu` produces an FP16 candidate followed by a quantized CPU candidate;
-automatic DML without adjacent CPU and every explicit variant produce one
-candidate.
+inputs are model name, requested variant, deterministic mode, runtime platform,
+and configured execution-provider order before session-layer platform
+filtering. Its ordered output contains, for each candidate, the canonical
+registry variant and exact requested provider list.
+Automatic Windows `dml,cpu` produces an FP16 candidate followed by a quantized
+CPU candidate; automatic Windows DML without adjacent CPU and every explicit
+variant produce one candidate. Non-Windows automatic requests select the
+quantized candidate before provider normalization.
 
 The local embedding constructor owns candidate iteration and ONNX session
 creation. It returns only after one session is initialized, exposing:
@@ -92,7 +101,7 @@ The runtime resolves an ordered candidate list before cache comparison:
 
 1. Resolve automatic or explicit variant intent.
 2. Apply deterministic CPU constraints before choosing the Jina artifact.
-3. For automatic `dml,cpu` indexing, try an FP16 DirectML session first.
+3. For automatic Windows `dml,cpu` indexing, try an FP16 DirectML session first.
 4. If ONNX returns a session-creation error, try one quantized CPU session.
 5. Expose the successfully initialized candidate's cache-compatibility key and
    separate diagnostic identity.
@@ -157,16 +166,19 @@ reports success.
 The current global package must be replaced with a built copy of this checkout,
 not a symlink. The active configuration then omits `modelVariant` and sets the
 provider order to `dml,cpu`, which activates automatic FP16 indexing and the
-quantized CPU fallback. The configured graph path remains unchanged.
+quantized CPU fallback on the target Windows host. The configured graph path
+remains unchanged.
 
 ## Failure Handling
 
 - Missing or corrupt artifacts use the existing verified download path; strict
   global activation fails if verification still cannot succeed.
-- An automatic FP16 DirectML session-creation error logs one warning and retries
-  quantized CPU once only when CPU is the immediate next configured provider.
-- DML-only and non-adjacent CPU orders have no automatic variant fallback and
-  return the existing provider-creation failure if the FP16 session fails.
+- An automatic Windows FP16 DirectML session-creation error logs one warning
+  and retries quantized CPU once only when CPU is the immediate next configured
+  provider.
+- Windows DML-only and non-adjacent CPU orders have no automatic variant
+  fallback and return the existing provider-creation failure if the FP16
+  session fails.
 - An explicit `fp16` request never changes silently to quantized; it returns the
   existing typed failure or degraded result according to the caller contract.
 - A failed model pass writes no mock vectors and never changes cache identity to
@@ -182,7 +194,11 @@ Use the existing Node test runner and current provider/session test seams.
 
 1. Add a table-driven unit test for automatic Jina selection across
    deterministic CPU, CPU-only, ordered `dml,cpu`, DML-only, non-adjacent CPU,
-   CPU-first, and explicit variant cases.
+   and CPU-first cases. For both Linux and macOS, require `dml,cpu` rows for
+   automatic/default, explicit `fp16`, and explicit `int8`. Prove only the
+   automatic/default row selects quantized because of the platform guard and
+   each explicit row keeps its requested canonical variant before later
+   provider filtering.
 2. Add one fallback test that makes FP16 DirectML session creation throw and
    proves quantized CPU becomes the final identity before persistence. Prove an
    explicit FP16 request does not substitute variants.
@@ -202,8 +218,9 @@ Run acceptance against the built global copy without opening the configured
 LadybugDB:
 
 1. Verify both cached Jina graph files against their pinned SHA-256 digests.
-2. Create an automatic `dml,cpu` non-deterministic provider and prove it reports
-   FP16/DirectML and returns finite, normalized 768-dimensional vectors.
+2. On Windows, create an automatic `dml,cpu` non-deterministic provider and
+   prove it reports FP16/DirectML and returns finite, normalized 768-dimensional
+   vectors.
 3. Create an automatic deterministic provider and prove it reports
    quantized/CPU, returns the same shape, and repeats byte-stably.
 4. Force a recoverable DirectML session-creation error and prove the automatic
@@ -226,10 +243,12 @@ configuration reference/schema/example, architecture notes where the runtime
 choice is described, and the Unreleased changelog. The documentation must state:
 
 - `default` is provider-aware for Jina rather than a fixed artifact;
-- DirectML automatic indexing uses FP16 only when DirectML leads the configured
-  provider order;
-- automatic quantized CPU fallback requires the adjacent provider order
-  `dml,cpu`;
+- Windows DirectML automatic indexing uses FP16 only when DirectML leads the
+  configured provider order;
+- non-Windows automatic requests remain quantized even when a copied provider
+  order starts with DML;
+- automatic Windows quantized CPU fallback requires the adjacent provider
+  order `dml,cpu`;
 - deterministic and CPU execution use quantized Jina;
 - explicit variants override automatic selection;
 - both artifacts are installed and verified; and
@@ -241,6 +260,9 @@ the dirty worktree. Generated config artifacts must be rebuilt through their
 existing scripts rather than edited independently.
 
 ## Activation Sequence
+
+The activation sequence applies to the target Windows host. Non-Windows
+installations keep their existing CPU-first configuration.
 
 1. Implement and pass focused tests plus build/documentation gates.
 2. Install the built package globally as a copy and strictly verify both Jina
@@ -263,8 +285,8 @@ variant. The extra cached FP16 artifact is harmless and can remain installed.
 
 - A fresh or updated global installation has verified FP16 and quantized Jina
   artifacts at the pinned revision.
-- Automatic `dml,cpu` indexing initializes FP16 DirectML; deterministic and CPU
-  paths initialize quantized CPU.
+- Automatic Windows `dml,cpu` indexing initializes FP16 DirectML;
+  deterministic, CPU, and non-Windows automatic paths initialize quantized.
 - Recoverable automatic DirectML initialization failure selects quantized CPU
   before cache lookup or persistence.
 - Explicit variant behavior remains unchanged.
