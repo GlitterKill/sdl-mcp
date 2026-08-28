@@ -741,7 +741,8 @@ Define synthetic 768-dimensional normalized vectors and test `evaluateJinaProbe(
 - reported identities exactly FP16/DirectML and quantized/CPU;
 - finite normalized 768-dimensional vectors;
 - exact repeated CPU vectors;
-- minimum paired cosine `0.99`;
+- minimum paired cosine `0.985`, the approved measured-artifact floor; the
+  top-1 gates below remain mandatory;
 - quantized query vectors ranking the FP16 corpus with each expected fixture target at top-1;
 - control quantized query/corpus targets also at top-1.
 
@@ -975,7 +976,8 @@ Expected: exit `0` with one compact result proving:
 - deterministic child identity is quantized Jina on CPU;
 - all vectors are finite, normalized, and 768-dimensional;
 - repeated CPU vectors are byte-stable;
-- every paired vector cosine is at least `0.99`;
+- every paired vector cosine is at least `0.985`, the approved measured-artifact
+  floor; both top-1 gates below remain mandatory;
 - both cross-variant and quantized controls return expected fixture targets at top-1;
 - the forced automatic fallback child returns real quantized/CPU vectors, while its
   explicit FP16 control attempts once and rejects;

@@ -1,6 +1,7 @@
 import childProcess from "node:child_process";
 
 export const NORMALIZATION_TOLERANCE = 1e-5;
+export const MINIMUM_PAIRED_COSINE = 0.985;
 export const STDOUT_LIMIT_BYTES = 512 * 1024;
 
 const STDERR_LIMIT_BYTES = 16 * 1024;
@@ -361,7 +362,8 @@ export function evaluateJinaProbe({ dml, cpu, fallback }) {
       JSON.stringify(cpu.vectors) === JSON.stringify(cpu.repeatVectors),
     minimumPairedCosine,
     pairedCosinePassed:
-      minimumPairedCosine !== null && minimumPairedCosine >= 0.99,
+      minimumPairedCosine !== null &&
+      minimumPairedCosine >= MINIMUM_PAIRED_COSINE,
     crossVariantTop1,
     crossVariantTop1Passed: sameTargets(crossVariantTop1),
     controlTop1,

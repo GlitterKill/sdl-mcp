@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import { describe, it, type TestContext } from "node:test";
 
 import {
+  MINIMUM_PAIRED_COSINE,
   NORMALIZATION_TOLERANCE,
   STDOUT_LIMIT_BYTES,
   evaluateJinaProbe,
@@ -72,6 +73,20 @@ function nextUp(value: number): number {
   view.setFloat64(0, value, false);
   view.setBigUint64(0, view.getBigUint64(0, false) + 1n, false);
   return view.getFloat64(0, false);
+}
+
+function nextDown(value: number): number {
+  const bytes = new ArrayBuffer(8);
+  const view = new DataView(bytes);
+  view.setFloat64(0, value, false);
+  view.setBigUint64(0, view.getBigUint64(0, false) - 1n, false);
+  return view.getFloat64(0, false);
+}
+
+function vectorWithCosine(value: number): number[] {
+  const result = vector(0, value);
+  result[1] = Math.sqrt(1 - value * value);
+  return result;
 }
 
 function mockSpawn(
@@ -209,6 +224,19 @@ describe("evaluateJinaProbe", () => {
     );
 
     assert.equal(evaluateJinaProbe(above).quality.normalizedPassed, false);
+  });
+
+  it("accepts the paired-cosine floor and rejects the next value below it", () => {
+    assert.equal(MINIMUM_PAIRED_COSINE, 0.985);
+    const atFloor = probe();
+    atFloor.dml.vectors[2] = vectorWithCosine(MINIMUM_PAIRED_COSINE);
+    assert.equal(evaluateJinaProbe(atFloor).quality.pairedCosinePassed, true);
+
+    const belowFloor = probe();
+    belowFloor.dml.vectors[2] = vectorWithCosine(
+      nextDown(MINIMUM_PAIRED_COSINE),
+    );
+    assert.equal(evaluateJinaProbe(belowFloor).quality.pairedCosinePassed, false);
   });
 
   it("fails every identity gate independently", async (t) => {

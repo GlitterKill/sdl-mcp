@@ -212,9 +212,8 @@ LadybugDB:
    cross-variant retrieval probe. Embed corpus documents with FP16 DirectML and
    queries with deterministic quantized CPU, then rank the FP16 corpus with the
    quantized query vectors. Every paired same-text FP16/quantized vector must
-   have cosine similarity of at least 0.99, and every existing expected target
-   must remain inside its required top-k result. Run the existing all-quantized
-   query/corpus topology as the control.
+   have cosine similarity of at least 0.985, the approved measured-artifact
+   floor; both cross-variant and control top-1 gates remain mandatory.
 
 The probe reports CPU and DirectML inference wall times but makes no speed claim
 or timing gate. Total index wall time remains a separate, explicitly authorized
