@@ -1,7 +1,7 @@
 # GPU-Aware Jina FP16 Default Design
 
 **Date:** 2026-08-28
-**Status:** Design approved; pending written-spec review
+**Status:** Independently reviewed; pending user approval
 
 ## Objective
 
@@ -229,6 +229,8 @@ choice is described, and the Unreleased changelog. The documentation must state:
 - `default` is provider-aware for Jina rather than a fixed artifact;
 - DirectML automatic indexing uses FP16 only when DirectML leads the configured
   provider order;
+- automatic quantized CPU fallback requires the adjacent provider order
+  `dml,cpu`;
 - deterministic and CPU execution use quantized Jina;
 - explicit variants override automatic selection;
 - both artifacts are installed and verified; and
