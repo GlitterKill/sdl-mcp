@@ -32,7 +32,7 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 | Transports   | stdio (CLI agents), HTTP/SSE (network clients)                                                                                                                                                                             |
 | AST parsing  | tree-sitter 0.26.2 (via @keqingmoe/tree-sitter) + language grammars via `sdl-mcp-tree-sitter-*` wrapper packages (peer-range normalized to accept 0.26.x; see [grammar-wrappers/README.md](../grammar-wrappers/README.md)) |
 | Native addon | Rust via napi-rs (optional, multi-threaded pass-1)                                                                                                                                                                         |
-| Embeddings   | ONNX Runtime with two supported local models: `jina-embeddings-v2-base-code` for Symbols and `nomic-embed-text-v1.5` for FileSummary vectors                                                                                |
+| Embeddings   | ONNX Runtime with provider-aware Jina FP16/quantized selection for Symbols and unchanged quantized Nomic for FileSummary vectors                                                                                              |
 | Validation   | Zod schemas for all tool payloads and responses                                                                                                                                                                            |
 
 ---
@@ -638,10 +638,10 @@ Hybrid retrieval combines LadybugDB FTS and vector indexes with RRF fusion. The 
 
 Two local ONNX models are supported:
 
-- **jina-embeddings-v2-base-code** (768-dim, ~110 MB) - default Symbol-lane model, optimized for code.
+- **jina-embeddings-v2-base-code** (768-dim, ~321 MB FP16 and ~162 MB quantized) - default Symbol-lane model, optimized for code.
 - **nomic-embed-text-v1.5** (768-dim, ~138 MB) - default FileSummary-lane model, optimized for prose and natural-language queries.
 
-Both models are fetched into the user model cache by postinstall when possible, or lazily on first use. Nomic benefits most from LLM summaries. Jina Code excels at code-to-code similarity without requiring natural-language summaries.
+npm postinstall installs both pinned Jina graphs into the user model cache and verifies each with SHA-256; pinned quantized Nomic delivery is unchanged. Omitted/`default` Jina selects FP16 for DirectML-first throughput sessions and quantized for CPU or deterministic sessions. Nomic benefits most from LLM summaries. Jina Code excels at code-to-code similarity without requiring natural-language summaries.
 
 ### LLM Summaries
 

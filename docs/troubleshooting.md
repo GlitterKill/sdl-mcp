@@ -514,11 +514,11 @@ live outside those defaults.
 #### Embedding model download fails
 
 - Symptom: first-run hangs or errors during model download (e.g., `nomic-embed-text-v1.5` or `jina-embeddings-v2-base-code`)
-- Cause: network restrictions or proxy settings blocking the model download (~138 MB for Nomic, ~110 MB for Jina Code)
+- Cause: network restrictions or proxy settings blocking the model downloads (~138 MB for quantized Nomic; ~321 MB FP16 and ~162 MB quantized for Jina Code)
 - Resolution:
   - ensure outbound HTTPS access to Hugging Face model hub
   - configure proxy via `HTTPS_PROXY` environment variable if needed
-  - pre-download the default specialized-lane models with `node scripts/download-models.mjs jina-embeddings-v2-base-code nomic-embed-text-v1.5`
+  - run `node scripts/postinstall-models.mjs --strict`: with `SDL_MCP_SKIP_MODEL_DOWNLOAD` unset, it installs and verifies the pinned default model set; with `SDL_MCP_SKIP_MODEL_DOWNLOAD=1`, it verifies existing artifacts and fails if required files are missing
   - use `semantic.modelCacheDir` to point SDL-MCP at a pre-seeded model cache for restricted or offline environments
 
 ## Debug Commands

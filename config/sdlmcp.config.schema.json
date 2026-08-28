@@ -987,14 +987,14 @@
         },
         "modelVariant": {
           "type": "string",
-          "description": "ONNX model file variant to load. Common values: 'default' / 'int8' (~140-160MB, balanced), 'fp16' (~270-320MB, ~30% faster than fp32 with <0.5% accuracy loss), 'fp32' (~550-650MB, reference quality). nomic-embed-text-v1.5 also publishes 'uint8', 'q4', 'q4f16', 'bnb4'. When the chosen variant is not published for a given model, the registry falls back to that model's default variant with a warning."
+          "description": "Provider-aware automatic mode for Jina when omitted or 'default': a non-deterministic DirectML-first session uses FP16; only configured adjacent ['dml','cpu'] adds a quantized CPU candidate; deterministic and CPU sessions use quantized. Explicit non-default variants remain authoritative."
         },
         "executionProviders": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "ONNX Runtime execution providers in priority order. ORT tries them left-to-right; first one that initialises wins. Bundled with default onnxruntime-node npm package: Windows x64 ['cpu', 'dml', 'webgpu'], macOS ['cpu', 'coreml'], Linux x64 ['cpu', 'cuda', 'tensorrt'] (CUDA EP requires NVIDIA GPU + CUDA 12 + cuDNN on the host), Linux arm64 ['cpu']. DirectML covers any DX12 GPU including AMD Radeon, NVIDIA GeForce, Intel Arc. ROCm (AMD on Linux), OpenVINO, QNN need a custom ORT build. Unsupported entries on a given platform are dropped with a warning; 'cpu' is auto-appended as final fallback so session creation never strands.",
+          "description": "ONNX Runtime execution providers in priority order. ORT tries them left-to-right; first one that initialises wins. Bundled with default onnxruntime-node npm package: Windows x64 ['cpu', 'dml', 'webgpu'], macOS ['cpu', 'coreml'], Linux x64 ['cpu', 'cuda', 'tensorrt'] (CUDA EP requires NVIDIA GPU + CUDA 12 + cuDNN on the host), Linux arm64 ['cpu']. DirectML covers any DX12 GPU including AMD Radeon, NVIDIA GeForce, Intel Arc. ROCm (AMD on Linux), OpenVINO, QNN need a custom ORT build. The ONNX session helper drops unsupported entries and auto-appends 'cpu'; Jina automatic variant selection uses the configured provider order before that session-layer normalization.",
           "default": [
             "cpu"
           ]

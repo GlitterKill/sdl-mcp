@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 /**
  * Tests for the new embedding-related config knobs:
@@ -127,6 +129,27 @@ describe("modelVariant schema", () => {
     for (const variant of ["default", "fp16", "fp32", "int8", "q4"]) {
       const parsed = SemanticConfigSchema.parse({ modelVariant: variant });
       assert.strictEqual(parsed.modelVariant, variant);
+    }
+  });
+
+  it("describes Jina default as provider-aware automatic mode", async () => {
+    const { SemanticConfigSchema } = await import("../../dist/config/types.js");
+    const sourceDescription =
+      SemanticConfigSchema.shape.modelVariant.description ?? "";
+    const generatedSchema = JSON.parse(
+      readFileSync(resolve("config/sdlmcp.config.schema.json"), "utf8"),
+    ) as {
+      properties: {
+        semantic: { properties: { modelVariant: { description: string } } };
+      };
+    };
+    const generatedDescription =
+      generatedSchema.properties.semantic.properties.modelVariant.description;
+
+    for (const description of [sourceDescription, generatedDescription]) {
+      assert.match(description, /provider-aware automatic mode/i);
+      assert.match(description, /DirectML-first[^.]*FP16/i);
+      assert.match(description, /deterministic[^.]*CPU[^.]*quantized/i);
     }
   });
 });

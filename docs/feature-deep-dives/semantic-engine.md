@@ -405,7 +405,7 @@ SDL-MCP currently ships with two supported embedding models, each suited to diff
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB<br/>Optimized for code"] e1@--> Symbols["Default Symbol lane"]
+    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~321 MB FP16 + ~162 MB quantized<br/>Optimized for code"] e1@--> Symbols["Default Symbol lane"]
     Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] e2@--> FileSummaries["Default FileSummary lane"]
     Jina e3@-. max-recall .-> FileSummaries
     Nomic e4@-. max-recall .-> Symbols
@@ -438,7 +438,7 @@ flowchart LR
 | **`api`**             | Anthropic API                               | Enterprise environments               |
 | **`mock`**            | Deterministic hash-based vectors (64-dim)   | Testing, CI, when ONNX is unavailable |
 
-The local provider uses `onnxruntime-node` and `tokenizers` (optional dependencies). If either runtime cannot load, it falls back to mock embeddings for test behavior, but the refresh remains degraded and does not satisfy semantic readiness.
+The local provider uses `onnxruntime-node` and `tokenizers` (optional dependencies). npm postinstall caches and SHA-256 verifies both pinned Jina graphs; pinned quantized Nomic delivery is unchanged. Omitted/`default` Jina selects FP16 for DirectML-first throughput sessions and quantized for CPU or deterministic sessions. Only configured adjacent `["dml","cpu"]` enables the second quantized CPU candidate; explicit non-default variants remain authoritative. If the runtime cannot load any candidate, the refresh remains degraded and does not satisfy semantic readiness.
 
 ### Model-Aware Embedding Payloads
 
@@ -568,7 +568,7 @@ flowchart TD
 
 Each row keeps the compact cache representation (`Float32 -> multiply by 10,000 -> round to Int16 -> base64 encode`) and the numeric `DOUBLE[768]` array required by Ladybug HNSW.
 
-Each embedding is tagged with a `cardHash` (SHA-256 of the symbol data + text format used). When the symbol changes or the text format changes, the embedding is automatically refreshed during indexing.
+Each embedding is tagged with a `cardHash` (SHA-256 of the payload plus the effective Jina artifact identity). When the effective Jina graph changes, Jina Symbol and FileSummary hashes invalidate on the next explicitly initiated semantic index; no index is started solely by changing the configuration.
 
 > **Migration note**: Migration m007 copied the deprecated `SymbolEmbedding` table into inline Symbol compatibility columns. Migration m026 copies complete supported inline vectors into `SymbolVectorEmbedding`. Current writes and HNSW indexes use the dedicated table; the older storage remains compatibility-only.
 

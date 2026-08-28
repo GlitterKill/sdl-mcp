@@ -657,26 +657,23 @@ export const SemanticConfigSchema = z.object({
    */
   embeddingsSequential: z.boolean().default(false),
   /**
-   * Which ONNX file variant to load for each embedding model. Lets users
-   * trade speed for accuracy without recompiling. Valid values depend on
-   * what each model publishes â€” when a chosen variant is unavailable for
-   * a given model, the registry falls back to that model's
-   * `defaultVariant` with a warning.
+   * Which ONNX file variant to load for each embedding model. For Jina,
+   * omitted/`"default"` is provider-aware automatic mode: a throughput
+   * session whose configured providers start with adjacent `"dml","cpu"`
+   * tries FP16 on DirectML, then quantized on CPU; DirectML without that
+   * adjacent CPU fallback tries FP16 only. Deterministic and CPU sessions use
+   * quantized Jina. Explicit non-default variants remain authoritative.
    *
-   * Common variants:
-   *   - `"default"` / `"int8"`: HF's general-quantized file (~140-160MB).
-   *     The current shipped default, balanced speed/accuracy.
-   *   - `"fp16"`: half-precision (~270-320MB). ~30% faster than fp32 with
-   *     <0.5% accuracy loss.
-   *   - `"fp32"`: full precision (~550-650MB). Reference quality, slowest.
-   *   - `"q4"`, `"q4f16"`, `"bnb4"`, `"uint8"`: aggressive quantization
-   *     (~110-165MB), 2-4Ã— faster than fp32 with 1-7% accuracy loss
-   *     depending on workload. Availability per model varies â€” see
-   *     `ModelInfo.variants` in `model-registry.ts`.
-   *
-   * Pass-through string so future variants land without a schema bump.
+   * Unsupported variants still fall back to the model's `defaultVariant`
+   * with a warning. This remains a pass-through string so future variants do
+   * not require a schema bump.
    */
-  modelVariant: z.string().optional(),
+  modelVariant: z
+    .string()
+    .optional()
+    .describe(
+      "Provider-aware automatic mode for Jina when omitted or 'default': a non-deterministic DirectML-first session uses FP16; only configured adjacent ['dml','cpu'] adds a quantized CPU candidate; deterministic and CPU sessions use quantized. Explicit non-default variants remain authoritative.",
+    ),
   /**
    * ONNX Runtime execution providers, in priority order. ORT tries them
    * left-to-right and uses the first one that initialises successfully.
@@ -699,9 +696,9 @@ export const SemanticConfigSchema = z.object({
    * and sdl-mcp will pick up the extra providers â€” the filter only
    * drops entries known to be unavailable in the default package.
    *
-   * Always include `"cpu"` somewhere so initialisation can fall back
-   * when a GPU provider can't load â€” the helper auto-appends it if you
-   * forget.
+   * The ONNX session helper filters unsupported providers and auto-appends
+   * `"cpu"` when absent. Variant fallback still depends on the configured
+   * provider order before that session-layer normalization.
    */
   executionProviders: z.array(z.string()).default(["cpu"]),
   /**

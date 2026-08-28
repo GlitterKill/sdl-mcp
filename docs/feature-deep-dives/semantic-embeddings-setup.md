@@ -18,7 +18,7 @@ flowchart TD
     Onnx e3@--> Vector["Embedding Vector"]
 
     subgraph Models["Embedding Models"]
-        Jina["jina-embeddings-v2-base-code<br/>768-dim, ~110 MB<br/>postinstall or lazy download"]
+        Jina["jina-embeddings-v2-base-code<br/>768-dim, ~321 MB FP16 + ~162 MB quantized<br/>postinstall, SHA-256 verified"]
         Nomic["nomic-embed-text-v1.5<br/>768-dim, ~138 MB<br/>postinstall or lazy download"]
         Mock["Mock fallback<br/>64-dim, deterministic"]
     end
@@ -62,12 +62,12 @@ flowchart TD
 | :-------------------- | :----------------- | :-------- | :-------- | :------------------------------------------- |
 | ONNX Runtime          | `onnxruntime-node` | `^1.24.3` | Optional  | Run local embedding model inference          |
 | HuggingFace Tokenizer | `tokenizers@npm:@anush008/tokenizers` | `^0.6.0` | Optional  | Tokenize text for ONNX models                |
-| Jina Code Model       | downloaded         | -         | Optional  | Default Symbol-lane code embeddings          |
+| Jina Code Model       | downloaded         | -         | Optional  | FP16 and quantized Symbol-lane graphs         |
 | Nomic Model           | downloaded         | -         | Optional  | Default FileSummary-lane text embeddings     |
 | Anthropic API Key     | -                  | -         | Optional  | LLM summary generation                       |
 | Ollama Server         | -                  | -         | Optional  | Local LLM summary generation                 |
 
-Without the optional ONNX dependencies, SDL-MCP still works: embeddings fall back to deterministic 64-dim mock vectors. Semantic search will function, but with lower quality results.
+Without the optional ONNX dependencies, SDL-MCP structural and text retrieval remain available. Semantic vector retrieval remains unavailable/degraded because mock fallback vectors are neither persisted nor returned.
 
 ---
 
@@ -75,7 +75,7 @@ Without the optional ONNX dependencies, SDL-MCP still works: embeddings fall bac
 
 ### Tier 1: Specialized Default (Free, Recommended)
 
-The default semantic profile is `specialized`: Symbol embeddings use `jina-embeddings-v2-base-code`, while FileSummary embeddings use `nomic-embed-text-v1.5`. This keeps index time lower than the old both-models-on-both-lanes behavior while preserving the strongest practical default for code-shaped and prose-shaped payloads. LLM summaries remain off unless you enable them.
+The default semantic profile is `specialized`: Symbol embeddings use `jina-embeddings-v2-base-code`, while FileSummary embeddings use `nomic-embed-text-v1.5`. Jina's omitted/`default` mode selects FP16 for DirectML-first throughput sessions and quantized for CPU or deterministic sessions; Nomic remains quantized. LLM summaries remain off unless you enable them.
 
 Enhanced heuristics are always active, generating pattern-matched summaries for all symbol kinds (class, interface, type, enum, variable, constructor) in addition to typed function/method summaries. When `semantic.enabled: true`, NN summary transfer also runs automatically, propagating documentation from well-documented neighbors to undocumented symbols via embedding similarity.
 
@@ -399,8 +399,8 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 | Profile role          | Code-shaped payloads                      | Prose-heavy payloads                    |
 | Dimensions            | 768                                       | 768                                    |
 | Max input tokens      | 8,192                                     | 8,192                                  |
-| ONNX file size        | ~110 MB (INT8)                            | ~138 MB (INT8)                         |
-| Model file delivery   | Postinstall or lazy download              | Postinstall or lazy download           |
+| ONNX file size        | ~321 MB FP16 + ~162 MB quantized           | ~138 MB quantized                       |
+| Model file delivery   | Both pinned graphs cached and SHA-256 verified by postinstall | Pinned quantized graph; unchanged |
 | Training data         | Source code across many languages         | General text and natural-language data |
 | Input format          | Structured code sections                  | Flowing prose with document/query prefix |
 | Best paired with      | Symbol search and code-to-code matching   | File summaries and NL-heavy queries    |
@@ -533,12 +533,12 @@ Local embedding generation is the dominant cost of a full reindex on most repos 
 
 ### Model Variants (`semantic.modelVariant`)
 
-Each ONNX model on HuggingFace ships several pre-quantised variants. SDL-MCP picks the variant by name; unsupported requests fall back to the model's `defaultVariant` with a warning.
+Each ONNX model on HuggingFace ships several variants. For Jina, omitted/`default` is provider-aware automatic mode: CPU and deterministic sessions use quantized, while DirectML-first throughput sessions use FP16. Only configured adjacent `["dml","cpu"]` adds a second quantized CPU candidate. Explicit non-default variants remain authoritative; unsupported requests fall back to the model's `defaultVariant` with a warning.
 
 | Variant   | jina-code | nomic-text | File size (approx)         | Speed vs fp32   | Quality vs fp32         |
 | :-------- | :-------: | :--------: | :------------------------- | :-------------- | :---------------------- |
-| `default` |     ✓     |     ✓      | jina ~162MB / nomic ~137MB | baseline (int8) | baseline (int8)         |
-| `int8`    |     ✓     |     ✓      | ~140-160MB                 | ~2-3× fp32      | -1 to -3% retrieval     |
+| `default` |     ✓     |     ✓      | Jina automatic / Nomic ~137MB | provider-aware | provider-aware for Jina |
+| `int8`    |     ✓     |     ✓      | ~162 MB                    | ~2-3× fp32      | -1 to -3% retrieval     |
 | `uint8`   |     —     |     ✓      | ~137MB                     | ~2-3× fp32      | -1 to -3% retrieval     |
 | `q4`      |     —     |     ✓      | ~165MB                     | ~3-4× fp32      | -3 to -7% retrieval     |
 | `q4f16`   |     —     |     ✓      | ~111MB                     | ~3-4× fp32      | -3 to -7% retrieval     |
@@ -546,7 +546,7 @@ Each ONNX model on HuggingFace ships several pre-quantised variants. SDL-MCP pic
 | `fp16`    |     ✓     |     ✓      | ~270-321MB                 | ~1.3-1.5× fp32  | <0.5% loss (negligible) |
 | `fp32`    |     ✓     |     ✓      | ~547-642MB                 | baseline        | reference               |
 
-The default ships the int8 quantised variant. Move to `fp16` if you want a small speed boost with no measurable quality loss, or to `q4`/`q4f16`/`bnb4` if you can tolerate ~3-7% retrieval quality drop for ~3× speed. Each variant downloads on first use to the model cache directory; tokenizer + config are shared across variants.
+npm postinstall caches and SHA-256 verifies both pinned Jina graphs (~321 MB FP16 and ~162 MB quantized); pinned quantized Nomic delivery is unchanged. Explicit variants download on first use when they are not part of that installed set; tokenizer and config are shared across variants.
 
 ```jsonc
 {
@@ -558,7 +558,7 @@ The default ships the int8 quantised variant. Move to `fp16` if you want a small
 
 ### GPU / Accelerator Execution Providers (`semantic.executionProviders`)
 
-ONNX Runtime ships several execution providers in the default `onnxruntime-node` npm package — no separate package or build needed. SDL-MCP filters the user list against the platform's bundled providers and auto-appends `"cpu"` as final fallback so session creation never strands.
+ONNX Runtime ships several execution providers in the default `onnxruntime-node` npm package — no separate package or build needed. Jina candidate selection uses the configured provider order first; the ONNX session layer then filters unsupported providers and auto-appends `"cpu"` as final fallback.
 
 | Platform    | Bundled providers         | Covers                                                                  |
 | :---------- | :------------------------ | :---------------------------------------------------------------------- |
@@ -582,7 +582,7 @@ Out of scope (require a custom ONNX Runtime build): `rocm` (AMD on Linux), `open
 }
 ```
 
-Expected speedup vs CPU-only on a workstation-class machine: **3-8× for transformer inference**. Combine with `modelVariant: "fp16"` for additive gains.
+Measure the acceptance probe on the target machine before choosing a provider. Its local timing compares that hardware and workload only; SDL-MCP does not promise a blanket GPU speedup.
 
 DirectML sessions automatically use sequential execution, disable ONNX memory patterns, and serialize `Run()` calls per cached session. `embeddingConcurrency` can still overlap tokenization before each run, so do not reduce it to `1` solely for the DirectML session-safety contract.
 
@@ -710,8 +710,9 @@ For local global-package builds, `scripts/install-local-global.ps1` also loads `
 
 ```bash
 node scripts/download-models.mjs <model-name>
-# or prefetch the default specialized-lane models:
-node scripts/download-models.mjs jina-embeddings-v2-base-code nomic-embed-text-v1.5
+# SDL_MCP_SKIP_MODEL_DOWNLOAD unset: install and verify the pinned default set.
+# SDL_MCP_SKIP_MODEL_DOWNLOAD=1: verify existing artifacts; fail if required files are missing.
+node scripts/postinstall-models.mjs --strict
 ```
 
 ### "Failed to download model_quantized.onnx for model nomic-embed-text-v1.5"
@@ -813,7 +814,7 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     "fileSummaryEmbeddingBatchSize": 4, // 1-16: rows per FileSummary ONNX call
     "fileSummaryEmbeddingMaxChars": 4096, // bounds FileSummary vector payloads
     "embeddingsSequential": false, // run multi-model embedding in series (vs Promise.all)
-    "modelVariant": "default", // "default" | "fp16" | "fp32" | "int8" | nomic-only "uint8"/"q4"/"q4f16"/"bnb4"
+    "modelVariant": "default", // Jina automatic: DML-first FP16; CPU/deterministic quantized
     "executionProviders": ["cpu"], // ORT EPs: ["dml","cpu"] (Win), ["coreml","cpu"] (macOS), ["cuda","cpu"] (Linux NVIDIA)
     "onnx": {
       "intraOpNumThreads": 0, // 0 = min(8, estimated physical cores).

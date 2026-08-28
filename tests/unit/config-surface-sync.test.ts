@@ -11,6 +11,7 @@ import {
   PolicyConfigSchema,
   PrefetchConfigSchema,
   RepoConfigSchema,
+  SemanticConfigSchema,
 } from "../../dist/config/types.js";
 import {
   DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS,
@@ -18,6 +19,7 @@ import {
   MIN_POST_INDEX_SESSION_TIMEOUT_MS,
 } from "../../dist/config/constants.js";
 import { PolicyGetResponseSchema } from "../../dist/mcp/tools.js";
+import { resolveEmbeddingModelCandidates } from "../../dist/indexer/model-registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -283,5 +285,47 @@ describe("config surface sync", () => {
     );
     assert.match(uiConfig, /maxLegacyFallbackFiles/);
     assert.match(uiConfig, /maxSemanticEligibleFallbackFiles/);
+  });
+
+  it("keeps the example Jina default automatic for CPU and DirectML", () => {
+    const sample = JSON.parse(
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.example.json"), "utf8"),
+    );
+    const semantic = SemanticConfigSchema.parse(sample.semantic);
+    assert.strictEqual(semantic.modelVariant, "default");
+    assert.deepStrictEqual(semantic.executionProviders, ["cpu"]);
+
+    const resolveCandidates = (
+      requestedProviders: readonly string[],
+      deterministic = false,
+      requestedVariant = semantic.modelVariant,
+    ) =>
+      resolveEmbeddingModelCandidates({
+        name: "jina-embeddings-v2-base-code",
+        requestedVariant,
+        deterministic,
+        requestedProviders,
+      }).map(({ variantName, modelFile, requestedProviders: providers }) => [
+        variantName,
+        modelFile,
+        providers,
+      ]);
+
+    assert.deepStrictEqual(resolveCandidates(semantic.executionProviders), [
+      ["default", "model_quantized.onnx", ["cpu"]],
+    ]);
+    assert.deepStrictEqual(resolveCandidates(["dml", "cpu"]), [
+      ["fp16", "model_fp16.onnx", ["dml", "cpu"]],
+      ["default", "model_quantized.onnx", ["cpu"]],
+    ]);
+    assert.deepStrictEqual(resolveCandidates(["dml", "webgpu", "cpu"]), [
+      ["fp16", "model_fp16.onnx", ["dml", "webgpu", "cpu"]],
+    ]);
+    assert.deepStrictEqual(resolveCandidates(["dml", "cpu"], true), [
+      ["default", "model_quantized.onnx", ["cpu"]],
+    ]);
+    assert.deepStrictEqual(resolveCandidates(["cpu"], false, "fp16"), [
+      ["fp16", "model_fp16.onnx", ["cpu"]],
+    ]);
   });
 });
