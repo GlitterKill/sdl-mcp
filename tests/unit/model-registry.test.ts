@@ -9,7 +9,126 @@ import {
   resolveModelDir,
   isModelAvailable,
   resolveVariant,
+  resolveEmbeddingModelCandidates,
 } from "../../dist/indexer/model-registry.js";
+
+const candidateTuple = (candidate: {
+  variantName: string;
+  modelFile: string;
+  requestedProviders: string[];
+}) => [candidate.variantName, candidate.modelFile, candidate.requestedProviders];
+
+test("resolveEmbeddingModelCandidates selects GPU-aware Jina variants", () => {
+  const cases = [
+    {
+      name: "Jina requested default throughput keeps DML then CPU fallback",
+      input: {
+        name: "jina-embeddings-v2-base-code",
+        requestedVariant: "default",
+        deterministic: false,
+        requestedProviders: ["dml", "cpu"] as const,
+      },
+      expected: [
+        ["fp16", "model_fp16.onnx", ["dml", "cpu"]],
+        ["default", "model_quantized.onnx", ["cpu"]],
+      ],
+    },
+    {
+      name: "Jina automatic deterministic uses quantized CPU",
+      input: {
+        name: "jina-embeddings-v2-base-code",
+        deterministic: true,
+        requestedProviders: ["dml", "cpu"],
+      },
+      expected: [["default", "model_quantized.onnx", ["cpu"]]],
+    },
+    {
+      name: "Jina automatic CPU uses quantized CPU",
+      input: {
+        name: "jina-embeddings-v2-base-code",
+        deterministic: false,
+        requestedProviders: ["cpu"],
+      },
+      expected: [["default", "model_quantized.onnx", ["cpu"]]],
+    },
+    {
+      name: "Jina automatic CPU-first preserves providers",
+      input: {
+        name: "jina-embeddings-v2-base-code",
+        deterministic: false,
+        requestedProviders: ["cpu", "dml"],
+      },
+      expected: [["default", "model_quantized.onnx", ["cpu", "dml"]]],
+    },
+    {
+      name: "Jina automatic DML uses fp16 only",
+      input: {
+        name: "jina-embeddings-v2-base-code",
+        deterministic: false,
+        requestedProviders: ["dml"],
+      },
+      expected: [["fp16", "model_fp16.onnx", ["dml"]]],
+    },
+    {
+      name: "Jina automatic DML CUDA CPU preserves order",
+      input: {
+        name: "jina-embeddings-v2-base-code",
+        deterministic: false,
+        requestedProviders: ["dml", "cuda", "cpu"],
+      },
+      expected: [["fp16", "model_fp16.onnx", ["dml", "cuda", "cpu"]]],
+    },
+    {
+      name: "explicit Jina fp16 deterministic forces CPU",
+      input: {
+        name: "jina-embeddings-v2-base-code",
+        requestedVariant: "fp16",
+        deterministic: true,
+        requestedProviders: ["dml", "cpu"],
+      },
+      expected: [["fp16", "model_fp16.onnx", ["cpu"]]],
+    },
+    {
+      name: "Nomic default throughput keeps existing variant",
+      input: {
+        name: "nomic-embed-text-v1.5",
+        requestedVariant: "default",
+        deterministic: false,
+        requestedProviders: ["dml", "cpu"],
+      },
+      expected: [["default", "model_quantized.onnx", ["dml", "cpu"]]],
+    },
+  ];
+
+  for (const { name, input, expected } of cases) {
+    assert.deepStrictEqual(
+      resolveEmbeddingModelCandidates(input).map(candidateTuple),
+      expected,
+      name,
+    );
+  }
+});
+
+test("Jina aliases share cache compatibility while fp16 differs", () => {
+  const options = { deterministic: false, requestedProviders: ["cpu"] };
+  const jinaDefault = resolveEmbeddingModelCandidates({
+    name: "jina-embeddings-v2-base-code",
+    ...options,
+  })[0];
+  const jinaInt8 = resolveEmbeddingModelCandidates({
+    name: "jina-embeddings-v2-base-code",
+    requestedVariant: "int8",
+    ...options,
+  })[0];
+  const jinaFp16 = resolveEmbeddingModelCandidates({
+    name: "jina-embeddings-v2-base-code",
+    requestedVariant: "fp16",
+    ...options,
+  })[0];
+
+  assert.strictEqual(jinaDefault.cacheCompatibilityKey, jinaInt8.cacheCompatibilityKey);
+  assert.notStrictEqual(jinaDefault.cacheCompatibilityKey, jinaFp16.cacheCompatibilityKey);
+});
 
 test("getModelInfo returns Jina metadata", () => {
   const info = getModelInfo("jina-embeddings-v2-base-code");

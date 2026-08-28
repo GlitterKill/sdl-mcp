@@ -76,6 +76,13 @@ export interface ModelInfo {
   queryPrefix?: string;
 }
 
+export interface EmbeddingModelCandidate {
+  variantName: string;
+  modelFile: string;
+  requestedProviders: string[];
+  cacheCompatibilityKey?: string;
+}
+
 const HF_JINA = "https://huggingface.co/jinaai/jina-embeddings-v2-base-code";
 const HF_NOMIC = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5";
 const GH_RELEASES =
@@ -294,6 +301,51 @@ export function resolveVariant(
     variantName: info.defaultVariant,
     variant: info.variants[info.defaultVariant],
   };
+}
+
+function normalizeRequestedProviders(requestedProviders?: readonly string[]): string[] {
+  const providers = requestedProviders?.map((provider) => provider.toLowerCase()) ?? [];
+  return [...new Set(providers.length > 0 ? providers : ["cpu"])];
+}
+
+export function resolveEmbeddingModelCandidates({
+  name,
+  requestedVariant,
+  deterministic,
+  requestedProviders,
+}: {
+  name: string;
+  requestedVariant?: string;
+  deterministic: boolean;
+  requestedProviders?: readonly string[];
+}): EmbeddingModelCandidate[] {
+  const providers = normalizeRequestedProviders(requestedProviders);
+  const effectiveProviders = deterministic ? ["cpu"] : providers;
+  const isJina = name === "jina-embeddings-v2-base-code";
+  const automatic = isJina && (requestedVariant === undefined || requestedVariant === "default");
+  const requests: Array<{ variant: string; providers: string[] }> = [];
+
+  if (automatic && !deterministic && effectiveProviders[0] === "dml") {
+    requests.push({ variant: "fp16", providers: effectiveProviders });
+    if (effectiveProviders[1] === "cpu") {
+      requests.push({ variant: "default", providers: ["cpu"] });
+    }
+  } else {
+    requests.push({
+      variant: automatic ? "default" : (requestedVariant ?? "default"),
+      providers: effectiveProviders,
+    });
+  }
+
+  return requests.map(({ variant, providers: candidateProviders }) => {
+    const resolved = resolveVariant(name, variant);
+    return {
+      variantName: resolved.variantName,
+      modelFile: resolved.variant.modelFile,
+      requestedProviders: candidateProviders,
+      ...(isJina ? { cacheCompatibilityKey: `${name}:${resolved.variant.modelFile}` } : {}),
+    };
+  });
 }
 
 /**
