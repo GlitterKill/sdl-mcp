@@ -20,7 +20,6 @@ import {
 import {
   getModelInfo,
   applyDocumentPrefix,
-  isModelAvailable,
 } from "./model-registry.js";
 import type { IndexProgress } from "./indexer.js";
 import {
@@ -79,6 +78,15 @@ export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>;
   getDimension(): number;
   isMockFallback?(): boolean;
+  initialize?(): Promise<void>;
+  getCacheCompatibilityKey?(): string | undefined;
+  getDiagnosticIdentity?():
+    | {
+        modelName: string;
+        variantName: string;
+        executionProviders: readonly string[];
+      }
+    | undefined;
 }
 
 export interface EmbeddingMemorySnapshot {
@@ -118,9 +126,18 @@ class MockEmbeddingProvider implements EmbeddingProvider {
 
 class LocalEmbeddingProvider implements EmbeddingProvider {
   private session: OnnxEmbeddingSession | null = null;
+  private initialization: Promise<void> | null = null;
   private modelName: string;
   private sessionOptions: OnnxEmbeddingSessionOptions;
   private fallbackToMock = false;
+  private cacheCompatibilityKey: string | undefined;
+  private diagnosticIdentity:
+    | {
+        modelName: string;
+        variantName: string;
+        executionProviders: readonly string[];
+      }
+    | undefined;
 
   constructor(
     modelName: string,
@@ -128,29 +145,39 @@ class LocalEmbeddingProvider implements EmbeddingProvider {
   ) {
     this.modelName = modelName;
     this.sessionOptions = sessionOptions;
-    // Eagerly detect missing model files so isMockFallback() is accurate
-    // before the first embed() call.  This lets callers (e.g. the retrieval
-    // orchestrator) skip unavailable models without triggering a warn log.
-    if (!isModelAvailable(modelName)) {
+  }
+
+  initialize(): Promise<void> {
+    this.initialization ??= this.initializeSession();
+    return this.initialization;
+  }
+
+  private async initializeSession(): Promise<void> {
+    try {
+      this.session = await createOnnxSession(this.modelName, this.sessionOptions);
+      this.cacheCompatibilityKey = this.session.cacheCompatibilityKey;
+      this.diagnosticIdentity = {
+        modelName: this.session.modelName,
+        variantName: this.session.variantName,
+        executionProviders: this.session.executionProviders,
+      };
+    } catch (error) {
+      logger.warn(
+        `Local embedding provider falling back to mock: ${error instanceof Error ? error.message : String(error)}`,
+      );
       this.fallbackToMock = true;
     }
   }
 
   async embed(texts: string[]): Promise<number[][]> {
-    if (this.fallbackToMock) {
+    await this.initialize();
+    if (this.fallbackToMock || !this.session) {
       return texts.map((text) => embedTextDeterministic(text));
     }
 
     try {
-      if (!this.session) {
-        this.session = await createOnnxSession(
-          this.modelName,
-          this.sessionOptions,
-        );
-      }
       return await this.session.embed(texts);
     } catch (error) {
-      // Graceful degradation: fall back to mock if ONNX/tokenizers unavailable
       logger.warn(
         `Local embedding provider falling back to mock: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -180,6 +207,20 @@ class LocalEmbeddingProvider implements EmbeddingProvider {
 
   isMockFallback(): boolean {
     return this.fallbackToMock;
+  }
+
+  getCacheCompatibilityKey(): string | undefined {
+    return this.cacheCompatibilityKey;
+  }
+
+  getDiagnosticIdentity():
+    | {
+        modelName: string;
+        variantName: string;
+        executionProviders: readonly string[];
+      }
+    | undefined {
+    return this.diagnosticIdentity;
   }
 }
 
@@ -360,6 +401,7 @@ export async function refreshSymbolEmbeddings(params: {
   const modelName = params.model ?? "jina-embeddings-v2-base-code";
   const provider =
     params.embeddingProvider ?? getEmbeddingProvider(params.provider, modelName);
+  await provider.initialize?.();
   const measure = async <T>(
     phaseName: string,
     fn: () => Promise<T>,

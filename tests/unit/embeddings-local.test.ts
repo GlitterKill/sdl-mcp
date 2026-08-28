@@ -107,6 +107,23 @@ test("getEmbeddingProvider local provider returns correct model dimension", () =
   );
 });
 
+test("local provider resolves fallback during idempotent initialization", async () => {
+  const provider = getEmbeddingProvider("local", "missing-task3-model");
+
+  assert.strictEqual(typeof provider.initialize, "function");
+  assert.strictEqual(provider.isMockFallback?.(), false);
+
+  const first = provider.initialize?.();
+  const second = provider.initialize?.();
+  assert.strictEqual(first, second);
+  await first;
+
+  assert.strictEqual(provider.isMockFallback?.(), true);
+  assert.strictEqual(provider.getCacheCompatibilityKey?.(), undefined);
+  assert.strictEqual(provider.getDiagnosticIdentity?.(), undefined);
+  assert.strictEqual((await provider.embed(["fallback"]))[0].length, 64);
+});
+
 test("getEmbeddingProvider api provider works", async () => {
   const provider = getEmbeddingProvider("api");
   assert.strictEqual(provider.getDimension(), 64);

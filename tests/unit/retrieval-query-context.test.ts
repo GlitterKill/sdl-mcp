@@ -155,6 +155,56 @@ describe("request-scoped retrieval work", () => {
     }
   });
 
+  it("initializes before fallback checks and rejects providers that degrade during embed", async () => {
+    const prewarm = Reflect.get(
+      retrievalOrchestrator,
+      "prewarmRetrievalEmbeddingPromises",
+    );
+    assert.equal(typeof prewarm, "function");
+    if (typeof prewarm !== "function") return;
+
+    let initialized = false;
+    let degraded = false;
+    let embedCalls = 0;
+    const promises = await prewarm(
+      "review ContextEngineV2",
+      { includeFileSummary: false },
+      {
+        loadSemanticConfig: () => ({
+          enabled: true,
+          provider: "local",
+          symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
+          fileSummaryEmbeddingModels: [],
+        }),
+        getEmbeddingProvider: () => ({
+          initialize: async () => {
+            initialized = true;
+          },
+          embed: async () => {
+            assert.strictEqual(initialized, true);
+            embedCalls += 1;
+            degraded = true;
+            return [[42]];
+          },
+          getDimension: () => 1,
+          isMockFallback: () => {
+            assert.strictEqual(
+              initialized,
+              true,
+              "fallback state must not be read before initialization",
+            );
+            return degraded;
+          },
+        }),
+      },
+    );
+
+    const [embeddingPromise] = promises.values();
+    assert.ok(embeddingPromise);
+    await assert.rejects(embeddingPromise, /mock fallback/);
+    assert.strictEqual(embedCalls, 1);
+  });
+
   it("does not prewarm models when the vector lane is configured off", async () => {
     const prewarm = Reflect.get(
       retrievalOrchestrator,

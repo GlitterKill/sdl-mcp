@@ -372,12 +372,19 @@ function embeddingFactory(
       providerType,
       modelName,
     );
+    await provider.initialize?.();
     if (provider.isMockFallback?.()) {
       throw new Error(
         `Embedding provider for '${modelName}' is a mock fallback`,
       );
     }
-    return (await provider.embed([prefixedQuery]))[0] ?? [];
+    const embedding = (await provider.embed([prefixedQuery]))[0] ?? [];
+    if (provider.isMockFallback?.()) {
+      throw new Error(
+        `Embedding provider for '${modelName}' is a mock fallback`,
+      );
+    }
+    return embedding;
   };
 }
 

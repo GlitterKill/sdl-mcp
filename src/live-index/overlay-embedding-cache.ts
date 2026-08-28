@@ -20,6 +20,11 @@ class OverlayEmbeddingCache {
   private cache = new Map<string, Map<string, CachedEmbedding>>();
   // symbolId -> model -> CachedEmbedding
 
+  constructor(
+    private readonly resolveProvider: typeof getEmbeddingProvider =
+      getEmbeddingProvider,
+  ) {}
+
   /**
    * Get cached embedding for a symbol and model.
    * Returns null if not cached.
@@ -46,10 +51,12 @@ class OverlayEmbeddingCache {
 
     for (const [modelName] of Object.entries(EMBEDDING_MODELS)) {
       try {
-        const provider = getEmbeddingProvider(providerType, modelName);
+        const provider = this.resolveProvider(providerType, modelName);
+        await provider.initialize?.();
         if (provider.isMockFallback?.()) continue;
 
         const embeddings = await provider.embed([searchText]);
+        if (provider.isMockFallback?.()) continue;
         if (!embeddings[0] || embeddings[0].length === 0) continue;
 
         let modelCache = this.cache.get(symbolId);

@@ -390,5 +390,66 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
+  it("initializes embedding providers before persistence prepasses and keeps post-embed mock guards", () => {
+    const symbolSource = readSource("src/indexer/embeddings.ts");
+    const symbolStart = symbolSource.indexOf(
+      "export async function refreshSymbolEmbeddings(",
+    );
+    const symbolEnd = symbolSource.indexOf("\nexport ", symbolStart + 1);
+    const symbolBody = symbolSource.slice(
+      symbolStart,
+      symbolEnd === -1 ? symbolSource.length : symbolEnd,
+    );
+    const symbolInitialize = symbolBody.indexOf("await provider.initialize?.()");
+    const symbolConnection = symbolBody.indexOf("await getLadybugConn()");
+    const symbolCachePrepass = symbolBody.indexOf("getSymbolVectorEmbeddings(");
+    const symbolHashPrepass = symbolBody.indexOf(
+      "buildCardHash(symbol, prefixedText)",
+    );
+
+    assert.ok(
+      symbolInitialize !== -1 && symbolInitialize < symbolConnection,
+      "Symbol provider must initialize before LadybugDB opens",
+    );
+    assert.ok(
+      symbolInitialize < symbolCachePrepass &&
+        symbolInitialize < symbolHashPrepass,
+      "Symbol provider must initialize before cache and hash prepasses",
+    );
+    assert.match(
+      symbolBody,
+      /provider\.embed\(batchTexts\)[\s\S]*provider\.isMockFallback\?\.\(\)/,
+      "Symbol persistence must retain its post-embed mock guard",
+    );
+
+    const fileSource = readSource("src/indexer/file-summary-embeddings.ts");
+    const fileStart = fileSource.indexOf(
+      "export async function refreshFileSummaryEmbeddings(",
+    );
+    const fileEnd = fileSource.indexOf("\nexport ", fileStart + 1);
+    const fileBody = fileSource.slice(
+      fileStart,
+      fileEnd === -1 ? fileSource.length : fileEnd,
+    );
+    const fileInitialize = fileBody.indexOf("await provider.initialize?.()");
+    const fileConnection = fileBody.indexOf("await getLadybugConn()");
+    const fileCachePrepass = fileBody.indexOf("inspectSummaries(summaries)");
+    const fileHashPrepass = fileBody.indexOf("const cardHash = hashContent(");
+
+    assert.ok(
+      fileInitialize !== -1 && fileInitialize < fileConnection,
+      "FileSummary provider must initialize before LadybugDB opens",
+    );
+    assert.ok(
+      fileInitialize < fileCachePrepass && fileInitialize < fileHashPrepass,
+      "FileSummary provider must initialize before cache and hash prepasses",
+    );
+    assert.match(
+      fileSource,
+      /const vectors = await provider\.embed\([\s\S]*provider\.isMockFallback\?\.\(\)/,
+      "FileSummary persistence must retain its post-embed mock guard",
+    );
+  });
+
 
 });

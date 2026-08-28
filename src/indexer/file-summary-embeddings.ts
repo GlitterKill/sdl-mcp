@@ -70,6 +70,7 @@ export async function refreshFileSummaryEmbeddings(params: {
   const provider =
     params.embeddingProvider ??
     getEmbeddingProvider(params.provider, params.model);
+  await provider.initialize?.();
   const conn = await getLadybugConn();
 
   const summaries =
