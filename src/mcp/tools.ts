@@ -5327,7 +5327,7 @@ const PROJECTED_SUCCESS_SCHEMA_BY_ACTION: Readonly<
   workflowContinuationGet: [
     z
       .object({
-        data: z.array(z.unknown()),
+        data: z.unknown(),
         hasMore: z.boolean(),
         nextOffset: z.number().int().nonnegative().optional(),
       })

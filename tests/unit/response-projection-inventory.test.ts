@@ -870,6 +870,53 @@ describe("response projection inventory", () => {
     assert.deepEqual(failures, []);
   });
 
+  it("accepts scalar data from a default workflow continuation", () => {
+    const workflowRegistration = capturePublicToolRegistrations({
+      enabled: true,
+      exclusive: true,
+    }).find(({ name }) => name === "sdl.workflow");
+    assert.ok(workflowRegistration);
+    const workflowOutputSchema = exhaustiveOutputSchema(workflowRegistration);
+    assert.ok(workflowOutputSchema);
+
+    const workflowArgs = {
+      repoId: "projection-fixture",
+      steps: [{
+        fn: "workflowContinuationGet",
+        args: { handle: "cont-projection-fixture" },
+      }],
+    };
+    const projected = projectToolResultForModelContent(
+      "sdl.workflow",
+      {
+        results: [{
+          stepIndex: 0,
+          fn: "workflowContinuationGet",
+          status: "ok",
+          result: {
+            data: '{"results":[]}',
+            totalTokens: 4,
+            hasMore: true,
+            nextOffset: 100,
+          },
+        }],
+      },
+      workflowArgs,
+    );
+
+    assert.deepEqual(projected, {
+      results: [{
+        fn: "workflowContinuationGet",
+        result: {
+          data: '{"results":[]}',
+          hasMore: true,
+          nextOffset: 100,
+        },
+      }],
+    });
+    assert.deepEqual(workflowOutputSchema.parse(projected), projected);
+  });
+
   it("rejects arbitrary response content schemas and incoherent continuations", () => {
     const registrations = capturePublicToolRegistrations();
     const responseRegistration = registrations.find(

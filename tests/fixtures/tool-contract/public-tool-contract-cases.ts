@@ -3543,7 +3543,7 @@ export const PUBLIC_TOOL_CONTRACT_CASES: readonly PublicToolContractCase[] = [
       ],
       outputArms: [
         "workflowContinuationGet.output.union:required(data:unknown,hasMore:boolean,totalTokens:number);fields(data:unknown,hasMore:boolean,nextOffset:number,totalTokens:number)",
-        "workflowContinuationGet.output.union:required(data:unknown[],hasMore:boolean);fields(data:unknown[],hasMore:boolean,nextOffset:number)",
+        "workflowContinuationGet.output.union:required(data:unknown,hasMore:boolean);fields(data:unknown,hasMore:boolean,nextOffset:number)",
       ],
       options: [
         "action.codeMode:workflowContinuationGet",
