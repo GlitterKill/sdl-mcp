@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Install both Jina ONNX graphs, select FP16 for automatic DirectML indexing and quantized Jina for deterministic or CPU execution, prevent cross-variant cache reuse, and activate the verified global installation without touching the graph database.
+**Goal:** Install both Jina ONNX graphs, select FP16 for automatic Windows DirectML indexing and quantized Jina for deterministic, CPU, or non-Windows automatic execution, prevent cross-variant cache reuse, and activate the verified global installation without touching the graph database.
 
-**Architecture:** Add one pure candidate resolver to the existing model registry and let the existing ONNX session boundary try those candidates before returning an initialized identity. Symbol and FileSummary persistence append the resolved Jina artifact identity to their existing hashes, while retrieval keeps deterministic quantized CPU sessions. The existing postinstall cache, provider policy, and model registry remain the only artifact and runtime owners.
+**Architecture:** Add one pure candidate resolver to the existing model registry and let the existing ONNX session boundary try those candidates before returning an initialized identity. The resolver gates automatic DirectML FP16 candidates on the Windows runtime platform before the session helper filters unsupported providers. Symbol and FileSummary persistence append the resolved Jina artifact identity to their existing hashes, while retrieval keeps deterministic quantized CPU sessions. The existing postinstall cache, provider policy, and model registry remain the only artifact and runtime owners.
 
 **Tech Stack:** TypeScript, Node.js 24 `node:test`, ONNX Runtime Node.js 1.24.3, native `tokenizers`, PowerShell, existing model cache and postinstall scripts.
 
@@ -20,14 +20,14 @@
 - Preserve the current retained-HNSW worktree changes. `src/indexer/embeddings.ts`, `tests/unit/semantic-pipeline-regressions.test.ts`, `CHANGELOG.md`, and several target docs are already modified; inspect and stage only this feature's hunks.
 - Build `dist` before focused tests that import compiled modules.
 - Keep `semantic.modelVariant` as the existing optional string. Omitted and literal `default` are automatic only for Jina; no new config field or dependency is allowed.
-- Keep the existing execution-provider normalization, including its final CPU session provider. Variant fallback eligibility uses the raw normalized configured order: only adjacent `dml,cpu` produces a second quantized candidate.
+- Keep the existing execution-provider normalization, including its final CPU session provider. Variant fallback eligibility uses the configured order before session-layer platform filtering: only Windows automatic adjacent `dml,cpu` produces a second quantized candidate.
 - Keep Nomic selection and persisted hashes unchanged. Do not change LadybugDB schema, row IDs, vector property names, HNSW lifecycle, or MCP response contracts.
 - Use the cached FP16 artifact's verified SHA-256 `1aafc4fcd63d2e6899e88402ff731e7c646c2e435048294a3cbc908a40d45d7c` and the existing pinned Jina revision `516f4baf13dec4ddddda8631e019b5737c8bc250`.
 - Commit locally only. Do not push. Before each commit, run `git diff --cached --check` and confirm the staged name list excludes pre-existing HNSW hunks.
 
 ## File map
 
-- Modify `src/indexer/model-registry.ts`: resolve ordered automatic/explicit Jina candidates and canonical artifact cache keys.
+- Modify `src/indexer/model-registry.ts`: resolve ordered automatic/explicit Jina candidates, gate automatic DirectML FP16 on Windows, and return canonical artifact cache keys.
 - Modify `src/indexer/embeddings-local.ts`: include candidate identity in session caching, try the adjacent CPU candidate once, and return the initialized identity.
 - Modify `src/indexer/embeddings.ts`: initialize local providers before persistence and add the Jina artifact key to Symbol hashes.
 - Modify `src/indexer/file-summary-embeddings.ts`: initialize providers before cache inspection and add the same key to Jina FileSummary hashes.
@@ -1099,3 +1099,367 @@ Report:
 - any intentionally unstaged overlapping documentation/source hunks.
 
 Do not claim a full-index performance result. A full CPU/DML index remains separately gated by explicit index-refresh authorization.
+
+## Chunk 4: Cross-platform automatic-variant guard
+
+### Task 10: Select automatic DirectML FP16 only on Windows
+
+**Files:**
+
+- Modify: `tests/unit/model-registry.test.ts:21-110`
+- Modify: `tests/unit/embedding-session-candidates.test.ts:20-287`
+- Verify: `tests/unit/embeddings-execution-providers.test.ts`
+- Modify: `tests/unit/embeddings-config-knobs.test.ts:131-154`
+- Modify: `src/indexer/model-registry.ts:311-338`
+- Modify: `src/indexer/embeddings-local.ts:90-100,193-221`
+- Modify: `src/config/types.ts:657-703`
+- Modify: `config/sdlmcp.config.schema.json:987-998`
+- Modify provider/model sentences only: `CHANGELOG.md`, `docs/architecture.md`,
+  `docs/configuration-reference.md`,
+  `docs/feature-deep-dives/semantic-embeddings-setup.md`, and
+  `docs/feature-deep-dives/semantic-engine.md`
+- Modify provider/model sentence only: `src/indexer/AGENTS.md`
+
+- [ ] **Step 1: Add failing platform-selection rows**
+
+Make the existing candidate table platform-explicit. Add `platform: "win32"` to
+the existing automatic DirectML cases so they remain byte-stable on Linux and
+Windows CI. Add these non-Windows cases:
+
+```typescript
+{
+  name: "Jina automatic Linux ignores copied DML order",
+  input: {
+    name: "jina-embeddings-v2-base-code",
+    requestedVariant: "default",
+    deterministic: false,
+    requestedProviders: ["dml", "cpu"],
+    platform: "linux" as const,
+  },
+  expected: [["default", "model_quantized.onnx", ["dml", "cpu"]]],
+},
+{
+  name: "Jina automatic macOS ignores copied DML order",
+  input: {
+    name: "jina-embeddings-v2-base-code",
+    deterministic: false,
+    requestedProviders: ["dml", "cpu"],
+    platform: "darwin" as const,
+  },
+  expected: [["default", "model_quantized.onnx", ["dml", "cpu"]]],
+},
+```
+
+For both `linux` and `darwin`, add explicit `fp16` and `int8` rows with the same
+configured `dml,cpu` order. Expect `fp16/model_fp16.onnx` and
+`int8/model_quantized.onnx` respectively, proving the guard changes automatic
+mode only.
+
+Add session-level test inputs containing `runtimePlatform: "linux"` and
+`runtimePlatform: "darwin"` and record the loaded automatic `dml,cpu`
+candidate. Expect one quantized candidate on each platform, calling
+`resetLocalEmbeddingRuntime()` between rows. Set `runtimePlatform: "win32"` in
+existing automatic DirectML session test inputs so their fallback contract does
+not depend on the CI host. Step 1 changes tests only; the option is intentionally
+absent from production until Step 3.
+
+- [ ] **Step 2: Build the unchanged source and verify RED**
+
+```powershell
+npm run build:all
+node --experimental-strip-types --test-concurrency=1 --test tests/unit/model-registry.test.ts tests/unit/embedding-session-candidates.test.ts
+```
+
+Expected: FAIL because the current resolver ignores `platform` and the current
+session options do not propagate `runtimePlatform`; non-Windows automatic
+`dml,cpu` selects FP16.
+
+- [ ] **Step 3: Add the minimum shared guard**
+
+Extend only the existing resolver input and condition:
+
+```typescript
+export function resolveEmbeddingModelCandidates({
+  name,
+  requestedVariant,
+  deterministic,
+  requestedProviders,
+  platform = process.platform,
+}: {
+  name: string;
+  requestedVariant?: string;
+  deterministic: boolean;
+  requestedProviders?: readonly string[];
+  platform?: NodeJS.Platform;
+}): EmbeddingModelCandidate[] {
+  // existing setup remains unchanged
+  if (
+    platform === "win32" &&
+    automatic &&
+    !deterministic &&
+    effectiveProviders[0] === "dml"
+  ) {
+    // existing FP16 and adjacent CPU candidates remain unchanged
+  }
+}
+```
+
+Add one documented internal field to the existing session options and pass it
+through; do not add a public config field or platform detector:
+
+```typescript
+/** @internal Focused override for runtime-platform selection tests. */
+runtimePlatform?: NodeJS.Platform;
+
+const candidates = resolveEmbeddingModelCandidates({
+  name: modelName,
+  requestedVariant,
+  deterministic: options.deterministic === true,
+  requestedProviders,
+  platform: options.runtimePlatform,
+});
+```
+
+- [ ] **Step 4: Verify GREEN before documentation edits**
+
+```powershell
+npm run build:all
+node --experimental-strip-types --test-concurrency=1 --test tests/unit/model-registry.test.ts tests/unit/embedding-session-candidates.test.ts
+```
+
+Expected: both files pass. The Windows rows retain FP16/fallback behavior; the
+Linux/macOS automatic rows select quantized; explicit variants remain unchanged.
+
+- [ ] **Step 5: Add the failing documentation contract assertion**
+
+Extend the existing source/generated description test:
+
+```typescript
+assert.strictEqual(sourceDescription, generatedDescription);
+assert.match(description, /Windows[^.]*DirectML-first[^.]*FP16/i);
+assert.match(description, /non-Windows[^.]*quantized/i);
+assert.match(description, /adjacent[^.]*dml[^.]*cpu[^.]*fallback/i);
+assert.match(description, /deterministic[^.]*CPU[^.]*quantized/i);
+assert.match(description, /explicit[^.]*authoritative/i);
+```
+
+Run:
+
+```powershell
+node --experimental-strip-types --test-concurrency=1 --test tests/unit/embeddings-config-knobs.test.ts
+```
+
+Expected: FAIL because the current public descriptions do not state the Windows
+boundary or copied-config behavior.
+
+- [ ] **Step 6: Synchronize public wording without changing defaults**
+
+The repository has no config-schema generator. Update the Zod description and
+tracked JSON schema description together, then use Step 5's exact equality
+assertion as the drift guard. Preserve every approved rule:
+
+```text
+Automatic Jina selects FP16 only for a non-deterministic Windows DirectML-first
+request. Non-Windows automatic requests remain quantized even if a copied
+provider order starts with DML. Only configured adjacent dml,cpu adds the
+quantized CPU fallback candidate. Deterministic and CPU sessions use quantized.
+Explicit non-default variants remain authoritative.
+```
+
+Apply the same contract to every provider/model sentence found by:
+
+```powershell
+rg -n "DirectML.*FP16|FP16.*DirectML|DML.*FP16|provider-aware automatic|automatic.*DirectML" src/config/types.ts src/indexer/AGENTS.md config/sdlmcp.config.schema.json docs CHANGELOG.md --glob '*.md' --glob '*.ts' --glob '*.json'
+```
+
+Do not change `executionProviders` defaults, add platform-specific example
+configs, or alter installer behavior. Inspect each already-dirty documentation
+diff before editing and preserve retained-HNSW wording exactly.
+
+- [ ] **Step 7: Run the scoped source gates**
+
+Run focused database-free verification. `@test-scope` normally maps any
+`src/config/**` edit to `npm test`; this change edits description text only, so
+the exact source/generated equality test plus config/schema sync checks replace
+that broad database-initializing gate. Skip the full `npm test` intentionally;
+the runtime branch is covered by the resolver/session tests, and provider
+filtering remains covered by `embeddings-execution-providers.test.ts`.
+
+```powershell
+npm run build:all
+node --experimental-strip-types --test-concurrency=1 --test tests/unit/model-registry.test.ts tests/unit/embedding-session-candidates.test.ts tests/unit/embeddings-execution-providers.test.ts tests/unit/embeddings-config-knobs.test.ts tests/unit/config-surface-sync.test.ts
+npm run typecheck
+npm run lint
+npm run check:config-sync
+npm run check:schema-sync
+npm run test:harness
+git diff --check
+```
+
+Expected: every command exits `0`. Lint may report only the repository's existing
+warning baseline; it must report zero errors.
+
+- [ ] **Step 8: Commit only the guard and its documentation hunks**
+
+Stage clean code/config/test paths normally. Use interactive hunk staging for
+the already-dirty changelog and documentation paths:
+
+```powershell
+git add src/indexer/model-registry.ts src/indexer/embeddings-local.ts src/config/types.ts config/sdlmcp.config.schema.json tests/unit/model-registry.test.ts tests/unit/embedding-session-candidates.test.ts tests/unit/embeddings-config-knobs.test.ts
+git add -p CHANGELOG.md src/indexer/AGENTS.md docs/architecture.md docs/configuration-reference.md docs/feature-deep-dives/semantic-embeddings-setup.md docs/feature-deep-dives/semantic-engine.md
+git diff --cached --check
+git diff --cached --name-status
+git diff --cached
+git commit -m "fix(embeddings): guard automatic Jina FP16 by platform"
+```
+
+Before committing, prove no retained-HNSW line is staged. If any new wording
+cannot be isolated from an HNSW hunk, leave that file unstaged and report the
+boundary instead of contaminating the commit.
+
+### Task 11: Refresh and verify the current global copy
+
+**Files:**
+
+- Install from: current checkout
+- Verify: global `dist/indexer/model-registry.js` and
+  `dist/indexer/embeddings-local.js`
+- Preserve: `F:\Claude\sdl-mcp\sdlmcp.config.json`, configured LadybugDB, and
+  stopped HTTP server
+
+- [ ] **Step 1: Capture the operational baseline**
+
+Require the target Windows host, then reuse the exact process and graph snapshot
+shape from Task 8 Step 3:
+
+```powershell
+if ((node -p "process.platform").Trim() -ne 'win32') {
+  throw 'Global DirectML activation is Windows-only'
+}
+
+$configPath = 'F:\Claude\sdl-mcp\sdlmcp.config.json'
+
+function Get-SdlHttpProcesses {
+  @(Get-CimInstance Win32_Process | Where-Object {
+    if ($_.ProcessId -eq $PID) { return $false }
+    if ($_.Name -notmatch '^(?i:node(?:\.exe)?|sdl-mcp(?:\.exe)?)$') { return $false }
+    $line = [string]$_.CommandLine
+    $entrypoint =
+      $line -match '(?i)(?:^|[\s"])(?:sdl-mcp(?:\.cmd|\.ps1|\.exe)?)(?=[\s"]|$)' -or
+      $line -match '(?i)(?:^|[\s"])(?:"?[^"\r\n]*[\\/])?dist[\\/]cli[\\/]index\.js(?=["\s]|$)'
+    $serverMode =
+      $line -match '(?i)\bserve\b' -or
+      $line -match '(?i)(--http\b|--transport(?:=|\s+)http\b)'
+    $entrypoint -and $serverMode
+  } | Select-Object ProcessId, Name, CommandLine)
+}
+
+$active = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+$configuredGraphPath = [string]$active.graphDatabase.path
+if ([string]::IsNullOrWhiteSpace($configuredGraphPath)) {
+  throw 'Active config has no graphDatabase.path'
+}
+$graphPath = [System.IO.Path]::GetFullPath($configuredGraphPath)
+
+function Get-GraphFootprint {
+  $graphDirectory = [System.IO.Path]::GetDirectoryName($graphPath)
+  $graphLeaf = [System.IO.Path]::GetFileName($graphPath)
+  $sidecars = @(Get-ChildItem -LiteralPath $graphDirectory -Force | Where-Object {
+    $_.Name.StartsWith($graphLeaf, [System.StringComparison]::OrdinalIgnoreCase) -and
+    $_.Name -match '(?i)(wal|lock)'
+  } | Select-Object -ExpandProperty FullName)
+  @($graphPath) + $sidecars | Sort-Object -Unique | ForEach-Object {
+    $item = Get-Item -LiteralPath $_ -Force
+    [ordered]@{
+      FullName = $item.FullName
+      Exists = $true
+      Kind = if ($item.PSIsContainer) { 'Directory' } else { 'File' }
+      Length = if ($item.PSIsContainer) { $null } else { $item.Length }
+      LastWriteTimeUtc = $item.LastWriteTimeUtc.ToString('o')
+    }
+  }
+}
+
+$baseline = [ordered]@{
+  ConfigSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $configPath).Hash
+  Providers = @($active.semantic.executionProviders)
+  ModelVariantPresent = $null -ne $active.semantic.PSObject.Properties['modelVariant']
+  Graph = @(Get-GraphFootprint)
+  Http = @(Get-SdlHttpProcesses)
+}
+if ($baseline.Http.Count -ne 0) { throw 'SDL-MCP HTTP server is running' }
+```
+
+Clear `SDL_GRAPH_DB_PATH`, `SDL_GRAPH_DB_DIR`, and `SDL_DB_PATH` only inside any
+config-validation child process because this Codex host carries a stale
+process-only override. Stop on any unexpected baseline value or process-query
+failure; request the existing read-only Windows process approval if CIM access
+is denied.
+
+- [ ] **Step 2: Install the built checkout as the existing normal package copy**
+
+```powershell
+npm install -g --install-links .
+if ($LASTEXITCODE -ne 0) { throw 'Global package install failed' }
+$jinaGlobalRoot = Join-Path ((npm root -g).Trim()) 'sdl-mcp'
+$globalItem = Get-Item -LiteralPath $jinaGlobalRoot -Force
+if (
+  $globalItem.LinkType -or
+  (($globalItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+) {
+  throw 'Global package must be a normal copied directory, not a reparse point'
+}
+```
+
+Expected: exit `0`; the installed package is a normal directory, not a junction
+to this checkout. Do not change the active config or model cache manifest.
+
+- [ ] **Step 3: Verify local/global parity and model artifacts**
+
+```powershell
+foreach ($relativePath in @(
+  'dist\indexer\model-registry.js',
+  'dist\indexer\embeddings-local.js'
+)) {
+  $localHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $relativePath).Hash
+  $globalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $jinaGlobalRoot $relativePath)).Hash
+  if ($localHash -ne $globalHash) {
+    throw "Local/global hash mismatch: $relativePath"
+  }
+}
+
+node (Join-Path $jinaGlobalRoot 'scripts\postinstall-models.mjs') --strict
+if ($LASTEXITCODE -ne 0) { throw 'Strict global model verification failed' }
+```
+
+Expected: both local/global pairs match. The existing FP16 and quantized Jina
+hashes pass without changing their pinned files.
+
+- [ ] **Step 4: Re-run database-free Windows acceptance**
+
+```powershell
+node scripts/probe-jina-gpu-aware-default.mjs --module-root $jinaGlobalRoot
+if ($LASTEXITCODE -ne 0) { throw 'Global Jina acceptance probe failed' }
+```
+
+Expected: exit `0`; Windows automatic `dml,cpu` still reports FP16/DirectML,
+deterministic CPU reports quantized, fallback reports quantized/CPU, every vector
+gate passes, and minimum paired cosine remains at least `0.985`. Timing remains
+diagnostic only.
+
+- [ ] **Step 5: Prove operational invariance**
+
+Recreate `$active`, `$baseline`'s five fields, and `Get-GraphFootprint` without
+opening LadybugDB. Serialize both baseline and current values with
+`ConvertTo-Json -Depth 8 -Compress` and require ordinal string equality.
+
+Expected: config SHA, `dml,cpu`, omitted `modelVariant`, graph/WAL/lock metadata,
+and zero HTTP processes all match Step 1 exactly; no index or graph file was
+opened or mutated.
+
+- [ ] **Step 6: Report the bounded result**
+
+Report the platform matrix, focused gate counts, global parity, live Windows
+probe identity, unchanged config/graph/server state, retained-HNSW preservation,
+local commits, and no push. Do not claim Linux/macOS live acceptance; those paths
+are deterministic unit coverage until their CI jobs run.

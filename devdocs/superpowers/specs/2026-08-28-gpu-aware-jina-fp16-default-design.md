@@ -256,8 +256,10 @@ choice is described, and the Unreleased changelog. The documentation must state:
   requires a separately initiated semantic rebuild.
 
 Documentation edits must preserve the unrelated retained-HNSW work already in
-the dirty worktree. Generated config artifacts must be rebuilt through their
-existing scripts rather than edited independently.
+the dirty worktree. The repository has no config-schema generator, so update the
+tracked JSON description beside the Zod source description and enforce exact
+string equality with the existing focused config test. Run the config and
+schema sync checks after the paired edit.
 
 ## Activation Sequence
 
