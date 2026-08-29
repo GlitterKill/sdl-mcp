@@ -402,10 +402,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
         const result = await handleRuntimeExecute({
           repoId,
           runtime: "powershell",
-          executable:
-            expected.name === "non-terminating cmdlet error"
-              ? "powershell.exe"
-              : "pwsh.exe",
+          executable: "pwsh.exe",
           code: expected.code,
           persistOutput: false,
           outputMode: "minimal",

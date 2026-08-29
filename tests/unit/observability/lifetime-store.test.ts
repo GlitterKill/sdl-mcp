@@ -3,6 +3,7 @@ import {
   lstat,
   mkdtemp,
   readFile,
+  realpath,
   readdir,
   rm,
   unlink,
@@ -50,7 +51,9 @@ function root(generation: number, updatedAt = ISO_1): DurableLifetimeRoot {
 }
 
 async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "sdl-lifetime-store-"));
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "sdl-lifetime-store-")),
+  );
   temporaryDirectories.push(directory);
   return directory;
 }

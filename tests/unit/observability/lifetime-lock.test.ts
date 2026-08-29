@@ -45,7 +45,9 @@ const children = new Set<ChildProcessWithoutNullStreams>();
 const WORKER_TIMEOUT_MS = 5_000;
 
 async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "sdl-lifetime-lock-"));
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "sdl-lifetime-lock-")),
+  );
   temporaryDirectories.push(directory);
   return directory;
 }

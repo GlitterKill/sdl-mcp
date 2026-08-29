@@ -8,6 +8,7 @@ import {
   mkdtemp,
   open,
   readFile,
+  realpath,
   readdir,
   rename,
   rm,
@@ -55,7 +56,9 @@ function serialized(value: DurableLifetimeRoot): string {
 }
 
 async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "sdl-lifetime-publication-"));
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "sdl-lifetime-publication-")),
+  );
   temporaryDirectories.push(directory);
   return directory;
 }

@@ -8,6 +8,7 @@
 import { access, mkdtemp, realpath, writeFile, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
+import { stripVTControlCharacters } from "util";
 import { z } from "zod";
 import type { ToolContext } from "../../server.js";
 import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
@@ -301,6 +302,8 @@ const POWERSHELL_STDERR_ERROR_PATTERNS: RegExp[] = [
   /FullyQualifiedErrorId\s*:/,
   /\+\s*CategoryInfo\s*:/,
   /^At line:\d+ char:\d+/m,
+  // PowerShell 7 ConciseView after VT control sequences are stripped.
+  /^[^:\r\n]+:\s+.+\.ps1:\d+(?::\d+)?$/m,
   /is not recognized as (?:the name of )?a cmdlet/i,
   /cannot be retrieved because it has not been set/i,
   /Exception calling ["'][^"']+["']/,
@@ -308,8 +311,9 @@ const POWERSHELL_STDERR_ERROR_PATTERNS: RegExp[] = [
 
 export function detectPowerShellStderrErrors(stderr: string): boolean {
   if (!stderr) return false;
+  const normalized = stripVTControlCharacters(stderr);
   return POWERSHELL_STDERR_ERROR_PATTERNS.some((pattern) =>
-    pattern.test(stderr),
+    pattern.test(normalized),
   );
 }
 

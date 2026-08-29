@@ -123,6 +123,12 @@ describe("SDL tool QA regressions", () => {
       true,
     );
     assert.equal(
+      detectPowerShellStderrErrors(
+        "\u001b[31;1mGet-Item: \u001b[0mC:\\Temp\\code.ps1:1\u001b[0m",
+      ),
+      true,
+    );
+    assert.equal(
       detectPowerShellStderrErrors("WARNING: package deprecated\n"),
       false,
     );

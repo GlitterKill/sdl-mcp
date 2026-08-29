@@ -156,6 +156,38 @@ Result:
 # fail 0
 ```
 
+### 2026-08-28: Stale Artifact and Windows Test-Environment Regressions
+
+Run `33228840410` failed in jobs `99037773532` (`tests (ubuntu-latest, 24.x)`)
+and `99037773651` (`tests (windows-latest, 24.x)`), step
+`Run tests (including 6 new language adapters + cross-platform paths)`, on
+commit `af4783ba77e63e62a4b29a204fc3bb7b67b0e1ff` from `main`. Build,
+typecheck, lint, config sync, security audit, native, and benchmark jobs passed.
+
+Confirmed causes and fixes:
+
+- `seed-resolution-evaluation.test.ts` failed on both platforms because commit
+  `6a49d8b2` changed `src/retrieval/orchestrator.ts` without regenerating the
+  checked source hash. `npm run benchmark:seed-resolution` refreshed the
+  deterministic artifact.
+- `semantic-pipeline-regressions.test.ts` used LF-only multiline `indexOf`
+  needles against a CRLF Windows checkout. Its shared source reader now
+  normalizes CRLF and lone CR to LF before structural assertions.
+- `mcp-runtime-tool.test.ts` selected hosted Windows PowerShell 5 for one case,
+  reintroducing the 30-second hang previously avoided by commit `a4625045`.
+  The case now uses `pwsh.exe`; the existing stderr detector strips VT control
+  sequences and recognizes PowerShell 7's concise `.ps1:<line>` error record.
+
+The remaining Windows-only lifetime failures were traced with high confidence
+to `%TEMP%` using the `RUNNER~1` short-path alias. The production lifetime
+validator correctly rejects a requested path whose `realpath` differs, so the
+three test helpers now canonicalize each fresh `mkdtemp` directory with
+`realpath`. The production security boundary was not relaxed.
+
+Focused local verification passed 213/213 tests across the seven affected test
+files. Hosted validation of all four fixes is still pending; no workflow YAML
+change was needed.
+
 ## Local Reproduction Caveats
 
 Use the same Node major version as CI when you investigate native crashes. CI runs Node `20.x`, and local reproductions become unreliable if `node_modules` contains native artifacts built under Node `22`.

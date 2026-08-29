@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 function readSource(path: string): string {
-  return readFileSync(join(process.cwd(), path), "utf8");
+  return readFileSync(join(process.cwd(), path), "utf8").replace(
+    /\r\n?/g,
+    "\n",
+  );
 }
 
 describe("semantic pipeline regressions", () => {
