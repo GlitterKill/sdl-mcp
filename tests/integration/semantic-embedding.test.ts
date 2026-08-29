@@ -219,6 +219,19 @@ describe("Semantic Embedding Pipeline", () => {
     return vector;
   }
 
+  function makeBoundarySymbols(count: number): ladybugDb.SymbolRow[] {
+    return Array.from({ length: count }, (_, index) => ({
+      ...symbols[0],
+      symbolId: `sym-boundary-${index}`,
+      name: `boundarySymbol${index}`,
+      rangeStartLine: 100 + index * 2,
+      rangeEndLine: 101 + index * 2,
+      astFingerprint: `fp-boundary-${index}`,
+      signatureJson: JSON.stringify(`(value${index}: string) => string`),
+      summary: `Boundary lifecycle symbol ${index}`,
+    }));
+  }
+
   async function upsertStandardFileSummaries(
     conn: Awaited<ReturnType<typeof getLadybugConn>>,
     updatedAt = "2026-05-05T00:00:00Z",
@@ -891,7 +904,7 @@ describe("Semantic Embedding Pipeline", () => {
     );
   });
 
-  it("bootstraps HNSW and rebuilds it during incremental refresh", async () => {
+  it("bootstraps HNSW and retains it during one-row incremental refresh", async () => {
     const { provider: recordingProvider } = createRecordingProvider();
     let embeddingCallsStarted = 0;
     let releaseConcurrentCalls!: () => void;
@@ -1021,14 +1034,8 @@ describe("Semantic Embedding Pipeline", () => {
           "checkpoint.post",
         ].includes(phaseName),
       ),
-      [
-        "checkpoint.pre",
-        "hnsw.drop",
-        "inference",
-        "hnsw.create",
-        "checkpoint.post",
-      ],
-      "incremental Symbol writes must run with the shared-table HNSW absent",
+      ["inference"],
+      "one-row Symbol writes must retain the shared-table HNSW",
     );
     assert.strictEqual(await countSymbolVectorRows(conn), rowCountBefore);
 
@@ -1050,6 +1057,113 @@ describe("Semantic Embedding Pipeline", () => {
     assert.strictEqual(await countSymbolVectorRows(reopenedConn), rowCountBefore);
     neighbor = await queryJinaNeighbor(reopenedConn, changedVector);
     assert.strictEqual(neighbor.symbolId, changedSymbol.symbolId);
+    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
+  });
+
+  it("retains HNSW through 50 changed rows and rebuilds it at 51", async () => {
+    const boundarySymbols = makeBoundarySymbols(51);
+    const conn = await getLadybugConn();
+    for (const symbol of boundarySymbols) {
+      await ladybugDb.upsertSymbol(conn, symbol);
+    }
+
+    const { provider } = createRecordingProvider();
+    await refreshSymbolEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      embeddingProvider: provider,
+      batchSize: 16,
+      concurrency: 1,
+    });
+    const rowCountBefore = await countSymbolVectorRows(conn);
+
+    const retainedSymbols = boundarySymbols.slice(0, 50).map((symbol, index) => ({
+      ...symbol,
+      signatureJson: JSON.stringify(
+        `(value${index}: string, retained: true) => string`,
+      ),
+    }));
+    const retainedPhases: string[] = [];
+    const retained = await refreshSymbolEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      symbols: retainedSymbols,
+      embeddingProvider: provider,
+      batchSize: 16,
+      concurrency: 1,
+      recordTiming: (phaseName) => retainedPhases.push(phaseName),
+    });
+    assert.deepStrictEqual(retained, { embedded: 50, skipped: 0 });
+    assert.equal(
+      retainedPhases.some((phaseName) =>
+        ["checkpoint.pre", "hnsw.drop", "hnsw.create", "checkpoint.post"].includes(
+          phaseName,
+        ),
+      ),
+      false,
+      "50 changed vectors must keep the live HNSW",
+    );
+
+    const retainedRow = await ladybugDb.querySingle<{ vector: unknown }>(
+      conn,
+      `MATCH (e:SymbolVectorEmbedding {embeddingId: $embeddingId})
+       RETURN e.embeddingJinaCodeVec AS vector`,
+      { embeddingId: `${jinaModel}:${retainedSymbols[0].symbolId}` },
+    );
+    assert.ok(Array.isArray(retainedRow?.vector));
+    let neighbor = await queryJinaNeighbor(conn, retainedRow.vector as number[]);
+    assert.strictEqual(neighbor.symbolId, retainedSymbols[0].symbolId);
+    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
+
+    const bulkSymbols = boundarySymbols.map((symbol, index) => ({
+      ...symbol,
+      signatureJson: JSON.stringify(
+        `(value${index}: string, bulk: true, revision: 2) => string`,
+      ),
+    }));
+    const bulkPhases: string[] = [];
+    const bulk = await refreshSymbolEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      symbols: bulkSymbols,
+      embeddingProvider: provider,
+      batchSize: 16,
+      concurrency: 1,
+      recordTiming: (phaseName) => bulkPhases.push(phaseName),
+    });
+    assert.deepStrictEqual(bulk, { embedded: 51, skipped: 0 });
+    assert.deepStrictEqual(
+      bulkPhases.filter((phaseName) =>
+        ["checkpoint.pre", "hnsw.drop", "hnsw.create", "checkpoint.post"].includes(
+          phaseName,
+        ),
+      ),
+      ["checkpoint.pre", "hnsw.drop", "hnsw.create", "checkpoint.post"],
+      "51 changed vectors must use the bulk HNSW safety lane",
+    );
+    assert.strictEqual(await countSymbolVectorRows(conn), rowCountBefore);
+
+    const bulkRow = await ladybugDb.querySingle<{ vector: unknown }>(
+      conn,
+      `MATCH (e:SymbolVectorEmbedding {embeddingId: $embeddingId})
+       RETURN e.embeddingJinaCodeVec AS vector`,
+      { embeddingId: `${jinaModel}:${bulkSymbols[0].symbolId}` },
+    );
+    assert.ok(Array.isArray(bulkRow?.vector));
+    const bulkVector = bulkRow.vector as number[];
+    neighbor = await queryJinaNeighbor(conn, bulkVector);
+    assert.strictEqual(neighbor.symbolId, bulkSymbols[0].symbolId);
+    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
+
+    await closeLadybugDb({ strict: true });
+    await initLadybugDb(graphDbPath);
+    const reopenedConn = await getLadybugConn();
+    assert.strictEqual(await countSymbolVectorRows(reopenedConn), rowCountBefore);
+    neighbor = await queryJinaNeighbor(reopenedConn, bulkVector);
+    assert.strictEqual(neighbor.symbolId, bulkSymbols[0].symbolId);
     assert.ok(Math.abs(neighbor.distance) <= 1e-6);
   });
 

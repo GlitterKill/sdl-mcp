@@ -57,6 +57,13 @@ export const EMBEDDING_DIMENSION = 64;
  */
 export const REFRESH_BATCH_SIZE = DEFAULT_EMBEDDING_BATCH_SIZE;
 
+// A single 50-row delete/reinsert write was verified against a live 26k-row
+// LadybugDB HNSW and survived close/reopen. The production failure began on
+// the second 32-row write, so larger changes stay on the rebuild safety lane.
+// ponytail: keep this measured ceiling fixed until upstream live-HNSW writes
+// are proven safe at a larger boundary.
+const SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS = 50;
+
 let embeddingFailureCount = 0;
 
 export function getEmbeddingFailureCount(): number {
@@ -602,15 +609,22 @@ export async function refreshSymbolEmbeddings(params: {
   // throughput optimisation.
   uncachedItems.sort((a, b) => a.prefixedText.length - b.prefixedText.length);
 
-  // LadybugDB can terminate the process when a large live HNSW receives new
-  // vector rows. Keep every changed Symbol write inside one drop/recreate
-  // cycle; an absent bootstrap index remains on the cheaper create-only path.
-  const useRebuildPath =
+  // Keep ordinary incremental changes on the retained-HNSW path, but buffer
+  // them into one LadybugDB write. Larger changes use the drop/recreate safety
+  // lane because the observed native crash began on a second live-index write.
+  // An absent bootstrap index remains on the cheaper create-only path.
+  const hasLiveVectorIndex =
     !shouldBootstrapIndex &&
     vecProp !== null &&
     indexName !== null &&
-    modelInfo !== undefined &&
-    uncachedItems.length > 0;
+    modelInfo !== undefined;
+  const retainLiveHnsw =
+    hasLiveVectorIndex &&
+    uncachedItems.length > 0 &&
+    uncachedItems.length <= SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS;
+  const useRebuildPath =
+    hasLiveVectorIndex &&
+    uncachedItems.length > SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS;
 
   // Resolve concurrency: clamp to [1, MAX_EMBEDDING_CONCURRENCY].
   const maxConcurrency = Math.max(
@@ -680,6 +694,7 @@ export async function refreshSymbolEmbeddings(params: {
       failed: boolean;
       degraded?: boolean;
     };
+    const retainedBatchItems: SymbolVectorEmbeddingBatchItem[] = [];
 
     const processBatch = async (batch: UncachedBatch): Promise<BatchResult> => {
       const batchTexts = batch.map((item) => item.prefixedText);
@@ -758,14 +773,18 @@ export async function refreshSymbolEmbeddings(params: {
       }
 
       if (batchItems.length > 0) {
-        await withWriteConn(async (wConn) => {
-          await setSymbolVectorEmbeddingBatch(
-            wConn,
-            params.repoId,
-            storageModel,
-            batchItems,
-          );
-        });
+        if (retainLiveHnsw) {
+          retainedBatchItems.push(...batchItems);
+        } else {
+          await withWriteConn(async (wConn) => {
+            await setSymbolVectorEmbeddingBatch(
+              wConn,
+              params.repoId,
+              storageModel,
+              batchItems,
+            );
+          });
+        }
       }
 
       return {
@@ -824,6 +843,19 @@ export async function refreshSymbolEmbeddings(params: {
         if (processedBatches > 0 && failedBatches / processedBatches > 0.5) {
           throw new IndexError("Embedding failure rate exceeds 50%");
         }
+      }
+      if (retainedBatchItems.length > 0) {
+        await withWriteConn((wConn) =>
+          setSymbolVectorEmbeddingBatch(
+            wConn,
+            params.repoId,
+            storageModel,
+            retainedBatchItems,
+          ),
+        );
+        logger.info(
+          `[embeddings] Retained vector index '${indexName}' for ${retainedBatchItems.length} changed Symbol vector(s) in one write`,
+        );
       }
       recordMemorySnapshot("afterInference");
     } finally {

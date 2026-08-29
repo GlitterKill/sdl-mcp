@@ -89,7 +89,7 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
-  it("rebuilds Symbol HNSW around incremental writes", () => {
+  it("retains Symbol HNSW for bounded writes and rebuilds bulk changes", () => {
     const symbolSource = readSource("src/indexer/embeddings.ts");
     const symbolStart = symbolSource.indexOf(
       "export async function refreshSymbolEmbeddings(",
@@ -104,7 +104,7 @@ describe("semantic pipeline regressions", () => {
     assert.match(
       symbolBody,
       /dropVectorIndex\(\s*wConn,\s*SYMBOL_VECTOR_EMBEDDING_TABLE,\s*indexName/s,
-      "Symbol embedding refresh must remove the shared-table HNSW before writes",
+      "bulk Symbol embedding refresh must remove the shared-table HNSW before writes",
     );
     assert.match(
       symbolBody,
@@ -119,7 +119,22 @@ describe("semantic pipeline regressions", () => {
     assert.doesNotMatch(
       symbolBody,
       /rebuildMinUncachedRows|SYMBOL_VECTOR_REBUILD_MIN_ROWS/,
-      "the safety lifecycle must not defer changed Symbol vectors",
+      "the bounded lane must persist rather than defer changed Symbol vectors",
+    );
+    assert.match(
+      symbolSource,
+      /const SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS = 50;/,
+      "the retained-HNSW ceiling must stay pinned to the verified 50-row write",
+    );
+    assert.match(
+      symbolBody,
+      /uncachedItems\.length <= SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS/,
+      "bounded Symbol changes must retain the live HNSW",
+    );
+    assert.match(
+      symbolBody,
+      /uncachedItems\.length > SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS/,
+      "larger Symbol changes must use the bulk rebuild path",
     );
   });
 

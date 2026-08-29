@@ -596,7 +596,7 @@ flowchart TD
     class e1 animate;
 ```
 
-Once bootstrapped, Symbol refresh replaces only changed model rows and retains the healthy HNSW. Symbol ANN queries rank candidates inside a repository-scoped projected graph, so matching Symbol-to-File-to-Repo ownership filters the graph before the top-K search.
+Once bootstrapped, Symbol refresh buffers up to 50 changed model rows into one replacement write while retaining the healthy HNSW. Larger refreshes use one checkpointed drop/write/recreate cycle. Symbol ANN queries rank candidates inside a repository-scoped projected graph, so matching Symbol-to-File-to-Repo ownership filters the graph before the top-K search.
 
 The current recommended configuration surface is `semantic.retrieval.vector`. Retired sidecar ANN configuration is intentionally omitted from current examples.
 

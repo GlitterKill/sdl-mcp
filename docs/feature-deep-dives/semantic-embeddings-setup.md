@@ -651,7 +651,7 @@ flowchart TD
     class e1,e2,e3 animate;
 ```
 
-After bootstrap, incremental indexing and the background semantic repair worker replace only changed model rows and retain the live Symbol HNSW. Retrieval ranks candidates inside a repository-scoped projected graph. Startup and health checks accept an HNSW only when its table, name, type, and property all match the configured model.
+After bootstrap, incremental indexing and the background semantic repair worker buffer up to 50 changed model rows into one replacement write while retaining the live Symbol HNSW. Larger changes use one checkpointed drop/write/recreate cycle. Retrieval ranks candidates inside a repository-scoped projected graph. Startup and health checks accept an HNSW only when its table, name, type, and property all match the configured model.
 
 Vectors are compressed using Float16 quantization:
 
