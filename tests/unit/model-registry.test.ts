@@ -27,6 +27,7 @@ test("resolveEmbeddingModelCandidates selects GPU-aware Jina variants", () => {
         requestedVariant: "default",
         deterministic: false,
         requestedProviders: ["dml", "cpu"] as const,
+        platform: "win32" as const,
       },
       expected: [
         ["fp16", "model_fp16.onnx", ["dml", "cpu"]],
@@ -39,6 +40,7 @@ test("resolveEmbeddingModelCandidates selects GPU-aware Jina variants", () => {
         name: "jina-embeddings-v2-base-code",
         deterministic: true,
         requestedProviders: ["dml", "cpu"],
+        platform: "win32" as const,
       },
       expected: [["default", "model_quantized.onnx", ["cpu"]]],
     },
@@ -66,6 +68,7 @@ test("resolveEmbeddingModelCandidates selects GPU-aware Jina variants", () => {
         name: "jina-embeddings-v2-base-code",
         deterministic: false,
         requestedProviders: ["dml"],
+        platform: "win32" as const,
       },
       expected: [["fp16", "model_fp16.onnx", ["dml"]]],
     },
@@ -75,9 +78,45 @@ test("resolveEmbeddingModelCandidates selects GPU-aware Jina variants", () => {
         name: "jina-embeddings-v2-base-code",
         deterministic: false,
         requestedProviders: ["dml", "cuda", "cpu"],
+        platform: "win32" as const,
       },
       expected: [["fp16", "model_fp16.onnx", ["dml", "cuda", "cpu"]]],
     },
+    ...(["linux", "darwin"] as const).flatMap((platform) => [
+      {
+        name: `Jina automatic ${platform} keeps quantized configured providers`,
+        input: {
+          name: "jina-embeddings-v2-base-code",
+          requestedVariant: "default",
+          deterministic: false,
+          requestedProviders: ["dml", "cpu"] as const,
+          platform,
+        },
+        expected: [["default", "model_quantized.onnx", ["dml", "cpu"]]],
+      },
+      {
+        name: `explicit Jina fp16 stays authoritative on ${platform}`,
+        input: {
+          name: "jina-embeddings-v2-base-code",
+          requestedVariant: "fp16",
+          deterministic: false,
+          requestedProviders: ["dml", "cpu"] as const,
+          platform,
+        },
+        expected: [["fp16", "model_fp16.onnx", ["dml", "cpu"]]],
+      },
+      {
+        name: `explicit Jina int8 stays authoritative on ${platform}`,
+        input: {
+          name: "jina-embeddings-v2-base-code",
+          requestedVariant: "int8",
+          deterministic: false,
+          requestedProviders: ["dml", "cpu"] as const,
+          platform,
+        },
+        expected: [["int8", "model_quantized.onnx", ["dml", "cpu"]]],
+      },
+    ]),
     {
       name: "explicit Jina fp16 deterministic forces CPU",
       input: {

@@ -297,6 +297,7 @@ describe("config surface sync", () => {
 
     const resolveCandidates = (
       requestedProviders: readonly string[],
+      platform: NodeJS.Platform,
       deterministic = false,
       requestedVariant = semantic.modelVariant,
     ) =>
@@ -305,26 +306,30 @@ describe("config surface sync", () => {
         requestedVariant,
         deterministic,
         requestedProviders,
+        platform,
       }).map(({ variantName, modelFile, requestedProviders: providers }) => [
         variantName,
         modelFile,
         providers,
       ]);
 
-    assert.deepStrictEqual(resolveCandidates(semantic.executionProviders), [
+    assert.deepStrictEqual(resolveCandidates(semantic.executionProviders, "win32"), [
       ["default", "model_quantized.onnx", ["cpu"]],
     ]);
-    assert.deepStrictEqual(resolveCandidates(["dml", "cpu"]), [
+    assert.deepStrictEqual(resolveCandidates(["dml", "cpu"], "win32"), [
       ["fp16", "model_fp16.onnx", ["dml", "cpu"]],
       ["default", "model_quantized.onnx", ["cpu"]],
     ]);
-    assert.deepStrictEqual(resolveCandidates(["dml", "webgpu", "cpu"]), [
+    assert.deepStrictEqual(resolveCandidates(["dml", "cpu"], "linux"), [
+      ["default", "model_quantized.onnx", ["dml", "cpu"]],
+    ]);
+    assert.deepStrictEqual(resolveCandidates(["dml", "webgpu", "cpu"], "win32"), [
       ["fp16", "model_fp16.onnx", ["dml", "webgpu", "cpu"]],
     ]);
-    assert.deepStrictEqual(resolveCandidates(["dml", "cpu"], true), [
+    assert.deepStrictEqual(resolveCandidates(["dml", "cpu"], "win32", true), [
       ["default", "model_quantized.onnx", ["cpu"]],
     ]);
-    assert.deepStrictEqual(resolveCandidates(["cpu"], false, "fp16"), [
+    assert.deepStrictEqual(resolveCandidates(["cpu"], "win32", false, "fp16"), [
       ["fp16", "model_fp16.onnx", ["cpu"]],
     ]);
   });

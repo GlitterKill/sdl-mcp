@@ -641,7 +641,7 @@ Two local ONNX models are supported:
 - **jina-embeddings-v2-base-code** (768-dim, ~321 MB FP16 and ~162 MB quantized) - default Symbol-lane model, optimized for code.
 - **nomic-embed-text-v1.5** (768-dim, ~138 MB) - default FileSummary-lane model, optimized for prose and natural-language queries.
 
-npm postinstall installs both pinned Jina graphs into the user model cache and verifies each with SHA-256; pinned quantized Nomic delivery is unchanged. Omitted/`default` Jina selects FP16 for DirectML-first throughput sessions and quantized for CPU or deterministic sessions. Nomic benefits most from LLM summaries. Jina Code excels at code-to-code similarity without requiring natural-language summaries.
+npm postinstall installs both pinned Jina graphs into the user model cache and verifies each with SHA-256; pinned quantized Nomic delivery is unchanged. Omitted/`default` Jina selects FP16 only for Windows DirectML-first throughput sessions; non-Windows automatic, CPU, and deterministic sessions select quantized. Explicit variants remain authoritative on every platform. Nomic benefits most from LLM summaries. Jina Code excels at code-to-code similarity without requiring natural-language summaries.
 
 ### LLM Summaries
 

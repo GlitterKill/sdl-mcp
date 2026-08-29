@@ -987,7 +987,7 @@
         },
         "modelVariant": {
           "type": "string",
-          "description": "Provider-aware automatic mode for Jina when omitted or 'default': a non-deterministic DirectML-first session uses FP16; only configured adjacent ['dml','cpu'] adds a quantized CPU candidate; deterministic and CPU sessions use quantized. Explicit non-default variants remain authoritative."
+          "description": "Provider-aware automatic mode for Jina when omitted or 'default': Windows non-deterministic DirectML-first sessions use FP16; only configured adjacent ['dml','cpu'] adds a quantized CPU fallback candidate. Non-Windows automatic, deterministic, and CPU sessions use quantized. Explicit non-default variants remain authoritative."
         },
         "executionProviders": {
           "type": "array",

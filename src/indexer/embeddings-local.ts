@@ -97,6 +97,8 @@ export interface OnnxEmbeddingSessionOptions {
   modelVariant?: string;
   /** @internal Focused override for requested execution providers. */
   executionProviders?: readonly string[];
+  /** @internal Focused override for platform-aware model selection. */
+  runtimePlatform?: NodeJS.Platform;
 }
 
 type CandidateSessionLoader = (
@@ -200,11 +202,13 @@ export async function createOnnxSession(
     options.modelVariant ?? appConfig.semantic?.modelVariant;
   const requestedProviders =
     options.executionProviders ?? appConfig.semantic?.executionProviders;
+  const runtimePlatform = options.runtimePlatform ?? process.platform;
   const candidates = resolveEmbeddingModelCandidates({
     name: modelName,
     requestedVariant,
     deterministic: options.deterministic === true,
     requestedProviders,
+    platform: runtimePlatform,
   });
   const canonicalVariant =
     requestedVariant === undefined || requestedVariant === "default"
@@ -218,6 +222,7 @@ export async function createOnnxSession(
     options.deterministic === true ? "deterministic" : "throughput",
     canonicalVariant,
     normalizedRequestProviders,
+    runtimePlatform,
   ]);
   const existing = sessionCache.get(cacheKey);
   if (existing) {

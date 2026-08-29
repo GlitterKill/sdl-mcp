@@ -45,7 +45,11 @@ describe("createOnnxSession candidate selection", () => {
     try {
       const session = await createOnnxSession(
         JINA,
-        { modelVariant: "default", executionProviders: ["dml", "cpu"] },
+        {
+          modelVariant: "default",
+          executionProviders: ["dml", "cpu"],
+          runtimePlatform: "win32",
+        },
         async (_modelName, candidate) => {
           attempts.push(candidate.variantName);
           if (candidate.variantName === "fp16") {
@@ -84,8 +88,20 @@ describe("createOnnxSession candidate selection", () => {
   it("does not retry explicit FP16 or automatic requests without adjacent CPU fallback", async () => {
     const cases = [
       { options: { modelVariant: "fp16", executionProviders: ["dml", "cpu"] } },
-      { options: { modelVariant: "default", executionProviders: ["dml"] } },
-      { options: { modelVariant: "default", executionProviders: ["dml", "cuda", "cpu"] } },
+      {
+        options: {
+          modelVariant: "default",
+          executionProviders: ["dml"],
+          runtimePlatform: "win32" as const,
+        },
+      },
+      {
+        options: {
+          modelVariant: "default",
+          executionProviders: ["dml", "cuda", "cpu"],
+          runtimePlatform: "win32" as const,
+        },
+      },
     ];
 
     for (const { options } of cases) {
@@ -110,6 +126,7 @@ describe("createOnnxSession candidate selection", () => {
         deterministic: true,
         modelVariant: "default",
         executionProviders: ["dml", "cpu"],
+        runtimePlatform: "win32",
       },
       async (_modelName, candidate) => {
         attempts.push([candidate.variantName, candidate.requestedProviders]);
@@ -119,6 +136,62 @@ describe("createOnnxSession candidate selection", () => {
 
     assert.deepStrictEqual(attempts, [["default", ["cpu"]]]);
     assert.deepStrictEqual(session.executionProviders, ["cpu"]);
+  });
+
+  it("uses one quantized candidate for automatic DML-first requests off Windows", async () => {
+    for (const runtimePlatform of ["linux", "darwin"] as const) {
+      const attempts: Array<[string, string, readonly string[]]> = [];
+      const session = await createOnnxSession(
+        JINA,
+        {
+          modelVariant: "default",
+          executionProviders: ["dml", "cpu"],
+          runtimePlatform,
+        },
+        async (_modelName, candidate) => {
+          attempts.push([
+            candidate.variantName,
+            candidate.modelFile,
+            candidate.requestedProviders,
+          ]);
+          return sessionFor(candidate);
+        },
+      );
+
+      assert.deepStrictEqual(attempts, [
+        ["default", "model_quantized.onnx", ["dml", "cpu"]],
+      ]);
+      assert.strictEqual(session.modelFile, "model_quantized.onnx");
+      await resetLocalEmbeddingRuntime();
+    }
+  });
+
+  it("separates automatic session cache entries by runtime platform", async () => {
+    const calls: string[] = [];
+    const loader = async (_modelName: string, candidate: Parameters<typeof sessionFor>[0]) => {
+      calls.push(candidate.variantName);
+      return sessionFor(candidate);
+    };
+    const options = {
+      modelVariant: "default",
+      executionProviders: ["dml", "cpu"],
+    };
+
+    const windows = await createOnnxSession(
+      JINA,
+      { ...options, runtimePlatform: "win32" },
+      loader,
+    );
+    const linux = await createOnnxSession(
+      JINA,
+      { ...options, runtimePlatform: "linux" },
+      loader,
+    );
+
+    assert.deepStrictEqual(calls, ["fp16", "default"]);
+    assert.notStrictEqual(windows, linux);
+    assert.strictEqual(windows.modelFile, "model_fp16.onnx");
+    assert.strictEqual(linux.modelFile, "model_quantized.onnx");
   });
 
   it("separates cache entries by explicit variant and provider order while sharing automatic default", async () => {
@@ -142,7 +215,11 @@ describe("createOnnxSession candidate selection", () => {
     );
     const reordered = await createOnnxSession(
       JINA,
-      { modelVariant: "default", executionProviders: ["dml", "cpu"] },
+      {
+        modelVariant: "default",
+        executionProviders: ["dml", "cpu"],
+        runtimePlatform: "win32",
+      },
       loader,
     );
 
@@ -159,7 +236,11 @@ describe("createOnnxSession candidate selection", () => {
     );
     const retainedReordered = await createOnnxSession(
       JINA,
-      { modelVariant: "default", executionProviders: ["dml", "cpu"] },
+      {
+        modelVariant: "default",
+        executionProviders: ["dml", "cpu"],
+        runtimePlatform: "win32",
+      },
       loader,
     );
     assert.strictEqual(retainedFp16, explicitFp16);
@@ -180,7 +261,12 @@ describe("createOnnxSession candidate selection", () => {
 
     const dmlThenCpu = await createOnnxSession(
       JINA,
-      { deterministic: true, modelVariant: "default", executionProviders: ["dml", "cpu"] },
+      {
+        deterministic: true,
+        modelVariant: "default",
+        executionProviders: ["dml", "cpu"],
+        runtimePlatform: "win32",
+      },
       loader,
     );
     const cpuThenDml = await createOnnxSession(
@@ -209,7 +295,11 @@ describe("createOnnxSession candidate selection", () => {
     );
     const separateProviders = await createOnnxSession(
       JINA,
-      { modelVariant: "default", executionProviders: ["dml", "cpu"] },
+      {
+        modelVariant: "default",
+        executionProviders: ["dml", "cpu"],
+        runtimePlatform: "win32",
+      },
       loader,
     );
 
@@ -258,7 +348,11 @@ describe("createOnnxSession candidate selection", () => {
     it(`returns the original ${kind} error without fallback`, async () => {
       let attempts = 0;
       const expected = new Error(message);
-      const options = { modelVariant: "default", executionProviders: ["dml", "cpu"] };
+      const options = {
+        modelVariant: "default",
+        executionProviders: ["dml", "cpu"],
+        runtimePlatform: "win32" as const,
+      };
 
       await assert.rejects(
         createOnnxSession(JINA, options, async (_modelName, candidate) => {
@@ -278,7 +372,11 @@ describe("createOnnxSession candidate selection", () => {
       attempts++;
       throw new OnnxSessionCreationError(`${candidate.variantName} unavailable`);
     };
-    const options = { modelVariant: "default", executionProviders: ["dml", "cpu"] };
+    const options = {
+      modelVariant: "default",
+      executionProviders: ["dml", "cpu"],
+      runtimePlatform: "win32" as const,
+    };
 
     await assert.rejects(createOnnxSession(JINA, options, typedLoader), /default unavailable/);
     assert.strictEqual(attempts, 2);

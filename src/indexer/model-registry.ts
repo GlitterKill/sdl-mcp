@@ -313,11 +313,13 @@ export function resolveEmbeddingModelCandidates({
   requestedVariant,
   deterministic,
   requestedProviders,
+  platform = process.platform,
 }: {
   name: string;
   requestedVariant?: string;
   deterministic: boolean;
   requestedProviders?: readonly string[];
+  platform?: NodeJS.Platform;
 }): EmbeddingModelCandidate[] {
   const providers = normalizeRequestedProviders(requestedProviders);
   const effectiveProviders = deterministic ? ["cpu"] : providers;
@@ -325,7 +327,12 @@ export function resolveEmbeddingModelCandidates({
   const automatic = isJina && (requestedVariant === undefined || requestedVariant === "default");
   const requests: Array<{ variant: string; providers: string[] }> = [];
 
-  if (automatic && !deterministic && effectiveProviders[0] === "dml") {
+  if (
+    automatic &&
+    platform === "win32" &&
+    !deterministic &&
+    effectiveProviders[0] === "dml"
+  ) {
     requests.push({ variant: "fp16", providers: effectiveProviders });
     if (effectiveProviders[1] === "cpu") {
       requests.push({ variant: "default", providers: ["cpu"] });

@@ -438,7 +438,7 @@ flowchart LR
 | **`api`**             | Anthropic API                               | Enterprise environments               |
 | **`mock`**            | Deterministic hash-based vectors (64-dim)   | Testing, CI, when ONNX is unavailable |
 
-The local provider uses `onnxruntime-node` and `tokenizers` (optional dependencies). npm postinstall caches and SHA-256 verifies both pinned Jina graphs; pinned quantized Nomic delivery is unchanged. Omitted/`default` Jina selects FP16 for DirectML-first throughput sessions and quantized for CPU or deterministic sessions. Only configured adjacent `["dml","cpu"]` enables the second quantized CPU candidate; explicit non-default variants remain authoritative. If the runtime cannot load any candidate, the refresh remains degraded and does not satisfy semantic readiness.
+The local provider uses `onnxruntime-node` and `tokenizers` (optional dependencies). npm postinstall caches and SHA-256 verifies both pinned Jina graphs; pinned quantized Nomic delivery is unchanged. Omitted/`default` Jina selects FP16 only for Windows DirectML-first throughput sessions; non-Windows automatic, CPU, and deterministic sessions select quantized. Only configured adjacent `["dml","cpu"]` on Windows enables the quantized CPU fallback candidate; explicit non-default variants remain authoritative on every platform. If the runtime cannot load any candidate, the refresh remains degraded and does not satisfy semantic readiness.
 
 ### Model-Aware Embedding Payloads
 

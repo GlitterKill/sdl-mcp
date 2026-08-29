@@ -75,7 +75,7 @@ Without the optional ONNX dependencies, SDL-MCP structural and text retrieval re
 
 ### Tier 1: Specialized Default (Free, Recommended)
 
-The default semantic profile is `specialized`: Symbol embeddings use `jina-embeddings-v2-base-code`, while FileSummary embeddings use `nomic-embed-text-v1.5`. Jina's omitted/`default` mode selects FP16 for DirectML-first throughput sessions and quantized for CPU or deterministic sessions; Nomic remains quantized. LLM summaries remain off unless you enable them.
+The default semantic profile is `specialized`: Symbol embeddings use `jina-embeddings-v2-base-code`, while FileSummary embeddings use `nomic-embed-text-v1.5`. Jina's omitted/`default` mode selects FP16 only for Windows DirectML-first throughput sessions; non-Windows automatic, CPU, and deterministic sessions select quantized. Explicit variants remain authoritative on every platform, and Nomic remains quantized. LLM summaries remain off unless you enable them.
 
 Enhanced heuristics are always active, generating pattern-matched summaries for all symbol kinds (class, interface, type, enum, variable, constructor) in addition to typed function/method summaries. When `semantic.enabled: true`, NN summary transfer also runs automatically, propagating documentation from well-documented neighbors to undocumented symbols via embedding similarity.
 
@@ -533,7 +533,7 @@ Local embedding generation is the dominant cost of a full reindex on most repos 
 
 ### Model Variants (`semantic.modelVariant`)
 
-Each ONNX model on HuggingFace ships several variants. For Jina, omitted/`default` is provider-aware automatic mode: CPU and deterministic sessions use quantized, while DirectML-first throughput sessions use FP16. Only configured adjacent `["dml","cpu"]` adds a second quantized CPU candidate. Explicit non-default variants remain authoritative; unsupported requests fall back to the model's `defaultVariant` with a warning.
+Each ONNX model on HuggingFace ships several variants. For Jina, omitted/`default` is provider-aware automatic mode: Windows DirectML-first throughput sessions use FP16; non-Windows automatic, CPU, and deterministic sessions use quantized. Only configured adjacent `["dml","cpu"]` on Windows adds the quantized CPU fallback candidate. Explicit non-default variants remain authoritative on every platform; unsupported requests fall back to the model's `defaultVariant` with a warning.
 
 | Variant   | jina-code | nomic-text | File size (approx)         | Speed vs fp32   | Quality vs fp32         |
 | :-------- | :-------: | :--------: | :------------------------- | :-------------- | :---------------------- |
@@ -814,7 +814,7 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     "fileSummaryEmbeddingBatchSize": 4, // 1-16: rows per FileSummary ONNX call
     "fileSummaryEmbeddingMaxChars": 4096, // bounds FileSummary vector payloads
     "embeddingsSequential": false, // run multi-model embedding in series (vs Promise.all)
-    "modelVariant": "default", // Jina automatic: DML-first FP16; CPU/deterministic quantized
+    "modelVariant": "default", // Jina automatic: Windows DML-first FP16; otherwise quantized
     "executionProviders": ["cpu"], // ORT EPs: ["dml","cpu"] (Win), ["coreml","cpu"] (macOS), ["cuda","cpu"] (Linux NVIDIA)
     "onnx": {
       "intraOpNumThreads": 0, // 0 = min(8, estimated physical cores).

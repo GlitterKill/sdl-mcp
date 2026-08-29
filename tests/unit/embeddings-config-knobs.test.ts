@@ -146,11 +146,13 @@ describe("modelVariant schema", () => {
     const generatedDescription =
       generatedSchema.properties.semantic.properties.modelVariant.description;
 
-    for (const description of [sourceDescription, generatedDescription]) {
-      assert.match(description, /provider-aware automatic mode/i);
-      assert.match(description, /DirectML-first[^.]*FP16/i);
-      assert.match(description, /deterministic[^.]*CPU[^.]*quantized/i);
-    }
+    assert.strictEqual(sourceDescription, generatedDescription);
+    assert.match(sourceDescription, /provider-aware automatic mode/i);
+    assert.match(sourceDescription, /Windows[^.]*DirectML-first[^.]*FP16/i);
+    assert.match(sourceDescription, /non-Windows[^.]*quantized/i);
+    assert.match(sourceDescription, /adjacent[^.]*dml[^.]*cpu[^.]*fallback/i);
+    assert.match(sourceDescription, /deterministic[^.]*CPU[^.]*quantized/i);
+    assert.match(sourceDescription, /explicit[^.]*variants[^.]*authoritative/i);
   });
 });
 

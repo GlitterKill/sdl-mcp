@@ -658,11 +658,11 @@ export const SemanticConfigSchema = z.object({
   embeddingsSequential: z.boolean().default(false),
   /**
    * Which ONNX file variant to load for each embedding model. For Jina,
-   * omitted/`"default"` is provider-aware automatic mode: a throughput
-   * session whose configured providers start with adjacent `"dml","cpu"`
-   * tries FP16 on DirectML, then quantized on CPU; DirectML without that
-   * adjacent CPU fallback tries FP16 only. Deterministic and CPU sessions use
-   * quantized Jina. Explicit non-default variants remain authoritative.
+   * omitted/`"default"` is provider-aware automatic mode. On Windows, a
+   * non-deterministic session whose configured providers start with `"dml"`
+   * uses FP16; only adjacent `"dml","cpu"` adds quantized CPU fallback.
+   * Non-Windows automatic, deterministic, and CPU sessions use quantized Jina.
+   * Explicit non-default variants remain authoritative on every platform.
    *
    * Unsupported variants still fall back to the model's `defaultVariant`
    * with a warning. This remains a pass-through string so future variants do
@@ -672,7 +672,7 @@ export const SemanticConfigSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Provider-aware automatic mode for Jina when omitted or 'default': a non-deterministic DirectML-first session uses FP16; only configured adjacent ['dml','cpu'] adds a quantized CPU candidate; deterministic and CPU sessions use quantized. Explicit non-default variants remain authoritative.",
+      "Provider-aware automatic mode for Jina when omitted or 'default': Windows non-deterministic DirectML-first sessions use FP16; only configured adjacent ['dml','cpu'] adds a quantized CPU fallback candidate. Non-Windows automatic, deterministic, and CPU sessions use quantized. Explicit non-default variants remain authoritative.",
     ),
   /**
    * ONNX Runtime execution providers, in priority order. ORT tries them
