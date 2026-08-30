@@ -56,6 +56,7 @@ describe("resolveSymbolRef missing-symbol recovery", () => {
   before(async () => {
     removeTestFile(DB_PATH);
     removeTestFile(`${DB_PATH}.wal`);
+    removeTestFile(`${DB_PATH}.sdl-lineage.json`);
     removeTestFile(CONFIG_PATH);
     writeFileSync(
       CONFIG_PATH,
@@ -127,6 +128,7 @@ describe("resolveSymbolRef missing-symbol recovery", () => {
     await closeLadybugDb?.();
     removeTestFile(DB_PATH);
     removeTestFile(`${DB_PATH}.wal`);
+    removeTestFile(`${DB_PATH}.sdl-lineage.json`);
     removeTestFile(CONFIG_PATH);
 
     if (previousConfig === undefined) delete process.env.SDL_CONFIG;
