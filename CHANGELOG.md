@@ -11,13 +11,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Fixed
+
+## [0.13.6] - 2026-08-30
+
+### Changed
+
 - **CPU embedding auto-tuning**: Omitted local CPU settings now use physical-core and startup free-memory bounds for embedding concurrency, symbol batch 8, and the physical-core width for automatic ONNX intra-op threads. Auto-detected and pinned performance tiers share these presets, while explicit settings remain authoritative; remove explicit `embeddingConcurrency`, `embeddingBatchSize`, or positive `onnx.intraOpNumThreads` fields to adopt the automatic values.
-- **GPU-aware Jina default**: Omitted/`default` Jina now selects FP16 only for Windows DirectML-first throughput sessions; non-Windows automatic, CPU, and deterministic sessions select quantized. Only configured adjacent `dml,cpu` on Windows enables quantized CPU fallback, while explicit variants stay authoritative on every platform. npm postinstall caches and SHA-256 verifies both pinned Jina graphs, and effective-artifact changes invalidate Jina Symbol and FileSummary hashes on the next explicitly initiated semantic index.
-- **Incremental symbol embedding refresh**: Only changed `SymbolVectorEmbedding` rows are deleted and reinserted. When the shared table already has a model-specific HNSW, refresh buffers up to 50 changed rows into one write while retaining the live index; larger refreshes checkpoint, drop the index once, replace all changed rows, recreate the index once, and checkpoint again. Bootstrap or missing-index recovery creates the HNSW after at least one complete model row exists. Repository-local cleanup removes only changed-file ownership links, preserves shared Symbol vectors, and deterministically transfers their canonical owner. Symbol ANN queries filter through repository-scoped projected graphs before ranking. Migration 26 copies complete legacy vectors in-database. Legacy `Symbol` embedding columns remain inert for compatibility, and upgraded databases may also retain legacy `Symbol` HNSW indexes until a safe rebuild.
+  <!-- release-note-commits: fe11889c1885bb18ae75ee96b46944684346fcb7 53e5f435923b58554cb7840df24e0226b71ba9da bc9a81a3463bb934ddc323af3646bc1570db0d1f ea5ae15c30d6648559d91a5d2c78c840916772ec 14c5fe05a7db02fab4c5a7d3cf3bc1b4518de5f1 60456ffdfffd96b6dbf3c1f1613092c2e59081b3 b6e3fc9d081987db95b18da5b51ca0ab5453223a d7c6c6a2209bbeb7401c8023282a047b84516f53 06e8420c76ee0b3418f00bafe615446805f8b081 5abf0895c86a82c6841bdab6fde3ad331a002f5e 284c5140770a20bb9891f6ba0fb8b2005e1e8050 d38478a3e1fcba51f0b3ec4e27828f7b9d50b6bc b5ffb751036a6489e69f313fa5fb2202af9f5156 24ca95ac16ae5a7a61e2f794106b50ae00c3b26f 3dc98656125736139238977f9ac8865439557b98 7aba818e68535fbde95e5733f50978606ec26293 b9e3ec82fb1c3a628a88d843548ba6514572b7c1 ff7accbf7ee7709ad718a873a22f241af55075db 66e281a385a3a69ae9e2c0eb1942ec4532d41e2e bcab1c6df6e11dba585ee9e4b3682a6d3861a0ec -->
+
+- **GPU-aware Jina default**: Omitted/commonly configured Jina sessions now choose platform-appropriate FP16 or quantized graphs, initialize and cache by effective artifact, verify downloaded models, and invalidate semantic hashes when the effective artifact changes.
+  <!-- release-note-commits: 9d64e54dd0b899a21772c7b2e7c8cab3808980b1 7a8e3e0785e3d440b0a61d7d39951608b7a7ffd1 53efa896e9dd5190effb81b9959ac643d83e0ceb 3817b65b9c270e7e398cc43b152ac22f63cf2327 7050d204941a5c7128d6651d77fe3f53f6cc34bc c4670fb88e36dbb977cdb8565b580d3273d730bc 6d20041f0eef1885f0f978893ea84e8ae3110eab 4ba2deb8763fc2a81906c49b0796d9da2d4e56af 6a49d8b2f550dd6e8ce841281c478bb5433a69c1 ce6814d363c98e1185fe3b8fa4911e7a8bb7539f 3447e77382dab07f3c92cb732050941a95f110f7 7294c8cfc6d45849d11611af859fb511f6e420c0 f614c6019c00e098ce1558f6f825d896387ffec4 56f13f931e4d1f1861754e68678b3b851e071b18 3de1ab4da79ba6c530aa9ebb5ed9ac68ce79a7c9 -->
+
+- **DirectML session safety**: Pinned ONNX Runtime 1.24.3, enforced DirectML-compatible session options, and serialized inference on DirectML sessions.
+  <!-- release-note-commits: 3d891588b468adf5fc237573607ed71178233d8b 7946b5c91c2c960d290a2694b0cd1e41548209f1 4a1109a76c963d641d028a6a5fbcc7603a2caf16 d3ae4e559e3c9b8ea648a1f1b51bd8cf7e7e2130 fd557484b71ae0bc1e4d6f6cfe8cb51cfd276e09 -->
+
+- **Incremental symbol embedding refresh**: Moved symbol vectors to a dedicated shared table, preserved repository ownership and migration behavior, retained live HNSW indexes for bounded updates, and rebuilt them once around larger replacements.
+  <!-- release-note-commits: 029cafae009c9035c1b08369da53c72231040781 786f6684957ebe5dd5659fe5b91851f2813d65ad 716e4666949915103950c2d83c59e82800efcf4e 9f311a77b8a2e58e92ab94d8fbd097863d38e93a 89789f398362d83828b37b4e87fbcf6e5e0915eb b45e22e4a9a296be6b869300b0f176d96e21708d 972857814cad03b5ecd924bee6d1eb1b1a17b2a7 1f669656edab2b5a5bbf624c5f4d690dfc067a6b 7da3622a496e9716e038ab08bfe1a1baf91c235b 4b0fc78fc19a5ece92ec443a484623e3c2688b84 4a4c080051732d281f0c0ffe42441dcce25e02c1 c971fd552120327ffe355634ada35ccf939cd168 e57d4f782a75a1c9296617e63a5e990b15ca0fa6 747fc924fb3b9cca3ddc97d4ebbd8282775362a8 411f70f191a4e07c727073fd9395c038cab9ff4f 212266c59d4e7dfabe428e328173a8841432b1e2 -->
+
+- **Stable global installs**: Install global package payloads as stable copies so temporary package-manager paths cannot break the installed CLI.
+  <!-- release-note-commits: 550b6abbe46a6ffbe38366c5d524cf4de3ca9d6e -->
 
 ### Fixed
 
-- **Multi-repository Jina indexing crash**: Coalesce bounded incremental `SymbolVectorEmbedding` replacements into one live-HNSW write, and route changes above 50 rows through the checkpointed drop/write/recreate safety lane, preventing the repeated live-index writes that terminated later repositories after earlier repositories populated the shared index.
+- **Multi-repository Jina indexing crash**: Coalesce bounded incremental symbol-vector replacements into one live-HNSW write, preventing repeated writes from terminating later repository indexes.
+  <!-- release-note-commits: af4783ba77e63e62a4b29a204fc3bb7b67b0e1ff -->
+
+- **Workflow continuation compatibility**: Accept scalar workflow continuation data without rejecting otherwise valid stored-response flows.
+  <!-- release-note-commits: 36e3d2fc64bd36f106bda1836d97bc0d0e64b9fc -->
+
+- **Cross-platform test stability**: Corrected platform-sensitive regressions and refreshed the retrieval seed artifact used by verification.
+  <!-- release-note-commits: 20535b755d40391fb9a9a91a67df5b3509932943 0b3c789564ec72e593f75e851821232f963f1bcb -->
+
+- **Windows Ladybug vector tests**: Provision the packaged OpenSSL runtime only for tests that require the Ladybug vector extension, while preserving explicit native-disabled coverage elsewhere.
+  <!-- release-note-commits: d2443a4ac9aa5fd6e407681db6819f17429c97f7 -->
+
+### Engineering
+
+- **Scoped CodeQL analysis**: Added scoped CodeQL analysis and documented the warning/status cutover decisions behind the workflow.
+  <!-- release-note-commits: 077f9438b78c81ce1bc22e3ff3b27e1ad839b359 a2d0af555d967f6aa71bbe28efc4349da2ecf862 7e98ecdb123acc9cd9a4775504d8d6b68754e500 f1424fdde771845a02b4f36e320ae6de5731c079 -->
+
+- **Complete release-summary coverage**: Added full-range, full-OID coverage validation and immutable tagged release-note rendering.
+  <!-- release-note-commits: 66b7df8d4649f48be59f86c1633c656b6cda4193 cf6b4d7e3e7b175b9fcce649cb2ee2a8c3530d3b f3b6a9df44f222de2c66cbd50c24ec5e587da9ff -->
 
 ## [0.13.5] - 2026-08-25
 
