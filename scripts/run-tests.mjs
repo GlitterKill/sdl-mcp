@@ -296,7 +296,11 @@ async function runTestFile(testFile, index, baseTestEnv, testTempDir) {
   // Windows vector extensions need the verified OpenSSL loader from the native addon.
   if (
     process.platform === "win32" &&
-    normalizedTestFile === "tests/integration/semantic-embedding.test.ts"
+    (
+      normalizedTestFile === "tests/integration/semantic-embedding.test.ts" ||
+      normalizedTestFile === "tests/integration/provider-first-scip-execution.test.ts" ||
+      normalizedTestFile === "tests/unit/ladybug-edge-queries.test.ts"
+    )
   ) {
     delete env.SDL_MCP_DISABLE_NATIVE_ADDON;
   }

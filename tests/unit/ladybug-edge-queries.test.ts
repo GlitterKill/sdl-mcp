@@ -6,6 +6,10 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 import { queryStoredProcAll } from "../../dist/db/ladybug-core.js";
+import {
+  isWindowsFtsRuntimeUnavailable,
+  withWindowsFtsRuntime,
+} from "../../dist/db/ladybug-windows-fts-runtime.js";
 import { createVectorIndex } from "../../dist/retrieval/index-lifecycle.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -842,7 +846,13 @@ describe("LadybugDB Edge Queries", () => {
         "surviving-symbol-vector-hash",
         survivingVector,
       );
-      await exec(conn, "LOAD EXTENSION vector");
+      const vectorLoadResult = await withWindowsFtsRuntime(() =>
+        exec(conn, "LOAD EXTENSION vector"),
+      );
+      assert.strictEqual(
+        isWindowsFtsRuntimeUnavailable(vectorLoadResult),
+        false,
+      );
       assert.equal(
         await createVectorIndex(
           kuzuConn,
