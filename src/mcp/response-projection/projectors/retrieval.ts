@@ -270,7 +270,11 @@ function compactPackedDefaults(payload: string): string {
 function compactSearch(value: Record<string, unknown>): unknown {
   const result: Record<string, unknown> = {};
   for (const [key, field] of Object.entries(value)) {
-    if (key === "structuredContent" || key === "retrievalEvidence") continue;
+    if (
+      key === "structuredContent"
+      || key === "retrievalEvidence"
+      || key === "diagnostics"
+    ) continue;
     result[key] = typeof field === "string"
       ? compactPackedDefaults(field)
       : field;
@@ -290,6 +294,10 @@ function compactCode(
     "requiredFieldsForNext", "nextAction", "matchedIdentifiers",
     "missedIdentifiers", "missedIdentifierHint", "actualRange",
   ]);
+  // The public hot-path contract requires this field even when nothing matched.
+  if (action === "code.getHotPath" && Array.isArray(value.matchedIdentifiers)) {
+    result.matchedIdentifiers = value.matchedIdentifiers;
+  }
   if (input.options.includeDiagnostics) {
     Object.assign(result, copyPresent(value, [
       "estimatedTokens", "matchedLineNumbers",

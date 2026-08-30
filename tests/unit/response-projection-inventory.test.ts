@@ -588,10 +588,10 @@ describe("response projection inventory", () => {
     });
     const nodeBudgets = new Map([
       ["sdl.file", 1_000],
-      // Stored-response continuation plus truncated-card metadata totals 1,628 nodes.
-      ["sdl.retrieve", 1_635],
-      // Successful-truncation recovery plus strict delta preview arms total 5,589 nodes.
-      ["sdl.workflow", 5_599],
+      // Stored-response continuation, recovery defaults, and diagnostic code metadata total 1,641 nodes.
+      ["sdl.retrieve", 1_648],
+      // Successful-truncation recovery plus strict delta preview arms total 5,601 nodes.
+      ["sdl.workflow", 5_611],
     ]);
 
     for (const [name, maxNodes] of nodeBudgets) {
@@ -1313,6 +1313,112 @@ describe("response projection inventory", () => {
         }
       }
     }
+    assert.deepEqual(failures, []);
+  });
+
+  it("accepts explicitly requested diagnostics for retrieve-backed projections", () => {
+    const flatRegistrations = capturePublicToolRegistrations();
+    const retrieveRegistration = capturePublicToolRegistrations({
+      enabled: true,
+      exclusive: true,
+    }).find(({ name }) => name === "sdl.retrieve");
+    assert.ok(retrieveRegistration);
+    const retrieveSchema = exhaustiveOutputSchema(retrieveRegistration);
+    assert.ok(retrieveSchema);
+
+    const diagnostics = {
+      timings: {
+        totalMs: 4,
+        phases: { "server.dispatch": 3 },
+      },
+    };
+    const failures: string[] = [];
+    for (const testCase of [
+      {
+        action: "symbol.search",
+        op: "symbolSearch",
+        expectedDiagnosticKeys: [],
+      },
+      {
+        action: "code.getSkeleton",
+        op: "codeSkeleton",
+        expectedDiagnosticKeys: ["estimatedTokens"],
+      },
+      {
+        action: "code.getHotPath",
+        op: "codeHotPath",
+        expectedDiagnosticKeys: ["estimatedTokens", "matchedLineNumbers"],
+      },
+    ] as const) {
+      const fixture = AGENT_OUTPUT_CASES.find(
+        ({ action }) => action === testCase.action,
+      );
+      const directRegistration = flatRegistrations.find(
+        ({ name }) => name === `sdl.${testCase.action}`,
+      );
+      assert.ok(fixture, testCase.action);
+      assert.ok(directRegistration, testCase.action);
+      const directSchema = exhaustiveOutputSchema(directRegistration);
+      assert.ok(directSchema, testCase.action);
+
+      const canonical = {
+        ...(fixture.canonicalResultFactory() as Record<string, unknown>),
+        ...(testCase.op === "codeHotPath"
+          ? { matchedIdentifiers: [], missedIdentifiers: ["missing"] }
+          : {}),
+        diagnostics,
+      };
+      const directRequest = {
+        ...fixture.publicRequest,
+        detail: "compact" as const,
+        includeDiagnostics: true,
+      };
+      const directProjected = projectToolResultForModelContent(
+        fixture.action,
+        canonical,
+        directRequest,
+      );
+      const retrieveProjected = projectToolResultForModelContent(
+        "sdl.retrieve",
+        canonical,
+        {
+          repoId: fixture.publicRequest.repoId,
+          op: testCase.op,
+          args: fixture.publicRequest,
+          detail: "compact",
+          includeDiagnostics: true,
+        },
+      );
+
+      for (const [surface, schema, projected] of [
+        ["direct", directSchema, directProjected],
+        ["retrieve", retrieveSchema, retrieveProjected],
+      ] as const) {
+        const projectedRecord = projected as Record<string, unknown>;
+        for (const key of testCase.expectedDiagnosticKeys) {
+          assert.ok(
+            Object.hasOwn(projectedRecord, key),
+            `${surface}/${testCase.op}/${key}`,
+          );
+        }
+        if (testCase.op === "symbolSearch") {
+          assert.equal(
+            Object.hasOwn(projectedRecord, "diagnostics"),
+            false,
+            `${surface}/${testCase.op}/diagnostics`,
+          );
+        }
+        const parsed = schema.safeParse(projected);
+        if (!parsed.success) {
+          failures.push(
+            `${surface}/${testCase.op}: rejected ${JSON.stringify(parsed.error.issues)}`,
+          );
+        } else if (!isDeepStrictEqual(parsed.data, projected)) {
+          failures.push(`${surface}/${testCase.op}: stripped public fields`);
+        }
+      }
+    }
+
     assert.deepEqual(failures, []);
   });
 

@@ -1070,6 +1070,9 @@ const SymbolSearchNextBestActionSchema = z.object({
     taskText: z.string().min(1),
     budget: z.object({ maxTokens: z.number().int().min(512) }),
     focusPaths: z.array(z.string().min(1)).length(1),
+    refsMode: z.enum(["auto", "off"]).optional(),
+    responseMode: z.enum(["inline", "auto", "handle"]).optional(),
+    wireFormat: z.enum(["json", "packed", "auto"]).optional(),
   }),
   rationale: z.string().min(1),
 });
@@ -4815,7 +4818,10 @@ const ProjectedCodeSkeletonCompactResponseSchema = GetSkeletonPayloadSchema.pick
   truncation: true,
   range: true,
 })
-  .extend({ truncated: z.literal(true).optional() })
+  .extend({
+    truncated: z.literal(true).optional(),
+    estimatedTokens: GetSkeletonPayloadSchema.shape.estimatedTokens.optional(),
+  })
   .strict();
 
 const ProjectedCodeHotPathCompactResponseSchema = GetHotPathPayloadSchema.pick({
@@ -4831,6 +4837,9 @@ const ProjectedCodeHotPathCompactResponseSchema = GetHotPathPayloadSchema.pick({
   .extend({
     truncated: z.literal(true).optional(),
     nextAction: CallableRetrieveRecoverySchema.optional(),
+    estimatedTokens: GetHotPathPayloadSchema.shape.estimatedTokens.optional(),
+    matchedLineNumbers:
+      GetHotPathPayloadSchema.shape.matchedLineNumbers.optional(),
   })
   .strict();
 
