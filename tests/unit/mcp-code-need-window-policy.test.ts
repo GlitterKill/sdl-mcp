@@ -120,6 +120,15 @@ describe("code.needWindow policy remediation", () => {
       createdAt: now,
     });
 
+    await ladybugDb.createVersion(conn, {
+      versionId: "version-test",
+      repoId: "repo-test",
+      createdAt: now,
+      reason: "test",
+      prevVersionHash: null,
+      versionHash: "hash-version-test",
+    });
+
     await ladybugDb.upsertFile(conn, {
       fileId: "file-demo",
       repoId: "repo-test",
@@ -286,6 +295,46 @@ describe("code.needWindow policy remediation", () => {
     assert.equal(first.symbolId, "sym-demo");
     assert.match(first.code, /importantFlag/);
     assert.equal(JSON.stringify(first), JSON.stringify(second));
+  });
+
+  it("passes request cancellation into slice-backed code access", async () => {
+    const originalAny = AbortSignal.any;
+    const calls: AbortSignal[][] = [];
+    AbortSignal.any = ((signals: AbortSignal[]) => {
+      calls.push([...signals]);
+      return originalAny(signals);
+    }) as typeof AbortSignal.any;
+
+    const controller = new AbortController();
+    const reason = new Error("client disconnected");
+    try {
+      const response = handleCodeNeedWindow(
+        {
+          repoId: "repo-test",
+          symbolId: "sym-demo",
+          reason: "inspect important flag handling",
+          expectedLines: 20,
+          maxTokens: 120,
+          identifiersToFind: ["importantFlag"],
+          sliceContext: {
+            taskText: "inspect demoWindow",
+            entrySymbols: ["sym-demo"],
+          },
+        },
+        {
+          sendNotification: async () => {},
+          signal: controller.signal,
+        },
+      );
+      queueMicrotask(() => controller.abort(reason));
+
+      await assert.rejects(response, (error: unknown) => error === reason);
+      assert.equal(calls.length, 1);
+      assert.strictEqual(calls[0]?.[0], controller.signal);
+      assert.equal(calls[0]?.length, 2);
+    } finally {
+      AbortSignal.any = originalAny;
+    }
   });
 
   it("resolves stringified symbolRef targets for raw code windows", async () => {

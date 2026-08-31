@@ -90,6 +90,7 @@ describe("serve observability orchestration", () => {
           order.push(`drain-${drainAttempts}`);
           if (drainAttempts === 1) throw new Error("drain failed");
         },
+        persistUsage: async () => {},
         stopObservability: async () => {
           order.push("checkpoint");
           throw new Error("checkpoint failed");
@@ -136,6 +137,7 @@ describe("serve observability orchestration", () => {
           drainAttempts += 1;
           throw new Error("still active");
         },
+        persistUsage: async () => {},
         stopObservability: async () => {
           checkpoints += 1;
         },
@@ -176,6 +178,7 @@ describe("serve observability orchestration", () => {
           drainAttempts += 1;
           throw new Error("still active");
         },
+        persistUsage: async () => {},
         stopObservability: async () => {
           checkpoints += 1;
         },
@@ -190,6 +193,38 @@ describe("serve observability orchestration", () => {
       assert.equal(drainAttempts, 2);
       assert.equal(checkpoints, 0);
       assert.equal(closeAttempts, 0);
+    } finally {
+      process.exit = originalExit;
+    }
+  });
+
+  it("drains accepted work before persisting usage and closing the database", async () => {
+    const order: string[] = [];
+    const originalExit = process.exit;
+    process.exit = (() => undefined as never) as NodeJS.Process["exit"];
+    try {
+      const manager = new ShutdownManager({
+        forceTimeoutMs: 10_000,
+        log: () => {},
+      });
+      registerServeFinalCleanups(manager, {
+        drainWork: async () => {
+          order.push("drain");
+        },
+        persistUsage: async () => {
+          order.push("usage");
+        },
+        stopObservability: async () => {
+          order.push("checkpoint");
+        },
+        closeDatabase: async () => {
+          order.push("db");
+        },
+      });
+
+      await manager.shutdown("test");
+
+      assert.deepEqual(order, ["drain", "usage", "checkpoint", "db"]);
     } finally {
       process.exit = originalExit;
     }

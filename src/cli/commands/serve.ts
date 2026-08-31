@@ -110,6 +110,7 @@ export function registerServeFinalCleanups(
   shutdownMgr: Pick<ShutdownManager, "addCleanup">,
   cleanup: {
     drainWork: () => Promise<void>;
+    persistUsage: () => Promise<void>;
     stopObservability: () => Promise<void>;
     closeDatabase: () => Promise<void>;
   },
@@ -120,6 +121,9 @@ export function registerServeFinalCleanups(
     workDrained = true;
   };
   shutdownMgr.addCleanup("workDrain", drainWork);
+  shutdownMgr.addCleanup("persistUsage", async () => {
+    if (workDrained) await cleanup.persistUsage();
+  });
   shutdownMgr.addCleanup("observability", async () => {
     if (workDrained) await cleanup.stopObservability();
   });
@@ -289,23 +293,6 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     dashboardHandle?.close(),
   );
   shutdownMgr.addCleanup("httpServer", () => httpHandle?.close());
-  shutdownMgr.addCleanup("persistUsage", async () => {
-    try {
-      if (
-        graphDbAvailable &&
-        startupReadiness.isWriteReady() &&
-        tokenAccumulator.hasUsage
-      ) {
-        await persistUsageSnapshot(tokenAccumulator.getSnapshot());
-      }
-    } catch (err) {
-      // Non-critical — don't block shutdown.
-      writeServeStderrLine(
-        "[sdl-mcp] Failed to persist usage snapshot: " +
-          (err instanceof Error ? err.message : String(err)),
-      );
-    }
-  });
   shutdownMgr.addCleanup("watchers", async () => {
     for (const watcher of watchers) {
       try {
@@ -320,6 +307,23 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   shutdownMgr.addCleanup("graphIntegrityVerifier", stopGraphIntegrityVerifier);
   registerServeFinalCleanups(shutdownMgr, {
     drainWork: drainLadybugWork,
+    persistUsage: async () => {
+      try {
+        if (
+          graphDbAvailable &&
+          startupReadiness.isWriteReady() &&
+          tokenAccumulator.hasUsage
+        ) {
+          await persistUsageSnapshot(tokenAccumulator.getSnapshot());
+        }
+      } catch (err) {
+        // Non-critical — don't block shutdown.
+        writeServeStderrLine(
+          "[sdl-mcp] Failed to persist usage snapshot: " +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    },
     stopObservability,
     closeDatabase: closeLadybugDb,
   });

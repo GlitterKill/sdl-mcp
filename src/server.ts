@@ -1298,7 +1298,12 @@ export class MCPServer {
             const runDispatch = () =>
               shouldBypassToolDispatch(toolName, parsedArgs)
                 ? dispatchTool()
-                : runToolDispatch(dispatchTool, undefined, toolName);
+                : runToolDispatch(
+                    dispatchTool,
+                    undefined,
+                    toolName,
+                    toolContext.signal,
+                  );
             // Refresh admission must happen before the outer dispatch lease.
             // This also covers workflows, whose refresh step executes inside
             // the workflow's single outer lease rather than acquiring its own.

@@ -1,4 +1,6 @@
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
@@ -178,6 +180,56 @@ describe("tool dispatch limiter", () => {
 
     release?.();
     await first;
+  });
+
+  it("removes queued dispatch work when the request is cancelled", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 1, queueTimeoutMs: 1_000 });
+
+    let release: (() => void) | undefined;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = runToolDispatch(async () => blocker, undefined, "first");
+    const controller = new AbortController();
+    const reason = new Error("client disconnected");
+    const queued = runToolDispatch(
+      async () => "second",
+      undefined,
+      "second",
+      controller.signal,
+    );
+
+    try {
+      await delay(20);
+      assert.strictEqual(getToolDispatchStats().queued, 1);
+
+      controller.abort(reason);
+      const outcome = await Promise.race([
+        queued.then(
+          () => ({ kind: "resolved" as const }),
+          (error: unknown) => ({ kind: "rejected" as const, error }),
+        ),
+        delay(100).then(() => ({ kind: "pending" as const })),
+      ]);
+
+      assert.strictEqual(outcome.kind, "rejected");
+      if (outcome.kind !== "rejected") return;
+      assert.strictEqual(outcome.error, reason);
+      assert.strictEqual(getToolDispatchStats().queued, 0);
+    } finally {
+      release?.();
+      await first;
+      await queued.catch(() => undefined);
+    }
+  });
+
+  it("forwards MCP request cancellation into the shared dispatch queue", () => {
+    const source = readFileSync(join(process.cwd(), "src", "server.ts"), "utf8");
+
+    assert.match(
+      source,
+      /runToolDispatch\(\s*dispatchTool,\s*undefined,\s*toolName,\s*toolContext\.signal,\s*\)/,
+    );
   });
 
   it("lets derived-refresh deferred work finish before timing foreground dispatch out", async () => {

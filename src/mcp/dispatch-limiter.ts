@@ -171,6 +171,7 @@ export async function runToolDispatch<T>(
   fn: () => Promise<T>,
   timeoutMs?: number,
   label = "tool-dispatch",
+  signal?: AbortSignal,
 ): Promise<T> {
   const deferredWork = label.startsWith("derived-refresh:")
     ? undefined
@@ -195,6 +196,7 @@ export async function runToolDispatch<T>(
           }
         }),
       queueTimeoutMs,
+      signal,
     );
   } catch (error) {
     if (error instanceof ConcurrencyQueueTimeoutError) {

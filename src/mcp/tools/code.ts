@@ -94,6 +94,32 @@ type ResolvedGetHotPathRequest = Omit<
   "symbolId" | "symbolRef"
 > & { symbolId: string };
 
+function awaitWithSignal<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason);
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function buildSessionRef(key: string, etag?: string): { key: string; etag?: string } {
   const ref: { key: string; etag?: string } = { key };
   if (etag !== undefined) ref.etag = etag;
@@ -561,11 +587,21 @@ export async function handleCodeNeedWindow(
       request.repoId,
     );
     if (latestVersion) {
-      const { slice } = await buildSlice({
-        repoId: request.repoId,
-        versionId: latestVersion.versionId,
-        ...request.sliceContext,
-      });
+      const sliceSignal = context?.signal
+        ? AbortSignal.any([context.signal, AbortSignal.timeout(30_000)])
+        : undefined;
+      sliceSignal?.throwIfAborted();
+      // LadybugDB reads are not uniformly abort-aware; release the MCP
+      // dispatch slot on cancellation while also passing the signal down.
+      const { slice } = await awaitWithSignal(
+        buildSlice({
+          repoId: request.repoId,
+          versionId: latestVersion.versionId,
+          ...request.sliceContext,
+          signal: sliceSignal,
+        }),
+        sliceSignal,
+      );
       sliceContext = slice;
     }
   }

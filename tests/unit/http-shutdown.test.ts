@@ -77,36 +77,54 @@ describe("HTTP shutdown wiring", () => {
     }
   });
 
-  it("registers HTTP server cleanup before final DB cleanup", () => {
+  it("stops HTTP producers before draining work and persisting usage", () => {
     const source = readFileSync(
       join(process.cwd(), "src", "cli", "commands", "serve.ts"),
       "utf8",
     );
-    const httpCleanupIndex = source.indexOf(
+    const serveSource = source.slice(
+      source.indexOf("export async function serveCommand"),
+    );
+    const httpCleanupIndex = serveSource.indexOf(
       'shutdownMgr.addCleanup("httpServer"',
     );
-    const persistUsageIndex = source.indexOf(
+    const earlyPersistUsageIndex = serveSource.indexOf(
       'shutdownMgr.addCleanup("persistUsage"',
     );
-    const dbCleanupIndex = source.lastIndexOf(
+    const watcherCleanupIndex = serveSource.indexOf(
+      'shutdownMgr.addCleanup("watchers"',
+    );
+    const verifierCleanupIndex = serveSource.indexOf(
+      'shutdownMgr.addCleanup("graphIntegrityVerifier"',
+    );
+    const finalCleanupIndex = serveSource.indexOf(
       "registerServeFinalCleanups(shutdownMgr",
     );
-    const loggerCleanupIndex = source.indexOf(
+    const loggerCleanupIndex = serveSource.indexOf(
       'shutdownMgr.addCleanup("logger"',
     );
 
     assert.ok(httpCleanupIndex >= 0, "HTTP cleanup should be registered");
-    assert.ok(
-      persistUsageIndex >= 0,
-      "usage persistence cleanup should be registered",
+    assert.equal(
+      earlyPersistUsageIndex,
+      -1,
+      "usage persistence must not run before producer shutdown and work drain",
     );
-    assert.ok(dbCleanupIndex >= 0, "DB cleanup should be registered");
+    assert.ok(watcherCleanupIndex >= 0, "watcher cleanup should be registered");
+    assert.ok(verifierCleanupIndex >= 0, "verifier cleanup should be registered");
+    assert.ok(finalCleanupIndex >= 0, "final cleanup should be registered");
     assert.ok(loggerCleanupIndex >= 0, "logger cleanup should be registered");
     assert.ok(
-      httpCleanupIndex < persistUsageIndex &&
-        persistUsageIndex < dbCleanupIndex &&
-        dbCleanupIndex < loggerCleanupIndex,
-      "HTTP transport cleanup must run before usage persistence and final DB/logger cleanup",
+      httpCleanupIndex < watcherCleanupIndex &&
+        watcherCleanupIndex < verifierCleanupIndex &&
+        verifierCleanupIndex < finalCleanupIndex &&
+        finalCleanupIndex < loggerCleanupIndex,
+      "HTTP transport and producers must stop before final drain/usage/DB cleanup",
+    );
+    assert.match(
+      serveSource,
+      /registerServeFinalCleanups\(shutdownMgr,\s*\{[\s\S]*?persistUsage:\s*async\s*\(\)\s*=>/,
+      "serve cleanup must persist usage through the post-drain final cleanup path",
     );
   });
 
