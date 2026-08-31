@@ -13,7 +13,7 @@ import { prepareOpencodeSterileRuntime } from "./agents/opencode-runtime.mjs";
 import { extractOpencodeSessionUsage, tokensFromOpencodeSessionCounts } from "./agents/opencode.mjs";
 
 const SESSION_SCHEMA_VERSION = 3;
-const ANALYSIS_SCHEMA_VERSION = 2;
+const ANALYSIS_SCHEMA_VERSION = 3;
 const DEFAULT_RESULTS = "sdlbench/results/sessions.jsonl";
 const DEFAULT_ENCODING = "o200k_base";
 const DEFAULT_MODEL = "gpt-5.5";
@@ -323,40 +323,93 @@ export function importTranscript({ agent, variant, text, repoId = "unknown", tas
   };
 }
 
+function createCacheAggregate() {
+  return {
+    totalSessions: 0,
+    availableSessions: 0,
+    inputTokens: 0,
+    readTokens: 0,
+    writeTokens: 0,
+    discountSavingsUsd: 0,
+    uncachedEquivalentInputUsd: 0,
+  };
+}
+
+function addCacheAggregate(aggregate, cache) {
+  aggregate.totalSessions += 1;
+  if (!cache?.available) return;
+  aggregate.availableSessions += 1;
+  aggregate.inputTokens += nonNegativeNumber(cache.inputTokens);
+  aggregate.readTokens += nonNegativeNumber(cache.readTokens);
+  aggregate.writeTokens += nonNegativeNumber(cache.writeTokens);
+  aggregate.discountSavingsUsd += nonNegativeNumber(cache.discountSavingsUsd);
+  aggregate.uncachedEquivalentInputUsd += nonNegativeNumber(cache.uncachedEquivalentInputUsd);
+}
+
+function finalizeCacheAggregate(aggregate) {
+  return {
+    totalSessions: aggregate.totalSessions,
+    availableSessions: aggregate.availableSessions,
+    coveragePercent: pct(aggregate.availableSessions, aggregate.totalSessions),
+    inputTokens: aggregate.inputTokens,
+    readTokens: aggregate.readTokens,
+    writeTokens: aggregate.writeTokens,
+    hitPercent: pct(aggregate.readTokens, aggregate.inputTokens),
+    discountSavingsUsd: round4(aggregate.discountSavingsUsd),
+    discountSavingsPercent: pct(aggregate.discountSavingsUsd, aggregate.uncachedEquivalentInputUsd),
+  };
+}
+
 export function analyzeSessions(records) {
   const byVariant = {};
   for (const record of records) {
     const executionMode = record.workflow?.executionMode ?? "unknown";
-    const bucket = byVariant[record.variant] ??= { byExecutionMode: {}, durationMs: [] };
-    const modeBucket = bucket.byExecutionMode[executionMode] ??= { sessions: 0, passed: 0, tokens: 0, costUsd: 0, durationMs: [] };
+    const bucket = byVariant[record.variant] ??= {
+      byExecutionMode: {},
+      durationMs: [],
+      cache: createCacheAggregate(),
+    };
+    const modeBucket = bucket.byExecutionMode[executionMode] ??= {
+      sessions: 0,
+      passed: 0,
+      tokens: 0,
+      costUsd: 0,
+      durationMs: [],
+      cache: createCacheAggregate(),
+    };
     modeBucket.sessions += 1;
     modeBucket.passed += record.quality?.passed ? 1 : 0;
     modeBucket.tokens += record.tokens?.total ?? 0;
     modeBucket.costUsd += record.cost?.totalUsd ?? 0;
     modeBucket.durationMs.push(record.durationMs ?? 0);
     bucket.durationMs.push(record.durationMs ?? 0);
+    addCacheAggregate(modeBucket.cache, record.cache);
+    addCacheAggregate(bucket.cache, record.cache);
   }
 
   for (const bucket of Object.values(byVariant)) {
     for (const modeBucket of Object.values(bucket.byExecutionMode)) {
       modeBucket.passRate = pct(modeBucket.passed, modeBucket.sessions);
       modeBucket.p50DurationMs = percentile(modeBucket.durationMs, 50);
+      modeBucket.cache = finalizeCacheAggregate(modeBucket.cache);
       delete modeBucket.durationMs;
     }
     bucket.p50DurationMs = percentile(bucket.durationMs, 50);
+    bucket.cache = finalizeCacheAggregate(bucket.cache);
     delete bucket.durationMs;
   }
 
   const paired = buildPairedDeltas(records);
   const deltas = {};
 
-  const baseline = byVariant.baseline;
-  if (baseline) {
-    for (const [variant, bucket] of Object.entries(byVariant)) {
+  if (byVariant.baseline) {
+    for (const variant of Object.keys(byVariant)) {
       if (variant === "baseline") continue;
-      const pairedForVariant = paired.filter((row) => row.sdlVariant === variant);
+      const pairedForVariant = paired.filter((row) => row.variant === variant);
       const tokensSaved = pairedForVariant.reduce((sum, row) => sum + row.deltaTok, 0);
-      const costSavedUsd = round4(pairedForVariant.reduce((sum, row) => sum + (row.baselineCostUsd - row.sdlCostUsd), 0));
+      const costSavedUsd = round4(
+        pairedForVariant.reduce((sum, row) => sum + (row.baselineCostUsd - row.productCostUsd), 0),
+      );
       const deltaPctValues = pairedForVariant.map((row) => row.deltaPct);
 
       const stats = deltaPctValues.length >= 3
@@ -368,8 +421,8 @@ export function analyzeSessions(records) {
               upper: round4(bootstrapCI(deltaPctValues).upper),
             },
             significant: mannWhitneyU(
-              pairedForVariant.map((p) => p.baselineTok),
-              pairedForVariant.map((p) => p.sdlTok),
+              pairedForVariant.map((pair) => pair.baselineTok),
+              pairedForVariant.map((pair) => pair.productTok),
             ).significant,
           }
         : {};
@@ -384,7 +437,10 @@ export function analyzeSessions(records) {
     }
   }
 
-  const deltaPcts = paired.map((row) => row.deltaPct).sort((a, b) => a - b);
+  const sdlDeltaPcts = paired
+    .filter((row) => row.variant === "sdl")
+    .map((row) => row.deltaPct)
+    .sort((a, b) => a - b);
 
   return {
     schemaVersion: ANALYSIS_SCHEMA_VERSION,
@@ -393,7 +449,31 @@ export function analyzeSessions(records) {
     paired,
     deltas,
     headlineClaim: "median paired savings on tasks both solved",
-    pairedMedianDeltaPct: round4(median(deltaPcts)),
+    pairedMedianDeltaPct: round4(median(sdlDeltaPcts)),
+  };
+}
+
+function buildCacheComparison(baselineCache, productCache) {
+  const baselineAvailable = Boolean(baselineCache?.available);
+  const productAvailable = Boolean(productCache?.available);
+  if (!baselineAvailable || !productAvailable) {
+    return {
+      comparable: false,
+      reason: "provider-usage-unavailable",
+      baselineAvailable,
+      productAvailable,
+    };
+  }
+
+  return {
+    comparable: true,
+    baseline: baselineCache,
+    product: productCache,
+    hitPercentDelta: round4(productCache.hitPercent - baselineCache.hitPercent),
+    discountSavingsUsdDelta: round4(productCache.discountSavingsUsd - baselineCache.discountSavingsUsd),
+    discountSavingsPercentDelta: round4(
+      productCache.discountSavingsPercent - baselineCache.discountSavingsPercent,
+    ),
   };
 }
 
@@ -414,38 +494,53 @@ function buildPairedDeltas(records) {
   const paired = [];
   for (const slot of byKey.values()) {
     const baseline = slot.baseline;
-    const sdl = slot.sdl;
-    if (!baseline || !sdl) continue;
-    const baselineTok = baseline.tokens?.total ?? 0;
-    const sdlTok = sdl.tokens?.total ?? 0;
-    const deltaTok = baselineTok - sdlTok;
-    const deltaPctVal = pct(deltaTok, baselineTok);
-    paired.push({
-      taskId: baseline.taskId,
-      agent: baseline.agent,
-      model: baseline.model,
-      executionMode: baseline.workflow?.executionMode ?? "unknown",
-      baselineTok,
-      sdlTok,
-      deltaTok,
-      deltaPct: deltaPctVal,
-      bothPass: Boolean(baseline.quality?.passed) && Boolean(sdl.quality?.passed),
-      baselineCostUsd: baseline.cost?.totalUsd ?? 0,
-      sdlCostUsd: sdl.cost?.totalUsd ?? 0,
-      sdlVariant: sdl.variant,
-      lossSignals: deltaPctVal < 0
-        ? signalsForLoss({
-            baselineTok,
-            sdlTok,
-            attribution: {
-              repoSizeClass: sdl.repo?.sizeClass,
-              cachedInput: sdl.tokens?.cachedInput ?? 0,
-              total: sdl.tokens?.total ?? 0,
-            },
-            observability: sdl.artifacts?.sdl?.observability ?? {},
-          })
-        : [],
-    });
+    if (!baseline) continue;
+    const products = Object.entries(slot)
+      .filter(([variant]) => variant !== "baseline")
+      .sort(([left], [right]) => left.localeCompare(right));
+    for (const [variant, product] of products) {
+      const baselineTok = baseline.tokens?.total ?? 0;
+      const productTok = product.tokens?.total ?? 0;
+      const deltaTok = baselineTok - productTok;
+      const deltaPctVal = pct(deltaTok, baselineTok);
+      const row = {
+        taskId: baseline.taskId,
+        agent: baseline.agent,
+        model: baseline.model,
+        executionMode: baseline.workflow?.executionMode ?? "unknown",
+        variant,
+        baselineTok,
+        productTok,
+        deltaTok,
+        deltaPct: deltaPctVal,
+        bothPass: true,
+        baselineCostUsd: baseline.cost?.totalUsd ?? 0,
+        productCostUsd: product.cost?.totalUsd ?? 0,
+        cache: buildCacheComparison(baseline.cache, product.cache),
+        coverage: product.coverage,
+        fairness: product.fairness,
+        lossSignals: deltaPctVal < 0
+          ? signalsForLoss({
+              baselineTok,
+              sdlTok: productTok,
+              attribution: {
+                repoSizeClass: product.repo?.sizeClass,
+                cachedInput: product.tokens?.cachedInput ?? 0,
+                total: product.tokens?.total ?? 0,
+              },
+              observability: product.artifacts?.sdl?.observability ?? {},
+            })
+          : [],
+      };
+      if (variant === "sdl") {
+        Object.assign(row, {
+          sdlTok: productTok,
+          sdlCostUsd: row.productCostUsd,
+          sdlVariant: variant,
+        });
+      }
+      paired.push(row);
+    }
   }
   return paired;
 }

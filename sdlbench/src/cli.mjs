@@ -142,7 +142,11 @@ async function dispatch() {
     const inPath = opts.in ?? "sdlbench/results/sessions.jsonl";
     const records = await readJsonl(inPath);
     const summary = analyzeSessions(records);
-    const result = validateClaims({ paired: summary.paired, profile: opts.profile ?? "realism" });
+    const result = validateClaims({
+      paired: summary.paired,
+      profile: opts.profile ?? "realism",
+      variant: opts.variant ?? "sdl",
+    });
     console.log(JSON.stringify(result, null, 2));
   } else if (command === "view") {
     if (opts.check) {
@@ -201,7 +205,7 @@ function usage() {
   sdlbench setup repos|products|all
   sdlbench run --matrix sdlbench/tasks/matrix.json --agent codex|claude --variant baseline|sdl [--model gpt-5.5] [--pricing sdlbench/config/pricing.json] [--repos sdlbench/config/repos.lock.json] [--repo-id fixture-js] [--warm-session] [--behavior] [--agent-command "cmd {repo} {prompt}"]
   sdlbench scaling --sizes tiny,small --agent codex --variant baseline,sdl [--i-understand-cost]
-  sdlbench claims --in sdlbench/results/sessions.jsonl --profile realism|efficient|smoke
+  sdlbench claims --in sdlbench/results/sessions.jsonl --profile realism|efficient|smoke [--variant sdl]
   sdlbench import --agent codex|claude --variant baseline --transcript transcript.jsonl
   sdlbench analyze --in sdlbench/results/sessions.jsonl
   sdlbench view [--port 4177]`);

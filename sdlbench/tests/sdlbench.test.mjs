@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -2168,4 +2169,179 @@ test("estimateCost prices cache writes once and clamps input buckets", () => {
   assert.equal(cost.uncachedInputUsd, 0);
   assert.equal(cost.cacheWriteInputPerMTok, 12);
   assert.equal(cost.totalUsd, 0.004);
+});
+
+
+test("generic product cache pairing preserves SDL headline and weighted aggregates", () => {
+  const availableCache = (inputTokens, readTokens, discountSavingsUsd) => ({
+    available: true,
+    source: "provider",
+    inputTokens,
+    readTokens,
+    writeTokens: 0,
+    uncachedTokens: inputTokens - readTokens,
+    hitPercent: inputTokens ? readTokens / inputTokens * 100 : 0,
+    uncachedEquivalentInputUsd: inputTokens / 10_000,
+    billedInputUsd: inputTokens / 10_000 - discountSavingsUsd,
+    discountSavingsUsd,
+    discountSavingsPercent: inputTokens ? discountSavingsUsd / (inputTokens / 10_000) * 100 : 0,
+  });
+  const record = (variant, taskId, total, totalUsd, cache) => ({
+    schemaVersion: 3,
+    variant,
+    taskId,
+    agent: "codex",
+    model: "model",
+    tokens: { total },
+    cost: { totalUsd },
+    cache,
+    quality: { passed: true },
+    workflow: { executionMode: "behavior" },
+  });
+  const unavailable = { available: false, reason: "provider-usage-unavailable" };
+  const summary = analyzeSessions([
+    record("baseline", "task-1", 100, 0.1, availableCache(100, 20, 0.0016)),
+    record("sdl", "task-1", 60, 0.06, availableCache(60, 30, 0.003)),
+    record("competitor", "task-1", 10, 0.01, unavailable),
+    record("sdl", "task-2", 75, 0.075, availableCache(300, 0, 0)),
+  ]);
+
+  assert.equal(summary.schemaVersion, 3);
+  assert.equal(summary.paired.length, 2);
+  const sdlPair = summary.paired.find((row) => row.variant === "sdl");
+  const competitorPair = summary.paired.find((row) => row.variant === "competitor");
+  assert.equal(sdlPair.productTok, 60);
+  assert.equal(sdlPair.sdlTok, 60);
+  assert.equal(sdlPair.sdlVariant, "sdl");
+  assert.equal(sdlPair.cache.comparable, true);
+  assert.equal(sdlPair.cache.baseline.hitPercent, 20);
+  assert.equal(sdlPair.cache.product.hitPercent, 50);
+  assert.equal(sdlPair.cache.hitPercentDelta, 30);
+  assert.equal(competitorPair.productTok, 10);
+  assert.equal("sdlTok" in competitorPair, false);
+  assert.equal(competitorPair.cache.comparable, false);
+  assert.equal(competitorPair.cache.reason, "provider-usage-unavailable");
+  assert.equal(competitorPair.cache.baselineAvailable, true);
+  assert.equal(competitorPair.cache.productAvailable, false);
+  assert.equal(competitorPair.deltaPct, 90);
+
+  assert.deepEqual(summary.byVariant.sdl.cache, {
+    totalSessions: 2,
+    availableSessions: 2,
+    coveragePercent: 100,
+    inputTokens: 360,
+    readTokens: 30,
+    writeTokens: 0,
+    hitPercent: 8.33,
+    discountSavingsUsd: 0.003,
+    discountSavingsPercent: 8.33,
+  });
+  assert.deepEqual(
+    summary.byVariant.sdl.byExecutionMode.behavior.cache,
+    summary.byVariant.sdl.cache,
+  );
+  assert.equal(summary.byVariant.competitor.cache.totalSessions, 1);
+  assert.equal(summary.byVariant.competitor.cache.availableSessions, 0);
+  assert.equal(summary.byVariant.competitor.cache.coveragePercent, 0);
+  assert.equal(summary.pairedMedianDeltaPct, 40);
+  assert.equal(summary.deltas.sdl.medianDeltaPct, 40);
+  assert.equal(summary.deltas.competitor.medianDeltaPct, 90);
+  assert.match(summary.headlineClaim, /median paired savings on tasks both solved/);
+});
+
+test("validateClaims isolates products and ignores cache fields", () => {
+  const paired = [
+    {
+      variant: "sdl",
+      deltaPct: 60,
+      coverage: { contextCoverage: 1 },
+      fairness: { netSavingsPct: 60 },
+      cache: { comparable: true, hitPercentDelta: 99 },
+    },
+    {
+      variant: "competitor",
+      deltaPct: -50,
+      coverage: { contextCoverage: 1 },
+      fairness: { netSavingsPct: 60 },
+      cache: { comparable: true, hitPercentDelta: -99 },
+    },
+  ];
+
+  const defaultResult = validateClaims({ paired, profile: "smoke" });
+  const competitorResult = validateClaims({ paired, profile: "smoke", variant: "competitor" });
+  assert.equal(defaultResult.variant, "sdl");
+  assert.equal(defaultResult.passed, true);
+  assert.equal(competitorResult.variant, "competitor");
+  assert.equal(competitorResult.passed, false);
+
+  const changedCache = paired.map((row) => ({
+    ...row,
+    cache: { comparable: !row.cache.comparable, hitPercentDelta: row.cache.hitPercentDelta * -1000 },
+  }));
+  assert.equal(
+    validateClaims({ paired: changedCache, profile: "smoke" }).passed,
+    defaultResult.passed,
+  );
+  assert.equal(
+    validateClaims({ paired: changedCache, profile: "smoke", variant: "competitor" }).passed,
+    competitorResult.passed,
+  );
+});
+
+test("claims CLI defaults to SDL and accepts an explicit competitor variant", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-claims-variant-"));
+  const resultsPath = join(root, "sessions.jsonl");
+  const record = (variant, total) => ({
+    schemaVersion: 3,
+    variant,
+    taskId: "task-1",
+    agent: "codex",
+    model: "model",
+    tokens: { total },
+    cost: { totalUsd: total / 1000 },
+    cache: { available: false, reason: "provider-usage-unavailable" },
+    quality: { passed: true },
+    workflow: { executionMode: "behavior" },
+    coverage: { contextCoverage: 1 },
+    fairness: { netSavingsPct: 60 },
+  });
+
+  try {
+    await writeFile(
+      resultsPath,
+      [
+        record("baseline", 100),
+        record("sdl", 40),
+        record("competitor", 150),
+      ].map((value) => JSON.stringify(value)).join("\n") + "\n",
+    );
+    const cliPath = join(process.cwd(), "sdlbench/src/cli.mjs");
+    const runClaims = (variant) => spawnSync(
+      process.execPath,
+      [
+        cliPath,
+        "claims",
+        "--in",
+        resultsPath,
+        "--profile",
+        "smoke",
+        ...(variant ? ["--variant", variant] : []),
+      ],
+      { encoding: "utf8" },
+    );
+
+    const defaultRun = runClaims();
+    assert.equal(defaultRun.status, 0, defaultRun.stderr);
+    const defaultResult = JSON.parse(defaultRun.stdout);
+    assert.equal(defaultResult.variant, "sdl");
+    assert.equal(defaultResult.passed, true);
+
+    const competitorRun = runClaims("competitor");
+    assert.equal(competitorRun.status, 0, competitorRun.stderr);
+    const competitorResult = JSON.parse(competitorRun.stdout);
+    assert.equal(competitorResult.variant, "competitor");
+    assert.equal(competitorResult.passed, false);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
 });

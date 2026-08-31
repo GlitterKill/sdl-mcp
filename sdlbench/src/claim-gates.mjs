@@ -22,17 +22,20 @@ const PROFILES = {
   },
 };
 
-export function validateClaims({ paired, profile = "realism" }) {
+export function validateClaims({ paired, profile = "realism", variant = "sdl" }) {
+  const selected = paired.filter(
+    (row) => (row.variant ?? row.sdlVariant ?? "sdl") === variant,
+  );
   const thresholds = PROFILES[profile] ?? PROFILES.realism;
-  const deltaPcts = paired.map((row) => row.deltaPct).sort((a, b) => a - b);
-  const coverages = paired.map((row) => row.coverage?.contextCoverage ?? row.coverage?.fileCoverage ?? 0);
-  const fairnesses = paired.map((row) => row.fairness?.netSavingsPct ?? 0);
+  const deltaPcts = selected.map((row) => row.deltaPct).sort((a, b) => a - b);
+  const coverages = selected.map((row) => row.coverage?.contextCoverage ?? row.coverage?.fileCoverage ?? 0);
+  const fairnesses = selected.map((row) => row.fairness?.netSavingsPct ?? 0);
 
   const p50 = percentile(deltaPcts, 50);
   const p25 = percentile(deltaPcts, 25);
   const minVal = deltaPcts.length > 0 ? deltaPcts[0] : 0;
-  const avgCoverage = coverages.length > 0 ? coverages.reduce((s, v) => s + v, 0) / coverages.length : 0;
-  const avgFairness = fairnesses.length > 0 ? fairnesses.reduce((s, v) => s + v, 0) / fairnesses.length : 0;
+  const avgCoverage = coverages.length > 0 ? coverages.reduce((sum, value) => sum + value, 0) / coverages.length : 0;
+  const avgFairness = fairnesses.length > 0 ? fairnesses.reduce((sum, value) => sum + value, 0) / fairnesses.length : 0;
 
   const gates = [
     { name: "p50_paired_savings", threshold: thresholds.p50Floor, actual: p50, passed: p50 >= thresholds.p50Floor },
@@ -44,9 +47,10 @@ export function validateClaims({ paired, profile = "realism" }) {
 
   return {
     profile,
-    passed: gates.every((g) => g.passed),
+    variant,
+    passed: gates.every((gate) => gate.passed),
     gates,
-    pairedCount: paired.length,
+    pairedCount: selected.length,
   };
 }
 
