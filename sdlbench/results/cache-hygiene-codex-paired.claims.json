@@ -1,0 +1,38 @@
+{
+  "profile": "realism",
+  "variant": "sdl",
+  "passed": false,
+  "gates": [
+    {
+      "name": "p50_paired_savings",
+      "threshold": 50,
+      "actual": -55.17,
+      "passed": false
+    },
+    {
+      "name": "p25_paired_savings",
+      "threshold": 40,
+      "actual": -75.22,
+      "passed": false
+    },
+    {
+      "name": "min_task_savings",
+      "threshold": 20,
+      "actual": -84.67,
+      "passed": false
+    },
+    {
+      "name": "avg_coverage",
+      "threshold": 0.5,
+      "actual": 0.25,
+      "passed": false
+    },
+    {
+      "name": "avg_fairness_netSavings",
+      "threshold": 20,
+      "actual": 0,
+      "passed": false
+    }
+  ],
+  "pairedCount": 4
+}

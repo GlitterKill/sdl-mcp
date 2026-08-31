@@ -1,0 +1,321 @@
+{
+  "schemaVersion": 3,
+  "totals": {
+    "sessions": 8,
+    "variants": 2,
+    "paired": 4
+  },
+  "byVariant": {
+    "baseline": {
+      "byExecutionMode": {
+        "behavior": {
+          "sessions": 4,
+          "passed": 4,
+          "tokens": 607179,
+          "costUsd": 2.3848000000000003,
+          "cache": {
+            "totalSessions": 4,
+            "availableSessions": 4,
+            "coveragePercent": 100,
+            "inputTokens": 584364,
+            "readTokens": 488576,
+            "writeTokens": 0,
+            "hitPercent": 83.61,
+            "discountSavingsUsd": 1.2214,
+            "discountSavingsPercent": 41.8
+          },
+          "passRate": 100,
+          "p50DurationMs": 122180
+        }
+      },
+      "cache": {
+        "totalSessions": 4,
+        "availableSessions": 4,
+        "coveragePercent": 100,
+        "inputTokens": 584364,
+        "readTokens": 488576,
+        "writeTokens": 0,
+        "hitPercent": 83.61,
+        "discountSavingsUsd": 1.2214,
+        "discountSavingsPercent": 41.8
+      },
+      "p50DurationMs": 122180
+    },
+    "sdl": {
+      "byExecutionMode": {
+        "behavior": {
+          "sessions": 4,
+          "passed": 4,
+          "tokens": 774194,
+          "costUsd": 2.8491,
+          "cache": {
+            "totalSessions": 4,
+            "availableSessions": 4,
+            "coveragePercent": 100,
+            "inputTokens": 749738,
+            "readTokens": 653312,
+            "writeTokens": 0,
+            "hitPercent": 87.14,
+            "discountSavingsUsd": 1.6334,
+            "discountSavingsPercent": 43.57
+          },
+          "passRate": 100,
+          "p50DurationMs": 123125.5
+        }
+      },
+      "cache": {
+        "totalSessions": 4,
+        "availableSessions": 4,
+        "coveragePercent": 100,
+        "inputTokens": 749738,
+        "readTokens": 653312,
+        "writeTokens": 0,
+        "hitPercent": 87.14,
+        "discountSavingsUsd": 1.6334,
+        "discountSavingsPercent": 43.57
+      },
+      "p50DurationMs": 123125.5
+    }
+  },
+  "paired": [
+    {
+      "taskId": "bugfix-discount-tax",
+      "agent": "codex",
+      "model": "gpt-5.5",
+      "executionMode": "behavior",
+      "claimGrade": "primary",
+      "variant": "sdl",
+      "baselineTok": 93982,
+      "productTok": 161717,
+      "deltaTok": -67735,
+      "deltaPct": -72.07,
+      "bothPass": true,
+      "baselineCostUsd": 0.3865,
+      "productCostUsd": 0.6342,
+      "cache": {
+        "comparable": true,
+        "baseline": {
+          "available": true,
+          "source": "codex_session_token_count",
+          "inputTokens": 90968,
+          "readTokens": 63488,
+          "writeTokens": 0,
+          "uncachedTokens": 27480,
+          "hitPercent": 69.79,
+          "uncachedEquivalentInputUsd": 0.4548,
+          "billedInputUsd": 0.2961,
+          "discountSavingsUsd": 0.1587,
+          "discountSavingsPercent": 34.9
+        },
+        "product": {
+          "available": true,
+          "source": "codex_session_token_count",
+          "inputTokens": 155407,
+          "readTokens": 132864,
+          "writeTokens": 0,
+          "uncachedTokens": 22543,
+          "hitPercent": 85.49,
+          "uncachedEquivalentInputUsd": 0.777,
+          "billedInputUsd": 0.4449,
+          "discountSavingsUsd": 0.3322,
+          "discountSavingsPercent": 42.75
+        },
+        "hitPercentDelta": 15.7,
+        "discountSavingsUsdDelta": 0.1735,
+        "discountSavingsPercentDelta": 7.85
+      },
+      "coverage": {
+        "fileCoverage": 100,
+        "symbolCoverage": 0,
+        "contextCoverage": 33.33,
+        "precision": 100,
+        "recall": 33.33,
+        "filesFound": [
+          "src/cart.js"
+        ],
+        "symbolsFound": [],
+        "targetFiles": [
+          "src/cart.js"
+        ],
+        "targetSymbols": [
+          "buildCart",
+          "resolvePromo"
+        ]
+      },
+      "lossSignals": [],
+      "sdlTok": 161717,
+      "sdlCostUsd": 0.6342,
+      "sdlVariant": "sdl"
+    },
+    {
+      "taskId": "feature-tiered-checkout",
+      "agent": "codex",
+      "model": "gpt-5.5",
+      "executionMode": "behavior",
+      "claimGrade": "primary",
+      "variant": "sdl",
+      "baselineTok": 176914,
+      "productTok": 326700,
+      "deltaTok": -149786,
+      "deltaPct": -84.67,
+      "bothPass": true,
+      "baselineCostUsd": 0.7639,
+      "productCostUsd": 1.1432,
+      "cache": {
+        "comparable": true,
+        "baseline": {
+          "available": true,
+          "source": "codex_session_token_count",
+          "inputTokens": 167903,
+          "readTokens": 138368,
+          "writeTokens": 0,
+          "uncachedTokens": 29535,
+          "hitPercent": 82.41,
+          "uncachedEquivalentInputUsd": 0.8395,
+          "billedInputUsd": 0.4936,
+          "discountSavingsUsd": 0.3459,
+          "discountSavingsPercent": 41.2
+        },
+        "product": {
+          "available": true,
+          "source": "codex_session_token_count",
+          "inputTokens": 317665,
+          "readTokens": 286464,
+          "writeTokens": 0,
+          "uncachedTokens": 31201,
+          "hitPercent": 90.18,
+          "uncachedEquivalentInputUsd": 1.5883,
+          "billedInputUsd": 0.8722,
+          "discountSavingsUsd": 0.7162,
+          "discountSavingsPercent": 45.09
+        },
+        "hitPercentDelta": 7.77,
+        "discountSavingsUsdDelta": 0.3703,
+        "discountSavingsPercentDelta": 3.89
+      },
+      "lossSignals": [],
+      "sdlTok": 326700,
+      "sdlCostUsd": 1.1432,
+      "sdlVariant": "sdl"
+    },
+    {
+      "taskId": "security-order-audit",
+      "agent": "codex",
+      "model": "gpt-5.5",
+      "executionMode": "behavior",
+      "claimGrade": "primary",
+      "variant": "sdl",
+      "baselineTok": 120300,
+      "productTok": 166337,
+      "deltaTok": -46037,
+      "deltaPct": -38.27,
+      "bothPass": true,
+      "baselineCostUsd": 0.4561,
+      "productCostUsd": 0.5796,
+      "cache": {
+        "comparable": true,
+        "baseline": {
+          "available": true,
+          "source": "codex_session_token_count",
+          "inputTokens": 116209,
+          "readTokens": 99072,
+          "writeTokens": 0,
+          "uncachedTokens": 17137,
+          "hitPercent": 85.25,
+          "uncachedEquivalentInputUsd": 0.581,
+          "billedInputUsd": 0.3334,
+          "discountSavingsUsd": 0.2477,
+          "discountSavingsPercent": 42.63
+        },
+        "product": {
+          "available": true,
+          "source": "codex_session_token_count",
+          "inputTokens": 162237,
+          "readTokens": 141824,
+          "writeTokens": 0,
+          "uncachedTokens": 20413,
+          "hitPercent": 87.42,
+          "uncachedEquivalentInputUsd": 0.8112,
+          "billedInputUsd": 0.4566,
+          "discountSavingsUsd": 0.3546,
+          "discountSavingsPercent": 43.71
+        },
+        "hitPercentDelta": 2.17,
+        "discountSavingsUsdDelta": 0.1069,
+        "discountSavingsPercentDelta": 1.08
+      },
+      "lossSignals": [],
+      "sdlTok": 166337,
+      "sdlCostUsd": 0.5796,
+      "sdlVariant": "sdl"
+    },
+    {
+      "taskId": "review-checkout-risk",
+      "agent": "codex",
+      "model": "gpt-5.5",
+      "executionMode": "behavior",
+      "claimGrade": "primary",
+      "variant": "sdl",
+      "baselineTok": 215983,
+      "productTok": 119440,
+      "deltaTok": 96543,
+      "deltaPct": 44.7,
+      "bothPass": true,
+      "baselineCostUsd": 0.7783,
+      "productCostUsd": 0.4921,
+      "cache": {
+        "comparable": true,
+        "baseline": {
+          "available": true,
+          "source": "codex_session_token_count",
+          "inputTokens": 209284,
+          "readTokens": 187648,
+          "writeTokens": 0,
+          "uncachedTokens": 21636,
+          "hitPercent": 89.66,
+          "uncachedEquivalentInputUsd": 1.0464,
+          "billedInputUsd": 0.5773,
+          "discountSavingsUsd": 0.4691,
+          "discountSavingsPercent": 44.83
+        },
+        "product": {
+          "available": true,
+          "source": "codex_session_token_count",
+          "inputTokens": 114429,
+          "readTokens": 92160,
+          "writeTokens": 0,
+          "uncachedTokens": 22269,
+          "hitPercent": 80.54,
+          "uncachedEquivalentInputUsd": 0.5721,
+          "billedInputUsd": 0.3417,
+          "discountSavingsUsd": 0.2304,
+          "discountSavingsPercent": 40.27
+        },
+        "hitPercentDelta": -9.12,
+        "discountSavingsUsdDelta": -0.2387,
+        "discountSavingsPercentDelta": -4.56
+      },
+      "lossSignals": [],
+      "sdlTok": 119440,
+      "sdlCostUsd": 0.4921,
+      "sdlVariant": "sdl"
+    }
+  ],
+  "deltas": {
+    "sdl": {
+      "tokensSaved": -167015,
+      "costSavedUsd": -0.4643,
+      "pairedCount": 4,
+      "medianDeltaPct": -55.17,
+      "deltasMean": -37.5775,
+      "deltasStd": 58.2452,
+      "bootstrap95": {
+        "lower": -78.37,
+        "upper": 15.5075
+      },
+      "significant": false
+    }
+  },
+  "headlineClaim": "median paired savings on tasks both solved",
+  "pairedMedianDeltaPct": -55.17
+}
