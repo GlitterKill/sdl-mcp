@@ -13,6 +13,7 @@ import {
   findCodexSessionTokenCounts,
   importTranscript,
   inspectCodexSessionSterility,
+  renderAgentPrompt,
   runBenchmark,
   trimSlash,
 } from "../src/sdlbench.mjs";
@@ -589,7 +590,7 @@ test("SDL behavior mode exposes a live MCP server without seeded lookup context"
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
       const prompt = readFileSync(process.argv[process.argv.indexOf("--prompt") + 1], "utf8");
       if (prompt.includes("PRESEEDED_LOOKUP_SHOULD_NOT_APPEAR")) process.exit(2);
-      if (!prompt.includes("configured SDL-MCP server")) process.exit(3);
+      if (/configured SDL-MCP server|sdl\\.context|sdl\\.workflow|workflow skill/i.test(prompt)) process.exit(3);
       if (!process.argv.join(" ").includes("mcp_servers.sdl-mcp.url")) process.exit(4);
       if (prompt.includes("PASTED_SDL_CONTEXT_SHOULD_NOT_APPEAR")) process.exit(5);
       if (prompt.includes("sdl.repo.status")) process.exit(6);
@@ -613,6 +614,18 @@ test("SDL behavior mode exposes a live MCP server without seeded lookup context"
 
     assert.equal(record.status, "pass");
     assert.match(record.artifacts.agent.command, /mcp_servers\.sdl-mcp\.url/);
+  for (const relativePath of [
+    "AGENTS.md",
+    "SDL.md",
+    ".codex/hooks.json",
+    ".codex/hooks/load-sdl-skill.mjs",
+    ".codex/hooks/force-sdl-mcp.mjs",
+  ]) {
+    await assert.rejects(
+      readFile(join(record.artifacts.worktree, relativePath), "utf8"),
+      { code: "ENOENT" },
+    );
+  }
     assert.match(record.artifacts.agent.command, new RegExp(`127\\.0\\.0\\.1:${port}`));
     assert.ok(requests.some((request) => request.pathname.endsWith("/reindex-stream")));
     assert.equal(requests.some((request) => request.pathname.endsWith("/search")), false);
@@ -2028,3 +2041,29 @@ test("runScalingCurve refuses to launch without --i-understand-cost and prints a
   }
 });
 
+
+
+test("renderAgentPrompt keeps baseline context and neutralizes non-baseline variants", () => {
+  const task = {
+    taskId: "prompt-contract",
+    prompt: "Fix it.",
+    context: { raw: "RAW_CONTEXT" },
+  };
+  const neutral = [
+    "Task: prompt-contract",
+    "Fix it.",
+    "Edit this repository in place. Keep changes limited to the task.",
+  ].join("\n\n");
+
+  assert.equal(renderAgentPrompt(task, "sdl"), neutral);
+  assert.equal(renderAgentPrompt(task, "competitor"), neutral);
+  assert.equal(
+    renderAgentPrompt(task, "baseline"),
+    [
+      "Task: prompt-contract",
+      "Fix it.",
+      "Context:\n\nRAW_CONTEXT",
+      "Edit this repository in place. Keep changes limited to the task.",
+    ].join("\n\n"),
+  );
+});

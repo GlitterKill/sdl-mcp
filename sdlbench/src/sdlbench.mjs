@@ -127,7 +127,6 @@ export async function runBenchmark(options = {}) {
       let agentRuntime = null;
 
       if (executionMode === "behavior") {
-        if (sdlSession) await installSdlBenchmarkReinforcement(runRoot, sdlSession);
         if (agent === "codex") {
           assertCodexWorktreeIsSterile(root, runRoot);
           codexRuntime = await prepareCodexSterileRuntime({ root, workDir, taskRunId });
@@ -541,25 +540,18 @@ async function loadAgentConfig(root, agent, options, { requireCommand = false } 
   }
 }
 
-function renderAgentPrompt(task, variant) {
+export function renderAgentPrompt(task, variant) {
   const context = promptContextForVariant(task, variant);
   return [
     `Task: ${task.taskId}`,
     task.prompt,
-    "Context:",
-    context,
+    ...(context ? ["Context:", context] : []),
     "Edit this repository in place. Keep changes limited to the task."
   ].join("\n\n");
 }
 
 function promptContextForVariant(task, variant) {
-  if (variant !== "sdl") return task.context.raw;
-  return [
-    "Use the configured SDL-MCP server for repository context.",
-    `The repository is already registered and indexed under repoId "${task.repoId}".`,
-    "Use sdl.context or sdl.workflow before reading or editing indexed source.",
-    "Use Code Mode actions for indexed-source edits and repo-local commands.",
-  ].join("\n");
+  return variant === "baseline" ? task.context.raw : "";
 }
 
 function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime }) {
@@ -689,65 +681,6 @@ function assertCodexWorktreeIsSterile(root, runRoot) {
   throw new Error(`Codex behavior worktree must be outside the benchmark repo to avoid parent AGENTS.md/rules: ${runRoot}`);
 }
 
-async function installSdlBenchmarkReinforcement(runRoot, sdlSession) {
-  const hookDir = join(runRoot, ".codex", "hooks");
-  await mkdir(hookDir, { recursive: true });
-  await writeFile(join(runRoot, "AGENTS.md"), sdlBenchmarkInstructions(sdlSession), "utf8");
-  await writeFile(join(runRoot, "SDL.md"), sdlBenchmarkInstructions(sdlSession), "utf8");
-  await writeFile(join(runRoot, ".codex", "hooks.json"), JSON.stringify({
-    hooks: {
-      SessionStart: [{
-        hooks: [{
-          type: "command",
-          command: `node ${JSON.stringify(join(hookDir, "load-sdl-skill.mjs"))}`,
-          timeout: 5,
-          statusMessage: "Loading SDL-MCP workflow skill",
-        }],
-      }],
-      PreToolUse: [{
-        matcher: ".*",
-        hooks: [{
-          type: "command",
-          command: `node ${JSON.stringify(join(hookDir, "force-sdl-mcp.mjs"))}`,
-          timeout: 10,
-          statusMessage: "Checking SDL-MCP tool policy",
-        }],
-      }],
-    },
-  }, null, 2), "utf8");
-
-  const sourceHookDir = join(defaultRoot(), ".codex", "hooks");
-  await writeFile(
-    join(hookDir, "load-sdl-skill.mjs"),
-    await readFile(join(sourceHookDir, "load-sdl-skill.mjs"), "utf8"),
-    "utf8",
-  );
-  const pidfilePath = sdlSession.evidence?.configPath
-    ? join(dirname(sdlSession.evidence.configPath), "sdl-mcp.pid")
-    : join(runRoot, ".sdlbench-sdl.pid");
-  const forceHook = (await readFile(join(sourceHookDir, "force-sdl-mcp.mjs"), "utf8"))
-    .replace(
-      /const pidfilePath = ".*?";/,
-      "const pidfilePath = " + JSON.stringify(pidfilePath) + ";",
-    )
-    .replace(
-      'normalized === "shell_command" ||',
-      'normalized === "shell_command" ||\n    normalized === "exec" ||\n    normalized.endsWith(".exec") ||',
-    );
-  await writeFile(join(hookDir, "force-sdl-mcp.mjs"), forceHook, "utf8");
-}
-
-function sdlBenchmarkInstructions(sdlSession) {
-  const repoId = sdlSession?.repoId ?? "fixture-js";
-  return [
-    "# SDL-MCP Benchmark Instructions",
-    "",
-    `The repository is registered and indexed under repoId "${repoId}".`,
-    "Use SDL-MCP as the repository interface.",
-    "Use sdl.context or sdl.workflow before reading or editing indexed source.",
-    "Use Code Mode actions for indexed-source edits and repo-local commands.",
-  ].join("\n");
-}
 
 async function snapshotFiles(root) {
   const files = new Map();
@@ -1129,7 +1062,7 @@ export function trimSlash(value) {
 
 function countSessionTokens(task, variant, tokenizerCommand, sdlContext, outputOverride, tokenizerOptions = {}) {
   const outputText = outputOverride ?? Object.values(task.solution?.files ?? {}).join("\n");
-  const activeContext = variant === "sdl" ? sdlContext : task.context.raw;
+  const activeContext = sdlContext;
   const counted = runTokenizer(tokenizerCommand, {
     input: `${task.prompt}\n\n${activeContext}`,
     output: outputText || task.expectedArtifacts?.join("\n") || task.prompt,
