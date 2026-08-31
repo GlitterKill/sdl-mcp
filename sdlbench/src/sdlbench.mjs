@@ -508,6 +508,9 @@ function buildPairedDeltas(records) {
         agent: baseline.agent,
         model: baseline.model,
         executionMode: baseline.workflow?.executionMode ?? "unknown",
+        claimGrade: baseline.claimGrade === "primary" && product.claimGrade === "primary"
+          ? "primary"
+          : "none",
         variant,
         baselineTok,
         productTok,

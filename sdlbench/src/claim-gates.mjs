@@ -24,7 +24,11 @@ const PROFILES = {
 
 export function validateClaims({ paired, profile = "realism", variant = "sdl" }) {
   const selected = paired.filter(
-    (row) => (row.variant ?? row.sdlVariant ?? "sdl") === variant,
+    (row) =>
+      (row.variant ?? row.sdlVariant ?? "sdl") === variant
+      && row.bothPass === true
+      && row.claimGrade === "primary"
+      && row.executionMode === "behavior",
   );
   const thresholds = PROFILES[profile] ?? PROFILES.realism;
   const deltaPcts = selected.map((row) => row.deltaPct).sort((a, b) => a - b);

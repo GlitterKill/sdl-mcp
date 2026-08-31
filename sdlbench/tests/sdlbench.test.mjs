@@ -1522,10 +1522,16 @@ test("behavior mode with agent=opencode throws when no session usage is found", 
 });
 
 test("validateClaims returns gates for smoke/efficient/realism profiles on paired data", () => {
+  const claimable = {
+    variant: "sdl",
+    bothPass: true,
+    claimGrade: "primary",
+    executionMode: "behavior",
+  };
   const paired = [
-    { deltaPct: 60, coverage: { contextCoverage: 0.8, fileCoverage: 0.9 }, fairness: { netSavingsPct: 50 } },
-    { deltaPct: 50, coverage: { contextCoverage: 0.7, fileCoverage: 0.8 }, fairness: { netSavingsPct: 40 } },
-    { deltaPct: 35, coverage: { contextCoverage: 0.6, fileCoverage: 0.5 }, fairness: { netSavingsPct: 25 } },
+    { ...claimable, deltaPct: 60, coverage: { contextCoverage: 0.8, fileCoverage: 0.9 }, fairness: { netSavingsPct: 50 } },
+    { ...claimable, deltaPct: 50, coverage: { contextCoverage: 0.7, fileCoverage: 0.8 }, fairness: { netSavingsPct: 40 } },
+    { ...claimable, deltaPct: 35, coverage: { contextCoverage: 0.6, fileCoverage: 0.5 }, fairness: { netSavingsPct: 25 } },
   ];
 
   const realism = validateClaims({ paired, profile: "realism" });
@@ -1539,7 +1545,7 @@ test("validateClaims returns gates for smoke/efficient/realism profiles on paire
   const efficient = validateClaims({ paired, profile: "efficient" });
   assert.ok(efficient.passed, "efficient profile should pass with good data");
 
-  const badPaired = [{ deltaPct: 5, coverage: {}, fairness: {} }];
+  const badPaired = [{ ...claimable, deltaPct: 5, coverage: {}, fairness: {} }];
   const badRealism = validateClaims({ paired: badPaired, profile: "realism" });
   assert.equal(badRealism.passed, false);
 });
@@ -2257,6 +2263,9 @@ test("validateClaims isolates products and ignores cache fields", () => {
   const paired = [
     {
       variant: "sdl",
+      claimGrade: "primary",
+      executionMode: "behavior",
+      bothPass: true,
       deltaPct: 60,
       coverage: { contextCoverage: 1 },
       fairness: { netSavingsPct: 60 },
@@ -2264,6 +2273,9 @@ test("validateClaims isolates products and ignores cache fields", () => {
     },
     {
       variant: "competitor",
+      claimGrade: "primary",
+      executionMode: "behavior",
+      bothPass: true,
       deltaPct: -50,
       coverage: { contextCoverage: 1 },
       fairness: { netSavingsPct: 60 },
@@ -2277,6 +2289,15 @@ test("validateClaims isolates products and ignores cache fields", () => {
   assert.equal(defaultResult.passed, true);
   assert.equal(competitorResult.variant, "competitor");
   assert.equal(competitorResult.passed, false);
+
+  const fixtureOnly = paired.map((row) => ({
+    ...row,
+    claimGrade: "none",
+    executionMode: "fixture",
+  }));
+  const fixtureResult = validateClaims({ paired: fixtureOnly, profile: "smoke" });
+  assert.equal(fixtureResult.passed, false);
+  assert.equal(fixtureResult.pairedCount, 0);
 
   const changedCache = paired.map((row) => ({
     ...row,
@@ -2298,6 +2319,7 @@ test("claims CLI defaults to SDL and accepts an explicit competitor variant", as
   const record = (variant, total) => ({
     schemaVersion: 3,
     variant,
+    claimGrade: "primary",
     taskId: "task-1",
     agent: "codex",
     model: "model",
