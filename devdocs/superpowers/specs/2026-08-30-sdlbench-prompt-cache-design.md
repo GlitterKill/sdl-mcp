@@ -71,12 +71,13 @@ interface BenchmarkSession {
 interface BenchmarkTurn {
   turnIndex: number;
   request: unknown;
+  canonicalModelInput: string;
   toolCalls: unknown[];
   toolResults: unknown[];
 }
 ```
 
-The persisted representation uses deterministic JSON serialization. Tool order, object key order, and result bytes are part of the measured cache surface. Operational timestamps, durations, request IDs, absolute paths, and other non-actionable noise remain outside the model-facing transcript.
+The persisted transcript stores every canonical model-input string, not only a digest. It also records the assembly version, serialization version, UTF-8 encoding, and tokenizer identity needed to replay the cache calculation losslessly. Tool order, object key order, and result bytes are part of the measured cache surface. Operational timestamps, durations, request IDs, absolute paths, and other non-actionable noise remain outside the model-facing transcript. Benchmark transcripts contain controlled fixture data only, not user sessions.
 
 The same task fixture defines the user request, turn limit, context budget, quality oracle, and completion criteria for every product. Product-specific instructions are allowed only when they arrive through that product's normal public installation or MCP loading path.
 
@@ -85,11 +86,22 @@ The same task fixture defines the user request, turn limit, context budget, qual
 Each benchmark result contains deterministic simulated metrics and optional provider metrics:
 
 ```ts
+type ProviderCacheResult =
+  | {
+      status: "available";
+      provider: string;
+      model: string;
+      pricingProfile: string;
+      ranking:
+        | { status: "ranked" }
+        | { status: "unranked"; reason: string };
+      metrics: CacheMetrics;
+    }
+  | { status: "unavailable"; reason: string };
+
 interface CacheResult {
   simulated: CacheMetrics;
-  provider:
-    | CacheMetrics
-    | { status: "unavailable"; reason: string };
+  provider: ProviderCacheResult;
 }
 
 interface CacheMetrics {
@@ -117,6 +129,8 @@ effectiveSavingsPct = effectiveSavingsTokens / totalInputTokens
 
 Zero-input runs report zero percentages rather than `NaN`.
 
+Each run starts a fresh product and model session. Turn `0` is the cold phase; turns `1..` are the warm phase. A one-turn run has an all-zero warm phase. Repeated executions use new run IDs and begin new cold phases. Whole-session values are the sum of the cold and warm phase values.
+
 ### Deterministic simulation
 
 The simulator compares consecutive serialized model-input prefixes. A byte is reusable only while every preceding byte is unchanged. Content moved earlier, reordered keys, changing tool definitions, and injected runtime metadata invalidate the prefix from the first differing byte.
@@ -130,7 +144,16 @@ Token counts use SDLBench's existing tokenizer. The simulator records:
 - invalidated-prefix tokens
 - reusable-prefix percentage
 
-For simulation, reusable-prefix tokens are cache reads and all remaining input tokens are uncached. Cache writes are reported separately but use a neutral weight of `1.0`, so the simulated gate measures deterministic reuse rather than provider pricing.
+For each turn, the simulator partitions input tokens into two mutually exclusive categories. A token is a cache read only when all of its serialized UTF-8 bytes occur before the first differing byte from the prior turn. Every other token is a cache write. Simulated uncached input is zero, so `totalInputTokens = cacheReadTokens + cacheWriteTokens`.
+
+The first turn has zero reads and writes its complete input. Later turns read the unchanged prefix and write the changed suffix. Simulation assigns read weight `0.0` and write weight `1.0`:
+
+```text
+simulatedEffectiveInputTokens = cacheWriteTokens
+simulatedEffectiveSavingsTokens = cacheReadTokens
+```
+
+This is an ideal deterministic reuse measure, not a prediction of provider cache thresholds, expiration, or pricing.
 
 ### Provider normalization
 
@@ -151,7 +174,7 @@ effectiveInputTokens =
 
 Weights are the provider's read and write prices divided by its normal input price for the recorded model. This expresses cache cost in full-price input-token equivalents. Cold writes can therefore produce negative savings when a provider charges a write premium. Dollar savings use the same profile but remain informational.
 
-Provider comparisons are valid only when product results use the same provider, model, and pricing-profile version.
+Provider comparisons are valid only when product results use the same provider, model, and pricing-profile version. Aggregation assigns `ranking.status`: compatible records are `ranked`; valid but incompatible records are retained as `unranked` with the mismatch reason.
 
 ## Provider Usage Import
 
@@ -168,7 +191,8 @@ Provider usage is imported after a benchmark session. SDLBench never stores cred
   "turns": [
     {
       "turnIndex": 0,
-      "inputTokens": 12000,
+      "totalInputTokens": 12000,
+      "uncachedInputTokens": 3000,
       "cacheReadTokens": 0,
       "cacheWriteTokens": 9000,
       "outputTokens": 800
@@ -177,7 +201,7 @@ Provider usage is imported after a benchmark session. SDLBench never stores cred
 }
 ```
 
-The importer joins records by `productId`, `taskId`, `runId`, and `turnIndex`. It rejects duplicate turns, negative or non-finite values, unknown runs, mismatched product identities, and incompatible provider/model/profile combinations.
+The importer joins records by `productId`, `taskId`, `runId`, and `turnIndex`. It rejects duplicate turns, negative or non-finite values, unknown runs, mismatched product identities, and provider metadata that conflicts with the recorded run. A provider, model, or profile mismatch between otherwise valid product runs does not discard either run; aggregation retains both and marks that comparison unranked.
 
 Imported files must not contain raw prompts, tool results, API keys, provider request IDs, or user data.
 
@@ -221,7 +245,7 @@ interface ProductBenchmarkResult {
 }
 ```
 
-Saved results include the benchmark schema version, tokenizer identity, fixture revision, pricing-profile identity, and transcript digest. Comparisons reject incompatible schema, tokenizer, or fixture revisions instead of silently combining them.
+Saved results include the losslessly replayable transcript artifact, transcript digest, benchmark schema version, assembly version, serialization version, tokenizer identity, fixture revision, and pricing-profile identity. The result summary references that artifact. Comparisons reject incompatible schema, assembly, serialization, tokenizer, or fixture revisions instead of silently combining them.
 
 Synthetic traces are regenerated from the same session/result contract. Existing stale traces remain historical artifacts and must not be presented as current SDLBench evidence.
 
@@ -263,6 +287,6 @@ The rollout does not require provider credentials in CI. The first four steps ca
 - SDL-MCP, the traditional baseline, and every tested competitor produce the same session/result shape.
 - Every run saves simulated cache metrics; imported provider metrics are optional and explicitly ranked or unranked.
 - Whole-session, cold, warm, and per-turn cache values are reproducible from saved inputs.
-- Existing raw token, uncapped token, coverage, precision, and recall metrics remain available.
+- Existing raw token, capped token, uncapped token, coverage, precision, and recall metrics remain available.
 - Synthetic traces are regenerated and no stale-trace warning remains.
 - SDLBench documentation explains cache formulas, fairness rules, ranking eligibility, and provider-profile compatibility.
