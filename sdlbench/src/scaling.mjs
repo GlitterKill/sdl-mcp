@@ -52,38 +52,51 @@ export async function runScalingCurve({
       }
     }
 
-    const sizeRecords = allRecords.filter((r) => r.repo?.sizeClass === sizeClass);
-    const baselineByTask = new Map();
-    const sdlByTask = new Map();
-    for (const r of sizeRecords) {
-      if (!r.quality?.passed) continue;
-      const bucket = r.variant === "baseline" ? baselineByTask : (r.variant === "sdl" ? sdlByTask : null);
-      if (!bucket) continue;
-      bucket.set(r.taskId, r);
+    const sizeRecords = allRecords.filter((record) => record.repo?.sizeClass === sizeClass);
+    const byVariant = new Map(variants.map((productVariant) => [productVariant, new Map()]));
+    for (const record of sizeRecords) {
+      if (!record.quality?.passed) continue;
+      byVariant.get(record.variant)?.set(record.taskId, record);
     }
-    const pairedTasks = [...baselineByTask.keys()].filter((id) => sdlByTask.has(id));
-    if (pairedTasks.length > 0) {
-      const baselineToks = pairedTasks.map((id) => baselineByTask.get(id).tokens?.total ?? 0);
-      const sdlToks = pairedTasks.map((id) => sdlByTask.get(id).tokens?.total ?? 0);
-      const baselineTok = baselineToks.reduce((a, b) => a + b, 0);
-      const sdlTok = sdlToks.reduce((a, b) => a + b, 0);
-      const perTaskDeltaPcts = pairedTasks.map((id) => {
-        const b = baselineByTask.get(id).tokens?.total ?? 0;
-        const s = sdlByTask.get(id).tokens?.total ?? 0;
-        return b > 0 ? Math.round(((b - s) / b) * 10000) / 100 : 0;
+    const baselineByTask = byVariant.get("baseline") ?? new Map();
+
+    for (const productVariant of variants.filter((value) => value !== "baseline")) {
+      const productByTask = byVariant.get(productVariant) ?? new Map();
+      const pairedTasks = [...baselineByTask.keys()].filter((taskId) => productByTask.has(taskId));
+      if (pairedTasks.length === 0) continue;
+
+      const baselineTok = pairedTasks.reduce(
+        (sum, taskId) => sum + (baselineByTask.get(taskId).tokens?.total ?? 0),
+        0,
+      );
+      const productTok = pairedTasks.reduce(
+        (sum, taskId) => sum + (productByTask.get(taskId).tokens?.total ?? 0),
+        0,
+      );
+      const perTaskDeltaPcts = pairedTasks.map((taskId) => {
+        const baselineTokens = baselineByTask.get(taskId).tokens?.total ?? 0;
+        const productTokens = productByTask.get(taskId).tokens?.total ?? 0;
+        return baselineTokens > 0
+          ? Math.round(((baselineTokens - productTokens) / baselineTokens) * 10000) / 100
+          : 0;
       });
-      scalingRows.push({
+      const row = {
         sizeClass,
-        symbolCount: sdlByTask.get(pairedTasks[0])?.artifacts?.sdl?.observability?.indexing_totalEvents ?? 0,
+        variant: productVariant,
+        symbolCount: baselineByTask.get(pairedTasks[0])?.repo?.symbolCount ?? null,
         baselineTok,
-        sdlTok,
+        productTok,
         deltaPct: baselineTok > 0
-          ? Math.round(((baselineTok - sdlTok) / baselineTok) * 10000) / 100
+          ? Math.round(((baselineTok - productTok) / baselineTok) * 10000) / 100
           : 0,
         pairedCount: pairedTasks.length,
         medianDeltaPct: percentile(perTaskDeltaPcts, 50),
         perTaskDeltaPcts,
-      });
+      };
+      if (productVariant === "sdl") {
+        Object.assign(row, { sdlTok: productTok, sdlVariant: productVariant });
+      }
+      scalingRows.push(row);
     }
   }
 

@@ -1720,6 +1720,7 @@ test("viewer filters stay reusable and bar charts have room", async () => {
   assert.match(html, /token-chart" viewBox="0 0 900 270"/);
   assert.match(html, /id="execution-mode-filter"/);
   assert.match(html, /id="paired-chart"/);
+  assert.match(html, /id="cache-chart"/);
   assert.match(html, /id="warning-banner"/);
   assert.match(html, /id="load-sidecars"/);
 });
@@ -2344,4 +2345,109 @@ test("claims CLI defaults to SDL and accepts an explicit competitor variant", as
   } finally {
     await rm(root, { force: true, recursive: true });
   }
+});
+
+
+test("scaling pairs every product and uses product-neutral repository metadata", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "sdlbench-scaling-generic-"));
+  const resultsDir = `sdlbench/.work/scaling-generic-${Date.now()}`;
+  const tokenizerCommand = await fakeTokenizer(tempRoot);
+
+  try {
+    const withSdl = await runScalingCurve({
+      root: process.cwd(),
+      matrixPath: "sdlbench/tasks/matrix.json",
+      sizeClasses: ["tiny"],
+      agent: "codex",
+      model: "gpt-5.5",
+      variant: "baseline,sdl,competitor",
+      reposLockPath: "sdlbench/config/repos.lock.json",
+      resultsDir,
+      iUnderstandCost: true,
+      tokenizerCommand,
+    });
+    assert.deepEqual(
+      withSdl.scalingRows.map((row) => row.variant).sort(),
+      ["competitor", "sdl"],
+    );
+    const sdlRow = withSdl.scalingRows.find((row) => row.variant === "sdl");
+    const competitorRow = withSdl.scalingRows.find((row) => row.variant === "competitor");
+    assert.equal(sdlRow.productTok, sdlRow.sdlTok);
+    assert.equal(sdlRow.sdlVariant, "sdl");
+    assert.equal(competitorRow.productTok > 0, true);
+    assert.equal("sdlTok" in competitorRow, false);
+    assert.equal(competitorRow.symbolCount, null);
+
+    const withoutSdl = await runScalingCurve({
+      root: process.cwd(),
+      matrixPath: "sdlbench/tasks/matrix.json",
+      sizeClasses: ["tiny"],
+      agent: "codex",
+      model: "gpt-5.5",
+      variant: "baseline,competitor",
+      reposLockPath: "sdlbench/config/repos.lock.json",
+      resultsDir,
+      iUnderstandCost: true,
+      tokenizerCommand,
+    });
+    assert.equal(withoutSdl.scalingRows.length, 1);
+    assert.equal(withoutSdl.scalingRows[0].variant, "competitor");
+    assert.equal(withoutSdl.scalingRows[0].symbolCount, null);
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true });
+    await rm(join(process.cwd(), resultsDir), { force: true, recursive: true });
+  }
+});
+
+test("buildChartModel exposes weighted cache efficiency with partial telemetry", () => {
+  const available = (inputTokens, readTokens, discountSavingsUsd) => ({
+    available: true,
+    source: "provider",
+    inputTokens,
+    readTokens,
+    writeTokens: 0,
+    uncachedTokens: inputTokens - readTokens,
+    hitPercent: readTokens / inputTokens * 100,
+    uncachedEquivalentInputUsd: inputTokens / 10_000,
+    billedInputUsd: inputTokens / 10_000 - discountSavingsUsd,
+    discountSavingsUsd,
+    discountSavingsPercent: discountSavingsUsd / (inputTokens / 10_000) * 100,
+  });
+  const unavailable = { available: false, reason: "provider-usage-unavailable" };
+  const record = (variant, taskId, total, cache) => ({
+    variant,
+    taskId,
+    durationMs: 100,
+    tokens: { total, saved: 0 },
+    cost: { totalUsd: 0 },
+    cache,
+    quality: { passed: true },
+    workflow: { executionMode: "behavior" },
+  });
+  const model = buildChartModel([
+    record("baseline", "t1", 100, unavailable),
+    record("sdl", "t1", 60, available(100, 80, 0.0064)),
+    record("sdl", "t2", 70, unavailable),
+    record("competitor", "t1", 50, available(200, 50, 0.001)),
+  ]);
+
+  assert.deepEqual(
+    model.cacheEfficiency.find((row) => row.variant === "sdl"),
+    {
+      variant: "sdl",
+      totalSessions: 2,
+      availableSessions: 1,
+      coveragePercent: 50,
+      inputTokens: 100,
+      readTokens: 80,
+      writeTokens: 0,
+      hitPercent: 80,
+      discountSavingsUsd: 0.0064,
+      discountSavingsPercent: 64,
+    },
+  );
+  assert.equal(model.cacheEfficiency.find((row) => row.variant === "baseline").coveragePercent, 0);
+  assert.equal(model.cacheEfficiency.find((row) => row.variant === "competitor").hitPercent, 25);
+  assert.deepEqual(model.pairedDeltas.map((row) => row.variant).sort(), ["competitor", "sdl"]);
+  assert.equal(model.tokenSavings.find((row) => row.variant === "sdl").total, 130);
 });

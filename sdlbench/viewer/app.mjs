@@ -14,7 +14,22 @@ export function buildChartModel(records) {
 
   for (const record of records) {
     const key = record.variant;
-    const row = grouped.get(key) ?? { variant: key, sessions: 0, passed: 0, saved: 0, total: 0, cost: 0, duration: 0, failures: 0 };
+    const row = grouped.get(key) ?? {
+      variant: key,
+      sessions: 0,
+      passed: 0,
+      saved: 0,
+      total: 0,
+      cost: 0,
+      duration: 0,
+      failures: 0,
+      cacheAvailable: 0,
+      cacheInput: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cacheSavings: 0,
+      cacheEquivalent: 0,
+    };
     row.sessions += 1;
     row.passed += record.quality?.passed ? 1 : 0;
     row.saved += record.tokens?.saved ?? 0;
@@ -22,6 +37,14 @@ export function buildChartModel(records) {
     row.cost += record.cost?.totalUsd ?? 0;
     row.duration += record.durationMs ?? 0;
     row.failures += record.quality?.passed ? 0 : 1;
+    if (record.cache?.available) {
+      row.cacheAvailable += 1;
+      row.cacheInput += record.cache.inputTokens ?? 0;
+      row.cacheRead += record.cache.readTokens ?? 0;
+      row.cacheWrite += record.cache.writeTokens ?? 0;
+      row.cacheSavings += record.cache.discountSavingsUsd ?? 0;
+      row.cacheEquivalent += record.cache.uncachedEquivalentInputUsd ?? 0;
+    }
     grouped.set(key, row);
   }
 
@@ -30,6 +53,20 @@ export function buildChartModel(records) {
     avgDuration: row.sessions ? Math.round(row.duration / row.sessions) : 0,
     errorRate: row.sessions ? Math.round((row.failures / row.sessions) * 10000) / 100 : 0,
     passRate: row.sessions ? Math.round((row.passed / row.sessions) * 10000) / 100 : 0,
+  }));
+  const cacheEfficiency = rows.map((row) => ({
+    variant: row.variant,
+    totalSessions: row.sessions,
+    availableSessions: row.cacheAvailable,
+    coveragePercent: row.sessions ? Math.round((row.cacheAvailable / row.sessions) * 10000) / 100 : 0,
+    inputTokens: row.cacheInput,
+    readTokens: row.cacheRead,
+    writeTokens: row.cacheWrite,
+    hitPercent: row.cacheInput ? Math.round((row.cacheRead / row.cacheInput) * 10000) / 100 : 0,
+    discountSavingsUsd: Math.round(row.cacheSavings * 10000) / 10000,
+    discountSavingsPercent: row.cacheEquivalent
+      ? Math.round((row.cacheSavings / row.cacheEquivalent) * 10000) / 100
+      : 0,
   }));
 
   const pairedDeltas = buildViewerPairedDeltas(records);
@@ -42,6 +79,7 @@ export function buildChartModel(records) {
     pairedDeltas,
     warnings,
     tokenSavings: rows,
+    cacheEfficiency,
     timeToCompletion: rows.map((row) => ({ variant: row.variant, avgDuration: row.avgDuration, sessions: row.sessions })),
     correctness: rows.map((row) => ({ variant: row.variant, passRate: row.passRate, errorRate: row.errorRate, sessions: row.sessions })),
     timeline: records.map((record, index) => ({
@@ -71,21 +109,26 @@ function buildViewerPairedDeltas(records) {
   const paired = [];
   for (const slot of slots.values()) {
     const baseline = slot.baseline;
-    const sdl = slot.sdl;
-    if (!baseline || !sdl) continue;
-    const baselineTok = baseline.tokens?.total ?? 0;
-    const sdlTok = sdl.tokens?.total ?? 0;
-    const deltaTok = baselineTok - sdlTok;
-    paired.push({
-      taskId: baseline.taskId,
-      variant: sdl.variant,
-      executionMode: baseline.workflow?.executionMode ?? "unknown",
-      baselineTok,
-      sdlTok,
-      deltaTok,
-      deltaPct: baselineTok ? Math.round((deltaTok / baselineTok) * 10000) / 100 : 0,
-      bothPass: Boolean(baseline.quality?.passed) && Boolean(sdl.quality?.passed),
-    });
+    if (!baseline) continue;
+    for (const [variant, product] of Object.entries(slot)
+      .filter(([value]) => value !== "baseline")
+      .sort(([left], [right]) => left.localeCompare(right))) {
+      const baselineTok = baseline.tokens?.total ?? 0;
+      const productTok = product.tokens?.total ?? 0;
+      const deltaTok = baselineTok - productTok;
+      const row = {
+        taskId: baseline.taskId,
+        variant,
+        executionMode: baseline.workflow?.executionMode ?? "unknown",
+        baselineTok,
+        productTok,
+        deltaTok,
+        deltaPct: baselineTok ? Math.round((deltaTok / baselineTok) * 10000) / 100 : 0,
+        bothPass: true,
+      };
+      if (variant === "sdl") row.sdlTok = productTok;
+      paired.push(row);
+    }
   }
   return paired;
 }
@@ -211,11 +254,12 @@ function render(state) {
   drawPairedBars("paired-chart", model.pairedDeltas);
   drawScalingCurve("scaling-chart", model.pairedDeltas);
   drawBars("token-chart", model.tokenSavings, "saved", "Saved tokens");
+  drawBars("cache-chart", model.cacheEfficiency, "hitPercent", "Prompt cache hit rate %");
   drawBars("cost-chart", model.tokenSavings, "cost", "Cost USD");
   drawBars("time-chart", model.timeToCompletion, "avgDuration", "Time to completion ms");
   drawBars("correctness-chart", model.correctness, "passRate", "Correctness pass rate");
   drawTimeline("timeline-chart", model.timeline);
-  drawMatrix("matrix", records);
+  drawMatrix("matrix", records, model.cacheEfficiency);
   document.body.classList.toggle("is-empty", records.length === 0);
 }
 
@@ -301,9 +345,16 @@ function drawTimeline(id, rows) {
   }).join("") + `<text x="6" y="18" class="title">Per-task timeline</text>`;
 }
 
-function drawMatrix(id, records) {
+function drawMatrix(id, records, cacheEfficiency) {
   const host = document.querySelector(`#${id}`);
-  host.innerHTML = records.map((record) => `<div class="matrix-row"><span>${escapeHtml(record.variant)}</span><span>${escapeHtml(record.taskId)}</span><span>${format(record.tokens?.total ?? 0)} tok</span><span>${format(record.durationMs ?? 0)}ms</span><span class="${record.quality?.passed ? "win" : "loss"}">${record.status}</span></div>`).join("");
+  const cacheByVariant = new Map(cacheEfficiency.map((cache) => [cache.variant, cache]));
+  host.innerHTML = records.map((record) => {
+    const cache = cacheByVariant.get(record.variant);
+    const cacheLabel = cache?.availableSessions
+      ? `${format(cache.hitPercent)}% hit · ${format(cache.discountSavingsUsd)} saved · ${format(cache.coveragePercent)}% telemetry`
+      : "cache n/a";
+    return `<div class="matrix-row"><span>${escapeHtml(record.variant)}</span><span>${escapeHtml(record.taskId)}</span><span>${format(record.tokens?.total ?? 0)} tok</span><span>${escapeHtml(cacheLabel)}</span><span>${format(record.durationMs ?? 0)}ms</span><span class="${record.quality?.passed ? "win" : "loss"}">${record.status}</span></div>`;
+  }).join("");
 }
 
 function fillSelect(id, values) {
