@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, cp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -736,21 +736,35 @@ async function codexDisabledSkillPaths({ root, sourceHome, codexHome }) {
   return [...paths].sort((a, b) => a.localeCompare(b));
 }
 
-async function findSkillFiles(root) {
+async function findSkillFiles(root, visited = new Set()) {
   try {
+    // Codex discovers junctioned skills, so the disable list must follow them once.
+    const canonicalRoot = await realpath(root);
+    if (visited.has(canonicalRoot)) return [];
+    visited.add(canonicalRoot);
+
     const entries = await readdir(root, { withFileTypes: true });
     const files = [];
     for (const entry of entries) {
       const path = join(root, entry.name);
-      if (entry.isDirectory()) {
-        files.push(...await findSkillFiles(path));
-      } else if (entry.isFile() && entry.name === "SKILL.md") {
+      let type = entry;
+      if (entry.isSymbolicLink()) {
+        try {
+          type = await stat(path);
+        } catch (error) {
+          if (error?.code === "ENOENT" || error?.code === "ELOOP") continue;
+          throw error;
+        }
+      }
+      if (type.isDirectory()) {
+        files.push(...await findSkillFiles(path, visited));
+      } else if (type.isFile() && entry.name === "SKILL.md") {
         files.push(path);
       }
     }
     return files;
   } catch (error) {
-    if (error?.code === "ENOENT") return [];
+    if (error?.code === "ENOENT" || error?.code === "ELOOP") return [];
     throw error;
   }
 }

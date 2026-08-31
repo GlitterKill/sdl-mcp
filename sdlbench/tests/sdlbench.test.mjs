@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -269,8 +269,17 @@ test("Codex behavior mode uses a sterile temporary CODEX_HOME", async () => {
   const repo = join(root, "repo");
   const matrixPath = join(root, "matrix.json");
   const agentPath = join(root, "agent.mjs");
+  const sourceHome = join(root, "source-codex-home");
+  const previousSourceHome = process.env.SDLBENCH_SOURCE_CODEX_HOME;
 
   try {
+    const linkedSkill = join(root, "linked-host-skill");
+    await mkdir(linkedSkill, { recursive: true });
+    await writeFile(join(linkedSkill, "SKILL.md"), "# Linked host skill\n");
+    await mkdir(join(sourceHome, "skills"), { recursive: true });
+    await symlink(linkedSkill, join(sourceHome, "skills", "linked-host-skill"), process.platform === "win32" ? "junction" : "dir");
+    process.env.SDLBENCH_SOURCE_CODEX_HOME = sourceHome;
+
     await mkdir(join(repo, "src"), { recursive: true });
     await mkdir(join(repo, "tests"), { recursive: true });
     await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
@@ -296,11 +305,13 @@ test("Codex behavior mode uses a sterile temporary CODEX_HOME", async () => {
       }]
     }));
     await writeFile(agentPath, `
-      import { mkdirSync, writeFileSync } from "node:fs";
+      import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
       import { join } from "node:path";
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
       const codexHome = process.env.CODEX_HOME;
       if (!codexHome || codexHome.includes(".codex")) process.exit(5);
+      const config = readFileSync(join(codexHome, "config.toml"), "utf8");
+      if (!config.includes("linked-host-skill")) process.exit(6);
       writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"sterile\\\";\\n");
       const sessions = join(codexHome, "sessions", "2026", "06", "26");
       mkdirSync(sessions, { recursive: true });
@@ -327,6 +338,8 @@ test("Codex behavior mode uses a sterile temporary CODEX_HOME", async () => {
     assert.equal(record.artifacts.codexSession.sessionId, "sterile-session");
     assert.equal(record.artifacts.worktree.replace(/\\/g, "/").startsWith(root.replace(/\\/g, "/")), false);
   } finally {
+    if (previousSourceHome === undefined) delete process.env.SDLBENCH_SOURCE_CODEX_HOME;
+    else process.env.SDLBENCH_SOURCE_CODEX_HOME = previousSourceHome;
     await rm(root, { force: true, recursive: true });
   }
 });
