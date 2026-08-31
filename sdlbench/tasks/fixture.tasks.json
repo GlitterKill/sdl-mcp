@@ -19,8 +19,13 @@
         ]
       },
       "contextTargets": {
-        "files": ["src/cart.js"],
-        "symbols": ["buildCart", "resolvePromo"]
+        "files": [
+          "src/cart.js"
+        ],
+        "symbols": [
+          "buildCart",
+          "resolvePromo"
+        ]
       },
       "verify": {
         "command": "node tests/discount-tax.test.mjs",
@@ -33,7 +38,8 @@
         "files": {
           "src/cart.js": "import { getProduct } from \"./catalog.js\";\nimport { customerAdjustment, resolvePromo } from \"./discounts.js\";\nimport { formatMoney } from \"./money.js\";\n\nconst TAX_RATE = 0.0825;\n\nexport function buildCart(lines, options = {}) {\n  const entries = lines.map((line) => {\n    const product = getProduct(line.sku);\n    return {\n      sku: product.sku,\n      name: product.name,\n      quantity: line.quantity,\n      unitPriceCents: product.priceCents,\n      lineTotalCents: product.priceCents * line.quantity\n    };\n  });\n  const subtotalCents = entries.reduce((sum, entry) => sum + entry.lineTotalCents, 0);\n  const promo = resolvePromo(options.promoCode, subtotalCents);\n  const customerDiscount = customerAdjustment(options.customer, subtotalCents);\n  const discounts = [promo, customerDiscount].filter((discount) => discount.amountCents > 0);\n  const discountCents = discounts.reduce((sum, discount) => sum + discount.amountCents, 0);\n  const taxableCents = Math.max(0, subtotalCents - discountCents);\n  const taxCents = Math.round(taxableCents * TAX_RATE);\n  const totalCents = subtotalCents - discountCents + taxCents;\n\n  return { entries, subtotalCents, discounts, discountCents, taxCents, totalCents };\n}\n\nexport function summarizeCart(cart) {\n  return {\n    itemCount: cart.entries.reduce((sum, entry) => sum + entry.quantity, 0),\n    subtotal: formatMoney(cart.subtotalCents),\n    discounts: formatMoney(cart.discountCents),\n    tax: formatMoney(cart.taxCents),\n    total: formatMoney(cart.totalCents)\n  };\n}\n"
         }
-      }
+      },
+      "promptSpecificity": "sparse"
     },
     {
       "schemaVersion": 1,
@@ -66,7 +72,8 @@
           "src/shipping.js": "export function estimateShipping(cart, customer = {}) {\n  const priority = customer.tier === \"gold\" && cart.subtotalCents >= 9000;\n  const free = priority || cart.subtotalCents >= 6500;\n  return {\n    method: priority ? \"priority\" : customer.region === \"EU\" ? \"international\" : \"standard\",\n    etaDays: priority ? 2 : customer.region === \"EU\" ? 8 : 5,\n    shippingCents: free ? 0 : 799\n  };\n}\n",
           "src/cart.js": "import { getProduct } from \"./catalog.js\";\nimport { customerAdjustment, resolvePromo } from \"./discounts.js\";\nimport { formatMoney } from \"./money.js\";\nimport { estimateShipping } from \"./shipping.js\";\n\nconst TAX_RATE = 0.0825;\n\nexport function buildCart(lines, options = {}) {\n  const entries = lines.map((line) => {\n    const product = getProduct(line.sku);\n    return {\n      sku: product.sku,\n      name: product.name,\n      quantity: line.quantity,\n      unitPriceCents: product.priceCents,\n      lineTotalCents: product.priceCents * line.quantity\n    };\n  });\n  const subtotalCents = entries.reduce((sum, entry) => sum + entry.lineTotalCents, 0);\n  const promo = resolvePromo(options.promoCode, subtotalCents);\n  const customerDiscount = customerAdjustment(options.customer, subtotalCents);\n  const discounts = [promo, customerDiscount].filter((discount) => discount.amountCents > 0);\n  const discountCents = discounts.reduce((sum, discount) => sum + discount.amountCents, 0);\n  const taxableCents = Math.max(0, subtotalCents - discountCents);\n  const taxCents = Math.round(taxableCents * TAX_RATE);\n  const totalCents = subtotalCents - discountCents + taxCents;\n\n  return { entries, subtotalCents, discounts, discountCents, taxCents, totalCents };\n}\n\nexport function summarizeCart(cart) {\n  return {\n    itemCount: cart.entries.reduce((sum, entry) => sum + entry.quantity, 0),\n    subtotal: formatMoney(cart.subtotalCents),\n    discounts: formatMoney(cart.discountCents),\n    tax: formatMoney(cart.taxCents),\n    total: formatMoney(cart.totalCents)\n  };\n}\n\nexport function createCheckoutSummary(cart, options = {}) {\n  const shipping = estimateShipping(cart, options.customer);\n  const grandTotalCents = cart.totalCents + shipping.shippingCents;\n  const flags = [];\n  if (cart.discounts.some((discount) => discount.code === \"GOLD5\")) flags.push(\"gold-loyalty\");\n  if (shipping.method === \"priority\") flags.push(\"priority-shipping\");\n  return {\n    ...summarizeCart(cart),\n    shipping,\n    grandTotalCents,\n    displayTotal: formatMoney(grandTotalCents),\n    flags\n  };\n}\n"
         }
-      }
+      },
+      "promptSpecificity": "normal"
     },
     {
       "schemaVersion": 1,
@@ -98,7 +105,8 @@
           "src/orders.js": "import { createHash, randomBytes } from \"node:crypto\";\n\nconst orders = [];\n\nexport function placeOrder(cart, payment) {\n  if (!payment?.token) throw new Error(\"payment token required\");\n  const order = {\n    id: `ord_${randomBytes(6).toString(\"hex\")}`,\n    lines: cart.entries.map((entry) => ({ ...entry })),\n    totalCents: cart.totalCents,\n    paymentFingerprint: fingerprint(payment.token),\n    status: \"paid\"\n  };\n  orders.push(order);\n  return cloneOrder(order);\n}\n\nexport function listOrders() {\n  return orders.map(cloneOrder);\n}\n\nfunction fingerprint(token) {\n  return createHash(\"sha256\").update(token).digest(\"hex\").slice(0, 12);\n}\n\nfunction cloneOrder(order) {\n  return { ...order, lines: order.lines.map((line) => ({ ...line })) };\n}\n",
           "src/audit.js": "export function auditOrder(order) {\n  return `${order.id}:paymentFingerprint=${order.paymentFingerprint}:${order.totalCents}:${order.status}`;\n}\n"
         }
-      }
+      },
+      "promptSpecificity": "explicit"
     },
     {
       "schemaVersion": 1,
@@ -131,7 +139,8 @@
         "files": {
           "review-report.md": "# Checkout Risk Review\n\n## Priority Findings\n\n1. Raw payment token is stored on orders and then emitted by auditOrder. Replace the payment token with a one-way payment fingerprint and never include the token in audit output.\n2. Order ids use Date.now, which is predictable and can collide under concurrent order placement. Use random or monotonic ids with enough entropy.\n3. Catalog products expose stock, but placeOrder never checks inventory or reserves stock before marking an order paid. Add an inventory validation/reservation boundary before payment capture is treated as final.\n4. listOrders returns mutable internal order objects, so callers can change stored status. Return defensive copies or immutable records.\n5. Cart tax calculation must be checked around discounts; tax should be calculated on the discounted taxable subtotal, not the pre-discount subtotal.\n6. Shipping rules have no priority path for high-value loyalty customers, so priority support purchases do not affect fulfillment. Make priority shipping rules explicit and covered by tests.\n"
         }
-      }
+      },
+      "promptSpecificity": "sparse"
     }
   ]
 }

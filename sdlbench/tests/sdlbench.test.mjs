@@ -108,7 +108,7 @@ test("runBenchmark resolves tokenizer and pricing from the tested model", async 
     assert.equal(record.tokens.modelHint, "gpt-test");
     assert.equal(record.tokens.encoding, "test_base");
     assert.equal(record.tokens.tokenizerResolution, "configured_encoding");
-    assert.equal(record.cost.inputUsd, 0.009);
+    assert.equal(record.cost.inputUsd, 0.004);
     assert.equal(record.cost.outputUsd, 0.012);
     assert.equal(record.cost.pricingModel, "gpt-test");
     assert.equal(record.cost.pricingSource, "model");
@@ -142,7 +142,7 @@ test("behavior mode runs an agent command instead of applying canned solution fi
         taskId: "behavior-edits-repo",
         repoId: "behavior-fixture",
         category: "bug-fix",
-        prompt: "Make value export agent.",
+        prompt: "RAW_CONTEXT_ONLY",
         repo: { sourcePath: repo },
         context: { raw: "RAW_CONTEXT_ONLY", sdl: "SDL_CONTEXT_ONLY" },
         verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
@@ -505,6 +505,19 @@ test("runBenchmark appends baseline and sdl fixture records with tokenizer-backe
     // Fixture-mode records no longer claim synthetic savings (schema v2 truth-fix).
     assert.ok(lines.every((record) => record.tokens.saved === 0));
     assert.ok(lines.every((record) => record.claimGrade === "none"));
+    assert.ok(
+      lines
+        .filter((record) => record.repoId === "fixture-js")
+        .every((record) => ["sparse", "normal", "explicit"].includes(record.promptSpecificity)),
+    );
+  const { analyzeSessions: analyzeBySpecificity } = await import("../src/sdlbench.mjs");
+  const specificitySummary = analyzeBySpecificity(
+    lines.filter((record) => record.repoId === "fixture-js"),
+  );
+  assert.equal(specificitySummary.byPromptSpecificity.sparse.sessions, 4);
+  assert.equal(specificitySummary.byPromptSpecificity.normal.sessions, 2);
+  assert.equal(specificitySummary.byPromptSpecificity.explicit.sessions, 2);
+
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -2105,7 +2118,7 @@ test("runScalingCurve refuses to launch without --i-understand-cost and prints a
 
 
 
-test("renderAgentPrompt keeps baseline context and neutralizes non-baseline variants", () => {
+test("renderAgentPrompt uses identical neutral prompts for every variant", () => {
   const task = {
     taskId: "prompt-contract",
     prompt: "Fix it.",
@@ -2119,14 +2132,19 @@ test("renderAgentPrompt keeps baseline context and neutralizes non-baseline vari
 
   assert.equal(renderAgentPrompt(task, "sdl"), neutral);
   assert.equal(renderAgentPrompt(task, "competitor"), neutral);
-  assert.equal(
-    renderAgentPrompt(task, "baseline"),
-    [
-      "Task: prompt-contract",
-      "Fix it.",
-      "Context:\n\nRAW_CONTEXT",
-      "Edit this repository in place. Keep changes limited to the task.",
-    ].join("\n\n"),
+  assert.equal(renderAgentPrompt(task, "baseline"), neutral);
+});
+
+test("fixture tasks declare prompt specificity without leaking paths into sparse prompts", async () => {
+  const fixture = JSON.parse(await readFile("sdlbench/tasks/fixture.tasks.json", "utf8"));
+  assert.deepEqual(
+    fixture.tasks.map((task) => task.promptSpecificity),
+    ["sparse", "normal", "explicit", "sparse"],
+  );
+  assert.ok(
+    fixture.tasks
+      .filter((task) => task.promptSpecificity === "sparse")
+      .every((task) => !/\b(?:src|tests)\//.test(task.prompt)),
   );
 });
 
@@ -2508,4 +2526,68 @@ test("CLI preserves the sterile default work directory for behavior runs", async
   const cliSource = await readFile("sdlbench/src/cli.mjs", "utf8");
   assert.match(cliSource, /workDir: opts\.workDir,/);
   assert.doesNotMatch(cliSource, /workDir: opts\.workDir \?\? "sdlbench\/\.work\/repos"/);
+});
+
+
+test("SDL behavior integrity rejects zero SDL activity", async () => {
+  const { assertSdlBehaviorIntegrity } = await import("../src/sdlbench.mjs");
+  const empty = {
+    variant: "sdl",
+    executionMode: "behavior",
+    claimGrade: "primary",
+    attribution: { toolCalls: [] },
+    observability: {
+      toolVolume_totalCalls: 0,
+      retrieval_totalRetrievals: 0,
+    },
+  };
+
+  assert.throws(() => assertSdlBehaviorIntegrity(empty), /zero SDL tool activity/i);
+  assert.doesNotThrow(() =>
+    assertSdlBehaviorIntegrity({
+      ...empty,
+      attribution: { toolCalls: [{ name: "mcp__sdl_mcp__sdl_context" }] },
+    }),
+  );
+  assert.doesNotThrow(() =>
+    assertSdlBehaviorIntegrity({
+      ...empty,
+      attribution: { toolCalls: [] },
+      observability: { toolVolume_totalCalls: 1 },
+    }),
+  );
+  assert.doesNotThrow(() =>
+    assertSdlBehaviorIntegrity({ ...empty, variant: "baseline" }),
+  );
+});
+
+
+test("installCodexEnforcementAssets installs production Codex hooks", async () => {
+  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { installCodexEnforcementAssets } = await import("../src/sdlbench.mjs");
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-hooks-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "existing\n");
+    await installCodexEnforcementAssets({
+      runRoot: root,
+      repoId: "fixture-js",
+      configPath: join(root, "sdlmcp.config.json"),
+    });
+
+    assert.match(
+      await readFile(join(root, ".codex", "hooks.json"), "utf8"),
+      /PreToolUse/,
+    );
+    assert.match(
+      await readFile(join(root, ".codex", "hooks", "force-sdl-mcp.mjs"), "utf8"),
+      /pidfilePath/,
+    );
+    assert.ok(await readFile(join(root, "SDL.md"), "utf8"));
+    assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "existing\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -1668,7 +1668,7 @@ function buildAgentWorkflowSkillAssets(repoRoot: string): GeneratedAsset[] {
   ];
 }
 
-function buildEnforcementAssets(
+export function buildEnforcementAssets(
   repoRoot: string,
   repoId: string,
   configPath: string,

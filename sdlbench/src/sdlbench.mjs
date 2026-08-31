@@ -131,6 +131,13 @@ export async function runBenchmark(options = {}) {
         if (agent === "codex") {
           assertCodexWorktreeIsSterile(root, runRoot);
           codexRuntime = await prepareCodexSterileRuntime({ root, workDir, taskRunId });
+        if (variant === "sdl") {
+          await installCodexEnforcementAssets({
+            runRoot,
+            repoId: sdlSession.repoId,
+            configPath: sdlSession.configPath ?? options.sdlConfigPath,
+          });
+        }
           agentRuntime = codexRuntime;
         } else if (agent === "opencode") {
           agentRuntime = await prepareOpencodeSterileRuntime({ root, workDir, taskRunId, sdlSession });
@@ -152,7 +159,7 @@ export async function runBenchmark(options = {}) {
       const durationMs = Math.round(performance.now() - activeStart);
       const wallMs = Math.round(performance.now() - started);
       const passed = verify.exitCode === 0 && (!agentResult || agentResult.exitCode === 0);
-      const estimatedTokens = countSessionTokens(task, variant, tokenizerCommand, promptContextForVariant(task, variant), outputText, {
+      const estimatedTokens = countSessionTokens(task, variant, tokenizerCommand, "", outputText, {
         model,
         encoding: modelPricing.encoding,
       });
@@ -221,6 +228,7 @@ export async function runBenchmark(options = {}) {
         repo: repoMeta,
         taskId: task.taskId,
         category: task.category,
+    promptSpecificity: task.promptSpecificity,
         status: passed ? "pass" : "fail",
         durationMs,
         wallMs,
@@ -269,7 +277,14 @@ export async function runBenchmark(options = {}) {
       };
 
       records.push(record);
-      await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
+      assertSdlBehaviorIntegrity({
+    variant,
+    executionMode,
+    attribution: record.attribution,
+    observability: record.artifacts?.sdl?.observability,
+    claimGrade: record.claimGrade,
+  });
+  await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
     } finally {
       if (ownsSdlSession) await sdlSession?.stop?.();
     }
@@ -360,7 +375,7 @@ function finalizeCacheAggregate(aggregate) {
   };
 }
 
-export function analyzeSessions(records) {
+function analyzeSessionsCore(records) {
   const byVariant = {};
   for (const record of records) {
     const executionMode = record.workflow?.executionMode ?? "unknown";
@@ -604,8 +619,12 @@ function validateTask(root, task) {
   if (!task.repo.sourcePath) throw new Error(`Task ${task.taskId} missing repo.sourcePath`);
   if (!task.verify.command) throw new Error(`Task ${task.taskId} missing verify.command`);
   if (!task.context?.raw || !task.context?.sdl) throw new Error(`Task ${task.taskId} missing context.raw/context.sdl`);
+  const promptSpecificity = task.promptSpecificity ?? "normal";
+  if (!["sparse", "normal", "explicit"].includes(promptSpecificity)) {
+    throw new Error(`${source}: invalid promptSpecificity '${promptSpecificity}'`);
+  }
   abs(root, task.repo.sourcePath);
-  return task;
+  return { ...task, promptSpecificity };
 }
 
 async function applySolution(runRoot, task) {
@@ -641,18 +660,12 @@ async function loadAgentConfig(root, agent, options, { requireCommand = false } 
   }
 }
 
-export function renderAgentPrompt(task, variant) {
-  const context = promptContextForVariant(task, variant);
+export function renderAgentPrompt(task, _variant) {
   return [
     `Task: ${task.taskId}`,
     task.prompt,
-    ...(context ? ["Context:", context] : []),
     "Edit this repository in place. Keep changes limited to the task."
   ].join("\n\n");
-}
-
-function promptContextForVariant(task, variant) {
-  return variant === "baseline" ? task.context.raw : "";
 }
 
 function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime }) {
@@ -862,6 +875,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
     const stop = observability.stop;
     return {
       baseUrl,
+    configPath: options.sdlConfigPath,
       mcpUrl: baseUrl + "/mcp",
       repoId: task.repoId,
       evidence,
@@ -1688,4 +1702,90 @@ function isPathInside(parent, child) {
   const normalizedParent = normalizeSessionPath(parent);
   const normalizedChild = normalizeSessionPath(child);
   return normalizedChild === normalizedParent || normalizedChild.startsWith(normalizedParent + "/");
+}
+
+
+export function assertSdlBehaviorIntegrity({
+  variant,
+  executionMode,
+  attribution,
+  observability,
+  claimGrade,
+}) {
+  if (variant !== "sdl" || executionMode !== "behavior" || claimGrade !== "primary") return;
+
+  const attributed = (attribution?.toolCalls ?? []).some((call) =>
+    /(?:^|[._])sdl(?:[._]|$)|sdl_mcp/i.test(call?.name ?? call?.toolName ?? ""),
+  );
+  const observed = [
+    observability?.toolVolume_totalCalls,
+    observability?.retrieval_totalRetrievals,
+  ].some((value) => Number(value) > 0);
+
+  if (!attributed && !observed) {
+    throw new Error(
+      "SDL behavior run recorded zero SDL tool activity; benchmark evidence is invalid.",
+    );
+  }
+}
+
+
+export async function installCodexEnforcementAssets({
+  runRoot,
+  repoId,
+  configPath,
+}) {
+  if (!configPath) {
+    throw new Error("SDL Codex behavior runs require the SDL server config path.");
+  }
+
+  const { buildEnforcementAssets } = await import(
+    new URL("../../dist/cli/commands/init.js", import.meta.url)
+  );
+  const { dirname } = await import("node:path");
+  const { chmod } = await import("node:fs/promises");
+  const assets = buildEnforcementAssets(runRoot, repoId, configPath, "codex");
+
+  for (const asset of assets) {
+    if (existsSync(asset.path)) continue;
+    await mkdir(dirname(asset.path), { recursive: true });
+    await writeFile(
+      asset.path,
+      asset.content.endsWith("\n") ? asset.content : `${asset.content}\n`,
+      "utf8",
+    );
+    if (asset.executable) {
+      await chmod(asset.path, 0o755);
+    }
+  }
+}
+
+
+export function analyzeSessions(records) {
+  const summary = analyzeSessionsCore(records);
+  const byPromptSpecificity = {};
+
+  for (const promptSpecificity of [
+    "sparse",
+    "normal",
+    "explicit",
+    "unspecified",
+  ]) {
+    const matching = records.filter(
+      (record) =>
+        (record.promptSpecificity ?? "unspecified") === promptSpecificity,
+    );
+    if (matching.length === 0) continue;
+
+    const tierSummary = analyzeSessionsCore(matching);
+    byPromptSpecificity[promptSpecificity] = {
+      sessions: tierSummary.totals.sessions,
+      paired: tierSummary.totals.paired,
+      pairedMedianDeltaPct: tierSummary.pairedMedianDeltaPct,
+      byVariant: tierSummary.byVariant,
+      deltas: tierSummary.deltas,
+    };
+  }
+
+  return { ...summary, byPromptSpecificity };
 }
