@@ -6,6 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+// Test fixtures and spawned CLI paths are repository-root relative.
+process.chdir(join(import.meta.dirname, "..", ".."));
+
 import {
   analyzeSessions,
   computeCacheMetrics,
