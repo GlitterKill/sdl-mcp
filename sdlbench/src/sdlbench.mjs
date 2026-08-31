@@ -933,6 +933,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
     const observability = startObservabilityPolling(baseUrl, authToken, task.repoId, options);
     return {
       baseUrl,
+    configPath,
       mcpUrl: baseUrl + "/mcp",
       repoId: task.repoId,
       evidence: {
