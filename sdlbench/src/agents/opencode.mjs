@@ -119,8 +119,9 @@ function normalizeSessionPath(value) {
 }
 
 /**
- * Reshape extracted OpenCode session usage into the v2 tokens schema used by
- * estimateCost and the SessionRecord tokens field.
+ * Reshape extracted OpenCode session usage into the v3 tokens schema used by
+ * estimateCost and the SessionRecord tokens field. Input is the provider total;
+ * cachedInput and cachedWriteInput remain subsets of that input.
  *
  * Mirrors tokensFromCodexSessionCounts in sdlbench.mjs (kept here so all
  * OpenCode-specific token logic lives in one agent module, isolating new

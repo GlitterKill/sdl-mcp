@@ -12,7 +12,8 @@ import { mean, stdDev, bootstrapCI, mannWhitneyU } from "./stats.mjs";
 import { prepareOpencodeSterileRuntime } from "./agents/opencode-runtime.mjs";
 import { extractOpencodeSessionUsage, tokensFromOpencodeSessionCounts } from "./agents/opencode.mjs";
 
-const SCHEMA_VERSION = 2;
+const SESSION_SCHEMA_VERSION = 3;
+const ANALYSIS_SCHEMA_VERSION = 2;
 const DEFAULT_RESULTS = "sdlbench/results/sessions.jsonl";
 const DEFAULT_ENCODING = "o200k_base";
 const DEFAULT_MODEL = "gpt-5.5";
@@ -203,8 +204,10 @@ export async function runBenchmark(options = {}) {
         ? (isFirstWarmTask ? estimateIndexCost(sdlSession.evidence.index, tokenizerCommand, { model, encoding: modelPricing.encoding }) : 0)
         : (variant === "sdl" ? estimateIndexCost(null, tokenizerCommand, { model, encoding: modelPricing.encoding }) : 0);
       tokens.indexCost = indexCost;
+      const cost = estimateCost(tokens, modelPricing);
+      const cache = computeCacheMetrics({ tokens, cost });
       const record = {
-        schemaVersion: SCHEMA_VERSION,
+        schemaVersion: SESSION_SCHEMA_VERSION,
         runId: taskRunId,
         sessionId: randomUUID(),
         timestamp: new Date().toISOString(),
@@ -224,7 +227,8 @@ export async function runBenchmark(options = {}) {
         setupMs,
         agentMs: agentResult ? agentMs : durationMs,
         tokens,
-        cost: estimateCost(tokens, modelPricing),
+        cost,
+        cache,
         attribution,
         coverage: task.contextTargets
           ? computeCoverage({
@@ -292,8 +296,11 @@ export function importTranscript({ agent, variant, text, repoId = "unknown", tas
     tokenizer: counted,
   });
 
+  const cost = estimateCost(tokens);
+  const cache = computeCacheMetrics({ tokens, cost });
+
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: SESSION_SCHEMA_VERSION,
     runId: `import-${hash(rawText).slice(0, 10)}`,
     sessionId: randomUUID(),
     timestamp: new Date().toISOString(),
@@ -308,7 +315,8 @@ export function importTranscript({ agent, variant, text, repoId = "unknown", tas
     setupMs: 0,
     agentMs: 0,
     tokens,
-    cost: estimateCost(tokens),
+    cost,
+    cache,
     quality: { passed: true, errorRate: 0, weightedErrorRate: 0, rubricScore: 0 },
     workflow: { turns: parsed.length || 1, toolCalls: 0, fileReads: 0, shellCommands: 0, testsRun: 0, filesChanged: 0, humanInterventions: 0 },
     artifacts: {},
@@ -379,7 +387,7 @@ export function analyzeSessions(records) {
   const deltaPcts = paired.map((row) => row.deltaPct).sort((a, b) => a - b);
 
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: ANALYSIS_SCHEMA_VERSION,
     totals: { sessions: records.length, variants: Object.keys(byVariant).length, paired: paired.length },
     byVariant,
     paired,
@@ -842,6 +850,7 @@ export function createSdlHttpConfig({ task, runRoot, dbPath, repoMeta }) {
       languages,
     }],
     graphDatabase: { ...(config.graphDatabase ?? {}), path: dbPath },
+    indexing: { ...(config.indexing ?? {}), enableFileWatching: false },
     http: { ...(config.http ?? {}), allowRemote: false },
     httpAuth: { enabled: false },
   };
@@ -1017,8 +1026,8 @@ async function waitForHttpHealth(baseUrl, child, logs, timeoutMs) {
   while (Date.now() < deadline) {
     if (child.exitCode != null) throw new Error("SDL HTTP server exited early: " + logs.join("").slice(-4000));
     try {
-      const response = await fetchWithTimeout(baseUrl + "/health", {}, 1000);
-      if (response.ok) return;
+      await fetchWithTimeout(baseUrl + "/health", {}, 1000);
+      return;
     } catch {
       // Server is still starting.
     }
@@ -1413,44 +1422,92 @@ function round4(value) {
   return Math.round(value * 10000) / 10000;
 }
 
+function nonNegativeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
 export function estimateCost(tokens, pricing = DEFAULT_PRICING) {
   const rates = { ...DEFAULT_PRICING, ...pricing };
-  const input = tokens.input ?? 0;
-  const output = tokens.output ?? 0;
-  const productContext = tokens.productContext ?? 0;
-  const cachedInput = tokens.cachedInput ?? 0;
-  const reasoningOutput = tokens.reasoningOutput ?? 0;
-  const uncachedInput = Math.max(0, input - cachedInput);
-  const nonReasoningOutput = Math.max(0, output - reasoningOutput);
-  const cachedInputPerMTok = rates.cachedInputPerMTok ?? rates.inputPerMTok;
-  const reasoningOutputPerMTok = rates.reasoningOutputPerMTok ?? rates.outputPerMTok;
+  const input = nonNegativeNumber(tokens.input);
+  const output = nonNegativeNumber(tokens.output);
+  const productContext = nonNegativeNumber(tokens.productContext);
+  const cachedInput = Math.min(input, nonNegativeNumber(tokens.cachedInput));
+  const cachedWriteInput = Math.min(input - cachedInput, nonNegativeNumber(tokens.cachedWriteInput));
+  const reasoningOutput = Math.min(output, nonNegativeNumber(tokens.reasoningOutput));
+  const uncachedInput = input - cachedInput - cachedWriteInput;
+  const nonReasoningOutput = output - reasoningOutput;
+  const inputPerMTok = nonNegativeNumber(rates.inputPerMTok);
+  const outputPerMTok = nonNegativeNumber(rates.outputPerMTok);
+  const contextPerMTok = nonNegativeNumber(rates.contextPerMTok);
+  const cachedInputPerMTok = nonNegativeNumber(rates.cachedInputPerMTok ?? inputPerMTok);
+  const cacheWriteInputPerMTok = nonNegativeNumber(rates.cacheWriteInputPerMTok ?? inputPerMTok);
+  const reasoningOutputPerMTok = nonNegativeNumber(rates.reasoningOutputPerMTok ?? outputPerMTok);
 
   const cachedInputUsd = (cachedInput / 1_000_000) * cachedInputPerMTok;
-  const uncachedInputUsd = (uncachedInput / 1_000_000) * rates.inputPerMTok;
-  const nonReasoningOutputUsd = (nonReasoningOutput / 1_000_000) * rates.outputPerMTok;
+  const cacheWriteInputUsd = (cachedWriteInput / 1_000_000) * cacheWriteInputPerMTok;
+  const uncachedInputUsd = (uncachedInput / 1_000_000) * inputPerMTok;
+  const nonReasoningOutputUsd = (nonReasoningOutput / 1_000_000) * outputPerMTok;
   const reasoningOutputUsd = (reasoningOutput / 1_000_000) * reasoningOutputPerMTok;
-  const contextUsd = (productContext / 1_000_000) * rates.contextPerMTok;
-  // Comparability lines: what all input/output would cost at full rates with no
-  // cache discount. They are reported for comparison only and are NOT part of totalUsd.
-  const inputUsd = (input / 1_000_000) * rates.inputPerMTok;
-  const outputUsd = (output / 1_000_000) * rates.outputPerMTok;
+  const contextUsd = (productContext / 1_000_000) * contextPerMTok;
+  const inputUsd = (input / 1_000_000) * inputPerMTok;
+  const outputUsd = (output / 1_000_000) * outputPerMTok;
 
   return {
     inputUsd: round4(inputUsd),
     outputUsd: round4(outputUsd),
     cachedInputUsd: round4(cachedInputUsd),
+    cacheWriteInputUsd: round4(cacheWriteInputUsd),
     uncachedInputUsd: round4(uncachedInputUsd),
     nonReasoningOutputUsd: round4(nonReasoningOutputUsd),
     reasoningOutputUsd: round4(reasoningOutputUsd),
     contextUsd: round4(contextUsd),
-    totalUsd: round4(cachedInputUsd + uncachedInputUsd + nonReasoningOutputUsd + reasoningOutputUsd + contextUsd),
+    totalUsd: round4(cachedInputUsd + cacheWriteInputUsd + uncachedInputUsd + nonReasoningOutputUsd + reasoningOutputUsd + contextUsd),
     pricingModel: rates.model ?? tokens.model ?? DEFAULT_MODEL,
-    inputPerMTok: rates.inputPerMTok,
-    outputPerMTok: rates.outputPerMTok,
-    contextPerMTok: rates.contextPerMTok,
+    inputPerMTok,
+    outputPerMTok,
+    contextPerMTok,
     cachedInputPerMTok,
+    cacheWriteInputPerMTok,
     reasoningOutputPerMTok,
     pricingSource: rates.pricingSource ?? "default",
+  };
+}
+
+export function computeCacheMetrics({ tokens = {}, cost = {} } = {}) {
+  const hasProviderCacheUsage = Boolean(tokens.usageSource)
+    && (Object.hasOwn(tokens, "cachedInput") || Object.hasOwn(tokens, "cachedWriteInput"));
+  if (!hasProviderCacheUsage) {
+    return { available: false, reason: "provider-usage-unavailable" };
+  }
+
+  const inputTokens = nonNegativeNumber(tokens.input);
+  const readTokens = Math.min(inputTokens, nonNegativeNumber(tokens.cachedInput));
+  const writeTokens = Math.min(inputTokens - readTokens, nonNegativeNumber(tokens.cachedWriteInput));
+  const uncachedTokens = inputTokens - readTokens - writeTokens;
+  const inputPerMTok = nonNegativeNumber(cost.inputPerMTok);
+  const cachedInputPerMTok = nonNegativeNumber(cost.cachedInputPerMTok ?? inputPerMTok);
+  const cacheWriteInputPerMTok = nonNegativeNumber(cost.cacheWriteInputPerMTok ?? inputPerMTok);
+  const uncachedEquivalentInputUsd = (inputTokens / 1_000_000) * inputPerMTok;
+  const billedInputUsd = (
+    readTokens * cachedInputPerMTok
+    + writeTokens * cacheWriteInputPerMTok
+    + uncachedTokens * inputPerMTok
+  ) / 1_000_000;
+  const discountSavingsUsd = Math.max(0, uncachedEquivalentInputUsd - billedInputUsd);
+
+  return {
+    available: true,
+    source: tokens.usageSource,
+    inputTokens,
+    readTokens,
+    writeTokens,
+    uncachedTokens,
+    hitPercent: pct(readTokens, inputTokens),
+    uncachedEquivalentInputUsd: round4(uncachedEquivalentInputUsd),
+    billedInputUsd: round4(billedInputUsd),
+    discountSavingsUsd: round4(discountSavingsUsd),
+    discountSavingsPercent: pct(discountSavingsUsd, uncachedEquivalentInputUsd),
   };
 }
 

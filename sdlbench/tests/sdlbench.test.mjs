@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   analyzeSessions,
+  computeCacheMetrics,
   createSdlHttpConfig,
   estimateCost,
   extractRetrievedSymbolsFromAttribution,
@@ -243,6 +244,12 @@ test("behavior mode records Codex tiktoken session counts when available", async
     assert.equal(record.tokens.tokenizerSource, "codex-session");
     assert.equal(record.tokens.input, 1234);
     assert.equal(record.tokens.cachedInput, 900);
+    assert.equal(record.cache.available, true);
+    assert.equal(record.cache.source, record.tokens.usageSource);
+    assert.equal(record.cache.readTokens, record.tokens.cachedInput);
+    assert.equal(record.cache.writeTokens, record.tokens.cachedWriteInput ?? 0);
+    assert.equal(record.cache.hitPercent, 72.93);
+    assert.ok(record.cache.discountSavingsUsd >= 0);
     assert.equal(record.tokens.output, 456);
     assert.equal(record.tokens.reasoningOutput, 123);
     assert.equal(record.tokens.total, 1690);
@@ -647,6 +654,7 @@ test("temporary SDL benchmark server disables HTTP auth for Codex MCP access", (
   assert.ok(config.repos[0].ignore.includes(".gradle/**"));
   assert.deepEqual(config.httpAuth, { enabled: false });
   assert.equal(config.indexing.pipeline, "auto");
+  assert.equal(config.indexing.enableFileWatching, false);
   assert.equal(config.indexing.engine, "rust");
   assert.equal(config.indexing.providerFirst.lsp.mode, "primaryWithCaps");
   assert.equal(config.semantic.enabled, true);
@@ -1434,6 +1442,12 @@ test("behavior mode with agent=opencode records session usage as opencode-sessio
     assert.equal(record.tokens.reasoningOutput, 175);
     assert.equal(record.tokens.cachedInput, 1800);
     assert.equal(record.tokens.cachedWriteInput, 50);
+    assert.equal(record.cache.available, true);
+    assert.equal(record.cache.source, record.tokens.usageSource);
+    assert.equal(record.cache.readTokens, record.tokens.cachedInput);
+    assert.equal(record.cache.writeTokens, record.tokens.cachedWriteInput);
+    assert.equal(record.cache.hitPercent, 81.82);
+    assert.ok(record.cache.discountSavingsUsd >= 0);
     // Total excludes cache (cache is a component of input per OpenAI convention):
     // total = input + output + reasoning = 2775
     assert.equal(record.tokens.total, 2775);
@@ -1540,6 +1554,8 @@ test("analyzeSessions returns baseline deltas and imports transcript records", a
   assert.equal(imported.tokens.total > 0, true);
   assert.equal(imported.status, "imported");
   assert.equal(imported.tokens.tokenizerSource, "tiktoken");
+  assert.equal(imported.schemaVersion, 3);
+  assert.deepEqual(imported.cache, { available: false, reason: "provider-usage-unavailable" });
 
   const summary = analyzeSessions([
     { ...imported, variant: "baseline", taskId: "t1", agent: "codex", model: "m", tokens: { total: 100, saved: 0 }, cost: { totalUsd: 0.1 }, quality: { passed: true, errorRate: 0 }, workflow: { executionMode: "fixture" } },
@@ -1731,7 +1747,7 @@ test("serveViewer lists sidecar jsonl files and serves them", async () => {
   }
 });
 
-test("fixture records carry claimGrade=none and zeroed savings after schema v2", async () => {
+test("fixture records carry claimGrade=none, unavailable cache, and zeroed savings after schema v3", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-claim-fixture-"));
 
   try {
@@ -1744,11 +1760,13 @@ test("fixture records carry claimGrade=none and zeroed savings after schema v2",
       workDir: join(root, "work"),
     });
 
-    assert.ok(result.records.every((record) => record.schemaVersion === 2));
+    assert.ok(result.records.every((record) => record.schemaVersion === 3));
     assert.ok(result.records.every((record) => record.claimGrade === "none"));
     assert.ok(result.records.every((record) => record.tokens.saved === 0));
     assert.ok(result.records.every((record) => record.tokens.savingsPercent === 0));
     assert.ok(result.records.every((record) => record.tokens.rawEquivalent === record.tokens.total));
+    assert.ok(result.records.every((record) => record.cache.available === false));
+    assert.ok(result.records.every((record) => record.cache.reason === "provider-usage-unavailable"));
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -1814,9 +1832,15 @@ test("behavior records carry claimGrade=primary when codex session counts are pr
     });
     const [record] = result.records;
 
-    assert.equal(record.schemaVersion, 2);
+    assert.equal(record.schemaVersion, 3);
     assert.equal(record.claimGrade, "primary");
     assert.equal(record.tokens.tokenizerSource, "codex-session");
+    assert.equal(record.cache.available, true);
+    assert.equal(record.cache.source, record.tokens.usageSource);
+    assert.equal(record.cache.readTokens, record.tokens.cachedInput);
+    assert.equal(record.cache.writeTokens, record.tokens.cachedWriteInput ?? 0);
+    assert.equal(record.cache.hitPercent, 72.93);
+    assert.ok(record.cache.discountSavingsUsd >= 0);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -2066,4 +2090,82 @@ test("renderAgentPrompt keeps baseline context and neutralizes non-baseline vari
       "Edit this repository in place. Keep changes limited to the task.",
     ].join("\n\n"),
   );
+});
+
+
+test("cache accounting normalizes provider usage and unavailable records", () => {
+  const cache = computeCacheMetrics({
+    tokens: {
+      input: 1000,
+      cachedInput: 800,
+      cachedWriteInput: 100,
+      usageSource: "opencode_session_usage",
+    },
+    cost: {
+      inputPerMTok: 10,
+      cachedInputPerMTok: 2,
+      cacheWriteInputPerMTok: 10,
+    },
+  });
+  assert.deepEqual(cache, {
+    available: true,
+    source: "opencode_session_usage",
+    inputTokens: 1000,
+    readTokens: 800,
+    writeTokens: 100,
+    uncachedTokens: 100,
+    hitPercent: 80,
+    uncachedEquivalentInputUsd: 0.01,
+    billedInputUsd: 0.0036,
+    discountSavingsUsd: 0.0064,
+    discountSavingsPercent: 64,
+  });
+
+  assert.deepEqual(
+    computeCacheMetrics({
+      tokens: { input: 1000, cachedInput: 800, tokenizerSource: "tiktoken" },
+      cost: { inputPerMTok: 10, cachedInputPerMTok: 2 },
+    }),
+    { available: false, reason: "provider-usage-unavailable" },
+  );
+
+  const zero = computeCacheMetrics({
+    tokens: { input: 0, cachedInput: 0, cachedWriteInput: 0, usageSource: "provider" },
+    cost: { inputPerMTok: 10, cachedInputPerMTok: 2 },
+  });
+  assert.equal(zero.available, true);
+  assert.equal(zero.hitPercent, 0);
+  assert.equal(zero.discountSavingsPercent, 0);
+
+  const clamped = computeCacheMetrics({
+    tokens: { input: 100, cachedInput: 80, cachedWriteInput: 100, usageSource: "provider" },
+    cost: { inputPerMTok: 10, cachedInputPerMTok: 2 },
+  });
+  assert.equal(clamped.readTokens, 80);
+  assert.equal(clamped.writeTokens, 20);
+  assert.equal(clamped.uncachedTokens, 0);
+  assert.ok(
+    Object.values(clamped)
+      .filter((value) => typeof value === "number")
+      .every(Number.isFinite),
+  );
+});
+
+test("estimateCost prices cache writes once and clamps input buckets", () => {
+  const cost = estimateCost(
+    { input: 1000, output: 0, cachedInput: 800, cachedWriteInput: 300 },
+    {
+      inputPerMTok: 10,
+      outputPerMTok: 0,
+      contextPerMTok: 0,
+      cachedInputPerMTok: 2,
+      cacheWriteInputPerMTok: 12,
+    },
+  );
+
+  assert.equal(cost.cachedInputUsd, 0.0016);
+  assert.equal(cost.cacheWriteInputUsd, 0.0024);
+  assert.equal(cost.uncachedInputUsd, 0);
+  assert.equal(cost.cacheWriteInputPerMTok, 12);
+  assert.equal(cost.totalUsd, 0.004);
 });
