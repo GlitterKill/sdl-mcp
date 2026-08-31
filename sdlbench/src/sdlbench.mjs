@@ -8,7 +8,7 @@ import { createServer as createNetServer } from "node:net";
 import { performance } from "node:perf_hooks";
 import { signalsForLoss } from "./attribution-signals.mjs";
 import { computeCoverage } from "./coverage.mjs";
-import { mean, stdDev, bootstrapCI, mannWhitneyU } from "./stats.mjs";
+import { percentile, mean, stdDev, bootstrapCI, mannWhitneyU } from "./stats.mjs";
 import { prepareOpencodeSterileRuntime } from "./agents/opencode-runtime.mjs";
 import { extractOpencodeSessionUsage, tokensFromOpencodeSessionCounts } from "./agents/opencode.mjs";
 
@@ -431,7 +431,7 @@ export function analyzeSessions(records) {
         tokensSaved,
         costSavedUsd,
         pairedCount: pairedForVariant.length,
-        medianDeltaPct: round4(median(deltaPctValues)),
+        medianDeltaPct: round4(percentile(deltaPctValues, 50)),
         ...stats,
       };
     }
@@ -449,7 +449,7 @@ export function analyzeSessions(records) {
     paired,
     deltas,
     headlineClaim: "median paired savings on tasks both solved",
-    pairedMedianDeltaPct: round4(median(sdlDeltaPcts)),
+    pairedMedianDeltaPct: round4(percentile(sdlDeltaPcts, 50)),
   };
 }
 
@@ -548,11 +548,6 @@ function buildPairedDeltas(records) {
   return paired;
 }
 
-function median(sortedValues) {
-  if (!sortedValues.length) return 0;
-  const mid = Math.floor(sortedValues.length / 2);
-  return sortedValues.length % 2 ? sortedValues[mid] : (sortedValues[mid - 1] + sortedValues[mid]) / 2;
-}
 
 export async function readJsonl(path) {
   const text = await readFile(path, "utf8").catch((error) => {
@@ -1519,12 +1514,6 @@ function parseMaybeJsonl(text) {
     });
 }
 
-function percentile(values, p) {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
-  return sorted[index];
-}
 
 function pct(part, whole) {
   return whole ? Math.round((part / whole) * 10000) / 100 : 0;

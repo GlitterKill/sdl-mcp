@@ -1542,9 +1542,9 @@ test("validateClaims returns gates for smoke/efficient/realism profiles on paire
     executionMode: "behavior",
   };
   const paired = [
-    { ...claimable, deltaPct: 60, coverage: { contextCoverage: 0.8, fileCoverage: 0.9 }, fairness: { netSavingsPct: 50 } },
-    { ...claimable, deltaPct: 50, coverage: { contextCoverage: 0.7, fileCoverage: 0.8 }, fairness: { netSavingsPct: 40 } },
-    { ...claimable, deltaPct: 35, coverage: { contextCoverage: 0.6, fileCoverage: 0.5 }, fairness: { netSavingsPct: 25 } },
+    { ...claimable, deltaPct: 60, coverage: { contextCoverage: 80, fileCoverage: 90 }, fairness: { netSavingsPct: 50 } },
+    { ...claimable, deltaPct: 50, coverage: { contextCoverage: 70, fileCoverage: 80 }, fairness: { netSavingsPct: 40 } },
+    { ...claimable, deltaPct: 35, coverage: { contextCoverage: 60, fileCoverage: 50 }, fairness: { netSavingsPct: 25 } },
   ];
 
   const realism = validateClaims({ paired, profile: "realism" });
@@ -1557,6 +1557,20 @@ test("validateClaims returns gates for smoke/efficient/realism profiles on paire
 
   const efficient = validateClaims({ paired, profile: "efficient" });
   assert.ok(efficient.passed, "efficient profile should pass with good data");
+
+  const coverageGate = smoke.gates.find((gate) => gate.name === "avg_coverage");
+  assert.equal(coverageGate.actual, (0.9 + 0.8 + 0.5) / 3);
+
+  const evenMedian = validateClaims({
+    paired: [10, 20, 30, 40].map((deltaPct) => ({
+      ...claimable,
+      deltaPct,
+      coverage: { fileCoverage: 100 },
+      fairness: { netSavingsPct: 100 },
+    })),
+    profile: "smoke",
+  });
+  assert.equal(evenMedian.gates.find((gate) => gate.name === "p50_paired_savings").actual, 25);
 
   const badPaired = [{ ...claimable, deltaPct: 5, coverage: {}, fairness: {} }];
   const badRealism = validateClaims({ paired: badPaired, profile: "realism" });
@@ -2280,7 +2294,7 @@ test("validateClaims isolates products and ignores cache fields", () => {
       executionMode: "behavior",
       bothPass: true,
       deltaPct: 60,
-      coverage: { contextCoverage: 1 },
+      coverage: { fileCoverage: 100 },
       fairness: { netSavingsPct: 60 },
       cache: { comparable: true, hitPercentDelta: 99 },
     },
@@ -2290,7 +2304,7 @@ test("validateClaims isolates products and ignores cache fields", () => {
       executionMode: "behavior",
       bothPass: true,
       deltaPct: -50,
-      coverage: { contextCoverage: 1 },
+      coverage: { fileCoverage: 100 },
       fairness: { netSavingsPct: 60 },
       cache: { comparable: true, hitPercentDelta: -99 },
     },
@@ -2341,7 +2355,7 @@ test("claims CLI defaults to SDL and accepts an explicit competitor variant", as
     cache: { available: false, reason: "provider-usage-unavailable" },
     quality: { passed: true },
     workflow: { executionMode: "behavior" },
-    coverage: { contextCoverage: 1 },
+    coverage: { fileCoverage: 100 },
     fairness: { netSavingsPct: 60 },
   });
 

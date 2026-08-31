@@ -1,3 +1,5 @@
+import { percentile } from "./stats.mjs";
+
 const PROFILES = {
   smoke: {
     p50Floor: 30,
@@ -32,7 +34,7 @@ export function validateClaims({ paired, profile = "realism", variant = "sdl" })
   );
   const thresholds = PROFILES[profile] ?? PROFILES.realism;
   const deltaPcts = selected.map((row) => row.deltaPct).sort((a, b) => a - b);
-  const coverages = selected.map((row) => row.coverage?.contextCoverage ?? row.coverage?.fileCoverage ?? 0);
+  const coverages = selected.map((row) => (row.coverage?.fileCoverage ?? 0) / 100);
   const fairnesses = selected.map((row) => row.fairness?.netSavingsPct ?? 0);
 
   const p50 = percentile(deltaPcts, 50);
@@ -58,12 +60,6 @@ export function validateClaims({ paired, profile = "realism", variant = "sdl" })
   };
 }
 
-function percentile(values, p) {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
-  return sorted[index];
-}
 
 export function listProfiles() {
   return Object.keys(PROFILES).map((name) => ({ name, ...PROFILES[name] }));

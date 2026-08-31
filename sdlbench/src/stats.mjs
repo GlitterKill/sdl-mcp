@@ -1,8 +1,10 @@
 export function percentile(values, p) {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
-  return sorted[index];
+  const rank = (p / 100) * (sorted.length - 1);
+  const lower = Math.floor(rank);
+  const upper = Math.ceil(rank);
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (rank - lower);
 }
 
 export function mean(values) {

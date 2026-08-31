@@ -19,7 +19,7 @@ Run `sdlbench claims --in results/sessions.jsonl --profile <profile> --variant <
 | `realism` | 50% | 40% | 20% | 0.5 | 20% |
 
 - Gates are computed on the selected product's `paired[].deltaPct` only.
-- `coverage.fileCoverage` must meet the floor.
+- `coverage.fileCoverage` is recorded as a percentage; claim floors use ratios, so `0.5` means 50%.
 - `fairness.netSavingsPct` must meet the floor.
 - Cache hit rate, cache discount savings, and cache telemetry coverage are reported separately. They never change gates or exit status.
 
