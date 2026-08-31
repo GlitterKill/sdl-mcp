@@ -94,7 +94,7 @@ async function dispatch() {
       matrixPath: opts.matrix ?? "sdlbench/tasks/matrix.json",
       resultsPath: opts.out ?? "sdlbench/results/sessions.jsonl",
       variant: opts.variant ?? "baseline",
-      workDir: opts.workDir ?? "sdlbench/.work/repos",
+      workDir: opts.workDir,
       executionMode: opts.behavior ? "behavior" : opts.executionMode ?? opts["execution-mode"],
       agentCommand: opts.agentCommand ?? opts["agent-command"],
       agentConfigPath: opts.agentConfig ?? opts["agent-config"],

@@ -2476,3 +2476,9 @@ test("buildChartModel exposes weighted cache efficiency with partial telemetry",
   assert.deepEqual(model.pairedDeltas.map((row) => row.variant).sort(), ["competitor", "sdl"]);
   assert.equal(model.tokenSavings.find((row) => row.variant === "sdl").total, 130);
 });
+
+test("CLI preserves the sterile default work directory for behavior runs", async () => {
+  const cliSource = await readFile("sdlbench/src/cli.mjs", "utf8");
+  assert.match(cliSource, /workDir: opts\.workDir,/);
+  assert.doesNotMatch(cliSource, /workDir: opts\.workDir \?\? "sdlbench\/\.work\/repos"/);
+});
