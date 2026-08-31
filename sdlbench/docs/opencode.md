@@ -138,7 +138,7 @@ Z.AI's reasoning-tier output rate.
 - `sdlbench/config/agents/opencode.json` — agent config (model, command
   template, env passthrough, timeout).
 - `sdlbench/src/agents/opencode-runtime.mjs` — `prepareOpencodeSterileRuntime`
-  (per-run OPENCODE_DATA_DIR + OPENCODE_CONFIG_CONTENT generation).
+  (per-run `XDG_DATA_HOME` plus `OPENCODE_CONFIG_CONTENT` generation).
 - `sdlbench/src/agents/opencode.mjs` — `extractOpencodeSessionUsage` +
   `tokensFromOpencodeSessionCounts` (token-extraction and reshape).
 - `sdlbench/config/products.lock.json` — `baseline` and `sdl` products declare

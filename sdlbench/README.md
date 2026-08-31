@@ -14,7 +14,7 @@ node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent codex 
 node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent opencode --variant sdl --model glm-5.2 --behavior
 node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent opencode --variant sdl --model kimi-k2.7-code --behavior
 node sdlbench/src/cli.mjs scaling --sizes tiny,small --agent codex --variant baseline,sdl --i-understand-cost
-node sdlbench/src/cli.mjs claims --in sdlbench/results/sessions.jsonl --profile realism
+node sdlbench/src/cli.mjs claims --in sdlbench/results/sessions.jsonl --profile realism --variant sdl
 node sdlbench/src/cli.mjs analyze --in sdlbench/results/sessions.jsonl
 node sdlbench/src/cli.mjs view --port 4177
 ```
@@ -23,20 +23,12 @@ node sdlbench/src/cli.mjs view --port 4177
 
 SDLBench enforces truth in savings claims:
 
-- **Schema v2**: fixture-mode records carry `claimGrade: "none"` and zeroed
-  `tokens.saved`. Only behavior-mode Codex session counts (`claimGrade:
-  "primary"`) can support savings assertions.
-- **Pass-gated paired deltas**: the summary's `paired[]` array contains only
-  tasks where both baseline and SDL passed. `deltas.sdl.tokensSaved` is derived
-  from paired token-total deltas, not from a per-record `saved` field.
+- **Schema v3**: every session record carries explicit `cache` telemetry. Fixture and tokenizer-only records use `{ "available": false, "reason": "provider-usage-unavailable" }`; provider-backed Codex and OpenCode behavior records save measured cache reads and writes.
+- **Pass-gated paired deltas**: `paired[]` compares `tokens.total` only when both baseline and the selected product passed. `deltas.<variant>.tokensSaved` comes from those paired rows, not from per-record `tokens.saved`.
 - **Headline claim**: `summary.headlineClaim` is always "median paired savings
   on tasks both solved."
-- **Claim gates**: run `sdlbench claims --profile realism` to validate gates
-  (p50 >= 50%, p25 >= 40%, min task >= 20%, coverage >= 0.5, fairness >= 20%).
-  See `docs/claims.md` for the full policy.
-- **Fairness auditor**: `fairness.mjs` measures the token cost of SDL
-  reinforcement injections (AGENTS.md, SDL.md, hooks) and reports
-  `netSavingsPct` after deducting them.
+- **Claim gates**: run `sdlbench claims --profile realism --variant sdl` to validate one product against baseline. The default variant is `sdl`; cache fields are report-only and never change gate results. See `docs/claims.md`.
+- **Prompt-cache hygiene**: reports weighted provider cache hit rate, telemetry coverage, and the input-price discount relative to billing all input at the normal rate. Cache reads are not labeled as raw tokens saved.
 - **Cost guardrails**: `scaling` command requires `--i-understand-cost` and
   prints predicted USD before launching.
 - **Attribution**: behavior records carry `attribution.toolCalls[]` (parsed
@@ -73,9 +65,9 @@ Each task copies `sdlbench/tests/fixtures/repo` into `sdlbench/.work/repos/<task
 
 ## SDL Evidence
 
-For `--variant sdl`, the runner prepares a normal SDL-MCP HTTP server and indexes the copied fixture repo before the task starts. By default it starts a temporary `serve --http` process, waits on `/health`, and runs `POST /api/repo/:repoId/reindex-stream` with `mode: "full"`. It does not pre-run task-specific symbol searches, paste `context.sdl`, or convert `context.sdlQueries` into seeded slice entries; behavior-mode agents must discover context through the live SDL tools during the measured session. Tests can pass `sdlHttpBaseUrl` to use an existing HTTP server.
+For `--variant sdl`, the runner prepares a normal SDL-MCP HTTP server and indexes the copied fixture repo before the task starts. By default it starts a temporary `serve --http` process, waits until `/health` is reachable, then runs `POST /api/repo/:repoId/reindex-stream` with `mode: "full"`. It does not pre-run task-specific searches or paste fixture SDL context; behavior agents discover context through live tools. Tests can pass `sdlHttpBaseUrl` to use an existing server.
 
-The temporary config starts from `config/sdlmcp.config.example.json` so provider-first indexing, the Rust indexer, SCIP, semantic retrieval/enrichment, file watching, policy, prefetch, and exclusive Code Mode track the default SDL-MCP configuration. SDLBench only overrides the copied repo root, graph DB path, local HTTP/auth settings, benchmark ignore globs, and repo languages from `repos.lock`. Provider-first only counts as evidence when the HTTP indexing response reports provider-first execution; otherwise the record still proves real HTTP indexing/setup but not provider-first savings.
+The temporary config starts from `config/sdlmcp.config.example.json` and keeps provider-first indexing, Rust indexing, SCIP, semantic retrieval/enrichment, policy, prefetch, and exclusive Code Mode. SDLBench disables file watching because each copied repository is indexed explicitly before the measured run, and overrides only the copied root, graph DB path, local HTTP/auth settings, benchmark ignores, and repo languages. Provider-first counts as evidence only when the indexing response reports it.
 
 
 
@@ -83,22 +75,33 @@ SDL token counts use the rendered prompt plus measured agent session data when a
 
 ## Metrics
 
-`results/sessions.jsonl` is the canonical chart source. `analyze` writes `results/summary.json`; the viewer reads the JSONL directly and renders token use, cost, time to completion, correctness, timeline, and product matrix charts with per-chart PNG export.
+`results/sessions.jsonl` is the canonical chart source. `analyze` writes `results/summary.json`; the viewer renders paired raw-token deltas, cost, time, correctness, timeline, weighted cache efficiency, and a product matrix.
 
 Token counts use the selected model first: `--model`, then `config/agents/<agent>.json` `model`, then `config/pricing.json` `defaultModel`. Fixture-mode records use the tokenizer subprocess, which calls `tiktoken.encoding_for_model(model)` and falls back to the configured encoding only when tiktoken does not know that model. Codex behavior-mode records prefer Codex session JSONL `token_count` totals for the matching run worktree, including `input`, `cachedInput`, `output`, `reasoningOutput`, and `total`; the prompt estimate is kept at `artifacts.estimatedTokens` only when session counts are available.
 
 Cost estimates use `sdlbench/config/pricing.json`. When that file declares a `models` map, the selected model must have a matching pricing entry; otherwise the run fails instead of silently using another model's rates. `contextPerMTok` defaults to `0` for API cost estimates because prompt/context tokens are already included in input token charges.
+
+Raw paired token savings and prompt-cache savings are separate measurements:
+
+- Raw paired savings are `baseline.tokens.total - product.tokens.total`, reported only when both runs passed.
+- Cache hit percent is `cache.readTokens / cache.inputTokens`.
+- Cache discount savings compare billed input cost with the cost of billing every input token at the normal rate.
+- Cache telemetry coverage is the share of records with explicit provider cache counters. A valid zero-hit record is available telemetry, not missing telemetry.
+- Cache metrics are report-only. They do not alter raw token savings, claim gates, or command exit status.
+
+## Product Status
+
+Every executed non-baseline product uses the same session, analysis, scaling, cache, and viewer paths. `crg` and `repomix` are currently dry-run declarations in `config/products.lock.json`; they cannot produce claim-bearing comparison rows until real behavior integrations exist.
 
 ## Model Behavior Mode
 
 Default runs stay in fixture mode: they apply task-local `solution.files`, then run the verifier. Use this for harness and token plumbing checks.
 
 Pass `--behavior` to test model behavior. In behavior mode, SDLBench writes `.sdlbench-prompt.md` into the copied repo, runs the configured agent command template from `config/agents/<agent>.json`, then verifies the files the command changed. The checked-in Codex config defaults to `gpt-5.5` with `model_reasoning_effort="xhigh"`. The command template can use `{repo}`, `{prompt}`, `{taskId}`, `{variant}`, `{model}`, `{sdlMcpConfig}`, and `{sdlMcpUrl}` placeholders. Override it directly with `--agent-command "cmd {repo} {prompt}"` for local smoke tests.
-For SDL behavior runs, the rendered prompt includes generic SDL guidance and passes the live MCP server config so the agent can discover task context with tools during the measured session.
+All non-baseline products receive the same neutral task prompt. SDLBench supplies the normal live MCP server; SDL workflow guidance is discovered from the server tool surface when tools are first loaded, not from prompt text, skills, repository files, or hooks supplied by SDLBench.
 
-Codex behavior runs are isolated from the developer's normal Codex environment. By default, behavior worktrees are copied outside this repository under the OS temp directory so parent `AGENTS.md` files cannot bleed into the baseline. For each Codex task, SDLBench creates a temporary `CODEX_HOME`, copies only `auth.json`, disables plugin/app/memory/personality/browser/computer-use features, and disables every discovered user/plugin/system skill path in the temporary config. SDL hooks remain enabled so the `sdl` variant can still use the benchmark-installed SDL workflow hooks and local SDL instructions. A Codex behavior run fails instead of writing benchmark evidence if no matching Codex session token-count JSONL is found or if the captured session contains Ponytail, generic plugin/app/skill instructions, or memory context.
+Codex behavior runs are isolated from the developer environment. SDLBench uses an OS-temp worktree and temporary `CODEX_HOME`, copies only `auth.json`, and disables plugin, app, memory, personality, browser, computer-use, and discovered skill paths. A run fails if no matching Codex session token counts exist or if captured context contains Ponytail, generic plugin/app/skill instructions, or memory context.
 
-The `opencode` agent follows a parallel sterility model: a per-taskRunId `OPENCODE_DATA_DIR` redirects session storage away from
-`~/.local/share/opencode/storage/`, and `OPENCODE_CONFIG_CONTENT` is set to an inline JSON config carrying only the SDL MCP remote server entry (for `--variant sdl`) or an empty `mcp: {}` block (baseline). Token counts come from per-message `usage` records in the fragmented storage tree (parsed by `extractOpencodeSessionUsage`). See `docs/opencode.md` for the full setup, supported models (GLM-5.2 / Kimi K2.7 Code via Neuralwatt), and known limits.
+The `opencode` agent uses the same neutral prompt and a per-run `XDG_DATA_HOME`. `OPENCODE_CONFIG_CONTENT` contains only the live SDL MCP entry for SDL or an empty MCP block for baseline. Provider token and cache counts come from the matching session row in the isolated `opencode.db`. See `docs/opencode.md` for models, pricing, and limits.
 
 Behavior records include `artifacts.promptPath`, `artifacts.agent`, and `artifacts.changedFiles`. A pass means the agent command exited successfully and the verifier passed.
