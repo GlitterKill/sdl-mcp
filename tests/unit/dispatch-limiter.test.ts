@@ -19,9 +19,37 @@ import {
   waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
 import { _seedRunningForTesting } from "../../dist/indexer/derived-refresh-queue.js";
+import { logger } from "../../dist/util/logger.js";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface ActiveDispatchDiagnostic {
+  label: string;
+  ageMs: number;
+  cancellationState: "none" | "active" | "aborted";
+}
+
+interface ActiveDispatchDiagnostics {
+  activeDispatches: ActiveDispatchDiagnostic[];
+  activeDispatchesOmitted: number;
+}
+
+async function getActiveDispatchDiagnosticsForTesting(
+  nowMs?: number,
+): Promise<ActiveDispatchDiagnostics> {
+  const dispatchLimiterModule = await import(
+    "../../dist/mcp/dispatch-limiter.js"
+  );
+  const candidate: unknown = Reflect.get(
+    dispatchLimiterModule,
+    "_getActiveDispatchDiagnosticsForTesting",
+  );
+  assert.strictEqual(typeof candidate, "function");
+  return (
+    candidate as (snapshotNowMs?: number) => ActiveDispatchDiagnostics
+  )(nowMs);
 }
 
 describe("tool dispatch limiter", () => {
@@ -182,6 +210,131 @@ describe("tool dispatch limiter", () => {
     await first;
   });
 
+  it("logs bounded oldest-first active dispatch diagnostics on queue timeout", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 34, queueTimeoutMs: 1_000 });
+
+    const originalNow = Date.now;
+    const originalWarn = logger.warn;
+    let nowMs = 1_000;
+    Date.now = () => nowMs;
+
+    let releaseActive: (() => void) | undefined;
+    const activeBarrier = new Promise<void>((resolve) => {
+      releaseActive = resolve;
+    });
+    const liveController = new AbortController();
+    const abortedController = new AbortController();
+    const activeCalls: Promise<void>[] = [];
+    let timeoutWarning: Record<string, unknown> | undefined;
+
+    logger.warn = (message, meta) => {
+      if (message === "Tool dispatch queue timed out") {
+        timeoutWarning = meta;
+      }
+    };
+
+    try {
+      for (let index = 0; index < 34; index += 1) {
+        let markStarted: (() => void) | undefined;
+        const started = new Promise<void>((resolve) => {
+          markStarted = resolve;
+        });
+        const signal =
+          index === 1
+            ? liveController.signal
+            : index === 2
+              ? abortedController.signal
+              : undefined;
+
+        activeCalls.push(
+          runToolDispatch(
+            async () => {
+              markStarted?.();
+              await activeBarrier;
+            },
+            undefined,
+            "active-" + index,
+            signal,
+          ),
+        );
+        await started;
+        nowMs += 10;
+      }
+
+      // Cancellation after admission is diagnostic state only; it does not
+      // change the currently running tool callback.
+      abortedController.abort(new Error("client disconnected"));
+      nowMs = 2_000;
+
+      const activeLabels = Array.from(
+        { length: 34 },
+        (_value, index) => "active-" + index,
+      );
+      const indexingActive = getToolDispatchStats().indexingActive;
+
+      await assert.rejects(
+        runToolDispatch(async () => undefined, 15, "queued"),
+        (err: unknown) => {
+          assert.ok(err instanceof ToolDispatchQueueTimeoutError);
+          assert.strictEqual(err.name, "ToolDispatchQueueTimeoutError");
+          assert.strictEqual(
+            err.message,
+            "Tool dispatch queue timed out after 15ms for queued " +
+              "(active=34, queued=0, max=34, activeLabels=" +
+              activeLabels.join(",") +
+              ")",
+          );
+          assert.strictEqual(err.code, "RUNTIME_ERROR");
+          assert.strictEqual(err.classification, "unavailable");
+          assert.strictEqual(err.retryable, true);
+          assert.strictEqual(err.suggestedRetryDelayMs, 1_000);
+          assert.deepStrictEqual(err.details, [
+            "label=queued",
+            "active=34",
+            "queued=0",
+            "max=34",
+            "indexingActive=" + indexingActive,
+            "activeLabels=" + activeLabels.join(","),
+          ]);
+          assert.strictEqual(Reflect.has(err, "activeDispatches"), false);
+          assert.strictEqual(
+            Reflect.has(err, "activeDispatchesOmitted"),
+            false,
+          );
+          return true;
+        },
+      );
+
+      assert.ok(timeoutWarning);
+      const warning = timeoutWarning as Record<string, unknown>;
+      assert.deepStrictEqual(
+        warning.activeDispatches,
+        Array.from({ length: 32 }, (_value, index) => ({
+          label: "active-" + index,
+          ageMs: 1_000 - index * 10,
+          cancellationState:
+            index === 1 ? "active" : index === 2 ? "aborted" : "none",
+        })),
+      );
+      assert.strictEqual(warning.activeDispatchesOmitted, 2);
+
+      releaseActive?.();
+      await Promise.all(activeCalls);
+      assert.deepStrictEqual(
+        await getActiveDispatchDiagnosticsForTesting(),
+        {
+          activeDispatches: [],
+          activeDispatchesOmitted: 0,
+        },
+      );
+    } finally {
+      logger.warn = originalWarn;
+      Date.now = originalNow;
+      releaseActive?.();
+      await Promise.allSettled(activeCalls);
+    }
+  });
+
   it("removes queued dispatch work when the request is cancelled", async () => {
     configureToolDispatchLimiter({ maxConcurrency: 1, queueTimeoutMs: 1_000 });
 
@@ -312,6 +465,13 @@ describe("tool dispatch limiter", () => {
       assert.deepStrictEqual(getToolDispatchStats().activeLabels, ["first"]);
       resetToolDispatchLimiter();
       assert.deepStrictEqual(getToolDispatchStats().activeLabels, []);
+      assert.deepStrictEqual(
+        await getActiveDispatchDiagnosticsForTesting(),
+        {
+          activeDispatches: [],
+          activeDispatchesOmitted: 0,
+        },
+      );
     } finally {
       release?.();
       await first.catch(() => undefined);
