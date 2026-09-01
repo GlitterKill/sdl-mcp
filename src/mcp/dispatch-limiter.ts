@@ -38,6 +38,62 @@ let configuredMax = 8;
 
 // Labels are dispatch-only diagnostics; keep them out of the generic limiter.
 const activeDispatchLabels = new Map<string, number>();
+const ACTIVE_DISPATCH_DIAGNOSTIC_LIMIT = 32;
+
+interface ActiveDispatchRecord {
+  label: string;
+  startedAtMs: number;
+  signal?: AbortSignal;
+}
+
+interface ActiveDispatchDiagnostic {
+  label: string;
+  ageMs: number;
+  cancellationState: "none" | "active" | "aborted";
+}
+
+interface ActiveDispatchDiagnostics {
+  activeDispatches: ActiveDispatchDiagnostic[];
+  activeDispatchesOmitted: number;
+}
+
+// Per-invocation state is diagnostic-only and sampled only on queue timeout.
+const activeDispatchRecords = new Map<number, ActiveDispatchRecord>();
+let nextActiveDispatchId = 0;
+
+function getActiveDispatchDiagnostics(
+  nowMs = Date.now(),
+): ActiveDispatchDiagnostics {
+  const activeDispatches: ActiveDispatchDiagnostic[] = [];
+
+  // Map insertion order is admission order, so the cap keeps the oldest calls.
+  for (const record of activeDispatchRecords.values()) {
+    if (activeDispatches.length === ACTIVE_DISPATCH_DIAGNOSTIC_LIMIT) {
+      break;
+    }
+    activeDispatches.push({
+      label: record.label,
+      ageMs: Math.max(0, nowMs - record.startedAtMs),
+      cancellationState: record.signal
+        ? record.signal.aborted
+          ? "aborted"
+          : "active"
+        : "none",
+    });
+  }
+
+  return {
+    activeDispatches,
+    activeDispatchesOmitted:
+      activeDispatchRecords.size - activeDispatches.length,
+  };
+}
+
+export function _getActiveDispatchDiagnosticsForTesting(
+  nowMs = Date.now(),
+): ActiveDispatchDiagnostics {
+  return getActiveDispatchDiagnostics(nowMs);
+}
 
 function addActiveDispatchLabel(label: string): void {
   activeDispatchLabels.set(label, (activeDispatchLabels.get(label) ?? 0) + 1);
@@ -188,10 +244,19 @@ export async function runToolDispatch<T>(
     return await getToolDispatchLimiter().run(
       () =>
         dispatchContext.run(true, async () => {
+          // This callback runs only after admission, so queued calls are absent.
+          const activeDispatchId = nextActiveDispatchId;
+          nextActiveDispatchId += 1;
+          activeDispatchRecords.set(activeDispatchId, {
+            label,
+            startedAtMs: Date.now(),
+            ...(signal ? { signal } : {}),
+          });
           addActiveDispatchLabel(label);
           try {
             return await fn();
           } finally {
+            activeDispatchRecords.delete(activeDispatchId);
             deleteActiveDispatchLabel(label);
           }
         }),
@@ -201,6 +266,7 @@ export async function runToolDispatch<T>(
   } catch (error) {
     if (error instanceof ConcurrencyQueueTimeoutError) {
       const stats = getToolDispatchStats();
+      const activeDispatchDiagnostics = getActiveDispatchDiagnostics();
       logger.warn("Tool dispatch queue timed out", {
         label,
         timeoutMs: error.timeoutMs,
@@ -209,6 +275,9 @@ export async function runToolDispatch<T>(
         maxConcurrency: stats.maxConcurrency,
         configuredMax: stats.configuredMax,
         activeLabels: stats.activeLabels,
+        activeDispatches: activeDispatchDiagnostics.activeDispatches,
+        activeDispatchesOmitted:
+          activeDispatchDiagnostics.activeDispatchesOmitted,
         indexingActive: stats.indexingActive,
         deferredWork: stats.deferredWork,
       });
@@ -457,5 +526,7 @@ export function resetToolDispatchLimiter(): void {
   configuredMax = 8;
   configuredQueueTimeoutMs = 30_000;
   activeDispatchLabels.clear();
+  activeDispatchRecords.clear();
+  // Do not reset the id: pre-reset calls may finish after newly admitted calls.
   setIndexingStateListener(null);
 }
