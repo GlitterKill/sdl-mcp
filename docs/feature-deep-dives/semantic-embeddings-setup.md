@@ -499,7 +499,7 @@ Configure each lane directly; there is no legacy mode switch.
 ### How It Works
 
 1. **FTS and vector indexes are ensured automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; Symbol vector indexes cover model-specific numeric columns on `SymbolVectorEmbedding` after at least one complete row exists.
-2. **At query time**, FTS and vector searches run in parallel. Symbol vector search uses a repository-scoped LadybugDB projected graph, so repository filtering happens before ANN ranking and unrelated repositories cannot consume the top-K window. Each source produces a ranked candidate list.
+2. **At query time**, FTS and vector searches run in parallel. Symbol vector search uses the physical `SymbolVectorEmbedding` HNSW and marks each candidate's repository ownership in the query. Foreign candidates are discarded before ranking, fusion, or output. A short owned result set gets at most one bounded over-fetch retry; if ANN fails or remains short, a separately guarded exact cosine scan of the requested repository provides deterministically ordered candidates. SDL-MCP does not maintain per-repository HNSW graphs. Each source produces a ranked candidate list.
 3. **RRF fuses** the rank lists: `score(d) = S 1/(k + rank_i(d))` � symbols ranked highly by multiple sources rise to the top.
 4. **If an extension is unavailable** (for example, `fts` or `vector` is not loaded), the system omits that lane, renormalizes the remaining weights, and records the reduced coverage in telemetry.
 
@@ -651,7 +651,7 @@ flowchart TD
     class e1,e2,e3 animate;
 ```
 
-After bootstrap, incremental indexing and the background semantic repair worker buffer up to 50 changed model rows into one replacement write while retaining the live Symbol HNSW. Larger changes use one checkpointed drop/write/recreate cycle. Retrieval ranks candidates inside a repository-scoped projected graph. Startup and health checks accept an HNSW only when its table, name, type, and property all match the configured model.
+After bootstrap, incremental indexing and the background semantic repair worker buffer up to 50 changed model rows into one replacement write while retaining the live Symbol HNSW. Larger changes use one checkpointed drop/write/recreate cycle. Retrieval queries that physical HNSW, filters its ownership-marked results before ranking or fusion, and uses the bounded exact repository scan only when ANN cannot provide enough candidates. Startup and health checks accept an HNSW only when its table, name, type, and property all match the configured model; no per-repository HNSW lifecycle exists.
 
 Vectors are compressed using Float16 quantization:
 

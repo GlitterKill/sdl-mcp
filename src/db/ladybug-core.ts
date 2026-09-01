@@ -155,6 +155,10 @@ function getConnMutex(conn: Connection): ConcurrencyLimiter {
 // INSTALL race or write-txn conflict left the conn in an internally locked
 // state). The flag clears when the task finally settles.
 const DEFAULT_STUCK_TASK_WARN_MS = 30_000;
+const DEFAULT_VECTOR_QUERY_DEADLINE_MS = 5_000;
+const DEFAULT_VECTOR_QUERY_COOLDOWN_MS = 60_000;
+const DEFAULT_EXACT_VECTOR_QUERY_DEADLINE_MS = 5_000;
+const DEFAULT_EXACT_VECTOR_QUERY_COOLDOWN_MS = 60_000;
 
 // Test-only: override the watchdog threshold via env var so unit tests can
 // exercise the stuck-conn flag without 30-second sleeps. Read fresh on each
@@ -167,7 +171,15 @@ function getStuckTaskWarnMs(): number {
   }
   return DEFAULT_STUCK_TASK_WARN_MS;
 }
-const stuckConns = new WeakSet<Connection>();
+const stuckConnOwnerCounts = new WeakMap<Connection, number>();
+const vectorQueryLimiter = new ConcurrencyLimiter({ maxConcurrency: 1 });
+let vectorQueryDeadlineMs = DEFAULT_VECTOR_QUERY_DEADLINE_MS;
+let vectorQueryCooldownMs = DEFAULT_VECTOR_QUERY_COOLDOWN_MS;
+let vectorQueryCircuitOpenUntil = 0;
+const exactVectorQueryLimiter = new ConcurrencyLimiter({ maxConcurrency: 1 });
+let exactVectorQueryDeadlineMs = DEFAULT_EXACT_VECTOR_QUERY_DEADLINE_MS;
+let exactVectorQueryCooldownMs = DEFAULT_EXACT_VECTOR_QUERY_COOLDOWN_MS;
+let exactVectorQueryCircuitOpenUntil = 0;
 
 interface ConnWatchdogDetails {
   statement?: string;
@@ -234,7 +246,48 @@ export function _captureCallSiteForTesting(): string | undefined {
 }
 
 export function isConnStuck(conn: Connection): boolean {
-  return stuckConns.has(conn);
+  return (stuckConnOwnerCounts.get(conn) ?? 0) > 0;
+}
+
+function acquireStuckConn(conn: Connection): void {
+  stuckConnOwnerCounts.set(conn, (stuckConnOwnerCounts.get(conn) ?? 0) + 1);
+}
+
+function releaseStuckConn(conn: Connection): void {
+  const owners = stuckConnOwnerCounts.get(conn) ?? 0;
+  if (owners <= 1) {
+    stuckConnOwnerCounts.delete(conn);
+  } else {
+    stuckConnOwnerCounts.set(conn, owners - 1);
+  }
+}
+
+export function _configureVectorQueryGuardForTesting(options?: {
+  deadlineMs: number;
+  cooldownMs: number;
+}): void {
+  if (vectorQueryLimiter.getStats().active !== 0) {
+    throw new Error("Cannot reset the vector query guard while a query is active");
+  }
+  vectorQueryDeadlineMs = options?.deadlineMs ?? DEFAULT_VECTOR_QUERY_DEADLINE_MS;
+  vectorQueryCooldownMs = options?.cooldownMs ?? DEFAULT_VECTOR_QUERY_COOLDOWN_MS;
+  vectorQueryCircuitOpenUntil = 0;
+}
+
+export function _configureExactVectorQueryGuardForTesting(options?: {
+  deadlineMs: number;
+  cooldownMs: number;
+}): void {
+  if (exactVectorQueryLimiter.getStats().active !== 0) {
+    throw new Error(
+      "Cannot reset the exact vector query guard while a query is active",
+    );
+  }
+  exactVectorQueryDeadlineMs =
+    options?.deadlineMs ?? DEFAULT_EXACT_VECTOR_QUERY_DEADLINE_MS;
+  exactVectorQueryCooldownMs =
+    options?.cooldownMs ?? DEFAULT_EXACT_VECTOR_QUERY_COOLDOWN_MS;
+  exactVectorQueryCircuitOpenUntil = 0;
 }
 
 function withConnWatchdog<T>(
@@ -247,7 +300,7 @@ function withConnWatchdog<T>(
   const warnMs = getStuckTaskWarnMs();
   const timer = setTimeout(() => {
     stuckMarked = true;
-    stuckConns.add(conn);
+    acquireStuckConn(conn);
     logger.warn(
       `[ladybug-core] DB task running >${warnMs}ms; conn flagged stuck`,
       {
@@ -262,7 +315,7 @@ function withConnWatchdog<T>(
   timer.unref();
   return fn().finally(() => {
     clearTimeout(timer);
-    if (stuckMarked) stuckConns.delete(conn);
+    if (stuckMarked) releaseStuckConn(conn);
   });
 }
 
@@ -515,6 +568,68 @@ async function queryStoredProcAllAdmitted<T>(
     ),
   );
 }
+
+function isVectorIndexQuery(callQuery: string): boolean {
+  return /^\s*CALL\s+QUERY_VECTOR_INDEX\s*\(/iu.test(callQuery);
+}
+
+function vectorCircuitError(): DatabaseError {
+  return new DatabaseError(
+    "Vector query circuit is open; lexical retrieval remains available",
+  );
+}
+
+async function queryVectorStoredProcAll<T>(
+  conn: Connection,
+  callQuery: string,
+): Promise<T[]> {
+  if (Date.now() < vectorQueryCircuitOpenUntil) throw vectorCircuitError();
+  if (vectorQueryLimiter.getStats().active > 0) {
+    throw new DatabaseError(
+      "A vector query is already in progress; lexical retrieval remains available",
+    );
+  }
+
+  let started = false;
+  let settled = false;
+  let quarantined = false;
+  try {
+    return await vectorQueryLimiter.run(async () => {
+      // Recheck after admission so a circuit opened by an earlier task cannot
+      // be bypassed by a caller already entering the shared guard.
+      if (Date.now() < vectorQueryCircuitOpenUntil) throw vectorCircuitError();
+      started = true;
+      try {
+        return await queryStoredProcAllAdmitted<T>(conn, callQuery);
+      } finally {
+        settled = true;
+        if (quarantined) releaseStuckConn(conn);
+      }
+    }, vectorQueryDeadlineMs);
+  } catch (err) {
+    if (!started) throw err;
+    vectorQueryCircuitOpenUntil = Date.now() + vectorQueryCooldownMs;
+    if (!settled) {
+      // ConcurrencyLimiter keeps its slot until the native promise settles.
+      // Quarantine the same connection immediately so the read pool cannot
+      // assign unrelated FTS or graph reads to its occupied mutex meanwhile.
+      quarantined = true;
+      acquireStuckConn(conn);
+      logger.warn(
+        "[ladybug-core] Vector query deadline exceeded; conn flagged stuck and circuit opened",
+        {
+          deadlineMs: vectorQueryDeadlineMs,
+          statementFingerprint: statementFingerprint(callQuery),
+        },
+      );
+      throw new DatabaseError(
+        `Vector query deadline exceeded after ${vectorQueryDeadlineMs}ms; lexical retrieval remains available`,
+      );
+    }
+    throw err;
+  }
+}
+
 export function queryStoredProcAll<T>(
   conn: Connection,
   callQuery: string,
@@ -522,7 +637,9 @@ export function queryStoredProcAll<T>(
   const checkpointError = rawCheckpointError(callQuery);
   if (checkpointError) return Promise.reject(checkpointError);
   return withSharedLadybugOperation(() =>
-    queryStoredProcAllAdmitted<T>(conn, callQuery),
+    isVectorIndexQuery(callQuery)
+      ? queryVectorStoredProcAll<T>(conn, callQuery)
+      : queryStoredProcAllAdmitted<T>(conn, callQuery),
   );
 }
 
@@ -772,6 +889,77 @@ async function queryAllAdmitted<T>(
     ),
   );
 }
+
+function exactVectorCircuitError(): DatabaseError {
+  return new DatabaseError(
+    "Exact vector query circuit is open; lexical retrieval remains available",
+  );
+}
+
+async function queryExactVectorAllAdmitted<T>(
+  conn: Connection,
+  statement: string,
+  params: Record<string, unknown>,
+): Promise<T[]> {
+  if (Date.now() < exactVectorQueryCircuitOpenUntil) {
+    throw exactVectorCircuitError();
+  }
+  if (exactVectorQueryLimiter.getStats().active > 0) {
+    throw new DatabaseError(
+      "An exact vector query is already in progress; lexical retrieval remains available",
+    );
+  }
+
+  let started = false;
+  let settled = false;
+  let quarantined = false;
+  try {
+    return await exactVectorQueryLimiter.run(async () => {
+      if (Date.now() < exactVectorQueryCircuitOpenUntil) {
+        throw exactVectorCircuitError();
+      }
+      started = true;
+      try {
+        return await queryAllAdmitted<T>(conn, statement, params);
+      } finally {
+        settled = true;
+        if (quarantined) releaseStuckConn(conn);
+      }
+    }, exactVectorQueryDeadlineMs);
+  } catch (err) {
+    if (!started) throw err;
+    exactVectorQueryCircuitOpenUntil = Date.now() + exactVectorQueryCooldownMs;
+    if (!settled) {
+      // Keep the connection quarantined while the limiter retains the native task.
+      quarantined = true;
+      acquireStuckConn(conn);
+      logger.warn(
+        "[ladybug-core] Exact vector query deadline exceeded; conn flagged stuck and circuit opened",
+        {
+          deadlineMs: exactVectorQueryDeadlineMs,
+          statementFingerprint: statementFingerprint(statement),
+        },
+      );
+      throw new DatabaseError(
+        `Exact vector query deadline exceeded after ${exactVectorQueryDeadlineMs}ms; lexical retrieval remains available`,
+      );
+    }
+    throw err;
+  }
+}
+
+export function queryExactVectorAll<T>(
+  conn: Connection,
+  statement: string,
+  params: Record<string, unknown> = {},
+): Promise<T[]> {
+  const checkpointError = rawCheckpointError(statement);
+  if (checkpointError) return Promise.reject(checkpointError);
+  return withSharedLadybugOperation(() =>
+    queryExactVectorAllAdmitted<T>(conn, statement, params),
+  );
+}
+
 export function queryAll<T>(
   conn: Connection,
   statement: string,

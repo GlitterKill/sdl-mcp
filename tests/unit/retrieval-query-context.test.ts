@@ -294,14 +294,17 @@ describe("request-scoped retrieval work", () => {
     assert.ok(retrievalDbSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
     assert.ok(
       orchestratorSrc.includes(
-        "`CALL QUERY_VECTOR_INDEX('${projectionName}'",
+        "`CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding'",
       ),
     );
-    assert.ok(orchestratorSrc.includes("symbolId: vectorRowId(row)"));
+    assert.ok(orchestratorSrc.includes("node.symbolId AS symbolId"));
+    assert.ok(orchestratorSrc.includes("AS owned"));
   });
 
-  it("runs both Symbol ANN paths through a repository-filtered projection", () => {
-    assert.ok(retrievalDbSrc.includes("CALL PROJECT_GRAPH_CYPHER"));
+  it("runs both Symbol ANN paths through the repository-safe helper", () => {
+    assert.ok(!retrievalDbSrc.includes("PROJECT_GRAPH_CYPHER"));
+    assert.ok(!retrievalDbSrc.includes("queryRepoSymbolVectorAnn"));
+    assert.ok(retrievalDbSrc.includes("rankRepoSymbolVectorsExact"));
     assert.strictEqual(
       orchestratorSrc.match(
         /queryRepoSymbolVectorIndex\(/g,

@@ -126,6 +126,13 @@ families have different effects and different controls.
   calls wait for it to finish instead of using this timeout, and server-side
   index progress reports `Deferred work is running (..., NN%)` when a progress
   estimate is available.
+- `Vector query deadline exceeded after 5000ms` means one native HNSW lookup
+  did not settle. SDL-MCP immediately quarantines that read connection, opens
+  the vector circuit for 60 seconds, and continues retrieval with lexical/FTS
+  lanes. Concurrent vector calls fail fast instead of consuming more pool
+  connections. If every read connection is stuck, checkout now fails instead
+  of assigning work to an occupied connection; repeated occurrences warrant a
+  server restart and LadybugDB log inspection.
 - `waitForDerivedRefreshIdle timed out` means a foreground refresh stopped
   waiting for the background derived-refresh queue to become idle. It logs a
   warning and proceeds; it is not controlled by

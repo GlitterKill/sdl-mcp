@@ -596,7 +596,7 @@ flowchart TD
     class e1 animate;
 ```
 
-Once bootstrapped, Symbol refresh buffers up to 50 changed model rows into one replacement write while retaining the healthy HNSW. Larger refreshes use one checkpointed drop/write/recreate cycle. Symbol ANN queries rank candidates inside a repository-scoped projected graph, so matching Symbol-to-File-to-Repo ownership filters the graph before the top-K search.
+Once bootstrapped, Symbol refresh buffers up to 50 changed model rows into one replacement write while retaining the healthy HNSW. Larger refreshes use one checkpointed drop/write/recreate cycle. Symbol ANN queries use the physical `SymbolVectorEmbedding` HNSW, mark ownership in the query, and discard foreign-repository candidates before ranking, fusion, or output. A short owned result set receives at most one bounded over-fetch retry; an ANN failure or remaining shortage falls back to a separately guarded exact cosine scan of the requested repository, ordered by score and then symbol ID. SDL-MCP does not create per-repository HNSW graphs.
 
 The current recommended configuration surface is `semantic.retrieval.vector`. Retired sidecar ANN configuration is intentionally omitted from current examples.
 

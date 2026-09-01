@@ -1029,21 +1029,18 @@ async function getLadybugReadConnAdmitted(): Promise<LadybugConnection> {
   // Callers that hit a connection error should retry; the pool will
   // recreate unhealthy connections lazily on demand.
   //
-  // Skip conns flagged stuck by ladybug-core's watchdog (a native task
-  // running inside the per-conn mutex >30s). Falls back to round-robin if
-  // every conn is stuck so liveness wins over correctness.
+  // Skip conns flagged stuck by ladybug-core's watchdog or vector deadline.
+  // If every conn is stuck, fail fast instead of assigning more work to an
+  // occupied native mutex and turning one hung query into a server-wide stall.
   for (let attempt = 0; attempt < readPool.length; attempt++) {
     const idx = readPoolIndex;
     readPoolIndex = (readPoolIndex + 1) % readPool.length;
     const candidate = readPool[idx];
     if (!isConnStuck(candidate)) return candidate;
   }
-  logger.error(
-    "[ladybug] all read conns flagged stuck; using round-robin anyway",
+  throw new DatabaseError(
+    "All read connections are stuck; retry after in-flight operations settle",
   );
-  const idx = readPoolIndex;
-  readPoolIndex = (readPoolIndex + 1) % readPool.length;
-  return readPool[idx];
 }
 
 export function getLadybugReadConn(): Promise<LadybugConnection> {

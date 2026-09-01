@@ -11,9 +11,17 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+import {
+  FileGatewayOutputSchema,
+  FileGatewayRequestSchema,
+  handleFileGateway,
+} from "../../dist/mcp/tools/file-gateway.js";
 import { handleFileRead } from "../../dist/mcp/tools/file-read.js";
 import { handleResponseGet } from "../../dist/mcp/tools/response.js";
-import { FileReadRequestSchema } from "../../dist/mcp/tools.js";
+import {
+  FileReadRequestSchema,
+  withProjectionOutputSchema,
+} from "../../dist/mcp/tools.js";
 import {
   MCPServer,
   type ToolResponseEnvelope,
@@ -159,6 +167,16 @@ describe("sdl.file.read responseMode preflight", { concurrency: false }, () => {
       FileReadRequestSchema,
       (args, context) => handleFileRead(args, context),
     );
+    server.registerTool(
+      "sdl.file",
+      "Read through the unified file gateway",
+      FileGatewayRequestSchema,
+      (args, context) => handleFileGateway(args, context),
+      undefined,
+      undefined,
+      undefined,
+      withProjectionOutputSchema("file", FileGatewayOutputSchema),
+    );
     callTool = getCallToolHandler(server);
   });
 
@@ -237,6 +255,38 @@ describe("sdl.file.read responseMode preflight", { concurrency: false }, () => {
     assert.doesNotMatch(wire, new RegExp(SENTINEL));
     assert.match(wire, /INLINE_RESPONSE_TOO_LARGE/);
     assert.match(wire, /response\.get/);
+  });
+
+  it("keeps the unified sdl.file oversized-inline error inside its output schema", async () => {
+    const response = await callTool(
+      {
+        method: "tools/call",
+        params: {
+          name: "sdl.file",
+          arguments: {
+            repoId: REPO_ID,
+            op: "read",
+            filePath: "large.txt",
+            responseMode: "inline",
+          },
+        },
+      },
+      {
+        _meta: {},
+        sendNotification: async () => {},
+        signal: new AbortController().signal,
+      },
+    );
+
+    assert.equal(response.isError, true);
+    assert.equal(
+      (response.structuredContent?.error as { code?: string } | undefined)?.code,
+      "INLINE_RESPONSE_TOO_LARGE",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(response),
+      /Structured content does not match internal output schema/i,
+    );
   });
 
   it("preserves explicitly bounded, search, range, and JSON-path requests", async () => {

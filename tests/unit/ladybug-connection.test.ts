@@ -33,6 +33,16 @@ let queryAll: <T>(
   statement: string,
   params?: Record<string, unknown>,
 ) => Promise<T[]>;
+let runExclusive: <T>(conn: Connection, fn: () => Promise<T>) => Promise<T>;
+let isConnStuck: (conn: Connection) => boolean;
+let queryStoredProcAll: <T>(
+  conn: Connection,
+  statement: string,
+) => Promise<T[]>;
+let configureVectorQueryGuardForTesting: (options?: {
+  deadlineMs: number;
+  cooldownMs: number;
+}) => void;
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
 let DatabaseErrorClass: new (message: string) => Error;
 let normalizePath: (p: string) => string;
@@ -77,6 +87,11 @@ await import("../../dist/db/ladybug-core.js")
   .then((core) => {
     withReadOnlyTransaction = core.withReadOnlyTransaction;
     queryAll = core.queryAll;
+    runExclusive = core.runExclusive;
+    isConnStuck = core.isConnStuck;
+    queryStoredProcAll = core.queryStoredProcAll;
+    configureVectorQueryGuardForTesting =
+      core._configureVectorQueryGuardForTesting;
   })
   .catch(() => {
     withReadOnlyTransaction = async () => {
@@ -85,6 +100,14 @@ await import("../../dist/db/ladybug-core.js")
     queryAll = async () => {
       throw new Error("Module not built");
     };
+    runExclusive = async () => {
+      throw new Error("Module not built");
+    };
+    isConnStuck = () => false;
+    queryStoredProcAll = async () => {
+      throw new Error("Module not built");
+    };
+    configureVectorQueryGuardForTesting = () => {};
   });
 
 await import("../../dist/mcp/errors.js")
@@ -439,6 +462,93 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
       } finally {
         await closeLadybugDb();
         cleanupTestDb("conn-singleton");
+      }
+    });
+
+    it("fails fast instead of reusing a pool whose connections are all stuck", async () => {
+      const testPath = getTestDbPath("all-read-connections-stuck");
+      cleanupTestDb("all-read-connections-stuck");
+      await initLadybugDb(testPath);
+      await getLadybugConn();
+
+      const previousWatchdog = process.env.SDL_STUCK_TASK_WARN_MS;
+      process.env.SDL_STUCK_TASK_WARN_MS = "20";
+      const release = deferred();
+      const pending = getReadPool().map((conn) =>
+        runExclusive(conn, () => release.promise),
+      );
+
+      try {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (getReadPool().every(isConnStuck)) break;
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        assert.ok(getReadPool().every(isConnStuck));
+        await assert.rejects(getLadybugConn(), /all read connections are stuck/i);
+      } finally {
+        release.resolve();
+        await Promise.all(pending);
+        if (previousWatchdog === undefined) {
+          delete process.env.SDL_STUCK_TASK_WARN_MS;
+        } else {
+          process.env.SDL_STUCK_TASK_WARN_MS = previousWatchdog;
+        }
+        await closeLadybugDb();
+        cleanupTestDb("all-read-connections-stuck");
+      }
+    });
+
+    it("routes checkout around a vector connection as soon as its deadline expires", async (t) => {
+      const testPath = getTestDbPath("vector-timeout-read-routing");
+      cleanupTestDb("vector-timeout-read-routing");
+      await initLadybugDb(testPath);
+      await getLadybugConn();
+
+      const pool = getReadPool();
+      const timedOutConn = pool[0];
+      const started = deferred();
+      const release = deferred();
+      configureVectorQueryGuardForTesting({
+        deadlineMs: 20,
+        cooldownMs: 1_000,
+      });
+      t.mock.method(timedOutConn, "query", async () => {
+        started.resolve();
+        await release.promise;
+        return {
+          getAll: async () => [],
+          close: () => {},
+        };
+      });
+
+      try {
+        const timeoutAssertion = assert.rejects(
+          queryStoredProcAll(
+            timedOutConn,
+            "CALL QUERY_VECTOR_INDEX('Symbol', 'symbol_vec', [0.1], 1) RETURN node, distance",
+          ),
+          /deadline exceeded/i,
+        );
+        await started.promise;
+        await timeoutAssertion;
+        assert.equal(isConnStuck(timedOutConn), true);
+
+        for (let attempt = 0; attempt < pool.length * 2; attempt += 1) {
+          assert.notStrictEqual(await getLadybugConn(), timedOutConn);
+        }
+      } finally {
+        release.resolve();
+        for (
+          let attempt = 0;
+          attempt < 20 && isConnStuck(timedOutConn);
+          attempt += 1
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        configureVectorQueryGuardForTesting();
+        await closeLadybugDb();
+        cleanupTestDb("vector-timeout-read-routing");
       }
     });
 

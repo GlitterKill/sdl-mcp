@@ -940,7 +940,6 @@ async function enforceProjectedResponseMode(
       },
     };
     const structuredContent = {
-      status: "error",
       error: {
         code: "INLINE_RESPONSE_TOO_LARGE",
         message: "Inline response exceeds the 8,000-token delivery limit.",

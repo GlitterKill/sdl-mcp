@@ -6,6 +6,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import * as core from "../../dist/db/ladybug-core.js";
 import {
   toNumber,
   toBoolean,
@@ -19,7 +20,9 @@ import {
   withTransaction,
   getPreparedStatement,
   isConnectionPoisoned,
+  isConnStuck,
   drainConnMutex,
+  _configureVectorQueryGuardForTesting,
 } from "../../dist/db/ladybug-core.js";
 
 describe("toNumber", () => {
@@ -480,5 +483,382 @@ describe("query helpers", () => {
       "BEGIN TRANSACTION",
       "COMMIT",
     ]);
+  });
+});
+
+describe("vector stored-procedure liveness", { concurrency: false }, () => {
+  type Connection = import("kuzu").Connection;
+  type ExactVectorQuery = <T>(
+    conn: Connection,
+    statement: string,
+    params?: Record<string, unknown>,
+  ) => Promise<T[]>;
+  type ConfigureExactGuard = (options?: {
+    deadlineMs: number;
+    cooldownMs: number;
+  }) => void;
+
+  function getExactVectorGuard(): {
+    query: ExactVectorQuery;
+    configure: ConfigureExactGuard;
+  } {
+    const exactVectorQuery = Reflect.get(core, "queryExactVectorAll");
+    const configureExactGuard = Reflect.get(
+      core,
+      "_configureExactVectorQueryGuardForTesting",
+    );
+    assert.equal(typeof exactVectorQuery, "function");
+    assert.equal(typeof configureExactGuard, "function");
+    return {
+      query: exactVectorQuery as ExactVectorQuery,
+      configure: configureExactGuard as ConfigureExactGuard,
+    };
+  }
+
+  it("single-flights vector work and quarantines a timed-out connection immediately", async () => {
+    const previousWatchdog = process.env.SDL_STUCK_TASK_WARN_MS;
+    process.env.SDL_STUCK_TASK_WARN_MS = "1000";
+    _configureVectorQueryGuardForTesting({
+      deadlineMs: 20,
+      cooldownMs: 20,
+    });
+
+    let releaseNative!: () => void;
+    let markNativeStarted!: () => void;
+    const nativeStarted = new Promise<void>((resolve) => {
+      markNativeStarted = resolve;
+    });
+    const nativeGate = new Promise<void>((resolve) => {
+      releaseNative = resolve;
+    });
+    const emptyResult = {
+      getAll: async () => [],
+      close: () => {},
+    };
+    let firstCalls = 0;
+    let otherCalls = 0;
+    const firstConn = {
+      query: async () => {
+        firstCalls += 1;
+        markNativeStarted();
+        await nativeGate;
+        return emptyResult;
+      },
+    } as unknown as Connection;
+    const otherConn = {
+      query: async () => {
+        otherCalls += 1;
+        return emptyResult;
+      },
+    } as unknown as Connection;
+    const vectorCall =
+      "CALL QUERY_VECTOR_INDEX('Symbol', 'symbol_vec', [0.1], 1) RETURN node, distance";
+
+    try {
+      const timeoutAssertion = assert.rejects(
+        queryStoredProcAll(firstConn, vectorCall),
+        /deadline exceeded/i,
+      );
+      await nativeStarted;
+
+      const busyStartedAt = performance.now();
+      await assert.rejects(
+        queryStoredProcAll(otherConn, vectorCall),
+        /already in progress/i,
+      );
+      assert.ok(performance.now() - busyStartedAt < 100);
+      assert.equal(otherCalls, 0);
+
+      await timeoutAssertion;
+      assert.equal(firstCalls, 1);
+      assert.equal(isConnStuck(firstConn), true);
+
+      await assert.rejects(
+        queryStoredProcAll(otherConn, vectorCall),
+        /circuit is open/i,
+      );
+      assert.equal(otherCalls, 0);
+
+      await queryStoredProcAll(
+        otherConn,
+        "CALL QUERY_FTS_INDEX('Symbol', 'symbol_fts', 'target') RETURN node, score",
+      );
+      assert.equal(otherCalls, 1);
+
+      releaseNative();
+      for (let attempt = 0; attempt < 20 && isConnStuck(firstConn); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      await queryStoredProcAll(otherConn, vectorCall);
+      assert.equal(otherCalls, 2);
+    } finally {
+      releaseNative();
+      for (let attempt = 0; attempt < 20 && isConnStuck(firstConn); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      _configureVectorQueryGuardForTesting();
+      if (previousWatchdog === undefined) {
+        delete process.env.SDL_STUCK_TASK_WARN_MS;
+      } else {
+        process.env.SDL_STUCK_TASK_WARN_MS = previousWatchdog;
+      }
+    }
+
+    assert.equal(isConnStuck(firstConn), false);
+  });
+
+  it("runs an exact scan on a healthy connection while the ANN circuit is open", async () => {
+    const exact = getExactVectorGuard();
+    _configureVectorQueryGuardForTesting({ deadlineMs: 20, cooldownMs: 1_000 });
+    exact.configure({ deadlineMs: 100, cooldownMs: 100 });
+
+    let releaseAnn!: () => void;
+    let markAnnStarted!: () => void;
+    const annStarted = new Promise<void>((resolve) => {
+      markAnnStarted = resolve;
+    });
+    const annGate = new Promise<void>((resolve) => {
+      releaseAnn = resolve;
+    });
+    const emptyResult = { getAll: async () => [], close: () => {} };
+    const annConn = {
+      query: async () => {
+        markAnnStarted();
+        await annGate;
+        return emptyResult;
+      },
+    } as unknown as Connection;
+    let exactCalls = 0;
+    const exactConn = {
+      prepare: async (statement: string) => statement,
+      execute: async () => {
+        exactCalls += 1;
+        return { getAll: async () => [{ symbolId: "owned" }], close: () => {} };
+      },
+    } as unknown as Connection;
+    const vectorCall =
+      "CALL QUERY_VECTOR_INDEX('Symbol', 'symbol_vec', [0.1], 1) RETURN node, distance";
+
+    try {
+      const annTimeout = assert.rejects(
+        queryStoredProcAll(annConn, vectorCall),
+        /deadline exceeded/i,
+      );
+      await annStarted;
+      await annTimeout;
+      await assert.rejects(queryStoredProcAll(exactConn, vectorCall), /circuit is open/i);
+
+      const rows = await exact.query<{ symbolId: string }>(
+        exactConn,
+        "MATCH (s:Symbol) RETURN s.symbolId AS symbolId",
+      );
+      assert.deepEqual(rows, [{ symbolId: "owned" }]);
+      assert.equal(exactCalls, 1);
+    } finally {
+      releaseAnn();
+      for (let attempt = 0; attempt < 20 && isConnStuck(annConn); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      _configureVectorQueryGuardForTesting();
+      exact.configure();
+    }
+  });
+
+  it("single-flights exact scans and quarantines a timed-out connection until native work settles", async () => {
+    const exact = getExactVectorGuard();
+    exact.configure({ deadlineMs: 20, cooldownMs: 1_000 });
+
+    let releaseNative!: () => void;
+    let markNativeStarted!: () => void;
+    const nativeStarted = new Promise<void>((resolve) => {
+      markNativeStarted = resolve;
+    });
+    const nativeGate = new Promise<void>((resolve) => {
+      releaseNative = resolve;
+    });
+    const emptyResult = { getAll: async () => [], close: () => {} };
+    let firstCalls = 0;
+    const firstConn = {
+      prepare: async (statement: string) => statement,
+      execute: async () => {
+        firstCalls += 1;
+        markNativeStarted();
+        await nativeGate;
+        return emptyResult;
+      },
+    } as unknown as Connection;
+    let otherCalls = 0;
+    const otherConn = {
+      prepare: async (statement: string) => {
+        otherCalls += 1;
+        return statement;
+      },
+      execute: async () => {
+        otherCalls += 1;
+        return emptyResult;
+      },
+    } as unknown as Connection;
+    const statement = "MATCH (e:SymbolVectorEmbedding) RETURN e.symbolId";
+
+    try {
+      const timeoutAssertion = assert.rejects(
+        exact.query(firstConn, statement),
+        /deadline exceeded/i,
+      );
+      await nativeStarted;
+
+      await assert.rejects(
+        exact.query(otherConn, statement),
+        /already in progress/i,
+      );
+      assert.equal(otherCalls, 0);
+
+      await timeoutAssertion;
+      assert.equal(firstCalls, 1);
+      assert.equal(isConnStuck(firstConn), true);
+
+      await assert.rejects(exact.query(otherConn, statement), /circuit is open/i);
+      assert.equal(otherCalls, 0);
+      assert.equal(isConnStuck(firstConn), true);
+
+      releaseNative();
+      for (let attempt = 0; attempt < 20 && isConnStuck(firstConn); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.equal(isConnStuck(firstConn), false);
+    } finally {
+      releaseNative();
+      for (let attempt = 0; attempt < 20 && isConnStuck(firstConn); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      exact.configure();
+    }
+  });
+
+  it("keeps overlapping watchdog and exact quarantine owners isolated", async () => {
+    const exact = getExactVectorGuard();
+    const previousWatchdog = process.env.SDL_STUCK_TASK_WARN_MS;
+    process.env.SDL_STUCK_TASK_WARN_MS = "50";
+    exact.configure({ deadlineMs: 10, cooldownMs: 1_000 });
+
+    let releaseOrdinary!: () => void;
+    let markOrdinaryStarted!: () => void;
+    const ordinaryStarted = new Promise<void>((resolve) => {
+      markOrdinaryStarted = resolve;
+    });
+    const ordinaryGate = new Promise<void>((resolve) => {
+      releaseOrdinary = resolve;
+    });
+    let releaseExact!: () => void;
+    let markExactStarted!: () => void;
+    let exactExecutionStarted = false;
+    let exactExecutionSettled = false;
+    const exactStarted = new Promise<void>((resolve) => {
+      markExactStarted = resolve;
+    });
+    let markExactSettled!: () => void;
+    const exactSettled = new Promise<void>((resolve) => {
+      markExactSettled = resolve;
+    });
+    const exactGate = new Promise<void>((resolve) => {
+      releaseExact = resolve;
+    });
+    const emptyResult = { getAll: async () => [], close: () => {} };
+    const conn = {
+      query: async () => {
+        markOrdinaryStarted();
+        await ordinaryGate;
+        return emptyResult;
+      },
+      prepare: async (statement: string) => statement,
+      execute: async () => {
+        exactExecutionStarted = true;
+        markExactStarted();
+        await exactGate;
+        exactExecutionSettled = true;
+        markExactSettled();
+        return emptyResult;
+      },
+    } as unknown as Connection;
+
+    try {
+      const ordinaryQuery = queryStoredProcAll(
+        conn,
+        "CALL QUERY_FTS_INDEX('Symbol', 'symbol_fts', 'target') RETURN node, score",
+      );
+      await ordinaryStarted;
+      for (let attempt = 0; attempt < 20 && !isConnStuck(conn); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.equal(isConnStuck(conn), true);
+
+      await assert.rejects(
+        exact.query(
+          conn,
+          "MATCH (e:SymbolVectorEmbedding) RETURN e.symbolId",
+        ),
+        /deadline exceeded/i,
+      );
+
+      releaseOrdinary();
+      await ordinaryQuery;
+      await exactStarted;
+      assert.equal(
+        isConnStuck(conn),
+        true,
+        "the exact owner must survive the ordinary watchdog release",
+      );
+
+      releaseExact();
+      for (let attempt = 0; attempt < 20 && isConnStuck(conn); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.equal(isConnStuck(conn), false);
+    } finally {
+      releaseOrdinary();
+      releaseExact();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (exactExecutionStarted && !exactExecutionSettled) {
+        await Promise.race([
+          exactSettled,
+          new Promise<void>((resolve) => setTimeout(resolve, 100)),
+        ]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      exact.configure();
+      if (previousWatchdog === undefined) {
+        delete process.env.SDL_STUCK_TASK_WARN_MS;
+      } else {
+        process.env.SDL_STUCK_TASK_WARN_MS = previousWatchdog;
+      }
+    }
+  });
+
+  it("rejects CHECKPOINT before an exact scan enters the native driver", async () => {
+    const exact = getExactVectorGuard();
+    exact.configure({ deadlineMs: 100, cooldownMs: 100 });
+    let nativeCalls = 0;
+    const conn = {
+      prepare: async () => {
+        nativeCalls += 1;
+        return "prepared";
+      },
+      execute: async () => {
+        nativeCalls += 1;
+        return { getAll: async () => [], close: () => {} };
+      },
+    } as unknown as Connection;
+
+    try {
+      await assert.rejects(
+        exact.query(conn, "RETURN 1; CHECKPOINT"),
+        /CHECKPOINT/i,
+      );
+      assert.equal(nativeCalls, 0);
+    } finally {
+      exact.configure();
+    }
   });
 });

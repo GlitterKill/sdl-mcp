@@ -21,6 +21,7 @@ it("executes exact entity lanes for specialized health", async (t) => {
   });
   const queries: string[] = [];
   const providerModels: string[] = [];
+  let rejectVector = false;
   const caps = {
     fts: true,
     fileSummaryFts: false,
@@ -48,6 +49,7 @@ it("executes exact entity lanes for specialized health", async (t) => {
       queryStoredProcAll: async (_conn: Connection, query: string) => {
         queries.push(query);
         if (query.includes("QUERY_VECTOR_INDEX")) {
+          if (rejectVector) throw new Error("vector deadline exceeded");
           return [{ node: { fileId: "file-summary-1" }, distance: 0.1 }];
         }
         return [{ node: { fileId: "file-summary-1" }, score: 1 }];
@@ -126,5 +128,39 @@ it("executes exact entity lanes for specialized health", async (t) => {
 
     assert.deepEqual(queries, []);
     assert.deepEqual(result.results, []);
+  });
+
+  await t.test("returns FileSummary FTS results when its vector lane fails", async () => {
+    queries.length = 0;
+    providerModels.length = 0;
+    caps.fileSummaryFts = true;
+    rejectVector = true;
+
+    try {
+      const result = await entitySearch({
+        repoId: "repo",
+        query: "find summary",
+        limit: 10,
+        entityTypes: ["fileSummary"],
+        ftsEnabled: true,
+        vectorEnabled: true,
+      });
+
+      assert.equal(
+        queries.filter((query) => query.includes("QUERY_FTS_INDEX")).length,
+        1,
+      );
+      assert.equal(
+        queries.filter((query) => query.includes("QUERY_VECTOR_INDEX")).length,
+        1,
+      );
+      assert.deepEqual(
+        result.results.map((item) => [item.entityType, item.entityId]),
+        [["fileSummary", "file-summary-1"]],
+      );
+    } finally {
+      caps.fileSummaryFts = false;
+      rejectVector = false;
+    }
   });
 });

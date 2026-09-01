@@ -24,7 +24,7 @@
  */
 
 import type { Connection } from "kuzu";
-import { queryStoredProcAll } from "../db/ladybug-core.js";
+import { isConnStuck, queryStoredProcAll } from "../db/ladybug-core.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import { IndexError } from "../domain/errors.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
@@ -104,6 +104,7 @@ interface VectorRawRow {
   _score?: number;
   distance?: number;
   _distance?: number;
+  owned?: boolean;
   [key: string]: unknown;
 }
 
@@ -509,30 +510,103 @@ function vectorRowId(row: VectorRawRow, idField = "symbolId"): string {
   return candidates.find((value): value is string => typeof value === "string") ?? "";
 }
 
-async function queryRepoSymbolVectorIndex(
+/** Query physical Symbol HNSW, filtering ownership before any caller sees rows. */
+export async function queryRepoSymbolVectorIndex(
   conn: Connection,
   repoId: string,
+  modelName: string,
   indexName: string,
   embedding: number[],
   topK: number,
+  configuredEfs: number,
 ): Promise<{ symbolId: string; score: number }[]> {
   assertIndexName(indexName);
   const k = assertPositiveInt(topK, "topK");
-  const projectionName = await ladybugDb.ensureRepoSymbolVectorProjection(conn, repoId);
-  assertTableName(projectionName);
-  const rows = await queryStoredProcAll<VectorRawRow>(
-    conn,
-    `CALL QUERY_VECTOR_INDEX('${projectionName}', '${indexName}', ${cypherNumberArray(embedding)}, ${k}) RETURN node, distance`,
-  );
-  return sortVectorRowsByDistance(rows).map((row) => ({
-    symbolId: vectorRowId(row),
-    score:
-      (row.score ?? row._score) != null
-        ? Number(row.score ?? row._score)
-        : (row.distance ?? row._distance) != null
-          ? 1 / (1 + Number(row.distance ?? row._distance))
-          : 0,
-  }));
+  if (!Number.isSafeInteger(configuredEfs) || configuredEfs <= 0) {
+    throw new Error(`efs must be a positive integer, got ${configuredEfs}`);
+  }
+
+  const exact = async (
+    reason: string,
+    annError?: Error,
+  ): Promise<{ symbolId: string; score: number }[]> => {
+    if (annError) {
+      logger.warn("[retrieval] Symbol ANN failed; using exact fallback", {
+        reason,
+        modelName,
+        indexName,
+        error: annError,
+      });
+    } else {
+      logger.debug("[retrieval] Symbol ANN shortage; using exact fallback", {
+        reason,
+        modelName,
+        indexName,
+      });
+    }
+    try {
+      const exactConn = isConnStuck(conn) ? await getLadybugConn() : conn;
+      return await ladybugDb.rankRepoSymbolVectorsExact(
+        exactConn,
+        repoId,
+        modelName,
+        embedding,
+        k,
+      );
+    } catch (exactError) {
+      if (!annError) throw exactError;
+      const normalizedExactError =
+        exactError instanceof Error ? exactError : new Error(String(exactError));
+      throw new AggregateError(
+        [annError, normalizedExactError],
+        `Symbol ANN failed: ${annError.message}; exact fallback failed: ${normalizedExactError.message}`,
+      );
+    }
+  };
+  const ann = async (
+    window: number,
+  ): Promise<{ rawCount: number; rows: { symbolId: string; score: number }[] }> => {
+    const rows = await queryStoredProcAll<VectorRawRow>(
+      conn,
+      `CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding', '${indexName}', ${cypherNumberArray(embedding)}, ${window}, efs := ${Math.max(configuredEfs, window)})
+       RETURN node.symbolId AS symbolId,
+              distance,
+              node.repoId = ${cypherSingleQuotedString(repoId)} AS owned`,
+    );
+    const seen = new Set<string>();
+    const owned: { symbolId: string; score: number }[] = [];
+    for (const row of sortVectorRowsByDistance(rows)) {
+      const symbolId = vectorRowId(row);
+      if (row.owned !== true || !symbolId || seen.has(symbolId)) continue;
+      seen.add(symbolId);
+      owned.push({ symbolId, score: 1 / (1 + vectorDistance(row)) });
+      if (owned.length === k) break;
+    }
+    return { rawCount: rows.length, rows: owned };
+  };
+
+  let first: Awaited<ReturnType<typeof ann>>;
+  try {
+    first = await ann(k);
+  } catch (err) {
+    return exact(
+      "initial-query-error",
+      err instanceof Error ? err : new Error(String(err)),
+    );
+  }
+  if (first.rows.length >= k) return first.rows;
+  if (first.rawCount < k) return exact("initial-window-short");
+  if (k === 10_000) return exact("candidate-ceiling");
+
+  try {
+    const retry = await ann(Math.min(10_000, k * 2));
+    return retry.rows.length >= k ? retry.rows : exact("retry-shortage");
+  } catch (err) {
+    return exact(
+      "retry-query-error",
+      err instanceof Error ? err : new Error(String(err)),
+    );
+  }
 }
 function timingKeySegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
@@ -626,18 +700,22 @@ function vectorSourceForModel(model: string): RetrievalSource {
 async function queryVectorIndex(
   conn: Connection,
   repoId: string,
+  modelName: string,
   indexName: string,
   embedding: number[],
   topK: number,
+  efs: number,
   onResult?: (succeeded: boolean) => void,
 ): Promise<{ symbolId: string; score: number }[]> {
   try {
     const results = await queryRepoSymbolVectorIndex(
       conn,
       repoId,
+      modelName,
       indexName,
       embedding,
       topK,
+      efs,
     );
     onResult?.(true);
     return results;
@@ -941,9 +1019,11 @@ export async function hybridSearch(
       const vecResults = await queryVectorIndex(
         conn,
         options.repoId,
+        modelName,
         indexName,
         queryEmbedding,
         vectorTopK,
+        config.vector.efs,
         (succeeded) => markLaneResult(queryContext, lane, succeeded),
       );
       recordRetrievalTiming(diagnosticTimings, "vector", vectorStartedAt);
@@ -1484,9 +1564,11 @@ async function runEntitySearch<T = never>(
             vecRows = await queryRepoSymbolVectorIndex(
               conn,
               options.repoId,
+              modelName,
               indexName,
               queryEmbedding,
               k,
+              config.vector.efs,
             );
           } else {
             const vectorTableName = entityFtsCfg.tableName;

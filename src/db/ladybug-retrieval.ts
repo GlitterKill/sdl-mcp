@@ -1,63 +1,55 @@
-import { createHash } from "node:crypto";
-
 import type { Connection } from "kuzu";
 
-import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "../retrieval/model-mapping.js";
-import { execStoredProc, queryAll } from "./ladybug-core.js";
-
-const symbolVectorProjectionPromises = new WeakMap<
-  Connection,
-  Map<string, Promise<string>>
->();
-
-function cypherSingleQuotedString(value: string): string {
-  return `'${value
-    .replace(/\\/g, "\\\\")
-    .replace(/\r/g, "\\r")
-    .replace(/\n/g, "\\n")
-    .replace(/\t/g, "\\t")
-    .replace(/'/g, "\\'")}'`;
-}
+import {
+  EMBEDDING_MODELS,
+  SYMBOL_VECTOR_EMBEDDING_TABLE,
+} from "../retrieval/model-mapping.js";
+import { queryAll, queryExactVectorAll } from "./ladybug-core.js";
 
 export interface RetrievalSeedCandidateRow {
   symbolId: string;
   score: number;
 }
 
-/** Ensure Symbol vector ANN ranking is scoped to one repository before top-K. */
-export async function ensureRepoSymbolVectorProjection(
+/** Rank one repository exactly when bounded global ANN cannot provide enough owned rows. */
+export async function rankRepoSymbolVectorsExact(
   conn: Connection,
   repoId: string,
-): Promise<string> {
-  const projectionName = `sdl_symbol_vectors_${createHash("sha256")
-    .update(repoId)
-    .digest("hex")
-    .slice(0, 16)}`;
-  let projections = symbolVectorProjectionPromises.get(conn);
-  if (!projections) {
-    projections = new Map();
-    symbolVectorProjectionPromises.set(conn, projections);
+  modelName: string,
+  embedding: number[],
+  limit: number,
+): Promise<RetrievalSeedCandidateRow[]> {
+  const model = EMBEDDING_MODELS[modelName];
+  if (!model) {
+    throw new Error(`Unknown embedding model "${modelName}"`);
   }
-  const existing = projections.get(projectionName);
-  if (existing) return existing;
+  if (embedding.length !== model.dimension) {
+    throw new Error(
+      `Embedding for "${modelName}" must contain ${model.dimension} values`,
+    );
+  }
+  if (embedding.some((value) => !Number.isFinite(value))) {
+    throw new Error("Embedding contains a non-finite value");
+  }
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 10_000) {
+    throw new Error(`limit must be an integer from 1 to 10000, got ${limit}`);
+  }
 
-  const projectionQuery =
-    `MATCH (r:Repo {repoId: ${cypherSingleQuotedString(repoId)}})<-[:FILE_IN_REPO]-(:File)` +
-    `<-[:SYMBOL_IN_FILE]-(s:Symbol), (e:${SYMBOL_VECTOR_EMBEDDING_TABLE}) ` +
-    "WHERE e.symbolId = s.symbolId WITH DISTINCT e RETURN e";
-  const creating = execStoredProc(
+  return queryExactVectorAll<RetrievalSeedCandidateRow>(
     conn,
-    `CALL PROJECT_GRAPH_CYPHER(${cypherSingleQuotedString(projectionName)}, ${cypherSingleQuotedString(projectionQuery)})`,
-  ).then(() => projectionName);
-  projections.set(projectionName, creating);
-  try {
-    return await creating;
-  } catch (err) {
-    if (projections.get(projectionName) === creating) {
-      projections.delete(projectionName);
-    }
-    throw err;
-  }
+    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE})
+     WHERE e.repoId = $repoId
+       AND e.${model.vecProperty} IS NOT NULL
+     WITH e.symbolId AS symbolId,
+          array_cosine_similarity(
+            e.${model.vecProperty},
+            CAST($embedding, 'DOUBLE[${model.dimension}]')
+          ) AS score
+     RETURN symbolId, score
+     ORDER BY score DESC, symbolId ASC
+     LIMIT $limit`,
+    { repoId, embedding, limit },
+  );
 }
 
 /** Resolve a full symbol ID without leaking Cypher into retrieval orchestration. */
