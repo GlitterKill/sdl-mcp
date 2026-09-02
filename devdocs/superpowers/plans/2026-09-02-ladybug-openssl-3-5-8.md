@@ -34,7 +34,7 @@
 - Modify: `scripts/build-ladybug-openssl-runtime.ps1`
 
 - [ ] Pin the official 3.5.8 URLs, SHA-256, signing subkey, and current primary certificate.
-- [ ] Replace the stale 0.18.1 FTS fixture with verified 0.19.0 extension metadata; the old URL mutated in place on 2026-09-01.
+- [ ] Replace the stale 0.18.1 FTS fixture with verified 0.19.0 extension metadata; versioned extension URLs are mutable, so fetch through a deterministic `sha256` query parameter keyed by the pinned artifact hash.
 - [ ] Set the package/workflow version to `3.5.8-sdl.1`.
 - [ ] Verify both committed certificate fingerprints before accepting the detached signature.
 - [ ] Run the focused contract test and confirm GREEN.

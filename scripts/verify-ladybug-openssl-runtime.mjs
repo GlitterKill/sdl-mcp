@@ -322,7 +322,9 @@ function packageVersion(name) {
 }
 
 async function downloadFts(tempRoot) {
-  const response = await fetch(fts.artifactUrl);
+  const artifactUrl = new URL(fts.artifactUrl);
+  artifactUrl.searchParams.set("sha256", fts.artifactSha256);
+  const response = await fetch(artifactUrl);
   assert.ok(response.ok, "failed to download FTS extension: " + response.status + " " + response.statusText);
   const body = Buffer.from(await response.arrayBuffer());
   assert.equal(sha256Buffer(body), fts.artifactSha256, "FTS artifact hash mismatch");

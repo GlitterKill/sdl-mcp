@@ -86,8 +86,8 @@ it("defines the pinned OpenSSL and Ladybug FTS source artifacts", () => {
     artifactUrl:
       "https://extension.ladybugdb.com/v0.19.0/win_amd64/fts/libfts.lbug_extension",
     artifactSha256:
-      "7f82059c8149bb7851420a9bfd0c46859e92efaeda0bcd5c65418d8f174edac4",
-    artifactSize: 14779904,
+      "27adf2ca87ec5a5871a91c3864a3353a7d4aa5808f5729f34a6c21cbb500eaf0",
+    artifactSize: 14809088,
     installedPath: ".lbdb/extension/0.19.0/win_amd64/fts/libfts.lbug_extension",
     requiredImports: ["libcrypto-3-x64.dll", "libssl-3-x64.dll"],
   });
@@ -181,6 +181,11 @@ it("publishes the package version pinned by the source contract", () => {
     /assert\.equal\(packageVersion\("kuzu"\), "0\.19\.0", "clean-env proof requires kuzu@npm:@ladybugdb\/core@0\.19\.0"\);/u,
   );
   assert.doesNotMatch(verifier, /@ladybugdb\/core@0\.18\.1/u);
+  assert.match(
+    verifier,
+    /const artifactUrl = new URL\(fts\.artifactUrl\);\s+artifactUrl\.searchParams\.set\("sha256", fts\.artifactSha256\);\s+const response = await fetch\(artifactUrl\);/u,
+  );
+  assert.doesNotMatch(verifier, /fetch\(fts\.artifactUrl\)/u);
 });
 
 it("stages only the reviewed runtime files", generatedArtifactTestOptions, () => {
