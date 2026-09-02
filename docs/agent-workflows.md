@@ -77,7 +77,7 @@ SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts mo
 | **Risk**                   | `sdl.pr.risk.analyze`      | Analyze PR risk, blast radius, and recommend test targets                                                                                                            |
 | **Agent**                  | `sdl.agent.feedback`       | Record which symbols were useful/missing after a task; supports `taskTags`                                                                                           |
 |                            | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics                                                                                                                     |
-| **File**                   | `sdl.file.read`            | Read non-indexed files with line range, search, or JSON path extraction                                                                                              |
+| **File**                   | `sdl.file.read`            | Read non-indexed files, or targeted, bounded indexed source when structured retrieval is unavailable                                                               |
 |                            | `sdl.file.write`           | Write one indexed or non-indexed file with targeted modes; indexed writes reconcile the live graph                                                                 |
 | **Runtime**                | `sdl.runtime.execute`      | Sandboxed subprocess execution with `outputMode` (`minimal`, `digest`, `summary`, `intent`); use digest for noisy build/test/lint/typecheck commands                  |
 |                            | `sdl.runtime.queryOutput`  | On-demand keyword search of stored runtime output artifacts by `artifactHandle`                                                                                      |
@@ -255,7 +255,7 @@ workflow step has `status: "error"` and the same typed error. The top-level MCP
 response sets `isError: true`; `onError: "continue"`, `"continueAll"`, and
 `"stop"` still control later steps as documented below.
 
-When Code Mode is unavailable, read non-indexed files with `sdl.file.read`.
+When Code Mode is unavailable, read non-indexed files with `sdl.file.read`. When structured retrieval is unavailable for indexed source, use a targeted, bounded `sdl.file.read` fallback.
 For indexed source, use the flat ladder: `sdl.repo.overview`,
 `sdl.symbol.search` / `sdl.symbol.getCard`, `sdl.slice.build`, then
 `sdl.code.getSkeleton`, `sdl.code.getHotPath`, or a justified
@@ -372,7 +372,7 @@ When memory is disabled, memory tools return a clear error and no memory surfaci
 
 ### 11) Do not
 
-- Do not use `file.read` or raw native reads for indexed source. Use `sdl.context`, `symbol.search`/`symbol.getCard`, `slice.build`, skeletons, hot paths, or gated windows.
+- Do not use broad `file.read` or raw native reads for indexed source. Use `sdl.context`, `symbol.search`/`symbol.getCard`, `slice.build`, skeletons, hot paths, or gated windows first; use targeted, bounded `file.read` only when structured retrieval is unavailable.
 - Do not call `sdl.code.needWindow` before trying `sdl.code.getSkeleton`/`sdl.code.getHotPath`.
 - Do not use broad `sdl.symbol.search` limits by default.
 - Do not rebuild slices repeatedly when `sdl.slice.refresh` can provide incremental deltas.

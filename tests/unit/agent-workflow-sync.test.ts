@@ -148,6 +148,45 @@ ${result.stderr}`);
     }
   });
 
+  it("documents bounded raw fallback when structured retrieval is unavailable", () => {
+    const workflowSurfaces = [
+      "templates/SDL.md",
+      "SDL.md",
+      "tests/stress/fixtures/SDL.md",
+      "templates/sdl-mcp-agent-workflow/SKILL.md",
+      "templates/AGENTS.md.template",
+      "templates/CLAUDE.md.template",
+      "templates/CODEX.md.template",
+      "templates/GEMINI.md.template",
+      "templates/OPENCODE.md.template",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "CODEX.md",
+      "GEMINI.md",
+      "OPENCODE.md",
+      "docs/agent-workflows.md",
+      "src/code-mode/descriptions.ts",
+      "src/mcp/server-instructions.ts",
+      "src/cli/commands/init.ts",
+      ".codex/agents/explore-sdl.toml",
+      ".claude/agents/explore-sdl.md",
+    ];
+
+    for (const relativePath of workflowSurfaces) {
+      const content = readFileSync(resolve(repoRoot, relativePath), "utf8");
+      assert.match(
+        content,
+        /structured retrieval is unavailable/i,
+        relativePath,
+      );
+      assert.match(
+        content,
+        /(?:targeted, bounded|bounded, targeted)[\s\S]{0,160}(?:sdl\.file|file\.read)/i,
+        relativePath,
+      );
+    }
+  });
+
   it("keeps runtime repository inspection guidance broad and actionable", () => {
     const workflowSurfaces = [
       "templates/SDL.md",

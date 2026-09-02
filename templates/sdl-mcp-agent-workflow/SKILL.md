@@ -16,7 +16,7 @@ the whole MCP response envelope to the agent.
    Its request is flat and requires `budget.maxTokens`; never send `options`,
    `contextMode`, or `answerFirst`.
 3. Use `sdl.retrieve` for one card, slice, skeleton, hot path, or justified code
-   window. Never use `file.read` for indexed source.
+   window. When structured retrieval is unavailable, use a targeted, bounded `sdl.file { op: "read" }` fallback.
 4. Use `sdl.workflow` for runtime execution, transforms, dependent calls, and
    batch mutations. Persist command output and query only needed failure lines.
    runtimeExecute executes repository tooling. Permitted uses include build,
@@ -25,7 +25,7 @@ the whole MCP response envelope to the agent.
    for indexed source and sdl.file with op="read" for other files. Do not guess
    `runtimeQueryOutput` arguments; replay a returned action unchanged or call
    focused `sdl.manual` for `runtime.queryOutput` first.
-5. Read non-indexed files through `sdl.file`. Its targeted write operation can
+5. Read non-indexed files through `sdl.file`; use the same targeted, bounded read only when structured retrieval is unavailable for indexed source. Its targeted write operation can
    update one indexed file with live reconciliation; prefer symbol or
    search-edit preview/apply operations when they can anchor the change.
 6. Keep `responseMode: "auto"` for potentially large results. When a result

@@ -162,7 +162,7 @@ npm run golden:update         # Regenerate golden snapshots
 | `sdl.buffer.push/checkpoint/status` | `src/mcp/tools/buffer.ts` | Live draft indexing |
 |  | `src/mcp/tools/summary.ts` | Context summaries |
 | `sdl.pr.risk.analyze` | `src/mcp/tools/prRisk.ts` | PR risk analysis |
-| `sdl.file.read` | `src/mcp/tools/file-read.ts` | Non-indexed file reader |
+| `sdl.file.read` | `src/mcp/tools/file-read.ts` | Non-indexed reader; targeted, bounded `sdl.file`/`file.read` fallback for indexed files when structured retrieval is unavailable |
 | `sdl.file.write` | `src/mcp/tools/file-write.ts` (+ `file-write-internals.ts`) | Single-file write (indexed or non-indexed); helpers shared with `search.edit` |
 | `sdl.search.edit` | `src/mcp/tools/search-edit/` | Cross-file search/edit (preview + apply, sha256 preconditions, rollback) |
 

@@ -46,7 +46,7 @@ Follow the same workflow as the user-global Codex skill at `C:\\Users\\glitt\\.c
 
 11. **Use native tools only as fallback or for non-repository internal data.** Avoid native `Grep`/`Glob` for repo-local source discovery when SDL-MCP can answer with `sdl.context`, `symbolSearch`, `slice.build`, or `sdl.action.search`.
 
-12. **For non-indexed files** (`.md`, `.json`, `.yaml`, `.toml`, `.xml`, `.sql`, `.css`, `.html`, `.txt`, config files, lock files), use `file.read` or `sdl.file` `op: "read"`. Prefer targeted modes over full reads:
+12. **For raw file reads**, use `file.read` or `sdl.file` `op: "read"` for non-indexed files. When structured retrieval is unavailable for indexed source, use targeted, bounded `file.read` or `sdl.file`. Prefer targeted modes over full reads:
    - **Line range**: `{ "fn": "fileRead", "args": { "filePath": "docs/guide.md", "offset": 10, "limit": 20 } }`
    - **Search**: `{ "fn": "fileRead", "args": { "filePath": "docs/guide.md", "search": "authentication", "searchContext": 3 } }`
    - **JSON path**: `{ "fn": "fileRead", "args": { "filePath": "package.json", "jsonPath": "dependencies" } }`

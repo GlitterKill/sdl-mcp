@@ -38,8 +38,9 @@ export const ACTION_SEARCH_DESCRIPTION =
   "sdl.workflow.";
 
 export const FILE_GATEWAY_DESCRIPTION =
-  'Unified file I/O gateway. op:"read" reads non-indexed files (configs, docs, ' +
-  'templates). op:"write" writes a single file with targeted modes (line replace, ' +
+  'Unified sdl.file gateway. op:"read" reads non-indexed files and ' +
+  'targeted, bounded indexed source through sdl.file when structured retrieval is unavailable. op:"write" ' +
+  'writes a single file with targeted modes (line replace, ' +
   'pattern replace, JSON path, insert, append). op:"searchEditPreview" returns a ' +
   "planHandle summarizing proposed cross-file edits and accepts identifier, " +
   'structural, or operations[] targeting for safer batches; op:"searchEditApply" executes ' +

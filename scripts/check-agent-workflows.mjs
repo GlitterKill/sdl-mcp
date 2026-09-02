@@ -42,7 +42,7 @@ const initRuntimeGuidanceSections = [
 const syncSurfaces = [
   {
     path: "templates/SDL.md",
-    required: ["slice.build", "file.read` for indexed source", "symbol.edit", "symbolEditPreview", "search.edit", "previewWindow", "explicit user approval in the current turn"],
+    required: ["slice.build", "structured retrieval is unavailable", "symbol.edit", "symbolEditPreview", "search.edit", "previewWindow", "explicit user approval in the current turn"],
   },
   {
     path: "templates/sdl-mcp-agent-workflow/SKILL.md",
@@ -86,11 +86,11 @@ const syncSurfaces = [
   },
   {
     path: "src/mcp/server-instructions.ts",
-    required: ["sdl-mcp-agent-workflow", "repo.status", "sdl.context", "sliceBuild", "file.read` only for non-indexed files", "symbol.edit", "response.get", "usageStats", "explicit user approval in the current turn"],
+    required: ["sdl-mcp-agent-workflow", "repo.status", "sdl.context", "sliceBuild", "structured retrieval is unavailable", "symbol.edit", "response.get", "usageStats", "explicit user approval in the current turn"],
   },
   {
     path: "src/cli/commands/init.ts",
-    required: ["buildClaudeExploreAgent", "buildCodexSessionStartHook", "sdl-mcp-agent-workflow", "sdl.context", "slice.build", "Never use \\`file.read\\` for indexed source", "symbol.edit", "runtimeExecute", "usageStats", "explicit user approval in the current turn"],
+    required: ["buildClaudeExploreAgent", "buildCodexSessionStartHook", "sdl-mcp-agent-workflow", "sdl.context", "slice.build", "structured retrieval is unavailable", "symbol.edit", "runtimeExecute", "usageStats", "explicit user approval in the current turn"],
   },
   {
     path: ".codex/agents/explore-sdl.toml",

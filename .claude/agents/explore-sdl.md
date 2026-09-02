@@ -58,7 +58,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 
 11. **Use native tools only as fallback or for non-repository internal data.** Avoid native `Grep`/`Glob` for repo-local source discovery when SDL-MCP can answer with `sdl.context`, `symbolSearch`, `slice.build`, or `sdl.action.search`.
 
-12. **For non-indexed files** (`.md`, `.json`, `.yaml`, `.toml`, `.xml`, `.sql`, `.css`, `.html`, `.txt`, config files, lock files), use `file.read` inside `sdl.workflow`. Prefer targeted modes over full reads:
+12. **For non-indexed files and bounded fallbacks**, use `file.read` inside `sdl.workflow` for non-indexed files. When structured retrieval is unavailable for indexed source, use targeted, bounded `file.read` or `sdl.file`. Prefer targeted modes over full reads:
    - **Line range**: `{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "offset": 10, "limit": 20 } }`
    - **Search**: `{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "search": "authentication", "searchContext": 3 } }`
    - **JSON path**: `{ "fn": "file.read", "args": { "filePath": "package.json", "jsonPath": "dependencies" } }`
