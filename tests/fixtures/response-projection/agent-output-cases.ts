@@ -551,16 +551,21 @@ export const AGENT_OUTPUT_CASES = [
   }),
   compactCase({
     action: "file.read",
-    publicRequest: { repoId: REPO_ID, filePath: "README.md" },
+    publicRequest: {
+      repoId: REPO_ID,
+      filePath: "src/unparseable.mjs",
+      maxTokens: 100,
+    },
     canonicalResultFactory: () => ({
-      filePath: "README.md",
-      content: "# Fixture\n",
-      bytes: 10,
+      filePath: "src/unparseable.mjs",
+      content: "export default function () {\n",
+      bytes: 29,
       totalLines: 1,
       returnedLines: 1,
+      retrievalFallback: "indexed-unparseable",
     }),
-    expectedCompactKeys: ["filePath", "content"],
-    requiredActionabilityKeys: ["filePath", "content"],
+    expectedCompactKeys: ["filePath", "content", "retrievalFallback"],
+    requiredActionabilityKeys: ["filePath", "content", "retrievalFallback"],
     executionMode: "read-only",
   }),
   compactCase({

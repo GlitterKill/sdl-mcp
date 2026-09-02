@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +10,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { FileReadResponseSchema } from "../../dist/mcp/tools.js";
 import { handleFileGateway } from "../../dist/mcp/tools/file-gateway.js";
 import { handleFileRead } from "../../dist/mcp/tools/file-read.js";
 import { handleResponseGet } from "../../dist/mcp/tools/response.js";
@@ -120,6 +121,35 @@ describe("sdl.file.read token usage metadata", () => {
     assert.match(String(response.content), /export default/);
   });
 
+  it("keeps bounded fallback parity across file.read and sdl.file", async () => {
+    const request = {
+      repoId,
+      filePath: "src/unparseable.mjs",
+      maxTokens: 100,
+    };
+    const direct = await handleFileRead(request) as Record<string, unknown>;
+    const gateway = await handleFileGateway({
+      op: "read",
+      ...request,
+    }) as Record<string, unknown>;
+
+    assert.equal(gateway.content, direct.content);
+    assert.equal(gateway.retrievalFallback, direct.retrievalFallback);
+  });
+
+  it("returns deterministic indexed fallback metadata", async () => {
+    const request = {
+      repoId,
+      filePath: "src/unparseable.mjs",
+      maxTokens: 100,
+    };
+
+    assert.deepEqual(
+      await handleFileRead(request),
+      await handleFileRead(request),
+    );
+  });
+
   it("rejects an unbounded indexed source fallback", async () => {
     await assert.rejects(
       () => handleFileRead({
@@ -136,6 +166,115 @@ describe("sdl.file.read token usage metadata", () => {
         op: "read",
         repoId,
         filePath: "src/parseable.ts",
+        maxTokens: 100,
+      }),
+      /Use sdl\.context.*sdl\.retrieve/i,
+    );
+  });
+
+  it("does not accept caller-controlled parser availability", async () => {
+    await assert.rejects(
+      () => handleFileRead({
+        repoId,
+        filePath: "src/parseable.ts",
+        maxTokens: 100,
+        unparseable: true,
+      }),
+      /Use sdl\.context.*sdl\.retrieve|unrecognized/i,
+    );
+  });
+
+  it("denies mixed-case aliases of parseable indexed source on Windows", {
+    skip: process.platform !== "win32",
+  }, async () => {
+    await assert.rejects(
+      () => handleFileRead({
+        repoId,
+        filePath: "SRC/PARSEABLE.TS",
+        maxTokens: 100,
+      }),
+      /Use sdl\.context.*sdl\.retrieve/i,
+    );
+  });
+
+
+  it("fails closed for ambiguous case-insensitive indexed paths on Windows", {
+    skip: process.platform !== "win32",
+  }, async () => {
+    const content = "export const ambiguous = true;\n";
+    writeFileSync(join(testDir, "src", "ambiguous.ts"), content, "utf-8");
+
+    const conn = await getLadybugConn();
+    const now = new Date().toISOString();
+    await ladybugDb.upsertFile(conn, {
+      fileId: "ambiguous-upper-file",
+      repoId,
+      relPath: "SRC/AMBIGUOUS.TS",
+      contentHash: "ambiguous-upper",
+      language: "typescript",
+      byteSize: Buffer.byteLength(content, "utf-8"),
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId: "ambiguous-title-file",
+      repoId,
+      relPath: "Src/Ambiguous.ts",
+      contentHash: "ambiguous-title",
+      language: "typescript",
+      byteSize: Buffer.byteLength(content, "utf-8"),
+      lastIndexedAt: now,
+    });
+
+    await assert.rejects(
+      () => handleFileRead({
+        repoId,
+        filePath: "src/ambiguous.ts",
+        maxTokens: 100,
+      }),
+      /Ambiguous indexed file path/i,
+    );
+
+    await ladybugDb.upsertFile(conn, {
+      fileId: "ambiguous-exact-file",
+      repoId,
+      relPath: "src/ambiguous.ts",
+      contentHash: "ambiguous-exact",
+      language: "typescript",
+      byteSize: Buffer.byteLength(content, "utf-8"),
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertFileParserStatesInTransaction(conn, [{
+      stateId: JSON.stringify([repoId, "ambiguous-exact-file"]),
+      repoId,
+      fileId: "ambiguous-exact-file",
+      engine: "typescript",
+      engineContract: "typescript:1",
+      adapterKey: "builtin:typescript:typescript:1",
+      language: "typescript",
+    }]);
+
+    await assert.rejects(
+      () => handleFileRead({
+        repoId,
+        filePath: "src/ambiguous.ts",
+        maxTokens: 100,
+      }),
+      /Indexed source has structured retrieval/i,
+    );
+  });
+
+  it("denies symlink aliases of parseable indexed source", async () => {
+    const sourceAlias = join(testDir, "source-alias");
+    symlinkSync(
+      join(testDir, "src"),
+      sourceAlias,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    await assert.rejects(
+      () => handleFileRead({
+        repoId,
+        filePath: "source-alias/parseable.ts",
         maxTokens: 100,
       }),
       /Use sdl\.context.*sdl\.retrieve/i,
@@ -392,6 +531,30 @@ describe("sdl.file.read token usage metadata", () => {
     assert.match(
       String((response.preview as Record<string, unknown>).content),
       /gateway-preview/,
+    );
+  });
+
+  it("keeps fallback metadata on handle-mode gateway responses", async () => {
+    const response = await handleFileGateway({
+      op: "read",
+      repoId,
+      filePath: "src/unparseable.mjs",
+      maxTokens: 100,
+      responseMode: "handle",
+    }) as Record<string, unknown>;
+
+    assert.equal(response.responseMode, "handle");
+    assert.equal(response.retrievalFallback, "indexed-unparseable");
+    assert.doesNotThrow(() => FileReadResponseSchema.parse(response));
+
+    const full = await handleResponseGet({
+      repoId,
+      handle: response.handle,
+      full: true,
+    }) as Record<string, unknown>;
+    assert.equal(
+      (full.content as Record<string, unknown>).retrievalFallback,
+      "indexed-unparseable",
     );
   });
 

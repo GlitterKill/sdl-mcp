@@ -160,10 +160,6 @@ ${result.stderr}`);
       "templates/GEMINI.md.template",
       "templates/OPENCODE.md.template",
       "AGENTS.md",
-      "CLAUDE.md",
-      "CODEX.md",
-      "GEMINI.md",
-      "OPENCODE.md",
       "docs/agent-workflows.md",
       "src/code-mode/descriptions.ts",
       "src/mcp/server-instructions.ts",
@@ -182,6 +178,24 @@ ${result.stderr}`);
       assert.match(
         content,
         /(?:targeted, bounded|bounded, targeted)[\s\S]{0,160}(?:sdl\.file|file\.read)/i,
+        relativePath,
+      );
+    }
+  });
+
+  it("removes stale non-indexed-only raw-read guidance", () => {
+    const generatedWorkflowSurfaces = [
+      "src/cli/commands/init.ts",
+      "src/cli/commands/tool-actions.ts",
+      ".codex/agents/explore-sdl.toml",
+      ".claude/agents/explore-sdl.md",
+    ];
+
+    for (const relativePath of generatedWorkflowSurfaces) {
+      const content = readFileSync(resolve(repoRoot, relativePath), "utf8");
+      assert.doesNotMatch(
+        content,
+        /(?:\\?`fileRead\\?`\s+for non-indexed files with|\\?`file\.read\\?`\s+only for non-indexed files|file\.read inside sdl\.workflow for reading non-indexed files with|Read non-indexed file content|non-indexed file(?: types)? only)/i,
         relativePath,
       );
     }

@@ -1,4 +1,4 @@
-import { resolve } from "path";
+import { relative, resolve } from "path";
 import { open, readFile, stat } from "fs/promises";
 import { existsSync, realpathSync } from "fs";
 
@@ -316,9 +316,12 @@ async function getSourceReadDisposition(
   repoId: string,
   filePath: string,
 ): Promise<SourceReadDisposition> {
-  const file = (
-    await ladybugDb.getFilesByPrefix(conn, repoId, filePath, 2)
-  ).find((candidate) => normalizePath(candidate.relPath) === filePath);
+  const file = await ladybugDb.getFileByRepoPath(
+    conn,
+    repoId,
+    filePath,
+    process.platform === "win32",
+  );
   if (!file) return "non-indexed";
 
   return await ladybugDb.getFileParserState(conn, repoId, file.fileId)
@@ -438,6 +441,17 @@ async function finalizeFileReadResponse(
     };
   }
 
+  if (
+    responseWithHint.retrievalFallback &&
+    "responseMode" in delivered &&
+    delivered.responseMode === "handle"
+  ) {
+    return {
+      ...delivered,
+      retrievalFallback: responseWithHint.retrievalFallback,
+    };
+  }
+
   return delivered;
 }
 
@@ -471,14 +485,16 @@ export async function handleFileRead(
     throw new NotFoundError(`File not found: ${filePath}`);
   }
 
-  const dotIndex = filePath.lastIndexOf(".");
-  const ext = dotIndex >= 0 ? filePath.slice(dotIndex).toLowerCase() : "";
+  const indexedFilePath = normalizePath(relative(rootPath, openPath));
+  const dotIndex = indexedFilePath.lastIndexOf(".");
+  const ext =
+    dotIndex >= 0 ? indexedFilePath.slice(dotIndex).toLowerCase() : "";
   let retrievalFallback: "indexed-unparseable" | undefined;
   if (SDL_SOURCE_EXTENSIONS.has(ext)) {
     const disposition = await getSourceReadDisposition(
       conn,
       request.repoId,
-      filePath,
+      indexedFilePath,
     );
     if (disposition === "structured") {
       throw new ValidationError(

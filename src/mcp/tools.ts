@@ -3946,6 +3946,7 @@ export const FileReadArtifactResponseSchema =
       truncated: true,
       truncatedAt: true,
     }).optional(),
+    retrievalFallback: z.literal("indexed-unparseable").optional(),
   });
 
 export const FileReadResponseSchema = z.union([

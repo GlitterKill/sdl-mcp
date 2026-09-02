@@ -1028,7 +1028,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 3. Use \`sdl.action.search\` or focused \`sdl.manual\` if the next SDL tool is unclear
 4. Use \`sdl.workflow\` to batch \`symbolSearch\`, \`symbolGetCard\`, \`sliceBuild\`, \`codeSkeleton\`, and \`codeHotPath\` when context needs follow-up
 5. Use \`codeNeedWindow\` only as a last resort with clear justification
-6. Use \`fileRead\` for non-indexed files with \`search\`, \`jsonPath\`, or bounded ranges
+6. Use \`fileRead\` for non-indexed files and as a targeted, bounded fallback when structured retrieval is unavailable; use \`search\`, \`jsonPath\`, or bounded ranges
 7. Use \`runtimeExecute\` plus \`runtimeQueryOutput\` for repo-local commands and targeted output retrieval
 8. Use \`symbol.edit\` for one-symbol edits, \`searchEditPreview\` with \`targeting:"identifier"\`, \`targeting:"structural"\`, or \`operations[]\` for safer cross-file edits, and Node scripts only as a last resort
 9. Use \`usageStats\` only for requested savings reports, telemetry debugging, or persisted usage snapshots; compact output returns \`formattedSummary\` and \`detail: "full"\` returns structured diagnostics
@@ -1084,7 +1084,7 @@ Provide flat focusSymbols and/or focusPaths as seed priorities. Always set budge
 
 ## Non-Indexed File Access
 
-- Use file.read inside sdl.workflow for reading non-indexed files with targeted modes (search, jsonPath, offset/limit).
+- Use file.read inside sdl.workflow for non-indexed files and as a targeted, bounded fallback when structured retrieval is unavailable; use search, jsonPath, or bounded offset/limit.
 - Use file.write or sdl.file op:"write" for targeted single-file writes; indexed writes reconcile the live graph.
 - Prefer search or jsonPath over full reads.
 `;

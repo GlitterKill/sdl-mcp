@@ -76,6 +76,6 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 3. Use `sdl.action.search` or focused `sdl.manual` if the next SDL tool is unclear
 4. Use `sdl.workflow` to batch `symbolSearch`, `symbolGetCard`, `sliceBuild`, `codeSkeleton`, and `codeHotPath` when context needs follow-up
 5. Use `codeNeedWindow` only as a last resort with clear justification
-6. Use `fileRead` for non-indexed files with `search`, `jsonPath`, or bounded ranges
+6. Use `fileRead` for non-indexed files and as a targeted, bounded fallback when structured retrieval is unavailable; use `search`, `jsonPath`, or bounded ranges
 7. Use `runtimeExecute` plus `runtimeQueryOutput` for repo-local commands and targeted output retrieval
 8. Use `usageStats` only for requested savings reports, telemetry debugging, or persisted usage snapshots

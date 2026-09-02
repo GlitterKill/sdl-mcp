@@ -1421,7 +1421,7 @@ const usageStats: CliActionDefinition = {
 const fileRead: CliActionDefinition = {
   action: "file.read",
   namespace: "repo",
-  description: "Read non-indexed file content from a registered repository",
+  description: "Read non-indexed files or bounded indexed files when structured retrieval is unavailable",
   args: [
     { ...REPO_ID_ARG },
     {
@@ -1429,7 +1429,7 @@ const fileRead: CliActionDefinition = {
       field: "filePath",
       type: "string",
       description:
-        "File path relative to repo root (non-indexed file types only)",
+        "Path relative to repo root; indexed files require the bounded fallback",
       required: true,
     },
     {

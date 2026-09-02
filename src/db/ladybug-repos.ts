@@ -3,6 +3,8 @@
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
+
+import { DatabaseError } from "../domain/errors.js";
 import {
   exec,
   queryAll,
@@ -560,11 +562,16 @@ export async function getFileByRepoPath(
   conn: Connection,
   repoId: string,
   relPath: string,
+  caseInsensitive = false,
 ): Promise<FileRow | null> {
   const normalizedRelPath = normalizePath(relPath);
-  const row = await querySingle<Omit<FileRow, "repoId">>(
+  const pathPredicate = caseInsensitive
+    ? "lower(f.relPath) = lower($relPath)"
+    : "f.relPath = $relPath";
+  const rows = await queryAll<Omit<FileRow, "repoId">>(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File {relPath: $relPath})
+    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
+     WHERE ${pathPredicate}
      RETURN f.fileId AS fileId,
             f.relPath AS relPath,
             f.contentHash AS contentHash,
@@ -575,7 +582,22 @@ export async function getFileByRepoPath(
     { repoId, relPath: normalizedRelPath },
   );
 
-  if (!row) return null;
+  if (rows.length === 0) return null;
+
+  // Prefer canonical casing; only a unique folded alias is safe.
+  const exactRows = rows.filter(
+    (row) => normalizePath(row.relPath) === normalizedRelPath,
+  );
+  const row = exactRows.length === 1
+    ? exactRows[0]
+    : exactRows.length === 0 && rows.length === 1
+      ? rows[0]
+      : null;
+  if (!row) {
+    throw new DatabaseError(
+      `Ambiguous indexed file path: ${normalizedRelPath}`,
+    );
+  }
 
   return {
     ...row,
