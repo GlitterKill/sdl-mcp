@@ -22,7 +22,7 @@ function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function createRuntimePackage(version = "3.5.7-sdl.2"): {
+function createRuntimePackage(version = "3.5.8-sdl.1"): {
   root: string;
   cleanup: () => void;
   options: Pick<WindowsFtsRuntimeOptions, "requireResolve">;
@@ -208,13 +208,13 @@ describe("withWindowsFtsRuntime", () => {
     assert.equal(isWindowsFtsRuntimeUnavailable(result) ? result.reason : undefined, "missing-package");
     assert.match(
       isWindowsFtsRuntimeUnavailable(result) ? result.recovery : "",
-      /@sdl-mcp\/ladybug-openssl-win32-x64@3\.5\.7-sdl\.2/u,
+      /@sdl-mcp\/ladybug-openssl-win32-x64@3\.5\.8-sdl\.1/u,
     );
     assert.doesNotMatch(isWindowsFtsRuntimeUnavailable(result) ? result.recovery : "", /[A-Z]:\\|\\Users\\|\/tmp\//u);
   });
 
-  it("rejects the retired 3.5.7-sdl.1 runtime package", async () => {
-    const fixture = createRuntimePackage("3.5.7-sdl.1");
+  it("rejects the retired 3.5.7-sdl.2 runtime package", async () => {
+    const fixture = createRuntimePackage("3.5.7-sdl.2");
     try {
       const result = await withWindowsFtsRuntime(
         async () => "loaded",

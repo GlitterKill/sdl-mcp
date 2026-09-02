@@ -8,6 +8,8 @@
 
 **Tech Stack:** PowerShell, OpenSSL 3.5.8, GnuPG, Node.js 24, node:test, npm provenance, GitHub Actions.
 
+**Status:** The runtime package is published and its registry tarball and provenance are verified. Phase 2 pins it while SDL remains at 0.13.6; the SDL version bump, tag, main push, GitHub Release, and `sdl-mcp` publication are deliberately deferred by user instruction.
+
 ---
 
 ## Chunk 1: Runtime package

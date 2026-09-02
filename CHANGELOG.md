@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows LadybugDB FTS security runtime**: Upgrade the exact Windows x64 OpenSSL runtime pin to `@sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1` and retire `3.5.7-sdl.2` ([#51](https://github.com/GlitterKill/sdl-mcp/issues/51)).
+
 ## [0.13.6] - 2026-08-30
 
 ### Changed

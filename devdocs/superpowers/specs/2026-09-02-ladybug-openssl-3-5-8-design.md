@@ -2,7 +2,7 @@
 
 ## Goal
 
-Replace the published Windows x64 Ladybug FTS runtime based on OpenSSL 3.5.7 with a signed, provenance-attested `3.5.8-sdl.1` package, then pin that exact package in SDL-MCP 0.13.7.
+Replace the published Windows x64 Ladybug FTS runtime based on OpenSSL 3.5.7 with a signed, provenance-attested `3.5.8-sdl.1` package, then pin that exact package in SDL-MCP.
 
 ## Security assessment
 
@@ -15,9 +15,13 @@ Reuse `.github/workflows/publish-ladybug-openssl.yml` and `scripts/build-ladybug
 ## Two publication phases
 
 1. Commit and push the runtime source/signing/test changes. Run the workflow in dry-run mode, inspect its evidence, then publish `@sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1` from the same immutable commit.
-2. After the registry package and provenance are verified, update SDL's exact optional dependency, loader constant, compatibility workflow, lockfile, changelog, and package versions. Run the release gates and publish SDL-MCP 0.13.7.
+2. After the registry package and provenance are verified, update SDL's exact optional dependency, loader constant, compatibility workflow, lockfile, and changelog. Defer the package-version bump and SDL release until separately authorized.
 
 The split avoids generating a lockfile against an unpublished package and preserves an auditable build identity for both publications.
+
+## Current status
+
+The runtime package is published, and its registry tarball and provenance are verified. This change pins it while SDL remains at 0.13.6; the SDL version bump, tag, main push, GitHub Release, and `sdl-mcp` publication are deliberately deferred by user instruction.
 
 ## Failure handling
 
