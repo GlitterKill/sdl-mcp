@@ -444,7 +444,7 @@ function runCleanLadybugChild() {
   if (process.platform !== "win32") {
     throw new Error("clean-environment Ladybug FTS verification must run on Windows");
   }
-  assert.equal(packageVersion("kuzu"), "0.18.1", "clean-env proof requires kuzu@npm:@ladybugdb/core@0.18.1");
+  assert.equal(packageVersion("kuzu"), "0.19.0", "clean-env proof requires kuzu@npm:@ladybugdb/core@0.19.0");
 
   const tempHome = mkdtempSync(join(tmpdir(), "sdl-ladybug-clean-home-"));
   const systemRoot = process.env.SystemRoot ?? "C:\\Windows";

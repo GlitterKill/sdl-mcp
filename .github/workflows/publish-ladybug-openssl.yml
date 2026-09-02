@@ -66,10 +66,10 @@ jobs:
       - name: Install committed dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
-      - name: Install disposable Ladybug 0.18.1 probe
+      - name: Install disposable Ladybug 0.19.0 probe
         run: >-
           npm install --no-save --no-package-lock --ignore-scripts --legacy-peer-deps
-          kuzu@npm:@ladybugdb/core@0.18.1
+          kuzu@npm:@ladybugdb/core@0.19.0
 
       - name: Setup LadybugDB native binary
         shell: pwsh

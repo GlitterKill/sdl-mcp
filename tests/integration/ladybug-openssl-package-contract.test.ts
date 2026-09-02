@@ -169,6 +169,18 @@ it("publishes the package version pinned by the source contract", () => {
   assert.equal(packageVersion, source.packageVersion);
   assert.match(workflow, /ladybug-openssl\/ladybug-fts-0\.19\.0\.json/u);
   assert.doesNotMatch(workflow, /ladybug-fts-0\.18\.1\.json/u);
+  assert.match(workflow, /kuzu@npm:@ladybugdb\/core@0\.19\.0/u);
+  assert.doesNotMatch(workflow, /kuzu@npm:@ladybugdb\/core@0\.18\.1/u);
+
+  const verifier = readFileSync(
+    join(repoRoot, "scripts", "verify-ladybug-openssl-runtime.mjs"),
+    "utf8",
+  );
+  assert.match(
+    verifier,
+    /assert\.equal\(packageVersion\("kuzu"\), "0\.19\.0", "clean-env proof requires kuzu@npm:@ladybugdb\/core@0\.19\.0"\);/u,
+  );
+  assert.doesNotMatch(verifier, /@ladybugdb\/core@0\.18\.1/u);
 });
 
 it("stages only the reviewed runtime files", generatedArtifactTestOptions, () => {
