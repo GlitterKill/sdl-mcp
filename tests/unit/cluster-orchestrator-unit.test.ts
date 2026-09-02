@@ -258,6 +258,16 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       name: "worker",
     });
     const conn = await getLadybugConn();
+    await ladybugDb.upsertShadowCluster(conn, {
+      shadowClusterId: "repo-single:louvain:old",
+      repoId: "repo-single",
+      algorithm: "louvain",
+      label: "old community",
+      symbolCount: 1,
+      modularity: 0,
+      versionId: "old",
+      createdAt: "2026-03-19T09:00:00.000Z",
+    });
 
     const result = await computeAndStoreClustersAndProcesses({
       conn,
@@ -272,6 +282,82 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
     assert.strictEqual(result.shadowClustersComputed, 0);
     assert.strictEqual(result.centralityComputed, 0);
     assert.equal(result.algorithmRefresh.pageRank.status, "skipped");
+    assert.deepStrictEqual(result.algorithmRefresh.louvain, {
+      status: "disabled",
+      count: 0,
+      reason: "manual-only",
+    });
+    assert.equal(
+      (await ladybugDb.getShadowClustersForRepo(conn, "repo-single")).length,
+      0,
+    );
+  });
+
+  it("clears stale Louvain shadows when algorithm refresh is disabled", async () => {
+    await resetDb();
+    await seedRepo("repo-algorithms-disabled");
+    await seedFile(
+      "repo-algorithms-disabled",
+      "file-1",
+      "src/algorithms-disabled.ts",
+    );
+    await seedSymbol({
+      repoId: "repo-algorithms-disabled",
+      fileId: "file-1",
+      symbolId: "sym-main",
+      name: "main",
+    });
+    await seedSymbol({
+      repoId: "repo-algorithms-disabled",
+      fileId: "file-1",
+      symbolId: "sym-worker",
+      name: "worker",
+    });
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertShadowCluster(conn, {
+      shadowClusterId: "repo-algorithms-disabled:louvain:old",
+      repoId: "repo-algorithms-disabled",
+      algorithm: "louvain",
+      label: "old community",
+      symbolCount: 2,
+      modularity: 0,
+      versionId: "old",
+      createdAt: "2026-03-19T09:00:00.000Z",
+    });
+
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-algorithms-disabled",
+      versionId: "v1",
+      sharedGraph: {
+        callEdges: [{ callerId: "sym-main", calleeId: "sym-worker" }],
+        clusterEdges: [
+          { fromSymbolId: "sym-main", toSymbolId: "sym-worker" },
+        ],
+      },
+      algorithmRefresh: {
+        enabled: false,
+        pageRank: { enabled: true },
+        kCore: { enabled: true },
+        louvain: { enabled: true, maxCallEdges: 50_000 },
+        workerTimeoutMs: 120_000,
+      },
+    });
+
+    assert.deepStrictEqual(result.algorithmRefresh.louvain, {
+      status: "disabled",
+      count: 0,
+      reason: "manual-only",
+    });
+    assert.equal(
+      (
+        await ladybugDb.getShadowClustersForRepo(
+          conn,
+          "repo-algorithms-disabled",
+        )
+      ).length,
+      0,
+    );
   });
 
   it("computes clusters and traces processes for a simple call chain", async () => {
@@ -817,7 +903,108 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
     }
   });
 
-  it("keeps centrality writes when Louvain fails", async () => {
+  it("isolates stale Louvain cleanup failures from graph and centrality work", async () => {
+    await resetDb();
+    await seedRepo("repo-louvain-cleanup-fails");
+    await seedFile(
+      "repo-louvain-cleanup-fails",
+      "file-1",
+      "src/cleanup-fails.ts",
+    );
+    for (const [symbolId, name] of [
+      ["sym-main", "main"],
+      ["sym-foo", "foo"],
+      ["sym-bar", "bar"],
+    ] as const) {
+      await seedSymbol({
+        repoId: "repo-louvain-cleanup-fails",
+        fileId: "file-1",
+        symbolId,
+        name,
+      });
+    }
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-louvain-cleanup-fails",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+      {
+        repoId: "repo-louvain-cleanup-fails",
+        fromSymbolId: "sym-foo",
+        toSymbolId: "sym-bar",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+
+    let cleanupCalled = false;
+    let centralityCalled = false;
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-louvain-cleanup-fails",
+      versionId: "v1",
+      minClusterSize: 2,
+      entryPatterns: ["^main$"],
+      algorithmRefresh: {
+        enabled: true,
+        pageRank: { enabled: true },
+        kCore: { enabled: false },
+        louvain: { enabled: true, maxCallEdges: 50_000 },
+        workerTimeoutMs: 120_000,
+      },
+      louvainShadowCleaner: async () => {
+        cleanupCalled = true;
+        throw new Error(`cleanup failed ${"x".repeat(1_000)}`);
+      },
+      centralityRunner: async () => {
+        centralityCalled = true;
+        return {
+          pageRank: [
+            { symbolId: "sym-main", score: 0.6 },
+            { symbolId: "sym-foo", score: 0.3 },
+            { symbolId: "sym-bar", score: 0.1 },
+          ],
+          kCore: [],
+        };
+      },
+    });
+
+    assert.equal(cleanupCalled, true);
+    assert.equal(centralityCalled, true);
+    assert.ok(result.clustersComputed > 0);
+    assert.ok(result.processesTraced > 0);
+    assert.equal(result.centralityComputed, 3);
+    assert.deepStrictEqual(result.algorithmRefresh.louvain, {
+      status: "disabled",
+      count: 0,
+      reason: "manual-only",
+    });
+    assert.equal(result.algorithmRefresh.dirty, true);
+    assert.equal(result.algorithmRefresh.failures.length, 1);
+    assert.match(
+      result.algorithmRefresh.failures[0] ?? "",
+      /^louvain-shadow-cleanup: cleanup failed /,
+    );
+    assert.ok((result.algorithmRefresh.failures[0]?.length ?? 0) <= 500);
+  });
+
+  it("keeps centrality writes while automatic Louvain is manual-only", async () => {
     await resetDb();
     await seedRepo("repo-louvain-fails");
     await seedFile("repo-louvain-fails", "file-1", "src/louvain.ts");
@@ -863,11 +1050,29 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       },
     ]);
 
+    await ladybugDb.upsertShadowCluster(conn, {
+      shadowClusterId: "repo-louvain-fails:louvain:old",
+      repoId: "repo-louvain-fails",
+      algorithm: "louvain",
+      label: "old community",
+      symbolCount: 2,
+      modularity: 0,
+      versionId: "old",
+      createdAt: "2026-03-19T09:00:00.000Z",
+    });
+
     const result = await computeAndStoreClustersAndProcesses({
       conn,
       repoId: "repo-louvain-fails",
       versionId: "v1",
       minClusterSize: 2,
+      algorithmRefresh: {
+        enabled: true,
+        pageRank: { enabled: true },
+        kCore: { enabled: true },
+        louvain: { enabled: true, maxCallEdges: 50_000 },
+        workerTimeoutMs: 120_000,
+      },
       centralityRunner: async () => ({
         pageRank: [
           { symbolId: "sym-main", score: 0.1 },
@@ -880,15 +1085,18 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
           { symbolId: "sym-bar", coreness: 1 },
         ],
       }),
-      algorithmCapabilityDetector: async () => ({ supported: true }),
-      louvainRunner: async () => {
-        throw new Error("simulated louvain failure");
-      },
     });
 
     assert.equal(result.centralityComputed, 3);
-    assert.equal(result.algorithmRefresh.dirty, true);
-    assert.equal(result.algorithmRefresh.louvain.status, "failed");
+    assert.equal(result.shadowClustersComputed, 0);
+    assert.equal(result.algorithmRefresh.dirty, false);
+    assert.equal(result.algorithmRefresh.louvain.status, "disabled");
+    assert.equal(result.algorithmRefresh.louvain.reason, "manual-only");
+    const shadowClusters = await ladybugDb.getShadowClustersForRepo(
+      conn,
+      "repo-louvain-fails",
+    );
+    assert.equal(shadowClusters.length, 0);
     const centrality = await ladybugDb.querySingle<{
       pageRank: unknown;
       kCore: unknown;
@@ -899,256 +1107,6 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
     );
     assert.equal(Number(centrality?.pageRank), 0.8);
     assert.equal(Number(centrality?.kCore), 2);
-  });
-
-  it("skips Louvain above maxCallEdges without marking algorithms stale", async () => {
-    await resetDb();
-    await seedRepo("repo-louvain-skipped");
-    await seedFile("repo-louvain-skipped", "file-1", "src/skip.ts");
-    for (const [symbolId, name] of [
-      ["sym-main", "main"],
-      ["sym-foo", "foo"],
-      ["sym-bar", "bar"],
-    ] as const) {
-      await seedSymbol({
-        repoId: "repo-louvain-skipped",
-        fileId: "file-1",
-        symbolId,
-        name,
-      });
-    }
-    const conn = await getLadybugConn();
-    await ladybugDb.insertEdges(conn, [
-      {
-        repoId: "repo-louvain-skipped",
-        fromSymbolId: "sym-main",
-        toSymbolId: "sym-foo",
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        resolverId: "unit-test",
-        resolutionPhase: "pass2",
-        provenance: "manual",
-        createdAt: "2026-03-19T09:00:00.000Z",
-      },
-      {
-        repoId: "repo-louvain-skipped",
-        fromSymbolId: "sym-foo",
-        toSymbolId: "sym-bar",
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        resolverId: "unit-test",
-        resolutionPhase: "pass2",
-        provenance: "manual",
-        createdAt: "2026-03-19T09:00:00.000Z",
-      },
-    ]);
-    let louvainCalled = false;
-    await ladybugDb.upsertShadowCluster(conn, {
-      shadowClusterId: "repo-louvain-skipped:louvain:old",
-      repoId: "repo-louvain-skipped",
-      algorithm: "louvain",
-      label: "old community",
-      symbolCount: 2,
-      modularity: 0,
-      versionId: "old",
-      createdAt: "2026-03-19T09:00:00.000Z",
-    });
-
-    const result = await computeAndStoreClustersAndProcesses({
-      conn,
-      repoId: "repo-louvain-skipped",
-      versionId: "v1",
-      algorithmRefresh: {
-        enabled: true,
-        pageRank: { enabled: false },
-        kCore: { enabled: false },
-        louvain: { enabled: true, maxCallEdges: 1 },
-        workerTimeoutMs: 120_000,
-      },
-      louvainRunner: async () => {
-        louvainCalled = true;
-        return [];
-      },
-    });
-
-    assert.equal(louvainCalled, false);
-    assert.equal(result.algorithmRefresh.louvain.status, "skipped");
-    assert.equal(result.algorithmRefresh.dirty, false);
-    const shadowClusters = await ladybugDb.getShadowClustersForRepo(
-      conn,
-      "repo-louvain-skipped",
-    );
-    assert.equal(shadowClusters.length, 0);
-  });
-
-  it("uses DB call-edge count for Louvain policy when shared graph undercounts", async () => {
-    await resetDb();
-    await seedRepo("repo-louvain-db-count");
-    await seedFile("repo-louvain-db-count", "file-1", "src/db-count.ts");
-    for (const [symbolId, name] of [
-      ["sym-main", "main"],
-      ["sym-foo", "foo"],
-      ["sym-bar", "bar"],
-    ] as const) {
-      await seedSymbol({
-        repoId: "repo-louvain-db-count",
-        fileId: "file-1",
-        symbolId,
-        name,
-      });
-    }
-    const conn = await getLadybugConn();
-    await ladybugDb.insertEdges(conn, [
-      {
-        repoId: "repo-louvain-db-count",
-        fromSymbolId: "sym-main",
-        toSymbolId: "sym-foo",
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        resolverId: "unit-test",
-        resolutionPhase: "pass2",
-        provenance: "manual",
-        createdAt: "2026-03-19T09:00:00.000Z",
-      },
-      {
-        repoId: "repo-louvain-db-count",
-        fromSymbolId: "sym-foo",
-        toSymbolId: "sym-bar",
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        resolverId: "unit-test",
-        resolutionPhase: "pass2",
-        provenance: "manual",
-        createdAt: "2026-03-19T09:00:00.000Z",
-      },
-    ]);
-    let louvainCalled = false;
-
-    const result = await computeAndStoreClustersAndProcesses({
-      conn,
-      repoId: "repo-louvain-db-count",
-      versionId: "v1",
-      algorithmRefresh: {
-        enabled: true,
-        pageRank: { enabled: false },
-        kCore: { enabled: false },
-        louvain: { enabled: true, maxCallEdges: 1 },
-        workerTimeoutMs: 120_000,
-      },
-      sharedGraph: {
-        callEdges: [{ callerId: "sym-main", calleeId: "sym-foo" }],
-        clusterEdges: [{ fromSymbolId: "sym-main", toSymbolId: "sym-foo" }],
-      },
-      louvainRunner: async () => {
-        louvainCalled = true;
-        return [];
-      },
-    });
-
-    assert.equal(louvainCalled, false);
-    assert.equal(result.algorithmRefresh.louvain.status, "skipped");
-    assert.match(
-      result.algorithmRefresh.louvain.reason ?? "",
-      /call-edge-count 2 exceeds maxCallEdges 1/,
-    );
-    assert.equal(result.algorithmRefresh.dirty, false);
-  });
-
-  it("clears stale Louvain shadow clusters when algorithm capability is unavailable", async () => {
-    await resetDb();
-    await seedRepo("repo-louvain-unsupported");
-    await seedFile("repo-louvain-unsupported", "file-1", "src/unsupported.ts");
-    for (const [symbolId, name] of [
-      ["sym-main", "main"],
-      ["sym-foo", "foo"],
-      ["sym-bar", "bar"],
-    ] as const) {
-      await seedSymbol({
-        repoId: "repo-louvain-unsupported",
-        fileId: "file-1",
-        symbolId,
-        name,
-      });
-    }
-    const conn = await getLadybugConn();
-    await ladybugDb.insertEdges(conn, [
-      {
-        repoId: "repo-louvain-unsupported",
-        fromSymbolId: "sym-main",
-        toSymbolId: "sym-foo",
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        resolverId: "unit-test",
-        resolutionPhase: "pass2",
-        provenance: "manual",
-        createdAt: "2026-03-19T09:00:00.000Z",
-      },
-      {
-        repoId: "repo-louvain-unsupported",
-        fromSymbolId: "sym-foo",
-        toSymbolId: "sym-bar",
-        edgeType: "call",
-        weight: 1,
-        confidence: 1,
-        resolution: "exact",
-        resolverId: "unit-test",
-        resolutionPhase: "pass2",
-        provenance: "manual",
-        createdAt: "2026-03-19T09:00:00.000Z",
-      },
-    ]);
-    await ladybugDb.upsertShadowCluster(conn, {
-      shadowClusterId: "repo-louvain-unsupported:louvain:old",
-      repoId: "repo-louvain-unsupported",
-      algorithm: "louvain",
-      label: "old community",
-      symbolCount: 2,
-      modularity: 0,
-      versionId: "old",
-      createdAt: "2026-03-19T09:00:00.000Z",
-    });
-    let louvainCalled = false;
-
-    const result = await computeAndStoreClustersAndProcesses({
-      conn,
-      repoId: "repo-louvain-unsupported",
-      versionId: "v1",
-      algorithmRefresh: {
-        enabled: true,
-        pageRank: { enabled: false },
-        kCore: { enabled: false },
-        louvain: { enabled: true, maxCallEdges: 50_000 },
-        workerTimeoutMs: 120_000,
-      },
-      algorithmCapabilityDetector: async () => ({
-        supported: false,
-        reason: "unit unsupported",
-      }),
-      louvainRunner: async () => {
-        louvainCalled = true;
-        return [];
-      },
-    });
-
-    assert.equal(louvainCalled, false);
-    assert.equal(result.algorithmRefresh.louvain.status, "skipped");
-    assert.equal(result.algorithmRefresh.louvain.reason, "unit unsupported");
-    assert.equal(result.algorithmRefresh.dirty, false);
-    const shadowClusters = await ladybugDb.getShadowClustersForRepo(
-      conn,
-      "repo-louvain-unsupported",
-    );
-    assert.equal(shadowClusters.length, 0);
   });
 
   it("marks algorithms dirty when the centrality worker times out", async () => {

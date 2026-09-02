@@ -235,6 +235,43 @@ describe("config surface sync", () => {
     assert.match(docs, /postIndexSessionTimeoutMs/);
   });
 
+  it("keeps automatic Louvain manual-only across config surfaces", () => {
+    const parsedDefaults = [
+      IndexingConfigSchema.parse({}),
+      IndexingConfigSchema.parse({ algorithmRefresh: {} }),
+      IndexingConfigSchema.parse({ algorithmRefresh: { louvain: {} } }),
+    ];
+    assert.deepStrictEqual(
+      parsedDefaults.map(
+        (parsed) => parsed.algorithmRefresh.louvain.enabled,
+      ),
+      [false, false, false],
+    );
+
+    const schema = JSON.parse(
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.schema.json"), "utf8"),
+    );
+    const algorithmRefreshSchema =
+      schema.properties.indexing.properties.algorithmRefresh;
+    assert.match(algorithmRefreshSchema.description, /manual-only/i);
+    assert.strictEqual(
+      algorithmRefreshSchema.properties.louvain.properties.enabled.default,
+      false,
+    );
+    assert.strictEqual(
+      algorithmRefreshSchema.properties.louvain.default.enabled,
+      false,
+    );
+
+    const sample = JSON.parse(
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.example.json"), "utf8"),
+    );
+    assert.strictEqual(
+      sample.indexing.algorithmRefresh.louvain.enabled,
+      false,
+    );
+  });
+
   it("keeps provider-first fallback caps surfaced in config docs and schema", () => {
     const parsed = IndexingConfigSchema.parse({});
     assert.strictEqual(parsed.providerFirst.maxLegacyFallbackFiles, 1_000_000);

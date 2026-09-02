@@ -11,14 +11,7 @@ import type { FoldedCentralityResult } from "../graph/metrics.js";
 import { traceProcessesTS } from "../graph/process.js";
 import { computeClustersRust, traceProcessesRust } from "./rustIndexer.js";
 import {
-  detectAlgoCapability,
-  resetRepoGraphProjection,
-  runLouvain,
-} from "../db/ladybug-algorithms.js";
-import {
   upsertCentralityBatch,
-  upsertShadowCluster,
-  upsertShadowClusterMembersBatch,
   deleteShadowClustersByRepo,
 } from "../db/ladybug-queries.js";
 import {
@@ -49,7 +42,7 @@ const DEFAULT_ALGORITHM_REFRESH_CONFIG: AlgorithmRefreshConfig = {
   enabled: true,
   pageRank: { enabled: true },
   kCore: { enabled: true },
-  louvain: { enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
+  louvain: { enabled: false, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
   workerTimeoutMs: 120_000,
 };
 
@@ -68,9 +61,8 @@ function normalizeAlgorithmRefreshConfig(
         config?.kCore?.enabled ?? DEFAULT_ALGORITHM_REFRESH_CONFIG.kCore.enabled,
     },
     louvain: {
-      enabled:
-        config?.louvain?.enabled ??
-        DEFAULT_ALGORITHM_REFRESH_CONFIG.louvain.enabled,
+      // Automatic Louvain is manual-only until a cancellable explicit trigger exists.
+      enabled: false,
       maxCallEdges:
         config?.louvain?.maxCallEdges ??
         DEFAULT_ALGORITHM_REFRESH_CONFIG.louvain.maxCallEdges,
@@ -224,8 +216,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
   maxProcessDepth?: number;
   algorithmRefresh?: AlgorithmRefreshConfig;
   centralityRunner?: CentralityRunner;
-  algorithmCapabilityDetector?: typeof detectAlgoCapability;
-  louvainRunner?: typeof runLouvain;
+  louvainShadowCleaner?: typeof clearLouvainShadowClusters;
   includeTimings?: boolean;
   centralityMetricsMaterialized?: boolean;
   foldedCentrality?: FoldedCentralityResult;
@@ -244,8 +235,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
     maxProcessDepth = DEFAULT_MAX_PROCESS_DEPTH,
     algorithmRefresh: rawAlgorithmRefresh,
     centralityRunner = runCentralityWorker,
-    algorithmCapabilityDetector = detectAlgoCapability,
-    louvainRunner = runLouvain,
+    louvainShadowCleaner = clearLouvainShadowClusters,
     includeTimings = false,
     centralityMetricsMaterialized = false,
     foldedCentrality,
@@ -287,6 +277,28 @@ export async function computeAndStoreClustersAndProcesses(params: {
     }
   };
 
+  const algorithmDiagnostics = createAlgorithmDiagnostics(
+    algorithmRefresh.enabled,
+  );
+  algorithmDiagnostics.louvain = {
+    status: "disabled",
+    count: 0,
+    reason: "manual-only",
+  };
+  // Clear automatic Louvain state before any graph-shape early return.
+  try {
+    await louvainShadowCleaner(repoId, "manual-only");
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    const failureReason = `louvain-shadow-cleanup: ${detail}`.slice(0, 500);
+    algorithmDiagnostics.dirty = true;
+    algorithmDiagnostics.failures.push(failureReason);
+    logger.warn(
+      "ladybug-algorithms: Louvain shadow cleanup failed; other graph work will continue",
+      { repoId, error: detail },
+    );
+  }
+
   // Cluster/process computation only needs symbol ids, names, file ids, and
   // lightweight edges, so keep the read path narrow.
   const symbols = await measureSubphase("loadSymbols", () =>
@@ -298,7 +310,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
       processesTraced: 0,
       centralityComputed: 0,
       shadowClustersComputed: 0,
-      algorithmRefresh: createAlgorithmDiagnostics(algorithmRefresh.enabled),
+      algorithmRefresh: algorithmDiagnostics,
       ...(timings ? { timings } : {}),
     };
   }
@@ -365,11 +377,11 @@ export async function computeAndStoreClustersAndProcesses(params: {
       shadowClustersComputed: 0,
       algorithmRefresh: {
         enabled: algorithmRefresh.enabled,
-        dirty: false,
+        dirty: algorithmDiagnostics.dirty,
         pageRank: { status: "skipped", count: 0, reason: "no-call-edges" },
         kCore: { status: "skipped", count: 0, reason: "no-call-edges" },
-        louvain: { status: "skipped", count: 0, reason: "no-call-edges" },
-        failures: [],
+        louvain: algorithmDiagnostics.louvain,
+        failures: algorithmDiagnostics.failures,
       },
       ...(timings ? { timings } : {}),
     };
@@ -751,16 +763,12 @@ export async function computeAndStoreClustersAndProcesses(params: {
   });
 
   // ======================================================================
-  // Optional algorithm stage (shadow + additive): PageRank/K-core metrics and
-  // Louvain shadow communities. Canonical cluster/process rows are already
-  // written above; failures here are reported through DerivedState and never
-  // roll back canonical work.
+  // Optional additive algorithm stage: PageRank/K-core metrics. Canonical
+  // cluster/process rows are already written above; failures here are reported
+  // through DerivedState and never roll back canonical work.
   // ======================================================================
   let centralityComputed = 0;
-  let shadowClustersComputed = 0;
-  const algorithmDiagnostics = createAlgorithmDiagnostics(
-    algorithmRefresh.enabled,
-  );
+  const shadowClustersComputed = 0;
   if (algorithmRefresh.enabled) {
     emitSubstage("algorithmRefresh");
     await measureSubphase("algorithmStage", async () => {
@@ -775,11 +783,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
           count: 0,
           reason: "no-call-edges",
         };
-        algorithmDiagnostics.louvain = {
-          status: "skipped",
-          count: 0,
-          reason: "no-call-edges",
-        };
+
         return;
       }
 
@@ -930,114 +934,6 @@ export async function computeAndStoreClustersAndProcesses(params: {
         };
       }
 
-      if (!algorithmRefresh.louvain.enabled) {
-        await clearLouvainShadowClusters(repoId, "disabled");
-        algorithmDiagnostics.louvain = {
-          status: "disabled",
-          count: 0,
-          reason: "disabled",
-        };
-        return;
-      }
-      let louvainPolicyCallEdges = callEdges.length;
-      if (louvainPolicyCallEdges <= algorithmRefresh.louvain.maxCallEdges) {
-        const edgeCounts = await measureSubphase(
-          "algorithmStage.louvainPolicyEdgeCount",
-          () => ladybugDb.getEdgeCountsByType(conn, repoId),
-        );
-        louvainPolicyCallEdges = Math.max(
-          louvainPolicyCallEdges,
-          edgeCounts.call ?? 0,
-        );
-      }
-      if (louvainPolicyCallEdges > algorithmRefresh.louvain.maxCallEdges) {
-        await clearLouvainShadowClusters(repoId, "max-call-edges");
-        algorithmDiagnostics.louvain = {
-          status: "skipped",
-          count: 0,
-          reason: `call-edge-count ${louvainPolicyCallEdges} exceeds maxCallEdges ${algorithmRefresh.louvain.maxCallEdges}`,
-        };
-        logger.info("ladybug-algorithms: skipping Louvain by policy", {
-          repoId,
-          callEdges: louvainPolicyCallEdges,
-          maxCallEdges: algorithmRefresh.louvain.maxCallEdges,
-        });
-        return;
-      }
-
-      try {
-        const capability = await algorithmCapabilityDetector(conn);
-        if (!capability.supported) {
-          await clearLouvainShadowClusters(repoId, "unsupported");
-          algorithmDiagnostics.louvain = {
-            status: "skipped",
-            count: 0,
-            reason: capability.reason ?? "unsupported",
-          };
-          return;
-        }
-        await resetRepoGraphProjection(conn, repoId);
-        const louvainResults = await louvainRunner(conn, repoId);
-
-        const communityMembers = new Map<number, string[]>();
-        for (const row of louvainResults) {
-          const members = communityMembers.get(row.communityId) ?? [];
-          members.push(row.symbolId);
-          communityMembers.set(row.communityId, members);
-        }
-        const sortedCommunityIds = [...communityMembers.keys()]
-          .filter(
-            (cid) =>
-              (communityMembers.get(cid)?.length ?? 0) >= minClusterSize,
-          )
-          .sort((a, b) => a - b);
-
-        await withWriteConn(async (wConn) => {
-          await deleteShadowClustersByRepo(wConn, repoId);
-          for (const communityId of sortedCommunityIds) {
-            const memberIds = (communityMembers.get(communityId) ?? [])
-              .slice()
-              .sort();
-            const shadowClusterId = `${repoId}:louvain:${communityId}`;
-            await upsertShadowCluster(wConn, {
-              shadowClusterId,
-              repoId,
-              algorithm: "louvain",
-              label: `Louvain community ${communityId}`,
-              symbolCount: memberIds.length,
-              modularity: 0.0,
-              versionId,
-              createdAt: now,
-            });
-            await upsertShadowClusterMembersBatch(
-              wConn,
-              memberIds.map((symbolId) => ({
-                symbolId,
-                shadowClusterId,
-                membershipScore: 1.0,
-              })),
-            );
-          }
-        });
-        shadowClustersComputed = sortedCommunityIds.length;
-        algorithmDiagnostics.louvain = {
-          status: "succeeded",
-          count: sortedCommunityIds.length,
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        algorithmDiagnostics.dirty = true;
-        algorithmDiagnostics.failures.push(message);
-        algorithmDiagnostics.louvain = {
-          status: "failed",
-          count: 0,
-          reason: message,
-        };
-        logger.warn(
-          "ladybug-algorithms: Louvain failed; centrality and canonical indexing preserved",
-          { repoId, error: message },
-        );
-      }
     });
   }
 

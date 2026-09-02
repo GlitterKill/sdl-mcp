@@ -111,7 +111,7 @@
         "enabled": true
       },
       "louvain": {
-        "enabled": true,
+        "enabled": false,
         "maxCallEdges": 10000
       },
       "workerTimeoutMs": 120000

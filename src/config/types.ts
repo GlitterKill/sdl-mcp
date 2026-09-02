@@ -229,14 +229,14 @@ export const AlgorithmRefreshConfigSchema = z.object({
     .default({ enabled: true }),
   louvain: z
     .object({
-      enabled: z.boolean().default(true),
+      enabled: z.boolean().default(false),
       maxCallEdges: z
         .number()
         .int()
         .min(0)
         .default(DEFAULT_LOUVAIN_MAX_CALL_EDGES),
     })
-    .default({ enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES }),
+    .default({ enabled: false, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES }),
   workerTimeoutMs: z
     .number()
     .int()
@@ -369,7 +369,7 @@ export const IndexingConfigSchema = z.object({
     enabled: true,
     pageRank: { enabled: true },
     kCore: { enabled: true },
-    louvain: { enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
+    louvain: { enabled: false, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
     workerTimeoutMs: 120_000,
   }),
 });

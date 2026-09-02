@@ -494,7 +494,7 @@
         },
         "algorithmRefresh": {
           "type": "object",
-          "description": "Optional post-index graph algorithm refresh. Canonical clusters/processes always run; PageRank/K-core use a bounded worker and Louvain is skipped above maxCallEdges.",
+          "description": "Optional post-index graph algorithm refresh. Canonical clusters/processes always run; PageRank/K-core use a bounded worker. Louvain settings are compatibility-only because automatic Louvain is manual-only.",
           "properties": {
             "enabled": {
               "type": "boolean",
@@ -529,7 +529,8 @@
               "properties": {
                 "enabled": {
                   "type": "boolean",
-                  "default": true
+                  "description": "Compatibility-only. Automatic Louvain is manual-only and this value is ignored.",
+                  "default": false
                 },
                 "maxCallEdges": {
                   "type": "integer",
@@ -538,7 +539,7 @@
                 }
               },
               "default": {
-                "enabled": true,
+                "enabled": false,
                 "maxCallEdges": 10000
               }
             },
@@ -558,7 +559,7 @@
               "enabled": true
             },
             "louvain": {
-              "enabled": true,
+              "enabled": false,
               "maxCallEdges": 10000
             },
             "workerTimeoutMs": 120000
@@ -601,7 +602,7 @@
             "enabled": true
           },
           "louvain": {
-            "enabled": true,
+            "enabled": false,
             "maxCallEdges": 10000
           },
           "workerTimeoutMs": 120000
