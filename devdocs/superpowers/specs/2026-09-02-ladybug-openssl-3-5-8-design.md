@@ -6,7 +6,7 @@ Replace the published Windows x64 Ladybug FTS runtime based on OpenSSL 3.5.7 wit
 
 ## Security assessment
 
-OpenSSL 3.5.8 fixes ten CVEs. The generic Ladybug FTS import contract covers TLS client, digest, and X.509 functions and does not import the affected QUIC server, DTLS, CMS, CMP, RPK, or one-shot `EVP_Cipher` APIs. Direct reachability is therefore not evident. The signed-build workflow also runs the repository's current Ladybug 0.19.0 clean-environment FTS test, so publication remains gated on the driver SDL actually ships. The distributed DLLs still contain affected 3.5.7 code and should be replaced.
+OpenSSL 3.5.8 fixes ten CVEs. The generic Ladybug FTS import contract covers TLS client, digest, and X.509 functions and does not import the affected QUIC server, DTLS, CMS, CMP, RPK, or one-shot `EVP_Cipher` APIs. Direct reachability is therefore not evident. The signed-build workflow also runs the repository's current Ladybug 0.19.0 clean-environment FTS test, so publication remains gated on the driver SDL actually ships. The FTS import fixture follows the root `kuzu` alias at `@ladybugdb/core@0.19.0`; the prior 0.18.1 URL mutated in place on 2026-09-01 and no longer matched its committed hash. The distributed DLLs still contain affected 3.5.7 code and should be replaced.
 
 ## Signed build
 

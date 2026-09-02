@@ -128,7 +128,7 @@ jobs:
             ladybug-openssl/pack.json
             ladybug-openssl/pack-dry-run.json
             ladybug-openssl/source.json
-            ladybug-openssl/ladybug-fts-0.18.1.json
+            ladybug-openssl/ladybug-fts-0.19.0.json
             ladybug-openssl/npm/win32-x64/provenance.json
             ladybug-openssl/npm/win32-x64/sbom.spdx.json
             ${{ runner.temp }}/ladybug-openssl-build.log

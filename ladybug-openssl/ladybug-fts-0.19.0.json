@@ -1,0 +1,13 @@
+{
+  "ladybugVersion": "0.19.0",
+  "extension": "fts",
+  "platform": "win_amd64",
+  "artifactUrl": "https://extension.ladybugdb.com/v0.19.0/win_amd64/fts/libfts.lbug_extension",
+  "artifactSha256": "7f82059c8149bb7851420a9bfd0c46859e92efaeda0bcd5c65418d8f174edac4",
+  "artifactSize": 14779904,
+  "installedPath": ".lbdb/extension/0.19.0/win_amd64/fts/libfts.lbug_extension",
+  "requiredImports": [
+    "libcrypto-3-x64.dll",
+    "libssl-3-x64.dll"
+  ]
+}

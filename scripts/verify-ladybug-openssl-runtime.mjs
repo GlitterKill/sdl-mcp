@@ -21,7 +21,7 @@ const packageRoot = join(contractRoot, "npm", "win32-x64");
 const binRoot = join(packageRoot, "bin");
 const buildRecordPath = join(contractRoot, "build-record.json");
 const source = readJson(join(contractRoot, "source.json"));
-const fts = readJson(join(contractRoot, "ladybug-fts-0.18.1.json"));
+const fts = readJson(join(contractRoot, "ladybug-fts-0.19.0.json"));
 const packageJson = readJson(join(packageRoot, "package.json"));
 const require = createRequire(import.meta.url);
 

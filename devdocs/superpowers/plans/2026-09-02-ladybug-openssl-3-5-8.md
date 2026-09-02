@@ -20,6 +20,7 @@
 
 - [ ] Expect OpenSSL `3.5.8`, package `3.5.8-sdl.1`, official SHA-256 `a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2`, signing subkey `C46ED3F2CBEFDA1FDAADA44264ED7B1DCCE71CB2`, and primary certificate `B146647E45A7B33947AB226B2A2C87D161692D40`.
 - [ ] Assert the publish workflow version equals `source.packageVersion`.
+- [ ] Assert the Ladybug FTS import fixture matches the root `kuzu` alias version so driver and artifact coverage cannot drift.
 - [ ] Run the focused contract file and confirm the expected RED failures.
 
 ### Task 2: Update the runtime source and trust material
@@ -33,6 +34,7 @@
 - Modify: `scripts/build-ladybug-openssl-runtime.ps1`
 
 - [ ] Pin the official 3.5.8 URLs, SHA-256, signing subkey, and current primary certificate.
+- [ ] Replace the stale 0.18.1 FTS fixture with verified 0.19.0 extension metadata; the old URL mutated in place on 2026-09-01.
 - [ ] Set the package/workflow version to `3.5.8-sdl.1`.
 - [ ] Verify both committed certificate fingerprints before accepting the detached signature.
 - [ ] Run the focused contract test and confirm GREEN.

@@ -9,10 +9,11 @@ const repoRoot = resolve(".");
 const contractRoot = join(repoRoot, "ladybug-openssl");
 const packageRoot = join(contractRoot, "npm", "win32-x64");
 const source = JSON.parse(readFileSync(join(contractRoot, "source.json"), "utf8"));
-// This fixture records the binary used to derive the generic OpenSSL import contract.
+const rootPackage = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+// Keep the import fixture aligned with the root LadybugDB alias.
 // Current-driver loading is covered by live-index-symbol-fts-crash.test.ts.
 const fts = JSON.parse(
-  readFileSync(join(contractRoot, "ladybug-fts-0.18.1.json"), "utf8"),
+  readFileSync(join(contractRoot, "ladybug-fts-0.19.0.json"), "utf8"),
 );
 const packageJson = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 const provenancePath = join(packageRoot, "provenance.json");
@@ -79,17 +80,21 @@ it("defines the pinned OpenSSL and Ladybug FTS source artifacts", () => {
     configureTarget: "VC-WIN64A",
   });
   assert.deepEqual(fts, {
-    ladybugVersion: "0.18.1",
+    ladybugVersion: "0.19.0",
     extension: "fts",
     platform: "win_amd64",
     artifactUrl:
-      "https://extension.ladybugdb.com/v0.18.1/win_amd64/fts/libfts.lbug_extension",
+      "https://extension.ladybugdb.com/v0.19.0/win_amd64/fts/libfts.lbug_extension",
     artifactSha256:
-      "ee7a2f506f5c9ac45ead24a25760fe3361e19aeca0505a9356a91c906e75434c",
-    artifactSize: 14577664,
-    installedPath: ".lbdb/extension/0.18.1/win_amd64/fts/libfts.lbug_extension",
+      "7f82059c8149bb7851420a9bfd0c46859e92efaeda0bcd5c65418d8f174edac4",
+    artifactSize: 14779904,
+    installedPath: ".lbdb/extension/0.19.0/win_amd64/fts/libfts.lbug_extension",
     requiredImports: ["libcrypto-3-x64.dll", "libssl-3-x64.dll"],
   });
+  assert.equal(
+    rootPackage.dependencies.kuzu,
+    "npm:@ladybugdb/core@" + fts.ladybugVersion,
+  );
   const releaseKey = readFileSync(
     join(contractRoot, "keys", "openssl-release.asc"),
     "utf8",
@@ -162,6 +167,8 @@ it("publishes the package version pinned by the source contract", () => {
   const packageVersion = workflow.match(/^  PACKAGE_VERSION: "([^"]+)"$/mu)?.[1];
 
   assert.equal(packageVersion, source.packageVersion);
+  assert.match(workflow, /ladybug-openssl\/ladybug-fts-0\.19\.0\.json/u);
+  assert.doesNotMatch(workflow, /ladybug-fts-0\.18\.1\.json/u);
 });
 
 it("stages only the reviewed runtime files", generatedArtifactTestOptions, () => {
