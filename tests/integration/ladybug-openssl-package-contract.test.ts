@@ -171,6 +171,10 @@ it("publishes the package version pinned by the source contract", () => {
   assert.doesNotMatch(workflow, /ladybug-fts-0\.18\.1\.json/u);
   assert.match(workflow, /kuzu@npm:@ladybugdb\/core@0\.19\.0/u);
   assert.doesNotMatch(workflow, /kuzu@npm:@ladybugdb\/core@0\.18\.1/u);
+  assert.match(
+    workflow,
+    /\$nativeCommandErrorPreference = \$PSNativeCommandUseErrorActionPreference\s+try \{\s+\$PSNativeCommandUseErrorActionPreference = \$false\s+\$metadataJson = npm view \$spec --json 2>\$null\s+\$metadataExitCode = \$LASTEXITCODE\s+\} finally \{\s+\$PSNativeCommandUseErrorActionPreference = \$nativeCommandErrorPreference\s+\}\s+if \(\$metadataExitCode -eq 0\)/u,
+  );
 
   const verifier = readFileSync(
     join(repoRoot, "scripts", "verify-ladybug-openssl-runtime.mjs"),

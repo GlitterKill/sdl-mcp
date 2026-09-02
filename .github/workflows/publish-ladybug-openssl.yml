@@ -150,8 +150,15 @@ jobs:
           $spec = "$env:PACKAGE_NAME@$env:PACKAGE_VERSION"
           $metadata = $null
           for ($attempt = 1; $attempt -le 30; $attempt++) {
-            $metadataJson = npm view $spec --json 2>$null
-            if ($LASTEXITCODE -eq 0) {
+            $nativeCommandErrorPreference = $PSNativeCommandUseErrorActionPreference
+            try {
+              $PSNativeCommandUseErrorActionPreference = $false
+              $metadataJson = npm view $spec --json 2>$null
+              $metadataExitCode = $LASTEXITCODE
+            } finally {
+              $PSNativeCommandUseErrorActionPreference = $nativeCommandErrorPreference
+            }
+            if ($metadataExitCode -eq 0) {
               $candidate = $metadataJson | ConvertFrom-Json
               if ($candidate.name -eq $env:PACKAGE_NAME -and $candidate.version -eq $env:PACKAGE_VERSION) {
                 $metadata = $candidate
