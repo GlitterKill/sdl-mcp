@@ -143,16 +143,29 @@ try {
   $fingerprintErr = Join-Path $tempRoot "key-fingerprints.err"
   $fingerprintProcess = Start-Process -FilePath $gpg -ArgumentList @("--with-colons", "--show-keys", $keyPathArg) -WorkingDirectory $repoRoot -RedirectStandardOutput $fingerprintOut -RedirectStandardError $fingerprintErr -NoNewWindow -Wait -PassThru
   if ($fingerprintProcess.ExitCode -ne 0) { throw "gpg --show-keys failed with exit $($fingerprintProcess.ExitCode): $(Get-Content $fingerprintErr -Raw)" }
-  $fingerprints = Get-Content $fingerprintOut -Raw
-  if ($fingerprints -notmatch $source.releaseSignerFingerprint) { throw "Committed key bundle does not contain expected fingerprint $($source.releaseSignerFingerprint)" }
+  $fingerprints = @(
+    Get-Content -LiteralPath $fingerprintOut |
+      Where-Object { $_ -match "^fpr:" } |
+      ForEach-Object { ($_ -split ":")[9].ToUpperInvariant() }
+  )
+  foreach ($expectedFingerprint in @($source.releaseCertificateFingerprint, $source.releaseSignerFingerprint)) {
+    $normalizedExpectedFingerprint = $expectedFingerprint.ToUpperInvariant()
+    if ($fingerprints -notcontains $normalizedExpectedFingerprint) {
+      throw "Committed key bundle does not contain expected fingerprint $expectedFingerprint"
+    }
+  }
   Run-Logged $gpg @("--batch", "--yes", "--dearmor", "--output", $keyringArg, $keyPathArg) $repoRoot
   $signatureVerification = Invoke-Captured $gpgv @("--status-fd=1", "--keyring", $keyringArg, $signaturePathArg, $downloadPathArg) $repoRoot
   if ($signatureVerification.ExitCode -ne 0) { throw "OpenSSL release signature verification failed with exit $($signatureVerification.ExitCode): $($signatureVerification.Output)" }
-  $validSignature = [regex]::Match($signatureVerification.Output, '(?m)^\[GNUPG:\] VALIDSIG ([0-9A-Fa-f]{40})\b')
-  if (-not $validSignature.Success) { throw "OpenSSL release signature verification did not report a VALIDSIG fingerprint: $($signatureVerification.Output)" }
+  $validSignature = [regex]::Match($signatureVerification.Output, '(?m)^\[GNUPG:\] VALIDSIG ([0-9A-Fa-f]{40})\b[^\r\n]*\s([0-9A-Fa-f]{40})\r?$')
+  if (-not $validSignature.Success) { throw "OpenSSL release signature verification did not report signing and primary VALIDSIG fingerprints: $($signatureVerification.Output)" }
   $signatureFingerprint = $validSignature.Groups[1].Value.ToUpperInvariant()
+  $signatureCertificateFingerprint = $validSignature.Groups[2].Value.ToUpperInvariant()
   if ($signatureFingerprint -ne $source.releaseSignerFingerprint.ToUpperInvariant()) {
     throw "OpenSSL release signature fingerprint mismatch: expected $($source.releaseSignerFingerprint), got $signatureFingerprint"
+  }
+  if ($signatureCertificateFingerprint -ne $source.releaseCertificateFingerprint.ToUpperInvariant()) {
+    throw "OpenSSL release signature certificate fingerprint mismatch: expected $($source.releaseCertificateFingerprint), got $signatureCertificateFingerprint"
   }
 
   $perlOverride = $env:SDL_OPENSSL_PERL

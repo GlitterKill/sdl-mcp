@@ -1,9 +1,10 @@
 {
-  "opensslVersion": "3.5.7",
-  "packageVersion": "3.5.7-sdl.2",
-  "sourceUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz",
-  "signatureUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz.asc",
-  "sourceSha256": "a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8",
-  "releaseSignerFingerprint": "BA5473A2B0587B07FB27CF2D216094DFD0CB81EF",
+  "opensslVersion": "3.5.8",
+  "packageVersion": "3.5.8-sdl.1",
+  "sourceUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
+  "signatureUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz.asc",
+  "sourceSha256": "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+  "releaseSignerFingerprint": "C46ED3F2CBEFDA1FDAADA44264ED7B1DCCE71CB2",
+  "releaseCertificateFingerprint": "B146647E45A7B33947AB226B2A2C87D161692D40",
   "configureTarget": "VC-WIN64A"
 }
