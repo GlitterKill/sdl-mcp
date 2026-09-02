@@ -1,6 +1,8 @@
 import { resolve } from "path";
 import { open, readFile, stat } from "fs/promises";
 import { existsSync, realpathSync } from "fs";
+
+import type { Connection } from "kuzu";
 import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   FileReadRequestSchema,
@@ -304,6 +306,26 @@ function hasFileReadTargeting(request: FileReadRequest): boolean {
   );
 }
 
+type SourceReadDisposition =
+  | "non-indexed"
+  | "structured"
+  | "indexed-unparseable";
+
+async function getSourceReadDisposition(
+  conn: Connection,
+  repoId: string,
+  filePath: string,
+): Promise<SourceReadDisposition> {
+  const file = (
+    await ladybugDb.getFilesByPrefix(conn, repoId, filePath, 2)
+  ).find((candidate) => normalizePath(candidate.relPath) === filePath);
+  if (!file) return "non-indexed";
+
+  return await ladybugDb.getFileParserState(conn, repoId, file.fileId)
+    ? "structured"
+    : "indexed-unparseable";
+}
+
 function maybeAddLargeReadHint(
   request: FileReadRequest,
   response: FileReadInlineResponse,
@@ -445,18 +467,47 @@ export async function handleFileRead(
     openPath = realAbsPath;
   }
 
-  // Check extension — block indexed source files
-  const dotIndex = filePath.lastIndexOf(".");
-  const ext = dotIndex >= 0 ? filePath.slice(dotIndex).toLowerCase() : "";
-  if (SDL_SOURCE_EXTENSIONS.has(ext)) {
-    throw new ValidationError(
-      `file.read is for non-indexed files only. Use sdl.context for task-scoped retrieval, or sdl.code.getSkeleton / sdl.code.getHotPath for targeted lookups on ${ext} files.`,
-    );
-  }
-
   if (!existsSync(absPath)) {
     throw new NotFoundError(`File not found: ${filePath}`);
   }
+
+  const dotIndex = filePath.lastIndexOf(".");
+  const ext = dotIndex >= 0 ? filePath.slice(dotIndex).toLowerCase() : "";
+  let retrievalFallback: "indexed-unparseable" | undefined;
+  if (SDL_SOURCE_EXTENSIONS.has(ext)) {
+    const disposition = await getSourceReadDisposition(
+      conn,
+      request.repoId,
+      filePath,
+    );
+    if (disposition === "structured") {
+      throw new ValidationError(
+        "Indexed source has structured retrieval. Use sdl.context or sdl.retrieve.",
+      );
+    }
+    if (
+      disposition === "indexed-unparseable" &&
+      !hasFileReadTargeting(request)
+    ) {
+      throw new ValidationError(
+        "Structured retrieval is unavailable for this indexed source. Retry file.read with search, maxTokens, maxBytes, offset, or limit.",
+      );
+    }
+    if (disposition === "indexed-unparseable") {
+      retrievalFallback = disposition;
+    }
+  }
+
+  const finalize = (
+    response: FileReadInlineResponse,
+    rawBytes: number,
+  ): Promise<FileReadResponse> =>
+    finalizeFileReadResponse(
+      request,
+      context,
+      retrievalFallback ? { ...response, retrievalFallback } : response,
+      rawBytes,
+    );
 
   // Keep token and byte budgets deterministic; the tighter limit wins.
   const maxBytes = Math.min(
@@ -571,10 +622,7 @@ export async function handleFileRead(
     }
     const extracted = extractByPath(parsed, normalizedPath);
     if (extracted === undefined) {
-      return finalizeFileReadResponse(
-        request,
-        context,
-        {
+      return finalize({
           filePath,
           content: "",
           bytes: 0,
@@ -597,10 +645,7 @@ export async function handleFileRead(
       truncated,
     } = clampFileReadContentUtf8(serialized, maxBytes);
 
-    return finalizeFileReadResponse(
-      request,
-      context,
-      {
+    return finalize({
         filePath,
         content,
         bytes: serializedBytes,
@@ -651,10 +696,7 @@ export async function handleFileRead(
     } = clampFileReadContentUtf8(finalContent, maxBytes);
     const searchTruncated =
       result.matchesTruncated || result.linesTruncated || contentTruncated;
-    return finalizeFileReadResponse(
-      request,
-      context,
-      {
+    return finalize({
         filePath,
         content: searchContent,
         bytes: finalBytes,
@@ -686,10 +728,7 @@ export async function handleFileRead(
 
     // Apply maxBytes truncation
     if (truncated) {
-      return finalizeFileReadResponse(
-        request,
-        context,
-        {
+      return finalize({
           filePath,
           content: boundedContent,
           bytes: slicedBytes,
@@ -702,10 +741,7 @@ export async function handleFileRead(
       ); // Compare against sliced range, not full file
     }
 
-    return finalizeFileReadResponse(
-      request,
-      context,
-      {
+    return finalize({
         filePath,
         content: numberedContent,
         bytes: slicedBytes,
@@ -723,10 +759,7 @@ export async function handleFileRead(
     logger.debug(
       `file.read truncated ${filePath}: ${totalBytes} -> ${maxBytes} bytes`,
     );
-    return finalizeFileReadResponse(
-      request,
-      context,
-      {
+    return finalize({
         filePath,
         content: truncated,
         bytes: totalBytes,
@@ -739,10 +772,7 @@ export async function handleFileRead(
     );
   }
 
-  return finalizeFileReadResponse(
-    request,
-    context,
-    {
+  return finalize({
       filePath,
       content: rawContent,
       bytes: totalBytes,

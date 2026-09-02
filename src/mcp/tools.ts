@@ -3841,7 +3841,7 @@ export const FileReadRequestSchema = withProjectionRequestOptions(z.object({
       message: "filePath must not contain null bytes",
     })
     .describe(
-      "File path relative to repo root. Only non-indexed file types allowed.",
+      "File path relative to repo root. Allows non-indexed files and bounded indexed source when structured retrieval is unavailable.",
     ),
   maxBytes: z
     .number()
@@ -3928,6 +3928,7 @@ export const FileReadInlineResponseSchema = z.object({
   truncatedAt: z.number().int().nonnegative().optional(),
   matchCount: z.number().int().nonnegative().optional(),
   extractedPath: z.string().optional(),
+  retrievalFallback: z.literal("indexed-unparseable").optional(),
   sessionDelta: SessionDeltaMetadataSchema.optional(),
   delta: SessionDeltaPayloadSchema.optional(),
   hint: z.string().optional(),

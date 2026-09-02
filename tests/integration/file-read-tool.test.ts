@@ -39,6 +39,19 @@ describe("sdl.file.read token usage metadata", () => {
     mkdirSync(docsDir, { recursive: true });
     writeFileSync(readmePath, fileContent, "utf-8");
 
+    const sourceDir = join(testDir, "src");
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, "parseable.ts"),
+      "export const value = 1;\n",
+      "utf-8",
+    );
+    writeFileSync(
+      join(sourceDir, "unparseable.mjs"),
+      "export default function () {\n",
+      "utf-8",
+    );
+
     await closeLadybugDb();
     await initLadybugDb(graphDbPath);
 
@@ -60,6 +73,33 @@ describe("sdl.file.read token usage metadata", () => {
       }),
       createdAt: now,
     });
+    await ladybugDb.upsertFile(conn, {
+      fileId: "parseable-file",
+      repoId,
+      relPath: "src/parseable.ts",
+      contentHash: "parseable",
+      language: "typescript",
+      byteSize: Buffer.byteLength("export const value = 1;\n", "utf-8"),
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId: "unparseable-file",
+      repoId,
+      relPath: "src/unparseable.mjs",
+      contentHash: "unparseable",
+      language: "javascript",
+      byteSize: Buffer.byteLength("export default function () {\n", "utf-8"),
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertFileParserStatesInTransaction(conn, [{
+      stateId: JSON.stringify([repoId, "parseable-file"]),
+      repoId,
+      fileId: "parseable-file",
+      engine: "typescript",
+      engineContract: "typescript:1",
+      adapterKey: "builtin:typescript:typescript:1",
+      language: "typescript",
+    }]);
   });
 
   afterEach(async () => {
@@ -67,6 +107,39 @@ describe("sdl.file.read token usage metadata", () => {
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
+  });
+
+  it("allows a bounded indexed source read when parser retrieval is unavailable", async () => {
+    const response = await handleFileRead({
+      repoId,
+      filePath: "src/unparseable.mjs",
+      maxTokens: 100,
+    }) as Record<string, unknown>;
+
+    assert.equal(response.retrievalFallback, "indexed-unparseable");
+    assert.match(String(response.content), /export default/);
+  });
+
+  it("rejects an unbounded indexed source fallback", async () => {
+    await assert.rejects(
+      () => handleFileRead({
+        repoId,
+        filePath: "src/unparseable.mjs",
+      }),
+      /structured retrieval is unavailable.*maxTokens|maxBytes|offset|limit|search/i,
+    );
+  });
+
+  it("keeps parseable indexed source on structured retrieval", async () => {
+    await assert.rejects(
+      () => handleFileGateway({
+        op: "read",
+        repoId,
+        filePath: "src/parseable.ts",
+        maxTokens: 100,
+      }),
+      /Use sdl\.context.*sdl\.retrieve/i,
+    );
   });
 
   it("keeps sdl.file traversal errors free of host paths", async () => {
