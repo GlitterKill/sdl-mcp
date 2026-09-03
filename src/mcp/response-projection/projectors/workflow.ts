@@ -205,7 +205,14 @@ function compactStep(
         maxTokens,
         continuationHandle,
       );
-      result = truncation.truncated;
+      const previewChangesPublicShape =
+        (isRecord(result) && raw.fn !== "dataPick")
+        || (Array.isArray(result) && !Array.isArray(truncation.truncated));
+      // Partial objects can violate action-specific required-field schemas;
+      // the continuation remains the complete, schema-independent recovery path.
+      result = truncation.handle && previewChangesPublicShape
+        ? undefined
+        : truncation.truncated;
       if (truncation.handle) {
         nextAction = recovery(input, raw, stepIndex, {
           action: "workflow",

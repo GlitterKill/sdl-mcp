@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { z } from "zod";
 
+import { registerTools } from "../../dist/mcp/tools/index.js";
 import {
   buildToolResponseEnvelope,
   MCPServer,
@@ -72,8 +73,7 @@ function assertSafeBoundaryFailure(
   assert.equal(response.isError, true);
 
   const structured = response.structuredContent as Record<string, unknown>;
-  assert.deepEqual(Object.keys(structured), ["status", "error"]);
-  assert.equal(structured.status, "error");
+  assert.deepEqual(Object.keys(structured), ["error"]);
   assert.deepEqual(
     Object.keys(structured.error as Record<string, unknown>),
     ["code", "message"],
@@ -137,6 +137,41 @@ describe("response projection boundary", () => {
     ) as Record<string, unknown>;
 
     assertSafeBoundaryFailure(response, "MODEL_PROJECTION_FAILED");
+  });
+
+  it("accepts projection boundary failures through the workflow validator", () => {
+    const server = new MCPServer();
+    registerTools(
+      server,
+      { actionAvailability: { memoryTools: true, infoTool: true } },
+      undefined,
+      { enabled: true, exclusive: true },
+    );
+    const workflowTool = (
+      server as unknown as {
+        tools: Map<string, { validationOutputSchema?: z.ZodType }>;
+      }
+    ).tools.get("sdl.workflow");
+    assert.ok(workflowTool?.validationOutputSchema);
+
+    const response = buildBoundaryEnvelope(
+      { canonical: "workflow-boundary" },
+      {
+        projectValue: () => {
+          throw new Error("workflow projector failed");
+        },
+      },
+    );
+    assert.deepEqual(Object.keys(response.structuredContent ?? {}), ["error"]);
+    const validation = workflowTool.validationOutputSchema.safeParse(
+      response.structuredContent,
+    );
+
+    assert.equal(
+      validation.success,
+      true,
+      validation.success ? undefined : validation.error.message,
+    );
   });
 
   it("audits the delivered boundary failure instead of canonical success", () => {
@@ -391,5 +426,32 @@ describe("response projection boundary", () => {
       {},
     );
     assert.deepEqual(response.tools, []);
+  });
+});
+
+describe("workflow root error summary", () => {
+  it("does not report error=0 for a typed root error", () => {
+    const canonical = {
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Invalid sdl.workflow request",
+      },
+    };
+    const response = buildToolResponseEnvelope(
+      canonical,
+      null,
+      "",
+      "sdl.workflow",
+      { steps: [] },
+      canonical,
+      true,
+      Object.freeze({ ...TEST_PROFILE, projector: "workflow" }),
+      TEST_OPTIONS,
+    );
+    const text = response.content.map((block) => block.text ?? "").join("\n");
+
+    assert.equal(response.isError, true);
+    assert.match(text, /Invalid sdl\.workflow request|VALIDATION_ERROR/);
+    assert.doesNotMatch(text, /error=0/);
   });
 });

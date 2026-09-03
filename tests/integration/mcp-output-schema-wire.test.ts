@@ -1371,6 +1371,39 @@ describe("MCP output-schema wire contracts", { concurrency: false }, () => {
       /repoId.*expected.*string/iu,
     );
   });
+  it("keeps low-budget repoOverview workflow output schema-valid", async () => {
+    const response = (await client.callTool({
+      name: "sdl.workflow",
+      arguments: {
+        repoId: REPO_ID,
+        steps: [{
+          fn: "repoOverview",
+          args: {
+            level: "full",
+            includeHotspots: true,
+            maxDirectories: 20,
+            maxExportsPerDirectory: 8,
+          },
+          maxResponseTokens: 80,
+          detail: "full",
+        }],
+        detail: "full",
+      },
+    })) as ToolEnvelope;
+
+    assert.notEqual(response.isError, true, responseText(response));
+    const step = (
+      response.structuredContent as {
+        results?: Array<{
+          truncatedResponse?: { continuationHandle?: string };
+          nextAction?: { action?: string };
+        }>;
+      }
+    ).results?.[0];
+    assert.ok(step?.truncatedResponse?.continuationHandle);
+    assert.equal(step.nextAction?.action, "sdl.workflow");
+  });
+
   it("keeps truncated workflow continuations complete and executable", async () => {
     const completeResult = Array.from({ length: 12 }, (_, index) => ({
       id: index,

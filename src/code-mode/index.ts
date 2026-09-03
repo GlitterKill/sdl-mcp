@@ -7,10 +7,12 @@ import { createActionMap, type ActionMap } from "../gateway/router.js";
 import {
   AgentContextOutputSchema,
   AgentContextRequestSchema,
+  InfoResponseSchema,
   WorkflowRuntimeExecuteResponseSchema,
   withProjectionSuccessOutputSchema,
 } from "../mcp/tools.js";
 import { handleAgentContext } from "../mcp/tools/context.js";
+import { handleInfo, InfoRequestSchema } from "../mcp/tools/info.js";
 import { projectWorkflowChildResultForModel } from "../mcp/context-response-projection.js";
 import {
   assertProjectionProfileInventory,
@@ -649,8 +651,8 @@ export function registerCodeModeTools(
     services.liveIndex,
     services.actionAvailability,
   );
-  // action.search is a meta tool, not a gateway action, but the manual
-  // documents it as a workflow step (fn: "actionSearch"). Extend the
+  // Meta tools are not gateway actions, but the manual documents them as
+  // workflow steps. Extend the
   // workflow-facing map (copy, not mutation — the base map is shared with
   // gateway registration) so those steps route to the meta handler. The
   // permissive META schema defers default-filling to handleActionSearch so
@@ -660,6 +662,10 @@ export function registerCodeModeTools(
     "action.search": {
       schema: WorkflowActionSearchRequestSchema,
       handler: async (args: unknown) => handleActionSearch(args, services),
+    },
+    info: {
+      schema: InfoRequestSchema,
+      handler: async (args: unknown) => handleInfo(args),
     },
   };
   const activeGatewayBindings = Object.entries(
@@ -679,7 +685,9 @@ export function registerCodeModeTools(
             )
           : action === "runtime.execute"
             ? WorkflowRuntimeExecuteResponseSchema
-            : publicSuccessOutputSchemaByAction.get(action);
+            : action === "info"
+              ? withProjectionSuccessOutputSchema(action, InfoResponseSchema)
+              : publicSuccessOutputSchemaByAction.get(action);
       return outputSchema === undefined ? [] : [[fn, outputSchema] as const];
     }),
     ...Object.entries(INTERNAL_TRANSFORM_SUCCESS_OUTPUT_SCHEMA_BY_ACTION),

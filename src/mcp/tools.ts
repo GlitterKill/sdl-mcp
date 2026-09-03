@@ -1844,6 +1844,10 @@ export const SliceRefreshResponseSchema = z.object({
   lease: SliceLeaseSchema.optional(),
 });
 
+const ProjectedSliceRefreshResponseSchema = SliceRefreshResponseSchema.extend({
+  lease: SliceLeaseSchema.omit({ expiresAt: true }).optional(),
+});
+
 const SliceErrorResponseSchema = z.object({
   error: z.object({
     code: z.string(),
@@ -1879,6 +1883,8 @@ const ProjectedGraphSliceSchema = GraphSliceSchema.pick({
   })
   .extend({
     cards: z.array(ProjectedSliceSymbolCardSchema),
+    cardsOmitted: z.number().int().nonnegative().optional(),
+    edgesOmitted: z.number().int().nonnegative().optional(),
     truncation: ProjectedSliceTruncationSchema.optional(),
   });
 
@@ -5289,6 +5295,7 @@ const PROJECTED_SUCCESS_SCHEMA_BY_ACTION: Readonly<
   Record<string, readonly z.ZodType[]>
 > = Object.freeze({
   "delta.get": [ProjectedDeltaGetCompactResponseSchema],
+  "slice.refresh": [ProjectedSliceRefreshResponseSchema],
   "symbol.edit": [ProjectedSymbolEditPreviewResponseSchema],
   "pr.risk.analyze": [ProjectedPRRiskCompactResponseSchema],
   "code.getSkeleton": [ProjectedCodeSkeletonCompactResponseSchema],

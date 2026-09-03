@@ -11,6 +11,7 @@ import { logger } from "../util/logger.js";
 import { ArtifactCleanupError } from "../domain/errors.js";
 import type { RedactionConfig } from "../config/types.js";
 import { isReDoSRisk } from "../util/safeRegex.js";
+import { redactMachinePaths } from "../util/redact-machine-paths.js";
 
 const gzipAsync = promisify(gzip);
 const ARTIFACT_DIR_PREFIX = "sdl-runtime";
@@ -54,6 +55,8 @@ interface WriteArtifactOptions {
   maxArtifactBytes: number;
   artifactBaseDir?: string | null;
   redactionConfig?: RedactionConfig;
+  /** Absolute roots that must never be persisted in command output. */
+  machinePaths?: readonly string[];
   /** Test hook used to fault-inject individual artifact member writes. */
   writeFileImpl?: ArtifactWriteFile;
 }
@@ -93,9 +96,10 @@ export function getArtifactBaseDir(configBaseDir?: string | null): string {
 export function applyRedaction(
   content: string,
   redactionConfig?: RedactionConfig,
+  machinePaths: readonly string[] = [],
 ): string {
   if (!redactionConfig?.enabled) {
-    return content;
+    return redactMachinePaths(content, machinePaths, "<repo-root>");
   }
 
   let redacted = content;
@@ -134,7 +138,7 @@ export function applyRedaction(
     }
   }
 
-  return redacted;
+  return redactMachinePaths(redacted, machinePaths, "<repo-root>");
 }
 
 export async function writeArtifact(
@@ -154,10 +158,12 @@ export async function writeArtifact(
   const redactedStdout = applyRedaction(
     opts.stdout.toString("utf-8"),
     opts.redactionConfig,
+    opts.machinePaths,
   );
   const redactedStderr = applyRedaction(
     opts.stderr.toString("utf-8"),
     opts.redactionConfig,
+    opts.machinePaths,
   );
 
   const stdoutSha256 = hashContent(redactedStdout);

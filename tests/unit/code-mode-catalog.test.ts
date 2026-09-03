@@ -86,12 +86,14 @@ describe("code-mode action catalog", () => {
       }) as {
         actions?: Array<{
           action: string;
+          fn?: string;
           schemaSummary?: { fields: Array<{ name: string }> };
         }>;
       };
 
       assert.strictEqual(result.actions?.length, 1);
       assert.strictEqual(result.actions[0]?.action, "info");
+      assert.strictEqual(result.actions[0]?.fn, "info");
       assert.ok(
         result.actions[0]?.schemaSummary?.fields.some(
           (field) => field.name === "redactPaths",

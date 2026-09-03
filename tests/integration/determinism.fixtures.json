@@ -593,6 +593,21 @@
       }
     },
     {
+      "tool": "sdl.workflow",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "steps": [
+          {
+            "fn": "info",
+            "args": {
+              "redactPaths": true
+            }
+          }
+        ],
+        "detail": "compact"
+      }
+    },
+    {
       "tool": "sdl.file",
       "args": {
         "repoId": "{REPO_ID}",
@@ -732,6 +747,21 @@
               "limit": 1,
               "semantic": false,
               "wireFormat": "json"
+            }
+          }
+        ],
+        "detail": "full"
+      }
+    },
+    {
+      "tool": "sdl.workflow",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "steps": [
+          {
+            "fn": "info",
+            "args": {
+              "redactPaths": true
             }
           }
         ],

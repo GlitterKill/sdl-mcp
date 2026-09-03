@@ -36,6 +36,8 @@ import {
 import {
   DeltaGetResponseSchema,
   ResponseGetResponseSchema,
+  SliceBuildResponseSchema,
+  SliceRefreshResponseSchema,
   withProjectionSuccessOutputSchema,
 } from "../../dist/mcp/tools.js";
 import { registerTools } from "../../dist/mcp/tools/index.js";
@@ -590,8 +592,8 @@ describe("response projection inventory", () => {
       ["sdl.file", 1_000],
       // Stored-response continuation, recovery defaults, and diagnostic code metadata total 1,641 nodes.
       ["sdl.retrieve", 1_648],
-      // Successful-truncation recovery plus strict delta preview arms total 5,601 nodes.
-      ["sdl.workflow", 5_611],
+      // Workflow info plus projected slice-refresh arms total 5,806 nodes.
+      ["sdl.workflow", 5_810],
     ]);
 
     for (const [name, maxNodes] of nodeBudgets) {
@@ -2132,4 +2134,85 @@ describe("response projection inventory", () => {
     ]);
   });
 
+});
+
+describe("slice output contract regressions", () => {
+  it("keeps the slice alongside its handle", () => {
+    const cards = Array.from({ length: 13 }, (_, index) => ({
+      symbolId: `sym-${index}`,
+      file: "src/example.ts",
+      range: { startLine: 1, startCol: 0, endLine: 1, endCol: 1 },
+      kind: "function",
+      name: `symbol${index}`,
+      exported: true,
+      detailLevel: "deps",
+      version: {},
+    }));
+    const edges = Array.from(
+      { length: 17 },
+      () => [0, 1, "call", 1.000000000001] as const,
+    );
+    const projected = projectToolResultForModelContent(
+      "slice.build",
+      {
+        sliceHandle: "slice-contract",
+        slice: {
+          startSymbols: ["sym-entry"],
+          cards,
+          edges,
+        },
+      },
+      { repoId: "repo-a", detail: "full", includeDiagnostics: false },
+    ) as {
+      sliceHandle?: string;
+      slice?: { startSymbols?: string[]; cards?: unknown[]; edges?: unknown[] };
+    };
+
+    assert.equal(projected.sliceHandle, "slice-contract");
+    assert.deepEqual(projected.slice?.startSymbols, ["sym-entry"]);
+    assert.equal(projected.slice?.cards?.length, 12);
+    assert.equal(projected.slice?.edges?.length, 16);
+    const publicSchema = withProjectionSuccessOutputSchema(
+      "slice.build",
+      SliceBuildResponseSchema,
+    );
+    assert.deepEqual(publicSchema.parse(projected), projected);
+  });
+
+  it("hides only the volatile slice lease expiry by default", () => {
+    const canonical = {
+      sliceHandle: "slice-contract",
+      knownVersion: "v1",
+      currentVersion: "v2",
+      notModified: true,
+      delta: null,
+      lease: {
+        expiresAt: "2026-09-03T12:34:56.000Z",
+        minVersion: null,
+        maxVersion: "v2",
+      },
+    };
+    const projected = projectToolResultForModelContent(
+      "slice.refresh",
+      canonical,
+      { repoId: "repo-a", detail: "full", includeDiagnostics: false },
+    ) as { lease?: Record<string, unknown> };
+    const diagnostics = projectToolResultForModelContent(
+      "slice.refresh",
+      canonical,
+      { repoId: "repo-a", detail: "full", includeDiagnostics: true },
+    ) as { lease?: Record<string, unknown> };
+
+    assert.deepEqual(projected.lease, { minVersion: null, maxVersion: "v2" });
+    const publicSchema = withProjectionSuccessOutputSchema(
+      "slice.refresh",
+      SliceRefreshResponseSchema,
+    );
+    assert.deepEqual(publicSchema.parse(projected), projected);
+    assert.deepEqual(publicSchema.parse(diagnostics), diagnostics);
+    assert.equal(
+      diagnostics.lease?.expiresAt,
+      "2026-09-03T12:34:56.000Z",
+    );
+  });
 });

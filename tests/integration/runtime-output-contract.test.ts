@@ -16,7 +16,10 @@ import {
 import { PROJECTION_PROFILE_REGISTRY } from "../../dist/mcp/response-projection/registry.js";
 import { handleRuntimeQueryOutput } from "../../dist/mcp/tools/runtime-query.js";
 import { RuntimeQueryOutputRequestSchema } from "../../dist/mcp/tools.js";
-import { writeArtifact } from "../../dist/runtime/artifacts.js";
+import {
+  applyRedaction,
+  writeArtifact,
+} from "../../dist/runtime/artifacts.js";
 
 type Detail = "compact" | "standard" | "full";
 
@@ -367,6 +370,68 @@ describe("runtime output contract", () => {
     assert.equal(diagnostics.durationMs, 91);
     for (const hidden of ["exitCode", "signal", "truncation", "digest"]) {
       assert.equal(hidden in diagnostics, false, hidden);
+    }
+  });
+
+  it("redacts repository roots before persisting runtime output", async () => {
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        repos: [{ repoId: "repo-a", rootPath: testDir }],
+        policy: {
+          maxWindowLines: 180,
+          maxWindowTokens: 1400,
+          requireIdentifiers: true,
+          allowBreakGlass: true,
+          defaultDenyRaw: true,
+          budgetCaps: { maxCards: 60, maxEstimatedTokens: 12_000 },
+        },
+        runtime: { artifactBaseDir },
+      }),
+      "utf8",
+    );
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+
+    const slashRoot = testDir.replaceAll("\\", "/");
+    const immediate = applyRedaction(
+      `${testDir}\n${slashRoot}`,
+      undefined,
+      [testDir],
+    );
+    assert.equal(immediate.includes(testDir), false);
+    assert.equal(immediate.includes(slashRoot), false);
+    assert.match(immediate, /<repo-root>/);
+
+    const artifact = await writeArtifact({
+      repoId: "repo-a",
+      runtime: "node",
+      argsHash: "a".repeat(64),
+      exitCode: 0,
+      signal: null,
+      durationMs: 1,
+      stdout: Buffer.from(`${testDir}\n${slashRoot}`, "utf8"),
+      stderr: Buffer.alloc(0),
+      policyAuditHash: "b".repeat(64),
+      artifactTtlHours: 1,
+      maxArtifactBytes: 1024 * 1024,
+      artifactBaseDir,
+      machinePaths: [testDir],
+    });
+
+    for (const view of ["model", "raw"] as const) {
+      const response = await handleRuntimeQueryOutput({
+        repoId: "repo-a",
+        artifactHandle: artifact.artifactHandle,
+        view,
+        queryTerms: [],
+        lineRange: { stream: "stdout", startLine: 1, endLine: 2 },
+      });
+      const content = response.excerpts.map((excerpt) => excerpt.content).join("\n");
+      assert.equal(content.includes(testDir), false, view);
+      assert.equal(content.includes(slashRoot), false, view);
+      assert.match(content, /<repo-root>/, view);
     }
   });
 

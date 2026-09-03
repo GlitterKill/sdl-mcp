@@ -69,6 +69,8 @@ type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefor
 // === Discovery ===
 /** Action catalog; workflow fn "actionSearch" */
 function actionSearch(p: { query: string; limit?: number; includeSchemas?: boolean }): { actions: object[] }
+/** Runtime/config status; paths redacted by default */
+function info(p?: { redactPaths?: boolean }): object
 
 // === Query ===
 /** ~150; nearMisses */

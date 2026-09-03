@@ -532,10 +532,7 @@ function buildBoundaryFailureEnvelope(
   }
   return {
     content,
-    structuredContent: {
-      status: "error",
-      error: { code, message },
-    },
+    structuredContent: { error: { code, message } },
     isError: true,
   };
 }
@@ -606,7 +603,11 @@ function workflowProjectionSummary(
   toolName: string,
   footerText: string,
 ): string | undefined {
-  if (toolName !== "sdl.workflow" || !isRecordValue(value)) return undefined;
+  if (
+    toolName !== "sdl.workflow"
+    || !isRecordValue(value)
+    || isRecordValue(value.error)
+  ) return undefined;
   const results = Array.isArray(value.results) ? value.results : [];
   let ok = 0;
   let error = 0;

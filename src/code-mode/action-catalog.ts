@@ -1367,8 +1367,10 @@ export function getActionMetadata(action: string): ActionMetadata {
   return ACTION_METADATA[action] ?? EMPTY_METADATA;
 }
 
-export const FN_NAME_MAP: Readonly<Record<string, string>> =
-  RECOVERY_FN_NAME_MAP;
+export const FN_NAME_MAP: Readonly<Record<string, string>> = Object.freeze({
+  ...RECOVERY_FN_NAME_MAP,
+  info: "info",
+});
 
 export const ACTION_TO_FN: Readonly<Record<string, string>> = Object.freeze(
   Object.fromEntries(

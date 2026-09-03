@@ -368,19 +368,20 @@ function compactEvidence(
 function compactSlice(value: Record<string, unknown>): unknown {
   const action = primaryAction(value);
   if (action !== undefined) return { nextAction: action };
+  const result: Record<string, unknown> = {};
   if (typeof value.sliceHandle === "string") {
-    return { sliceHandle: value.sliceHandle };
+    result.sliceHandle = value.sliceHandle;
   }
   const source = isRecord(value.slice) ? value.slice : value;
   const slice: Record<string, unknown> = {};
-  if (Array.isArray(source.startSymbols) && source.startSymbols.length > 0) {
+  if (Array.isArray(source.startSymbols)) {
     slice.startSymbols = source.startSymbols;
   }
-  if (Array.isArray(source.cards) && source.cards.length > 0) {
+  if (Array.isArray(source.cards)) {
     slice.cards = source.cards.slice(0, 12).map(compactItem);
     if (source.cards.length > 12) slice.cardsOmitted = source.cards.length - 12;
   }
-  if (Array.isArray(source.edges) && source.edges.length > 0) {
+  if (Array.isArray(source.edges)) {
     slice.edges = source.edges.slice(0, 16).map(compactItem);
     if (source.edges.length > 16) slice.edgesOmitted = source.edges.length - 16;
   }
@@ -389,7 +390,8 @@ function compactSlice(value: Record<string, unknown>): unknown {
       slice[key] = source[key];
     }
   }
-  return Object.keys(slice).length > 0 ? { slice } : {};
+  if (Object.keys(slice).length > 0) result.slice = slice;
+  return result;
 }
 
 function compactSpillover(value: Record<string, unknown>): unknown {
@@ -532,6 +534,16 @@ function projectCompact(
   return value;
 }
 
+function projectSliceRefresh(
+  value: Record<string, unknown>,
+  includeDiagnostics: boolean,
+): Record<string, unknown> {
+  if (includeDiagnostics || !isRecord(value.lease)) return value;
+  const lease = { ...value.lease };
+  delete lease.expiresAt;
+  return { ...value, lease };
+}
+
 /** Keep canonical retrieval data untouched and select only final model presentation. */
 export function projectRetrievalValue(
   input: ModelProjectionInput,
@@ -549,6 +561,9 @@ export function projectRetrievalValue(
       && (/GRAPH.*UNAVAILABLE/.test(code) || /BLOCKED/.test(code))
       ? canonical
       : compatibility;
+  }
+  if (action === "slice.refresh" && isRecord(compatibility)) {
+    return projectSliceRefresh(compatibility, input.options.includeDiagnostics);
   }
   if (![
     "symbol.getCard",

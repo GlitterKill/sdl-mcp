@@ -882,6 +882,7 @@ export async function handleRuntimeExecute(
           maxArtifactBytes: runtimeConfig.maxArtifactBytes,
           artifactBaseDir: runtimeConfig.artifactBaseDir,
           redactionConfig: appConfig.redaction,
+          machinePaths: [canonicalRepoRoot, repo.rootPath],
         });
         timer.record("runtime.persistArtifact", artifactStartedAt);
         return artifactResult.artifactDir
@@ -924,10 +925,12 @@ export async function handleRuntimeExecute(
         const compileStdout = applyRedaction(
           compileResult.stdout.toString("utf-8"),
           appConfig.redaction,
+          [canonicalRepoRoot, repo.rootPath],
         );
         const compileStderr = applyRedaction(
           compileResult.stderr.toString("utf-8"),
           appConfig.redaction,
+          [canonicalRepoRoot, repo.rootPath],
         );
         const compileRawTokens = Math.ceil(
           (compileResult.totalStdoutBytes + compileResult.totalStderrBytes) / 4,
@@ -1117,10 +1120,12 @@ export async function handleRuntimeExecute(
     const stdoutStr = applyRedaction(
       result.stdout.toString("utf-8"),
       appConfig.redaction,
+      [canonicalRepoRoot, repo.rootPath],
     );
     const stderrStr = applyRedaction(
       result.stderr.toString("utf-8"),
       appConfig.redaction,
+      [canonicalRepoRoot, repo.rootPath],
     );
     runtimeHints = mergeRuntimeHints(
       runtimeHints,

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Workflow projection errors**: Preserve typed projection-boundary failures and route low-budget object results through their continuation instead of emitting incomplete child payloads that fail the strict internal `sdl.workflow` output validator.
+
+- **Public tool output contracts**: Redact runtime output paths before inline or persisted exposure, retain slice payloads beside handles, omit volatile slice lease expiries unless diagnostics are requested, keep typed workflow errors accurate, and accept the documented `info` workflow function.
+
 - **Dependency security**: Update transitive `fast-uri`, `browserslist`, `qs`, and `@humanfs/node` resolutions to patched versions.
 
 - **Windows LadybugDB FTS security runtime**: Upgrade the exact Windows x64 OpenSSL runtime pin to `@sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1` and retire `3.5.7-sdl.2` ([#51](https://github.com/GlitterKill/sdl-mcp/issues/51)).

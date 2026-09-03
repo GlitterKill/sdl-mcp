@@ -877,9 +877,16 @@ test("SESSION BOUNDARY: workflow projection is resolved before continuation stor
     assert.match(continuation, /durationMs/);
     assert.match(continuation, /stable-repository-data/);
     const displayed = projectToolResultForModelContent("sdl.workflow", response, workflowArgs) as {
-      results: Array<{ result?: unknown }>;
+      results: Array<{
+        result?: unknown;
+        truncatedResponse?: { continuationHandle?: string };
+      }>;
     };
-    assert.match(canonical(displayed.results[1].result), /durationMs/);
+    assert.equal(displayed.results[1].result, undefined);
+    assert.equal(
+      displayed.results[1].truncatedResponse?.continuationHandle,
+      handle,
+    );
     return handle;
   };
 

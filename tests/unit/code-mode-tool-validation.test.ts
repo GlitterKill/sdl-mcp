@@ -410,7 +410,7 @@ describe("code-mode tool validation", () => {
     }
   });
 
-  it("rejects info and sdl.info as sdl.workflow actions", async () => {
+  it("executes info as an sdl.workflow action", async () => {
     let workflowHandler: ((args: unknown) => Promise<unknown>) | null = null;
     const fakeServer = {
       registerTool(
@@ -440,7 +440,15 @@ describe("code-mode tool validation", () => {
     );
 
     assert.ok(workflowHandler);
-    for (const fn of ["notARealFunction", "info", "sdl.info"]) {
+    const response = await workflowHandler({
+      repoId: "demo-repo",
+      onError: "stop",
+      steps: [{ fn: "info", args: { redactPaths: true } }],
+    }) as { results?: Array<{ fn?: string; result?: Record<string, unknown> }> };
+    assert.equal(response.results?.[0]?.fn, "info");
+    assert.equal(typeof response.results?.[0]?.result?.version, "string");
+
+    for (const fn of ["notARealFunction", "sdl.info"]) {
       await assert.rejects(
         () =>
           workflowHandler?.({

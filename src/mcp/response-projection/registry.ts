@@ -304,6 +304,7 @@ export const WORKFLOW_CHILD_ACTION_BINDINGS = Object.freeze({
   searchEdit: "search.edit",
   semanticEnrichmentRefresh: "semantic.enrichment.refresh",
   semanticEnrichmentStatus: "semantic.enrichment.status",
+  info: "info",
 } as const satisfies Readonly<Record<string, ProjectionAction>>);
 
 export function canonicalActionName(actionOrToolName: string): string {

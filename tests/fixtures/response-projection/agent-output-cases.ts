@@ -201,8 +201,8 @@ export const AGENT_OUTPUT_CASES = [
       },
       relationshipNote: "One direct dependency.",
     }),
-    expectedCompactKeys: ["sliceHandle"],
-    requiredActionabilityKeys: ["sliceHandle"],
+    expectedCompactKeys: ["sliceHandle", "slice"],
+    requiredActionabilityKeys: ["sliceHandle", "slice"],
     executionMode: "read-only",
   }),
   compactCase({
