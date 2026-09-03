@@ -59,8 +59,19 @@ export * from "./ladybug-feedback.js";
 // Legacy SymbolEmbedding compatibility CRUD, summary cache, sync artifacts, and symbol references.
 export * from "./ladybug-embeddings.js";
 
-// Model-aware Symbol node embedding helpers (replaces SymbolEmbedding table access)
-export * from "./ladybug-symbol-embeddings.js";
+// Model-aware Symbol vector embedding helpers
+export {
+  deleteSymbolVectorEmbeddingsBySymbolIds,
+  getSymbolVectorEmbedding,
+  getSymbolVectorEmbeddings,
+  hasCompleteSymbolVectorEmbedding,
+  resolveSymbolVectorPhysicalIdentity,
+  setSymbolVectorEmbedding,
+  setSymbolVectorEmbeddingBatch,
+  type SymbolVectorEmbeddingBatchItem,
+  type SymbolVectorEmbeddingRow,
+  type SymbolVectorPhysicalIdentity,
+} from "./ladybug-symbol-embeddings.js";
 
 // Tool policy & tsconfig hash operations
 export * from "./ladybug-config.js";

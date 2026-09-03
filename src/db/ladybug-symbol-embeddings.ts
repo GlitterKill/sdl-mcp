@@ -1,8 +1,14 @@
 /** Model-aware storage helpers for the dedicated SymbolVectorEmbedding table. */
+import { createHash } from "node:crypto";
+
 import type { Connection } from "kuzu";
 
+import type { SemanticConfig } from "../config/types.js";
+import { IndexError } from "../domain/errors.js";
 import {
+  EMBEDDING_MODELS,
   getVecPropertyName,
+  getVectorIndexName,
   SYMBOL_VECTOR_EMBEDDING_TABLE,
 } from "../retrieval/model-mapping.js";
 import { logger } from "../util/logger.js";
@@ -21,7 +27,91 @@ export interface SymbolVectorEmbeddingBatchItem {
   vectorArray: number[];
 }
 
-const SAFE_PROPERTY_NAME = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
+export interface SymbolVectorPhysicalIdentity {
+  repoHash: string;
+  tableName: string;
+  indexName: string;
+  propertyName: string;
+}
+
+const SAFE_IDENTIFIER = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
+
+function hashRepositoryId(repoId: string): string {
+  return createHash("sha256").update(repoId).digest("hex").slice(0, 32);
+}
+
+function getEffectiveLogicalIndexStem(
+  model: string,
+  semanticConfig?: SemanticConfig,
+): string | null {
+  return (
+    semanticConfig?.retrieval?.vector?.indexes?.[model]?.indexName ??
+    getVectorIndexName(model)
+  );
+}
+
+function assertPhysicalIdentifier(
+  identifier: string,
+  kind: "table" | "index",
+  model: string,
+): void {
+  if (SAFE_IDENTIFIER.test(identifier)) return;
+
+  if (identifier.length > 64) {
+    const guidance =
+      kind === "index"
+        ? ` Shorten semantic.retrieval.vector.indexes["${model}"].indexName.`
+        : "";
+    throw new IndexError(
+      `Resolved Symbol vector ${kind} identifier "${identifier}" is ${identifier.length} characters, exceeding the 64-character identifier limit.${guidance}`,
+    );
+  }
+
+  throw new IndexError(
+    `Resolved Symbol vector ${kind} identifier "${identifier}" is invalid; identifiers must start with an ASCII letter and contain only ASCII letters, digits, or underscores.`,
+  );
+}
+
+export function resolveSymbolVectorPhysicalIdentity(
+  repoId: string,
+  model: string,
+  semanticConfig?: SemanticConfig,
+): SymbolVectorPhysicalIdentity {
+  if (repoId.length === 0) {
+    throw new IndexError(
+      "Cannot resolve Symbol vector physical identity: repository ID must not be empty.",
+    );
+  }
+
+  const propertyName = getVecPropertyName(model);
+  const logicalIndexStem = getEffectiveLogicalIndexStem(model, semanticConfig);
+  if (!propertyName || !logicalIndexStem) {
+    throw new IndexError(
+      `Unsupported embedding model "${model}": cannot resolve Symbol vector physical identity.`,
+    );
+  }
+
+  for (const supportedModel of Object.keys(EMBEDDING_MODELS)) {
+    if (supportedModel === model) continue;
+    const otherLogicalIndexStem = getEffectiveLogicalIndexStem(
+      supportedModel,
+      semanticConfig,
+    );
+    if (otherLogicalIndexStem !== logicalIndexStem) continue;
+    throw new IndexError(
+      `Embedding models "${model}" and "${supportedModel}" resolve to the same Symbol vector logical index stem "${logicalIndexStem}". Configure unique indexName values in semantic.retrieval.vector.indexes because both models share one repository table.`,
+    );
+  }
+
+  const repoHash = hashRepositoryId(repoId);
+  const tableName = `${SYMBOL_VECTOR_EMBEDDING_TABLE}_r_${repoHash}`;
+  const indexName = `${logicalIndexStem}_r_${repoHash}`;
+
+  assertPhysicalIdentifier(tableName, "table", model);
+  assertPhysicalIdentifier(indexName, "index", model);
+
+  return { repoHash, tableName, indexName, propertyName };
+}
 
 function resolveVectorProperty(model: string): string {
   const vectorProperty = getVecPropertyName(model);
@@ -30,7 +120,7 @@ function resolveVectorProperty(model: string): string {
       `Unknown embedding model "${model}": cannot resolve vector property`,
     );
   }
-  if (!SAFE_PROPERTY_NAME.test(vectorProperty)) {
+  if (!SAFE_IDENTIFIER.test(vectorProperty)) {
     throw new Error(`Unsafe Cypher property name: "${vectorProperty}"`);
   }
   return vectorProperty;
