@@ -1048,3 +1048,222 @@ describe("upsertSymbolBatch — unit (fake connection)", () => {
     );
   });
 });
+
+
+describe("repository-routed symbol vector storage — unit", () => {
+  it("propagates SHOW_TABLES failures without preparing the catalog call", async () => {
+    const { getRepoSymbolVectorEmbedding } =
+      await import("../../dist/db/ladybug-symbol-embeddings.js");
+    let queryCalls = 0;
+    let prepareCalls = 0;
+    const conn = {
+      async query() {
+        queryCalls += 1;
+        throw new Error("catalog unavailable sentinel");
+      },
+      async prepare() {
+        prepareCalls += 1;
+        throw new Error("catalog calls must not be prepared");
+      },
+    } as unknown as Connection;
+
+    await assert.rejects(
+      getRepoSymbolVectorEmbedding(
+        conn,
+        "missing-repo",
+        "symbol-1",
+        "jina-embeddings-v2-base-code",
+      ),
+      /catalog unavailable sentinel/,
+    );
+    assert.strictEqual(queryCalls, 1);
+    assert.strictEqual(prepareCalls, 0);
+  });
+
+  it("rejects a pre-existing wrong schema before CREATE, DELETE, or MERGE", async () => {
+    const {
+      resolveSymbolVectorPhysicalIdentity,
+      setRepoSymbolVectorEmbedding,
+    } = await import("../../dist/db/ladybug-symbol-embeddings.js");
+    const { withExclusiveLadybugOperation } =
+      await import("../../dist/db/ladybug-operation-gate.js");
+    const tableName = resolveSymbolVectorPhysicalIdentity(
+      "wrong-schema-repo",
+      "jina-embeddings-v2-base-code",
+    ).tableName;
+    const statements: string[] = [];
+    const conn = {
+      async query(statement: string) {
+        statements.push(statement);
+        const rows = statement.includes("SHOW_TABLES")
+          ? [{ name: tableName, type: "NODE" }]
+          : [{ name: "embeddingId", type: "STRING", "primary key": true }];
+        return {
+          async getAll() {
+            return rows;
+          },
+          close() {},
+        };
+      },
+      async prepare(statement: string) {
+        statements.push(statement);
+        return {
+          statement,
+          isSuccess() {
+            return true;
+          },
+          getErrorMessage() {
+            return "";
+          },
+        };
+      },
+      async execute() {
+        return new FakeQueryResult();
+      },
+    } as unknown as Connection;
+
+    await assert.rejects(
+      withExclusiveLadybugOperation(() =>
+        setRepoSymbolVectorEmbedding(
+          conn,
+          "wrong-schema-repo",
+          "symbol-1",
+          "jina-embeddings-v2-base-code",
+          "vector",
+          "hash",
+          new Array<number>(768).fill(0.1),
+        ),
+      ),
+      /schema/i,
+    );
+    assert.ok(
+      statements.every(
+        (statement) => !/\b(?:CREATE|DELETE|MERGE)\b/.test(statement),
+      ),
+      `unexpected mutation statement: ${statements.join("\n")}`,
+    );
+  });
+
+  it("validates ownership with one fail-fast predicate query", async () => {
+    const {
+      resolveSymbolVectorPhysicalIdentity,
+      validateRepoSymbolVectorOwnership,
+    } = await import("../../dist/db/ladybug-symbol-embeddings.js");
+    const repoId = "ownership-query-repo";
+    const tableName = resolveSymbolVectorPhysicalIdentity(
+      repoId,
+      "jina-embeddings-v2-base-code",
+    ).tableName;
+    const catalogColumns = [
+      { name: "embeddingId", type: "STRING", "primary key": true },
+      { name: "repoId", type: "STRING", "primary key": false },
+      { name: "symbolId", type: "STRING", "primary key": false },
+      { name: "model", type: "STRING", "primary key": false },
+      { name: "embeddingVector", type: "STRING", "primary key": false },
+      { name: "cardHash", type: "STRING", "primary key": false },
+      { name: "updatedAt", type: "STRING", "primary key": false },
+      {
+        name: "embeddingJinaCodeVec",
+        type: "DOUBLE[768]",
+        "primary key": false,
+      },
+      {
+        name: "embeddingNomicVec",
+        type: "DOUBLE[768]",
+        "primary key": false,
+      },
+    ];
+    const preparedStatements: string[] = [];
+    let executeCalls = 0;
+    const conn = {
+      async query(statement: string) {
+        const rows = statement.includes("SHOW_TABLES")
+          ? [{ name: tableName, type: "NODE" }]
+          : catalogColumns;
+        return {
+          async getAll() {
+            return rows;
+          },
+          close() {},
+        };
+      },
+      async prepare(statement: string) {
+        preparedStatements.push(statement);
+        return {
+          statement,
+          isSuccess() {
+            return true;
+          },
+          getErrorMessage() {
+            return "";
+          },
+        };
+      },
+      async execute() {
+        executeCalls += 1;
+        return new FakeQueryResult();
+      },
+    } as unknown as Connection;
+
+    await validateRepoSymbolVectorOwnership(
+      conn,
+      repoId,
+      "jina-embeddings-v2-base-code",
+    );
+
+    assert.strictEqual(executeCalls, 1);
+    assert.strictEqual(preparedStatements.length, 1);
+    const statement = preparedStatements[0] ?? "";
+    assert.match(statement, /WHERE e\.repoId IS NULL OR e\.repoId <> \$repoId/);
+    assert.match(statement, /e\.embeddingJinaCodeVec IS NOT NULL/);
+    assert.match(statement, /e\.model IS NULL OR e\.model <> \$model/);
+    assert.match(statement, /e\.symbolId IS NULL/);
+    assert.match(statement, /e\.embeddingId IS NULL/);
+    assert.match(
+      statement,
+      /e\.embeddingId <> \$model \+ ':' \+ e\.symbolId/,
+    );
+    assert.match(statement, /RETURN 1 AS invalid\s+LIMIT 1/);
+    assert.doesNotMatch(statement, /RETURN e\.repoId AS repoId/);
+  });
+
+  it("resets prepared statement caches for every connection at once", async () => {
+    const { getPreparedStatement, resetPreparedStatementCaches } =
+      await import("../../dist/db/ladybug-core.js");
+    let firstPrepareCalls = 0;
+    let secondPrepareCalls = 0;
+    const makeConnection = (increment: () => void) =>
+      ({
+        async prepare(statement: string) {
+          increment();
+          return {
+            statement,
+            isSuccess() {
+              return true;
+            },
+            getErrorMessage() {
+              return "";
+            },
+          };
+        },
+      }) as unknown as Connection;
+    const first = makeConnection(() => {
+      firstPrepareCalls += 1;
+    });
+    const second = makeConnection(() => {
+      secondPrepareCalls += 1;
+    });
+
+    await getPreparedStatement(first, "RETURN 1");
+    await getPreparedStatement(first, "RETURN 1");
+    await getPreparedStatement(second, "RETURN 1");
+    await getPreparedStatement(second, "RETURN 1");
+    assert.deepStrictEqual([firstPrepareCalls, secondPrepareCalls], [1, 1]);
+
+    resetPreparedStatementCaches();
+
+    await getPreparedStatement(first, "RETURN 1");
+    await getPreparedStatement(second, "RETURN 1");
+    assert.deepStrictEqual([firstPrepareCalls, secondPrepareCalls], [2, 2]);
+  });
+});

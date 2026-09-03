@@ -3,6 +3,13 @@ import type { Connection } from "kuzu";
 import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "../retrieval/model-mapping.js";
 import { querySingle } from "./ladybug-core.js";
 
+// Repository-scoped completeness and ownership checks live with storage so
+// mutation callers and health reporting share one invariant implementation.
+export {
+  countCompleteRepoSymbolVectors,
+  validateRepoSymbolVectorOwnership,
+} from "./ladybug-symbol-embeddings.js";
+
 export interface RetrievalCoverageRow {
   eligible: unknown;
   covered: unknown;

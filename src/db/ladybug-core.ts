@@ -19,7 +19,7 @@ import {
 
 const MAX_PREPARED_STATEMENT_CACHE_SIZE = 200;
 
-const preparedStatementCacheByConn = new WeakMap<
+let preparedStatementCacheByConn = new WeakMap<
   Connection,
   Map<string, PreparedStatement>
 >();
@@ -739,6 +739,18 @@ export async function drainConnMutex(
  */
 export function clearPreparedStatementCache(conn: Connection): void {
   preparedStatementCacheByConn.delete(conn);
+}
+
+/**
+ * Invalidate prepared plans on the write connection and every pooled reader.
+ * Replacing the WeakMap evicts all weakly-keyed caches without retaining or
+ * enumerating connection objects.
+ */
+export function resetPreparedStatementCaches(): void {
+  preparedStatementCacheByConn = new WeakMap<
+    Connection,
+    Map<string, PreparedStatement>
+  >();
 }
 
 export function assertSafeInt(value: number, name: string): void {
