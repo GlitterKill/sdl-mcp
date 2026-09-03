@@ -74,6 +74,7 @@ import { recoverMissingMetricsForRepo } from "../graph/metrics-recovery.js";
 import { clearSliceCache } from "../graph/sliceCache.js";
 import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
+import { invalidateSymbolRetrievalCoverageCache } from "../retrieval/health.js";
 import {
   resolveEffectiveIndexMode,
   resolvePostIndexSessionTimeoutMs,
@@ -708,6 +709,7 @@ function invalidateIndexResultCaches(repoId: string): void {
   clearOverviewCache();
   clearSliceCache();
   clearFingerprintCollisionLog();
+  invalidateSymbolRetrievalCoverageCache(repoId);
 }
 
 function skippedDerivedStateResult(reason: string): {

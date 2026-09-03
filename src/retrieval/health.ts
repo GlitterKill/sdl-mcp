@@ -8,6 +8,7 @@ import {
   getFileSummaryRetrievalCoverage,
   getSymbolRetrievalCoverage,
 } from "../db/ladybug-retrieval-health.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import {
   ENTITY_FTS_INDEX_NAMES,
@@ -145,6 +146,64 @@ export function aggregateCoveragePermille(
   return Math.round((covered * 1000) / eligible);
 }
 
+/** Version-scoped Symbol coverage shared across retrieval requests. */
+type SymbolRetrievalCoverage = Awaited<
+  ReturnType<typeof getSymbolRetrievalCoverage>
+>;
+
+interface SymbolRetrievalCoverageCacheEntry {
+  versionId: string;
+  promise: Promise<SymbolRetrievalCoverage>;
+}
+
+const symbolRetrievalCoverageCache = new Map<
+  string,
+  Map<string, SymbolRetrievalCoverageCacheEntry>
+>();
+
+function getCachedSymbolRetrievalCoverage(
+  conn: Connection,
+  repoId: string,
+  versionId: string,
+  property: string,
+): Promise<SymbolRetrievalCoverage> {
+  let repoCache = symbolRetrievalCoverageCache.get(repoId);
+  if (!repoCache) {
+    repoCache = new Map();
+    symbolRetrievalCoverageCache.set(repoId, repoCache);
+  }
+
+  const existing = repoCache.get(property);
+  if (existing?.versionId === versionId) {
+    return existing.promise;
+  }
+
+  // Cache the promise before the database work starts so concurrent queries
+  // share one repository-wide coverage scan.
+  const promise = Promise.resolve().then(() =>
+    getSymbolRetrievalCoverage(conn, repoId, property),
+  );
+  const entry = { versionId, promise };
+  repoCache.set(property, entry);
+
+  void promise.catch(() => {
+    const currentRepoCache = symbolRetrievalCoverageCache.get(repoId);
+    // A failed old-version scan must not evict a newer replacement.
+    if (currentRepoCache?.get(property) === entry) {
+      currentRepoCache.delete(property);
+      if (currentRepoCache.size === 0) {
+        symbolRetrievalCoverageCache.delete(repoId);
+      }
+    }
+  });
+
+  return promise;
+}
+
+export function invalidateSymbolRetrievalCoverageCache(repoId: string): void {
+  symbolRetrievalCoverageCache.delete(repoId);
+}
+
 /**
  * Inspect retrieval indexes and repo-scoped embedding coverage.
  *
@@ -160,6 +219,7 @@ export async function checkRetrievalHealth(
     const indexes = await showIndexesStrict(conn);
     const extensions = getExtensionCapabilities();
     const required = resolveRequiredRetrievalIndexes(semanticConfig);
+    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
     const symbolCoverageFallback =
       getVecPropertyName("jina-embeddings-v2-base-code") ??
       FILESUMMARY_EMBEDDING_PROPERTIES.jinaCode.property;
@@ -174,7 +234,14 @@ export async function checkRetrievalHealth(
         const property = index.property ?? symbolCoverageFallback;
         return {
           model: index.model ?? "unknown",
-          ...(await getSymbolRetrievalCoverage(conn, repoId, property)),
+          ...(latestVersion
+            ? await getCachedSymbolRetrievalCoverage(
+                conn,
+                repoId,
+                latestVersion.versionId,
+                property,
+              )
+            : await getSymbolRetrievalCoverage(conn, repoId, property)),
           indexHealthy:
             extensions.vector && hasExactHealthyIndex(indexes, index),
         };
