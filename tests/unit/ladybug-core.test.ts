@@ -17,6 +17,7 @@ import {
   execDdl,
   execStoredProc,
   queryStoredProcAll,
+  execCheckpoint,
   withTransaction,
   getPreparedStatement,
   isConnectionPoisoned,
@@ -24,6 +25,7 @@ import {
   drainConnMutex,
   _configureVectorQueryGuardForTesting,
 } from "../../dist/db/ladybug-core.js";
+import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 
 describe("toNumber", () => {
   it("returns number as-is", () => {
@@ -884,6 +886,135 @@ describe("vector stored-procedure liveness", { concurrency: false }, () => {
       } else {
         process.env.SDL_STUCK_TASK_WARN_MS = previousWatchdog;
       }
+    }
+  });
+
+  it("applies the exact query deadline while waiting for shared admission", async () => {
+    const exact = getExactVectorGuard();
+    exact.configure({ deadlineMs: 20, cooldownMs: 100 });
+
+    let releaseExclusive!: () => void;
+    let markExclusiveStarted!: () => void;
+    const exclusiveStarted = new Promise<void>((resolve) => {
+      markExclusiveStarted = resolve;
+    });
+    const exclusiveGate = new Promise<void>((resolve) => {
+      releaseExclusive = resolve;
+    });
+    const exclusiveOperation = withExclusiveLadybugOperation(async () => {
+      markExclusiveStarted();
+      await exclusiveGate;
+    });
+    let nativeCalls = 0;
+    const conn = {
+      prepare: async (statement: string) => {
+        nativeCalls += 1;
+        return statement;
+      },
+      execute: async () => {
+        nativeCalls += 1;
+        return {
+          getAll: async () => [{ symbolId: "owned" }],
+          close: () => {},
+        };
+      },
+    } as unknown as Connection;
+    let exactQuery: Promise<unknown> | undefined;
+    let safetyTimer: NodeJS.Timeout | undefined;
+
+    try {
+      await exclusiveStarted;
+      exactQuery = exact.query(
+        conn,
+        "MATCH (e:SymbolVectorEmbedding) RETURN e.symbolId",
+      );
+      const safetyDeadline = new Promise<never>((_, reject) => {
+        safetyTimer = setTimeout(
+          () => reject(new Error("exact gate-wait test safety deadline exceeded")),
+          200,
+        );
+      });
+
+      await assert.rejects(
+        Promise.race([exactQuery, safetyDeadline]),
+        /Timed out after 20ms waiting for shared Ladybug operation admission/i,
+      );
+      assert.equal(nativeCalls, 0);
+
+      releaseExclusive();
+      await exclusiveOperation;
+      assert.deepEqual(
+        await exact.query<{ symbolId: string }>(
+          conn,
+          "MATCH (e:SymbolVectorEmbedding) RETURN e.symbolId",
+        ),
+        [{ symbolId: "owned" }],
+      );
+      assert.equal(nativeCalls, 2);
+    } finally {
+      if (safetyTimer) clearTimeout(safetyTimer);
+      releaseExclusive();
+      await exclusiveOperation;
+      if (exactQuery) await Promise.allSettled([exactQuery]);
+      exact.configure();
+    }
+  });
+
+  it("retains shared admission until timed-out exact native work drains", async () => {
+    const exact = getExactVectorGuard();
+    exact.configure({ deadlineMs: 20, cooldownMs: 1_000 });
+
+    let releaseNative!: () => void;
+    let markNativeStarted!: () => void;
+    const nativeStarted = new Promise<void>((resolve) => {
+      markNativeStarted = resolve;
+    });
+    const nativeGate = new Promise<void>((resolve) => {
+      releaseNative = resolve;
+    });
+    const exactConn = {
+      prepare: async (statement: string) => statement,
+      execute: async () => {
+        markNativeStarted();
+        await nativeGate;
+        return { getAll: async () => [], close: () => {} };
+      },
+    } as unknown as Connection;
+    let checkpointNativeCalls = 0;
+    const checkpointConn = {
+      query: async () => {
+        checkpointNativeCalls += 1;
+        return { close: () => {} };
+      },
+    } as unknown as Connection;
+    let exactQuery: Promise<unknown> | undefined;
+    let checkpoint: Promise<void> | undefined;
+
+    try {
+      exactQuery = exact.query(
+        exactConn,
+        "MATCH (e:SymbolVectorEmbedding) RETURN e.symbolId",
+      );
+      const timeoutAssertion = assert.rejects(exactQuery, /deadline exceeded/i);
+      await nativeStarted;
+      await timeoutAssertion;
+
+      checkpoint = execCheckpoint(checkpointConn);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(checkpointNativeCalls, 0);
+
+      releaseNative();
+      await checkpoint;
+      assert.equal(checkpointNativeCalls, 1);
+    } finally {
+      releaseNative();
+      if (exactQuery) await Promise.allSettled([exactQuery]);
+      if (checkpoint) await Promise.allSettled([checkpoint]);
+      for (let attempt = 0; attempt < 20 && isConnStuck(exactConn); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.equal(isConnStuck(exactConn), false);
+      exact.configure();
     }
   });
 

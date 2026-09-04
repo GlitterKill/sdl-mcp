@@ -920,18 +920,22 @@ async function queryExactVectorAllAdmitted<T>(
   let settled = false;
   let quarantined = false;
   try {
-    return await exactVectorQueryLimiter.run(async () => {
-      if (Date.now() < exactVectorQueryCircuitOpenUntil) {
-        throw exactVectorCircuitError();
-      }
-      started = true;
-      try {
-        return await queryAllAdmitted<T>(conn, statement, params);
-      } finally {
-        settled = true;
-        if (quarantined) releaseStuckConn(conn);
-      }
-    }, exactVectorQueryDeadlineMs);
+    return await exactVectorQueryLimiter.run(
+      () =>
+        withSharedLadybugOperation(async () => {
+          if (Date.now() < exactVectorQueryCircuitOpenUntil) {
+            throw exactVectorCircuitError();
+          }
+          started = true;
+          try {
+            return await queryAllAdmitted<T>(conn, statement, params);
+          } finally {
+            settled = true;
+            if (quarantined) releaseStuckConn(conn);
+          }
+        }, exactVectorQueryDeadlineMs),
+      exactVectorQueryDeadlineMs,
+    );
   } catch (err) {
     if (!started) throw err;
     exactVectorQueryCircuitOpenUntil = Date.now() + exactVectorQueryCooldownMs;
@@ -961,9 +965,7 @@ export function queryExactVectorAll<T>(
 ): Promise<T[]> {
   const checkpointError = rawCheckpointError(statement);
   if (checkpointError) return Promise.reject(checkpointError);
-  return withSharedLadybugOperation(() =>
-    queryExactVectorAllAdmitted<T>(conn, statement, params),
-  );
+  return queryExactVectorAllAdmitted<T>(conn, statement, params);
 }
 
 export function queryAll<T>(
