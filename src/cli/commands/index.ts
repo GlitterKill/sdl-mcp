@@ -1,6 +1,11 @@
 import { IndexOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import {
+  emitPerRepoSymbolVectorEvent,
+  openPerRepoSymbolVectorTraceSink,
+  withPerRepoSymbolVectorProcessTrace,
+} from "../../benchmark/per-repo-symbol-vector-observer.js";
+import {
   indexRepo,
   watchRepository,
   IndexWatchHandle,
@@ -2287,7 +2292,39 @@ export function formatIndexStartupLines(params: {
   ];
 }
 
+class InstrumentedIndexExit extends Error {
+  constructor(readonly exitCode: number) {
+    super(`Instrumented index requested exit ${exitCode}`);
+  }
+}
+
+type IndexCommandExit = (code: number) => never;
+
 export async function indexCommand(options: IndexOptions): Promise<void> {
+  const sink = openPerRepoSymbolVectorTraceSink();
+  if (!sink) {
+    await indexCommandImpl(options, (code) => process.exit(code));
+    return;
+  }
+
+  try {
+    await withPerRepoSymbolVectorProcessTrace(sink, () =>
+      indexCommandImpl(options, (code) => {
+        throw new InstrumentedIndexExit(code);
+      }),
+    );
+  } catch (error) {
+    if (error instanceof InstrumentedIndexExit) {
+      process.exit(error.exitCode);
+    }
+    throw error;
+  }
+}
+
+async function indexCommandImpl(
+  options: IndexOptions,
+  exitProcess: IndexCommandExit,
+): Promise<void> {
   printBanner();
 
   const configPath = activateCliConfigPath(options.config);
@@ -2383,7 +2420,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         : "No repositories configured",
     );
     await closeLadybugDb();
-    process.exit(1);
+    exitProcess(1);
   }
 
   for (const line of formatIndexStartupLines({
@@ -2498,6 +2535,11 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         repo.repoId,
         directMode,
         (progress) => {
+          emitPerRepoSymbolVectorEvent({
+            type: "progress",
+            repoId: repo.repoId,
+            progress,
+          });
           renderIndexProgress(progressState, progress);
         },
         undefined,
@@ -2605,7 +2647,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       console.error(`  - ${e.repoId}: ${e.error}`);
     }
     await cleanupOneShotIndexing(dbInitialized, derivedRefreshDisabled);
-    process.exit(1);
+    exitProcess(1);
   }
 
   if (options.watch && !canDelegate) {

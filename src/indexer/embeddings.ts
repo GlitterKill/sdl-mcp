@@ -1,5 +1,7 @@
 import { freemem, totalmem } from "node:os";
 
+import { emitPerRepoSymbolVectorEvent } from "../benchmark/per-repo-symbol-vector-observer.js";
+
 import {
   getLadybugConn,
   withWriteConn,
@@ -672,6 +674,7 @@ export async function refreshSymbolEmbeddings(params: {
     params.vectorIndexName,
   );
   let embedded = 0;
+  let completeCount = 0;
 
   await runHnswRebuildCycle({
     preCheckpointPhase: "symbol-vector-reconcile-pre-write",
@@ -794,6 +797,7 @@ export async function refreshSymbolEmbeddings(params: {
           params.repoId,
           modelName,
         );
+        completeCount = postCount;
         const requiredMode = resolveRepositorySymbolVectorIndexMode(postCount);
         if (requiredMode === "exact" && expectedIndexPresent) {
           await dropExpectedRepositoryVectorIndex(
@@ -816,7 +820,19 @@ export async function refreshSymbolEmbeddings(params: {
             await params.onReconciliationStep?.("after-index-drop");
           }
           recordMemorySnapshot("beforeHnsw");
-          let created: boolean;
+          const hnswEventScope = {
+            repoId: params.repoId,
+            model: modelName,
+            tableName: identity.tableName,
+            propertyName: identity.propertyName,
+            indexName: identity.indexName,
+            completeCount: postCount,
+          };
+          emitPerRepoSymbolVectorEvent({
+            type: "hnsw-start",
+            ...hnswEventScope,
+          });
+          let created = false;
           try {
             created = await measure("hnsw.create", () =>
               createVectorIndex(
@@ -829,6 +845,11 @@ export async function refreshSymbolEmbeddings(params: {
               ),
             );
           } finally {
+            emitPerRepoSymbolVectorEvent({
+              type: "hnsw-end",
+              ...hnswEventScope,
+              success: created,
+            });
             recordMemorySnapshot("afterHnsw");
           }
           if (!created) {
@@ -882,6 +903,16 @@ export async function refreshSymbolEmbeddings(params: {
         }
         await params.onReconciliationStep?.("after-validation");
       }),
+  });
+
+  emitPerRepoSymbolVectorEvent({
+    type: "embedding-complete",
+    repoId: params.repoId,
+    model: modelName,
+    tableName: identity.tableName,
+    propertyName: identity.propertyName,
+    indexName: identity.indexName,
+    completeCount,
   });
 
   params.onProgress?.({
