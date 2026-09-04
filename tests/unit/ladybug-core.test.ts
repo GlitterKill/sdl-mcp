@@ -666,7 +666,64 @@ describe("vector stored-procedure liveness", { concurrency: false }, () => {
     }
   });
 
-  it("single-flights exact scans and quarantines a timed-out connection until native work settles", async () => {
+  it("queues concurrent exact scans and returns every result", async () => {
+    const exact = getExactVectorGuard();
+    exact.configure({ deadlineMs: 500, cooldownMs: 100 });
+
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const executionOrder: number[] = [];
+    const makeConn = (index: number): Connection =>
+      ({
+        prepare: async (statement: string) => statement,
+        execute: async () => {
+          executionOrder.push(index);
+          if (index === 0) {
+            markFirstStarted();
+            await firstGate;
+          }
+          return {
+            getAll: async () => [{ index }],
+            close: () => {},
+          };
+        },
+      }) as unknown as Connection;
+    const statement = "MATCH (e:SymbolVectorEmbedding) RETURN e.symbolId";
+    const calls: Array<Promise<Array<{ index: number }>>> = [];
+
+    try {
+      calls.push(exact.query(makeConn(0), statement));
+      await firstStarted;
+      calls.push(
+        exact.query(makeConn(1), statement),
+        exact.query(makeConn(2), statement),
+        exact.query(makeConn(3), statement),
+      );
+      const allRows = Promise.all(calls);
+
+      releaseFirst();
+
+      assert.deepEqual(await allRows, [
+        [{ index: 0 }],
+        [{ index: 1 }],
+        [{ index: 2 }],
+        [{ index: 3 }],
+      ]);
+      assert.deepEqual(executionOrder, [0, 1, 2, 3]);
+    } finally {
+      releaseFirst();
+      await Promise.allSettled(calls);
+      exact.configure();
+    }
+  });
+
+  it("quarantines a timed-out exact scan until native work settles", async () => {
     const exact = getExactVectorGuard();
     exact.configure({ deadlineMs: 20, cooldownMs: 1_000 });
 
@@ -708,12 +765,6 @@ describe("vector stored-procedure liveness", { concurrency: false }, () => {
         /deadline exceeded/i,
       );
       await nativeStarted;
-
-      await assert.rejects(
-        exact.query(otherConn, statement),
-        /already in progress/i,
-      );
-      assert.equal(otherCalls, 0);
 
       await timeoutAssertion;
       assert.equal(firstCalls, 1);

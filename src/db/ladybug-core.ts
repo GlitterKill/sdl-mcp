@@ -916,12 +916,6 @@ async function queryExactVectorAllAdmitted<T>(
   if (Date.now() < exactVectorQueryCircuitOpenUntil) {
     throw exactVectorCircuitError();
   }
-  if (exactVectorQueryLimiter.getStats().active > 0) {
-    throw new DatabaseError(
-      "An exact vector query is already in progress; lexical retrieval remains available",
-    );
-  }
-
   let started = false;
   let settled = false;
   let quarantined = false;
