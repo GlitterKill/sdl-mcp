@@ -22,6 +22,7 @@ import { fileURLToPath } from "url";
 import {
   resolveSymbolVectorPhysicalIdentity,
   setRepoSymbolVectorEmbedding,
+  setRepoSymbolVectorEmbeddingBatch,
 } from "../../dist/db/ladybug-symbol-embeddings.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 
@@ -126,8 +127,55 @@ class FakeQueryResult {
   }
 }
 
-function createFakeConnection(statements: string[]): import("kuzu").Connection {
+function createFakeConnection(
+  statements: string[],
+  executions: Array<{
+    statement: string;
+    params: Record<string, unknown>;
+  }> = [],
+  onExecute?: (
+    statement: string,
+    params: Record<string, unknown>,
+  ) => Promise<void> | void,
+): import("kuzu").Connection {
   return {
+    async query(statement: string) {
+      const tableName = resolveSymbolVectorPhysicalIdentity(
+        "fake-repo",
+        "jina-embeddings-v2-base-code",
+      ).tableName;
+      const rows = statement.includes("SHOW_TABLES")
+        ? [{ name: tableName, type: "NODE" }]
+        : [
+            { name: "embeddingId", type: "STRING", "primary key": true },
+            { name: "repoId", type: "STRING", "primary key": false },
+            { name: "symbolId", type: "STRING", "primary key": false },
+            { name: "model", type: "STRING", "primary key": false },
+            {
+              name: "embeddingVector",
+              type: "STRING",
+              "primary key": false,
+            },
+            { name: "cardHash", type: "STRING", "primary key": false },
+            { name: "updatedAt", type: "STRING", "primary key": false },
+            {
+              name: "embeddingJinaCodeVec",
+              type: "DOUBLE[768]",
+              "primary key": false,
+            },
+            {
+              name: "embeddingNomicVec",
+              type: "DOUBLE[768]",
+              "primary key": false,
+            },
+          ];
+      return {
+        async getAll() {
+          return rows;
+        },
+        close() {},
+      };
+    },
     async prepare(statement: string) {
       return {
         statement,
@@ -139,8 +187,13 @@ function createFakeConnection(statements: string[]): import("kuzu").Connection {
         },
       };
     },
-    async execute(preparedStatement: { statement: string }) {
+    async execute(
+      preparedStatement: { statement: string },
+      params: Record<string, unknown> = {},
+    ) {
       statements.push(preparedStatement.statement);
+      executions.push({ statement: preparedStatement.statement, params });
+      await onExecute?.(preparedStatement.statement, params);
       return new FakeQueryResult();
     },
   } as unknown as import("kuzu").Connection;
@@ -1073,6 +1126,85 @@ describe("upsertSymbolBatch — unit (fake connection)", () => {
 
 
 describe("repository-routed symbol vector storage — unit", () => {
+  it("bounds non-live-HNSW vector MERGE writes without parallelizing them", async () => {
+    const statements: string[] = [];
+    const executions: Array<{
+      statement: string;
+      params: Record<string, unknown>;
+    }> = [];
+    const callbacks: string[] = [];
+    let activeMerges = 0;
+    let maxConcurrentMerges = 0;
+    const conn = createFakeConnection(
+      statements,
+      executions,
+      async (statement) => {
+        if (
+          !statement.includes("UNWIND $rows AS r") ||
+          !statement.includes("MERGE (e:")
+        ) {
+          return;
+        }
+        activeMerges += 1;
+        maxConcurrentMerges = Math.max(maxConcurrentMerges, activeMerges);
+        await Promise.resolve();
+        activeMerges -= 1;
+      },
+    );
+    const items = Array.from({ length: 129 }, (_, index) => ({
+      symbolId: `symbol-${index}`,
+      vector: "vector",
+      cardHash: "hash",
+      vectorArray: [0.1],
+    }));
+
+    await withExclusiveLadybugOperation(() =>
+      setRepoSymbolVectorEmbeddingBatch(
+        conn,
+        "fake-repo",
+        "jina-embeddings-v2-base-code",
+        items,
+        {
+          liveHnsw: false,
+          onOperation(operation) {
+            callbacks.push(operation);
+          },
+        },
+      ),
+    );
+
+    const mutationExecutions = executions.slice(2).filter(
+      ({ statement }) =>
+        statement.includes("DELETE e") ||
+        (statement.includes("UNWIND $rows AS r") &&
+          statement.includes("MERGE (e:")),
+    );
+    const deleteSizes = mutationExecutions
+      .filter(({ statement }) => statement.includes("DELETE e"))
+      .map(({ params }) => (params.symbolIds as string[]).length);
+    const mergeSizes = mutationExecutions
+      .filter(({ statement }) => statement.includes("UNWIND $rows AS r"))
+      .map(({ params }) => (params.rows as unknown[]).length);
+    const executionOrder = mutationExecutions.map(({ statement, params }) =>
+      statement.includes("DELETE e")
+        ? `delete:${(params.symbolIds as string[]).length}`
+        : `merge:${(params.rows as unknown[]).length}`,
+    );
+
+    assert.deepStrictEqual(deleteSizes, [129]);
+    assert.deepStrictEqual(mergeSizes, [128, 1]);
+    assert.deepStrictEqual(callbacks, [
+      "after-vector-delete",
+      "after-vector-merge",
+    ]);
+    assert.deepStrictEqual(executionOrder, [
+      "delete:129",
+      "merge:128",
+      "merge:1",
+    ]);
+    assert.strictEqual(maxConcurrentMerges, 1);
+  });
+
   it("propagates SHOW_TABLES failures without preparing the catalog call", async () => {
     const { getRepoSymbolVectorEmbedding } =
       await import("../../dist/db/ladybug-symbol-embeddings.js");

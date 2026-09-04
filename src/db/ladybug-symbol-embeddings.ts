@@ -44,6 +44,9 @@ export interface SymbolVectorPhysicalIdentity {
 
 const SAFE_IDENTIFIER = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
 const SYMBOL_VECTOR_TABLE_PREFIX = "SymbolVectorEmbedding_r_";
+// ponytail: A fixed cap bounds LadybugDB writes without configuration plumbing.
+// Raise it only after measurements show larger batches are safe and faster.
+const SYMBOL_VECTOR_MERGE_BATCH_SIZE = 128;
 
 function hashRepositoryId(repoId: string): string {
   return createHash("sha256").update(repoId).digest("hex").slice(0, 32);
@@ -599,7 +602,13 @@ export async function setRepoSymbolVectorEmbeddingBatch(
   } else {
     await deleteRows(rows.map((row) => row.symbolId));
     await options?.onOperation?.("after-vector-delete");
-    await mergeRows(rows);
+    for (
+      let offset = 0;
+      offset < rows.length;
+      offset += SYMBOL_VECTOR_MERGE_BATCH_SIZE
+    ) {
+      await mergeRows(rows.slice(offset, offset + SYMBOL_VECTOR_MERGE_BATCH_SIZE));
+    }
     await options?.onOperation?.("after-vector-merge");
   }
 }
