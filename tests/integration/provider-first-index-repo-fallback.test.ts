@@ -28,12 +28,14 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { execDdl } from "../../dist/db/ladybug-core.js";
 import {
   getDerivedState,
+  markDerivedStateComputed,
   markEmbeddingLifecycleSteadyIfCurrent,
 } from "../../dist/db/ladybug-derived-state.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 import {
   ensureRepoSymbolVectorTable,
   getRepoSymbolVectorEmbedding,
+  inspectRepoSymbolVectorTable,
   setRepoSymbolVectorEmbedding,
 } from "../../dist/db/ladybug-symbol-embeddings.js";
 import {
@@ -49,6 +51,7 @@ import { indexRepo as runIndexRepo } from "../../dist/indexer/indexer.js";
 import { processWatchedFileChange } from "../../dist/indexer/watcher.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
 import {
+  clearRepositorySymbolVectorHealth,
   getRepositorySymbolVectorHealthGeneration,
   getRepositorySymbolVectorHealthSnapshots,
   invalidateRepositorySymbolVectorHealth,
@@ -792,6 +795,59 @@ describe("provider-first indexRepo fallback", () => {
         "materialize.deleteFileSymbols"
       ],
       undefined,
+    );
+  });
+
+  it("completes provider-first semantic readiness without configured embedding models", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      semanticEnabled: true,
+      symbolEmbeddingModels: [],
+      fileSummaryEmbeddingModels: [],
+      generateSummaries: false,
+    });
+    // This fixture reuses repoId across disposable databases; health is process-global.
+    clearRepositorySymbolVectorHealth(repoId);
+    await markDerivedStateComputed(repoId, "semantic-clean-baseline", {
+      embeddings: true,
+      summaries: true,
+    });
+    const semanticConfig = loadConfig().semantic;
+    assert.deepEqual(semanticConfig?.symbolEmbeddingModels, []);
+    assert.deepEqual(semanticConfig?.fileSummaryEmbeddingModels, []);
+    const beforeState = await getDerivedState(repoId);
+    assert.equal(beforeState?.embeddingsDirty, false, "fixture starts semantic-clean");
+    assert.equal(beforeState?.embeddingLifecycleState, "steady", "fixture starts steady");
+    const generation = getRepositorySymbolVectorHealthGeneration(repoId);
+    assert.equal(getRepositorySymbolVectorHealthSnapshots(repoId), null);
+
+    const result = await indexRepo(repoId, "full", undefined, undefined, {
+      includeTimings: true,
+    });
+
+    assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.notEqual(result.semanticDeferred, true);
+    const state = await getDerivedState(repoId);
+    assert.equal(state?.embeddingsDirty, false);
+    assert.equal(state?.embeddingLifecycleState, "steady");
+    assert.equal(state?.targetVersionId, result.versionId);
+    assert.equal(getRepositorySymbolVectorHealthSnapshots(repoId), null);
+    assert.equal(getRepositorySymbolVectorHealthGeneration(repoId), generation);
+
+    const conn = await getLadybugConn();
+    const table = await inspectRepoSymbolVectorTable(conn, repoId);
+    assert.equal(table.state, "absent");
+    assert.equal(
+      (await showIndexes(conn)).some((index) => index.tableName === table.tableName),
+      false,
+    );
+    assert.ok(result.timings);
+    assert.deepEqual(
+      Object.keys(result.timings.phases).filter((phase) =>
+        /symbolEmbeddings|semanticEmbeddings|reconcil|hnsw/i.test(phase),
+      ),
+      [],
     );
   });
 
@@ -1748,6 +1804,8 @@ describe("provider-first indexRepo fallback", () => {
       seedRemovedFile?: boolean;
       semanticProvider?: "api" | "local" | "mock";
       generateSummaries?: boolean;
+      symbolEmbeddingModels?: string[];
+      fileSummaryEmbeddingModels?: string[];
       semanticRetrieval?: boolean;
       semanticEnabled?: boolean;
       releaseScaleSymbolCount?: number;
@@ -1844,6 +1902,8 @@ describe("provider-first indexRepo fallback", () => {
               ? { provider: options.semanticProvider }
               : {}),
             generateSummaries: options.generateSummaries ?? false,
+            symbolEmbeddingModels: options.symbolEmbeddingModels,
+            fileSummaryEmbeddingModels: options.fileSummaryEmbeddingModels,
             ...(options.semanticRetrieval ? { retrieval: {} } : {}),
           },
           scip: {

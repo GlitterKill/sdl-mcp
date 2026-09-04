@@ -309,12 +309,18 @@ export interface ProviderFirstSemanticReadinessRefreshDeps {
 export function resolveProviderFirstSemanticReadinessDeferral(
   appConfig: Pick<AppConfig, "semantic">,
 ): ProviderFirstSemanticReadinessDeferral {
-  const semanticDeferred = appConfig.semantic?.enabled === true;
+  const enabled = appConfig.semantic?.enabled === true;
+  const modelPlan = resolveSemanticEmbeddingModelPlan(appConfig.semantic);
+  // An enabled semantic config can have no work; preserve its clean durable state.
+  const summariesDirty = enabled && appConfig.semantic?.generateSummaries === true;
+  const embeddingsDirty = enabled && (
+    modelPlan.symbolEmbeddingModels.length > 0 ||
+    modelPlan.fileSummaryEmbeddingModels.length > 0
+  );
   return {
-    semanticDeferred,
-    summariesDirty:
-      semanticDeferred && appConfig.semantic?.generateSummaries === true,
-    embeddingsDirty: semanticDeferred,
+    semanticDeferred: summariesDirty || embeddingsDirty,
+    summariesDirty,
+    embeddingsDirty,
   };
 }
 

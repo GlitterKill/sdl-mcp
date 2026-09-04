@@ -169,6 +169,25 @@ const TEST_CASE_JSON =
   '{"framework":"node:test","title":"keeps sdl.info callable","suitePath":["Code Mode"],"modifiers":["only"]}';
 
 
+function createTestExclusiveOperation(events: string[]) {
+  let gateTail = Promise.resolve();
+  return async <T>(operation: () => Promise<T>): Promise<T> => {
+    const previous = gateTail;
+    let release!: () => void;
+    gateTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    events.push("gate:enter");
+    try {
+      return await operation();
+    } finally {
+      events.push("gate:exit");
+      release();
+    }
+  };
+}
+
 function semanticLifecycleStub(
   overrides: Partial<RepositorySemanticLifecycle> = {},
 ): RepositorySemanticLifecycle {
@@ -590,6 +609,23 @@ describe("provider-first indexing foundation", () => {
         embeddingsDirty: false,
       },
     );
+    for (const generateSummaries of [false, true]) {
+      assert.deepEqual(
+        resolveProviderFirstSemanticReadinessDeferral({
+          semantic: {
+            enabled: true,
+            generateSummaries,
+            symbolEmbeddingModels: [],
+            fileSummaryEmbeddingModels: [],
+          },
+        } as AppConfig),
+        {
+          semanticDeferred: generateSummaries,
+          summariesDirty: generateSummaries,
+          embeddingsDirty: false,
+        },
+      );
+    }
   });
 
   it("runs provider-first semantic readiness refresh and index finalization", async () => {
@@ -1072,24 +1108,7 @@ describe("provider-first indexing foundation", () => {
         "refreshing",
       );
       const events: string[] = [];
-      let gateTail = Promise.resolve();
-      const withTestExclusiveOperation = async <T>(
-        operation: () => Promise<T>,
-      ): Promise<T> => {
-        const previous = gateTail;
-        let release!: () => void;
-        gateTail = new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        await previous;
-        events.push("gate:enter");
-        try {
-          return await operation();
-        } finally {
-          events.push("gate:exit");
-          release();
-        }
-      };
+      const withTestExclusiveOperation = createTestExclusiveOperation(events);
       let competitorPromise: Promise<void> | undefined;
 
       try {
@@ -1227,6 +1246,87 @@ describe("provider-first indexing foundation", () => {
       } finally {
         clearRepositorySymbolVectorHealth(repoId);
       }
+    }
+  });
+
+  it("hard-degrades healthy vectors before admission reopens when failure finalization fails", async () => {
+    const repoId = "repo-semantic-double-failure";
+    const versionId = "v-semantic-double-failure";
+    const models = ["jina-embeddings-v2-base-code", "nomic-embed-text-v1.5"];
+    const semanticConfig = {
+      enabled: true,
+      symbolEmbeddingModels: models,
+      fileSummaryEmbeddingModels: [],
+    } as NonNullable<AppConfig["semantic"]>;
+    seedHealthyRepositoryVectorCache({ repoId, versionId, semanticConfig });
+    const events: string[] = [];
+    const withTestExclusiveOperation = createTestExclusiveOperation(events);
+    const primaryError = new Error("primary semantic failure");
+    const durableWriteError = new Error("durable refreshing write failed");
+    let competitorPromise: Promise<void> | undefined;
+
+    const assertHardDegraded = (): void => {
+      const snapshots = getRepositorySymbolVectorHealthSnapshots(repoId);
+      assert.ok(snapshots);
+      assert.deepEqual([...snapshots.keys()], models);
+      for (const snapshot of snapshots.values()) {
+        assert.equal(snapshot.mode, "degraded");
+        assert.equal(snapshot.exactFallbackAllowed, false);
+        assert.equal(snapshot.lifecycleState, "refreshing");
+      }
+    };
+
+    try {
+      const lifecycle = createRepositorySemanticLifecycle({
+        repoId,
+        versionId,
+        appConfig: { semantic: semanticConfig },
+        deps: {
+          withExclusiveOperation: withTestExclusiveOperation,
+          withWriteConnection: async (operation) => operation({} as Connection),
+          markRefreshingIfCurrent: async () => {
+            events.push("finalizer:refreshing");
+            throw durableWriteError;
+          },
+          invalidate: (...args) => {
+            const generation = invalidateRepositorySymbolVectorHealth(...args);
+            assertHardDegraded();
+            events.push("hard-degradation");
+            return generation;
+          },
+        },
+      });
+
+      await assert.rejects(
+        lifecycle.commitSuccess(async () => {
+          competitorPromise = withTestExclusiveOperation(async () => {
+            assertHardDegraded();
+            events.push("competitor");
+          });
+          throw primaryError;
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof AggregateError);
+          assert.equal(error.errors.length, 2);
+          assert.equal(error.errors[0], primaryError);
+          assert.equal(error.errors[1], durableWriteError);
+          return true;
+        },
+      );
+      assert.equal(lifecycle.failureFinalizationStartedInsideGate(), true);
+      assert.ok(competitorPromise);
+      await competitorPromise;
+      assert.deepEqual(events, [
+        "gate:enter",
+        "finalizer:refreshing",
+        "hard-degradation",
+        "gate:exit",
+        "gate:enter",
+        "competitor",
+        "gate:exit",
+      ]);
+    } finally {
+      clearRepositorySymbolVectorHealth(repoId);
     }
   });
 
