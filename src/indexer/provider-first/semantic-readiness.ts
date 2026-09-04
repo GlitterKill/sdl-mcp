@@ -459,8 +459,6 @@ export async function runProviderFirstSemanticReadinessRefresh(params: {
           onProgress: params.onProgress,
           concurrency: semanticConfig.embeddingConcurrency,
           batchSize: semanticConfig.embeddingBatchSize,
-          vectorIndexName:
-            semanticConfig.retrieval?.vector.indexes?.[embModel]?.indexName,
           vectorEfc: semanticConfig.retrieval?.vector.efc,
           semanticConfig,
           onFailureInsideGate: semanticLifecycle?.onFailureInsideGate,

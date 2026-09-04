@@ -89,7 +89,6 @@ export function resolveSymbolVectorPhysicalIdentity(
   repoId: string,
   model: string,
   semanticConfig?: SemanticConfig,
-  logicalIndexStemOverride?: string,
 ): SymbolVectorPhysicalIdentity {
   if (repoId.length === 0) {
     throw new IndexError(
@@ -98,8 +97,7 @@ export function resolveSymbolVectorPhysicalIdentity(
   }
 
   const propertyName = getVecPropertyName(model);
-  const logicalIndexStem =
-    logicalIndexStemOverride ?? getEffectiveLogicalIndexStem(model, semanticConfig);
+  const logicalIndexStem = getEffectiveLogicalIndexStem(model, semanticConfig);
   if (!propertyName || !logicalIndexStem) {
     throw new IndexError(
       `Unsupported embedding model "${model}": cannot resolve Symbol vector physical identity.`,

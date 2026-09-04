@@ -43,6 +43,7 @@ import {
   type IndexInfo,
 } from "../retrieval/index-lifecycle.js";
 import { EMBEDDING_MODELS } from "../retrieval/model-mapping.js";
+import { SYMBOL_HNSW_MIN_ROWS } from "../retrieval/health.js";
 import {
   getEligibleRepoSymbolIds,
   getRepoSymbolVectorHealthRows,
@@ -78,7 +79,7 @@ export type RepositorySymbolVectorIndexMode = "exact" | "hnsw";
 export function resolveRepositorySymbolVectorIndexMode(
   actualCompleteCount: number,
 ): RepositorySymbolVectorIndexMode {
-  return actualCompleteCount >= 2_000 ? "hnsw" : "exact";
+  return actualCompleteCount >= SYMBOL_HNSW_MIN_ROWS ? "hnsw" : "exact";
 }
 
 export interface RepositorySymbolVectorReconciliationPlanInput {
@@ -103,7 +104,7 @@ export function planRepositorySymbolVectorReconciliation(
 ): RepositorySymbolVectorReconciliationPlan {
   const retainExpectedIndex =
     input.expectedIndexHealthy &&
-    input.actualPreCount >= 2_000 &&
+    input.actualPreCount >= SYMBOL_HNSW_MIN_ROWS &&
     input.mutationCount <= SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS;
   return {
     retainExpectedIndex,
@@ -445,7 +446,6 @@ export async function refreshSymbolEmbeddings(params: {
   onProgress?: (progress: IndexProgress) => void;
   concurrency?: number;
   batchSize?: number;
-  vectorIndexName?: string;
   vectorEfc?: number;
   semanticConfig?: SemanticConfig;
   postIndexSessionTimeoutMs?: number;
@@ -671,7 +671,6 @@ export async function refreshSymbolEmbeddings(params: {
     params.repoId,
     modelName,
     params.semanticConfig,
-    params.vectorIndexName,
   );
   let embedded = 0;
   let completeCount = 0;
