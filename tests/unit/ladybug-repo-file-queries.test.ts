@@ -478,3 +478,341 @@ describe("LadybugDB Repo & File Queries", () => {
     assert.strictEqual(repo, null);
   });
 });
+
+
+describe("repository vector teardown orchestration", () => {
+  const repoId = "delete-repo";
+  const semantic = {
+    enabled: true,
+    symbolEmbeddingModels: [
+      "jina-embeddings-v2-base-code",
+      "nomic-embed-text-v1.5",
+    ],
+    fileSummaryEmbeddingModels: [],
+  };
+
+  async function runTeardownFixture(options: {
+    failAt?: "drop-index" | "prepared-cache-reset" | "graph-delete";
+    tablePresent?: boolean;
+    indexesPresent?: boolean;
+    catalogRows?: Array<{
+      name: string;
+      type: "vector";
+      property: string;
+      tableName?: string;
+      status: "healthy" | "unknown";
+      extensionLoaded?: boolean;
+    }>;
+  } = {}) {
+    const {
+      _teardownRepositoryDatabaseForTesting,
+    } = await import("../../dist/mcp/tools/repo.js");
+    const {
+      resolveRequiredRetrievalIndexes,
+    } = await import("../../dist/retrieval/health.js");
+    const required = resolveRequiredRetrievalIndexes(semantic, repoId)
+      .symbolVectors;
+    const tableName = required[0]!.tableName;
+    const controlRepoId = "control-repo";
+    const controlTableName = resolveRequiredRetrievalIndexes(semantic, controlRepoId)
+      .symbolVectors[0]!.tableName;
+    const events: string[] = [];
+    let durableLifecycle: "steady" | "deleting" | null = "steady";
+    let tablePresent = options.tablePresent ?? true;
+    let indexes = options.catalogRows ?? (
+      options.indexesPresent === false
+        ? []
+        : required.map((index) => ({
+            name: index.name!,
+            type: "vector" as const,
+            property: index.property!,
+            tableName: index.tableName,
+            status: "healthy" as const,
+            extensionLoaded: true,
+          }))
+    );
+    let graphDeletes = 0;
+    let otherRepoRows = 1;
+    const publishedReasons: string[] = [];
+
+    const failAt = (boundary: typeof options.failAt) => {
+      if (options.failAt === boundary) {
+        throw new Error(`injected ${boundary} failure`);
+      }
+    };
+
+    const run = () => _teardownRepositoryDatabaseForTesting(
+      repoId,
+      semantic,
+      {
+        withExclusiveOperation: async (task) => {
+          events.push("gate:start");
+          try {
+            return await task();
+          } finally {
+            events.push("gate:release");
+          }
+        },
+        withWriteConnection: async (task) => task({} as never),
+        getRepo: async () => ({ repoId }),
+        getLatestVersion: async () => ({ versionId: "v1" }) as never,
+        markDeleting: async (_conn, targetRepoId) => {
+          assert.strictEqual(targetRepoId, repoId);
+          events.push("durable:deleting");
+          durableLifecycle = "deleting";
+        },
+        invalidateHealth: () => {
+          events.push("cache:invalidate");
+          return 17;
+        },
+        inspectTable: async (_conn, targetRepoId) => {
+          assert.strictEqual(targetRepoId, repoId);
+          events.push("catalog:table");
+          return {
+            tableName,
+            state: tablePresent ? "present" as const : "absent" as const,
+          };
+        },
+        showIndexes: async () => {
+          events.push("catalog:indexes");
+          return indexes;
+        },
+        validateOwnership: async (_conn, targetRepoId) => {
+          assert.strictEqual(targetRepoId, repoId);
+          events.push("catalog:ownership");
+        },
+        dropIndex: async (_conn, targetTableName, indexName) => {
+          assert.strictEqual(targetTableName, tableName);
+          events.push(`drop-index:${indexName}`);
+          failAt("drop-index");
+          const before = indexes.length;
+          indexes = indexes.filter((index) => index.name !== indexName);
+          return { status: before === indexes.length ? "absent" : "dropped" };
+        },
+        dropTable: async (_conn, targetTableName) => {
+          if (targetTableName === controlTableName) otherRepoRows = 0;
+          assert.strictEqual(targetTableName, tableName);
+          events.push("drop-table");
+          tablePresent = false;
+        },
+        resetPreparedCaches: () => {
+          events.push("prepared-cache-reset");
+          failAt("prepared-cache-reset");
+        },
+        deleteGraph: async (_conn, targetRepoId) => {
+          if (targetRepoId === controlRepoId) otherRepoRows = 0;
+          assert.strictEqual(targetRepoId, repoId);
+          events.push("graph-delete");
+          graphDeletes += 1;
+          failAt("graph-delete");
+          durableLifecycle = null;
+        },
+        clearHealth: () => {
+          events.push("cache:clear");
+        },
+        getDerivedState: async () =>
+          durableLifecycle === null
+            ? null
+            : ({ embeddingLifecycleState: durableLifecycle }) as never,
+        assessHealth: async (_conn, input) => [{
+          repoId,
+          versionId: input.versionId,
+          generation: input.generation,
+          model: semantic.symbolEmbeddingModels[0],
+          lifecycleState: input.lifecycleState,
+          mode: "degraded",
+          exactFallbackAllowed: false,
+          reason: "repository vector deletion is pending",
+        }] as never,
+        publishHealth: ({ snapshots }) => {
+          events.push("cache:publish-deletion-pending");
+          publishedReasons.push(...snapshots.map((snapshot) => snapshot.reason ?? ""));
+          return true;
+        },
+        publishDiagnostic: (diagnostic) => {
+          events.push(`diagnostic:${diagnostic.code}`);
+        },
+      },
+    );
+
+    return {
+      run,
+      events,
+      get durableLifecycle() {
+        return durableLifecycle;
+      },
+      get tablePresent() {
+        return tablePresent;
+      },
+      get indexes() {
+        return indexes;
+      },
+      get graphDeletes() {
+        return graphDeletes;
+      },
+      get otherRepoRows() {
+        return otherRepoRows;
+      },
+      publishedReasons,
+    };
+  }
+
+  it("orders durable fencing, strict teardown, graph deletion, and cache clearing inside the exclusive gate", async () => {
+    const fixture = await runTeardownFixture();
+    await fixture.run();
+
+    assert.deepStrictEqual(fixture.events, [
+      "gate:start",
+      "durable:deleting",
+      "cache:invalidate",
+      "catalog:table",
+      "catalog:indexes",
+      "catalog:ownership",
+      ...fixture.events.filter((event) => event.startsWith("drop-index:")),
+      "drop-table",
+      "prepared-cache-reset",
+      "graph-delete",
+      "cache:clear",
+      "gate:release",
+    ]);
+    assert.strictEqual(fixture.durableLifecycle, null);
+    assert.strictEqual(fixture.otherRepoRows, 1);
+    assert.strictEqual(
+      fixture.events.some((event) => event === "cache:publish-deletion-pending"),
+      false,
+    );
+  });
+
+  it("treats absent indexes and an absent table as already torn down", async () => {
+    const fixture = await runTeardownFixture({
+      tablePresent: false,
+      indexesPresent: false,
+    });
+    await fixture.run();
+
+    assert.strictEqual(fixture.graphDeletes, 1);
+    assert.strictEqual(fixture.events.includes("drop-table"), false);
+    assert.strictEqual(fixture.events.includes("prepared-cache-reset"), false);
+    assert.strictEqual(fixture.otherRepoRows, 1);
+  });
+
+  it("treats absent expected indexes as already dropped before table teardown", async () => {
+    const fixture = await runTeardownFixture({
+      tablePresent: true,
+      indexesPresent: false,
+    });
+    await fixture.run();
+
+    assert.strictEqual(fixture.graphDeletes, 1);
+    assert.strictEqual(
+      fixture.events.some((event) => event.startsWith("drop-index:")),
+      false,
+    );
+    assert.strictEqual(fixture.events.includes("drop-table"), true);
+    assert.strictEqual(fixture.events.includes("prepared-cache-reset"), true);
+    assert.strictEqual(fixture.otherRepoRows, 1);
+  });
+
+
+  it("does not delete graph state when an index drop fails", async () => {
+    const fixture = await runTeardownFixture({ failAt: "drop-index" });
+    await assert.rejects(fixture.run, /injected drop-index failure/);
+
+    assert.strictEqual(fixture.graphDeletes, 0);
+    assert.strictEqual(fixture.tablePresent, true);
+    assert.strictEqual(fixture.durableLifecycle, "deleting");
+    assert.match(fixture.publishedReasons.join("\n"), /deletion is pending/);
+    assert.ok(
+      fixture.events.indexOf("cache:publish-deletion-pending") <
+        fixture.events.indexOf("gate:release"),
+    );
+    assert.strictEqual(fixture.otherRepoRows, 1);
+  });
+
+  it("keeps durable deleting when cache reset fails after the table drop", async () => {
+    const fixture = await runTeardownFixture({
+      failAt: "prepared-cache-reset",
+    });
+    await assert.rejects(fixture.run, /injected prepared-cache-reset failure/);
+
+    assert.strictEqual(fixture.tablePresent, false);
+    assert.strictEqual(fixture.graphDeletes, 0);
+    assert.strictEqual(fixture.durableLifecycle, "deleting");
+    assert.match(fixture.publishedReasons.join("\n"), /deletion is pending/);
+    assert.strictEqual(fixture.otherRepoRows, 1);
+  });
+
+  it("resumes after a graph-delete failure without recreating absent vector objects", async () => {
+    const fixture = await runTeardownFixture({ failAt: "graph-delete" });
+    await assert.rejects(fixture.run, /injected graph-delete failure/);
+    assert.strictEqual(fixture.tablePresent, false);
+    assert.strictEqual(fixture.durableLifecycle, "deleting");
+    assert.strictEqual(fixture.otherRepoRows, 1);
+
+
+    const retry = await runTeardownFixture({
+      tablePresent: fixture.tablePresent,
+      indexesPresent: false,
+    });
+    await retry.run();
+
+    assert.strictEqual(retry.graphDeletes, 1);
+    assert.strictEqual(retry.durableLifecycle, null);
+    assert.strictEqual(retry.events.includes("drop-table"), false);
+    assert.strictEqual(retry.otherRepoRows, 1);
+  });
+
+  it("rejects incompatible repository-table vector catalogs before DDL", async (t) => {
+    const {
+      resolveRequiredRetrievalIndexes,
+    } = await import("../../dist/retrieval/health.js");
+    const expected = resolveRequiredRetrievalIndexes(semantic, repoId)
+      .symbolVectors[0]!;
+    const exactRow = {
+      name: expected.name!,
+      type: "vector" as const,
+      property: expected.property!,
+      tableName: expected.tableName,
+      status: "healthy" as const,
+      extensionLoaded: true,
+    };
+    const cases = [
+      {
+        name: "wrong physical identity",
+        rows: [{ ...exactRow, tableName: "SymbolVectorEmbedding_r_wrong" }],
+        error: /incompatible/i,
+      },
+      {
+        name: "ambiguous physical identity",
+        rows: [exactRow, { ...exactRow, tableName: undefined }],
+        error: /ambiguous/i,
+      },
+      {
+        name: "unexpected table index",
+        rows: [{
+          ...exactRow,
+          name: "unexpected_vector_index",
+          property: "unexpectedVectorProperty",
+        }],
+        error: /unexpected vector index identity/i,
+      },
+    ];
+
+    for (const testCase of cases) {
+      await t.test(testCase.name, async () => {
+        const fixture = await runTeardownFixture({
+          catalogRows: testCase.rows,
+        });
+
+        await assert.rejects(fixture.run, testCase.error);
+        assert.strictEqual(
+          fixture.events.some((event) => event.startsWith("drop-index:")),
+          false,
+        );
+        assert.strictEqual(fixture.events.includes("drop-table"), false);
+        assert.strictEqual(fixture.graphDeletes, 0);
+        assert.strictEqual(fixture.otherRepoRows, 1);
+      });
+    }
+  });
+});

@@ -55,7 +55,9 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import {
   derivedStateIsStale,
   getDerivedState,
+  getDerivedStateFromConnection,
   markDerivedStateDirty,
+  markEmbeddingLifecycleRefreshingForTarget,
   recordDerivedStateError,
 } from "../db/ladybug-derived-state.js";
 import { logger } from "../util/logger.js";
@@ -74,7 +76,14 @@ import { recoverMissingMetricsForRepo } from "../graph/metrics-recovery.js";
 import { clearSliceCache } from "../graph/sliceCache.js";
 import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
-import { invalidateSymbolRetrievalCoverageCache } from "../retrieval/health.js";
+import {
+  hasRepositorySymbolVectorHealth,
+  invalidateRepositorySymbolVectorHealth,
+  invalidateSymbolRetrievalCoverageCache,
+} from "../retrieval/health.js";
+import { withExclusiveLadybugOperation } from "../db/ladybug-operation-gate.js";
+import { inspectRepoSymbolVectorTable } from "../db/ladybug-symbol-embeddings.js";
+import { resolveSemanticEmbeddingModelPlan } from "../config/semantic-embedding-model-plan.js";
 import {
   resolveEffectiveIndexMode,
   resolvePostIndexSessionTimeoutMs,
@@ -200,6 +209,7 @@ import {
   resolveProviderFirstSemanticEligiblePaths,
 } from "./provider-first/semantic-scope.js";
 import {
+  createRepositorySemanticLifecycle,
   markProviderFirstSemanticReadinessDeferred,
   runProviderFirstSemanticReadinessRefresh,
 } from "./provider-first/semantic-readiness.js";
@@ -494,6 +504,8 @@ export interface IndexRepoOptions {
   isolatedRebuild?: boolean;
   /** @internal Keeps compatibility benchmarks on the TypeScript-only pipeline. */
   forceLegacyPipeline?: boolean;
+  /** @internal Pauses after the first live Symbol transaction commits. */
+  afterFirstStructuralSymbolWriteCommitted?: () => Promise<void>;
 }
 export interface IndexResult {
   versionId: string;
@@ -2315,6 +2327,107 @@ async function indexRepoImpl(
   const graphIntegrity = new PersistedGraphIntegritySession(
     repoId, mode, !scopedSourceFileListActive,
   );
+  let semanticInvalidationPromise: Promise<void> | undefined;
+  let semanticInvalidationWasNoOp = false;
+  let firstStructuralCommitBarrierPromise: Promise<void> | undefined;
+  const ensureSemanticInvalidatedBeforeStructuralWrite = (
+    versionId: string,
+  ): Promise<void> => {
+    semanticInvalidationPromise ??= withExclusiveLadybugOperation(
+      async () => {
+        let cacheInvalidated = false;
+        try {
+          const invalidationState = await withWriteConn(async (writeConn) => {
+            const modelPlan = resolveSemanticEmbeddingModelPlan(
+              appConfig.semantic,
+            );
+            const allSymbolVectorModelsDisabled =
+              appConfig.semantic?.enabled === false ||
+              modelPlan.symbolEmbeddingModels.length === 0;
+            const table = await inspectRepoSymbolVectorTable(
+              writeConn,
+              repoId,
+            );
+            const state = await getDerivedStateFromConnection(
+              writeConn,
+              repoId,
+            );
+            if (
+              allSymbolVectorModelsDisabled &&
+              table.state === "absent" &&
+              !hasRepositorySymbolVectorHealth(repoId) &&
+              state !== null &&
+              !state.embeddingsDirty &&
+              state.embeddingLifecycleState === "steady"
+            ) {
+              semanticInvalidationWasNoOp = true;
+              return {
+                skip: true,
+                expectedTargetVersionId: state.targetVersionId,
+              };
+            }
+
+            return {
+              skip: false,
+              expectedTargetVersionId: state?.targetVersionId ?? null,
+            };
+          }, postIndexSessionTimeoutMs);
+          if (invalidationState.skip) return;
+
+          const marked = await withWriteConn(
+            (writeConn) =>
+              markEmbeddingLifecycleRefreshingForTarget(
+                writeConn,
+                repoId,
+                invalidationState.expectedTargetVersionId,
+                versionId,
+              ),
+            postIndexSessionTimeoutMs,
+          );
+          if (!marked) {
+            throw new Error(
+              `Cannot invalidate semantic state for ${repoId}: target version changed before ${versionId}`,
+            );
+          }
+
+          invalidateRepositorySymbolVectorHealth(
+            repoId,
+            versionId,
+            appConfig.semantic,
+            "refreshing",
+          );
+          cacheInvalidated = true;
+        } catch (error) {
+          if (!cacheInvalidated) {
+            try {
+              invalidateRepositorySymbolVectorHealth(
+                repoId,
+                versionId,
+                appConfig.semantic,
+                "refreshing",
+              );
+            } catch {
+              // invalidateRepositorySymbolVectorHealth removes the old entry
+              // before rethrowing, so no healthy generation can survive.
+            }
+          }
+          throw error;
+        }
+      },
+      postIndexSessionTimeoutMs,
+    );
+    return semanticInvalidationPromise;
+  };
+  const prepareFirstStructuralSymbolWrite = (
+    versionId: string,
+  ): Promise<void> =>
+    ensureSemanticInvalidatedBeforeStructuralWrite(versionId);
+  const pauseAfterFirstStructuralSymbolCommit = async (): Promise<void> => {
+    if (!options?.afterFirstStructuralSymbolWriteCommitted) return;
+    firstStructuralCommitBarrierPromise ??=
+      options.afterFirstStructuralSymbolWriteCommitted();
+    await firstStructuralCommitBarrierPromise;
+  };
   const createOrReuseVersion = async (
     versionReason: string,
     forceNewVersion = false,
@@ -2387,6 +2500,27 @@ async function indexRepoImpl(
     processesTraced: number;
     algorithmRefresh: AlgorithmRefreshDiagnostics;
   }> => {
+    await ensureSemanticInvalidatedBeforeStructuralWrite(params.versionId);
+    const semanticLifecycle =
+      appConfig.semantic?.enabled === true && !params.deferSemanticRefresh && !semanticInvalidationWasNoOp
+        ? createRepositorySemanticLifecycle({
+            repoId,
+            versionId: params.versionId,
+            appConfig,
+            postIndexSessionTimeoutMs,
+          })
+        : undefined;
+    const finalizeSemanticFailure = async (error: unknown): Promise<void> => {
+      if (!semanticLifecycle) return;
+      try {
+        await semanticLifecycle.onFailureOutsideGate(error);
+      } catch (finalizationError) {
+        throw new AggregateError(
+          [error, finalizationError],
+          "Semantic work and failure finalization both failed",
+        );
+      }
+    };
     const finalizeResult = await measurePhase("finalizeIndexing", () =>
       finalizeIndexing({
         repoId,
@@ -2403,11 +2537,16 @@ async function indexRepoImpl(
         deferSemanticRefresh: params.deferSemanticRefresh,
         preFinalize: params.preFinalize,
         postIndexSessionTimeoutMs,
+        onSymbolEmbeddingFailureInsideGate:
+          semanticLifecycle?.onFailureInsideGate,
         onProgress,
       }),
-    );
+    ).catch(async (error) => {
+      await finalizeSemanticFailure(error);
+      throw error;
+    });
     recordFinalizeIndexingSubphaseTimings(finalizeResult.timings);
-    return withPostIndexWriteSession(
+    const postIndexResult = await withPostIndexWriteSession(
       async () => {
         await measurePhase("ensureCriticalSymbolFts", async () => {
           await ensureCriticalSymbolFtsIndex({
@@ -2453,13 +2592,15 @@ async function indexRepoImpl(
           });
         }
 
-        await measurePhase("buildDeferredIndexes", async () => {
-          await buildDeferredIndexes({
-            deferSemanticVectorIndexes: finalizeResult.semanticDeferred,
-            deferSemanticTextIndexes: finalizeResult.semanticDeferred,
-            recordTiming: recordIndexSubphaseTiming,
-          });
-        });
+        if (!semanticLifecycle) {
+          await measurePhase("buildDeferredIndexes", () =>
+            buildDeferredIndexes({
+              deferSemanticVectorIndexes: finalizeResult.semanticDeferred,
+              deferSemanticTextIndexes: finalizeResult.semanticDeferred,
+              recordTiming: recordIndexSubphaseTiming,
+            }),
+          );
+        }
 
         await measurePhase("memorySync", async () => {
           await flagStaleMemoriesForChangedFiles(
@@ -2502,7 +2643,27 @@ async function indexRepoImpl(
         };
       },
       { timeoutMs: postIndexSessionTimeoutMs, repoId },
-    );
+    ).catch(async (error) => {
+      await finalizeSemanticFailure(error);
+      throw error;
+    });
+    if (semanticLifecycle) {
+      await semanticLifecycle
+        .commitSuccess(() =>
+          measurePhase("buildDeferredIndexes", () =>
+            buildDeferredIndexes({
+              deferSemanticVectorIndexes: false,
+              deferSemanticTextIndexes: false,
+              recordTiming: recordIndexSubphaseTiming,
+            }),
+          ),
+        )
+        .catch(async (error) => {
+          await finalizeSemanticFailure(error);
+          throw error;
+        });
+    }
+    return postIndexResult;
   };
 
   const finalizeProviderFirstShadowBuild = async (
@@ -2591,10 +2752,12 @@ async function indexRepoImpl(
       return { semanticDeferred: params.semanticDeferred };
     }
 
+    await ensureSemanticInvalidatedBeforeStructuralWrite(params.versionId);
     const semanticRefresh = await runProviderFirstSemanticReadinessRefresh({
       repoId,
       versionId: params.versionId,
       appConfig,
+      skipSymbolVectorLifecycle: semanticInvalidationWasNoOp,
       onProgress,
       recordTiming: recordIndexSubphaseTiming,
       recordMemorySnapshot: phaseTimings ? recordMemorySnapshot : undefined,
@@ -2659,8 +2822,13 @@ async function indexRepoImpl(
         return;
       }
 
-      await graphIntegrity.begin(undefined, providerCoverageScan.removedFileIds);
+      const structuralVersionId = graphIntegrity.reserveVersionId();
+      await graphIntegrity.begin(
+        structuralVersionId,
+        providerCoverageScan.removedFileIds,
+      );
       graphIntegrity.removeFiles(providerCoverageScan.removedFileIds);
+      await prepareFirstStructuralSymbolWrite(structuralVersionId);
       await measureProviderFirstPhase(
         "deleteRemovedFiles",
         "providerFirstIncrementalDeleteRemovedFiles",
@@ -2674,6 +2842,7 @@ async function indexRepoImpl(
             });
           }, postIndexSessionTimeoutMs),
       );
+      await pauseAfterFirstStructuralSymbolCommit();
       providerFirstRemovedFilesDeleted = true;
     };
     const providerChangedFiles = providerFirstIncrementalActive
@@ -3151,10 +3320,13 @@ async function indexRepoImpl(
           await measureProviderFirstPhase(
             "materialize",
             "providerFirstMaterialize",
-            () => {
+            async () => {
               if (activeMaterializationPlan.reuseExistingProviderRows) {
-                return Promise.resolve();
+                return;
               }
+              await prepareFirstStructuralSymbolWrite(
+                graphIntegrity.reserveVersionId(),
+              );
               return withWriteConn(async (conn) => {
                 if (providerRowsHaveMaterialization(materializedRows)) {
                   // materializeProviderFacts owns its transaction. Wrapping it
@@ -3251,6 +3423,9 @@ async function indexRepoImpl(
               }, postIndexSessionTimeoutMs);
             },
           );
+          if (!activeMaterializationPlan.reuseExistingProviderRows) {
+            await pauseAfterFirstStructuralSymbolCommit();
+          }
           if (
             !activeMaterializationPlan.reuseExistingProviderRows &&
             providerScan.removedFileIds.length > 0
@@ -3735,7 +3910,8 @@ async function indexRepoImpl(
       return result;
     });
   }
-  await graphIntegrity.begin(undefined, [
+  const structuralVersionId = graphIntegrity.reserveVersionId();
+  await graphIntegrity.begin(structuralVersionId, [
     ...removedFileIds,
     ...files.filter((file) => isScannedFileChanged(file, existingByPath.get(file.path)))
       .map((file) => fileIdForPath(repoId, file.path, existingByPath)),
@@ -3746,11 +3922,13 @@ async function indexRepoImpl(
     !providerFirstRemovedFilesDeleted &&
     removedFileIds.length > 0
   ) {
+    await prepareFirstStructuralSymbolWrite(structuralVersionId);
     await measurePhase("deleteRemovedFiles", () =>
       withWriteConn((writeConn) =>
         ladybugDb.deleteFilesByIds(writeConn, removedFileIds),
       ),
     );
+    await pauseAfterFirstStructuralSymbolCommit();
     providerFirstRemovedFilesDeleted = true;
   }
 
@@ -3763,6 +3941,7 @@ async function indexRepoImpl(
     const existingFileIds = [
       ...new Set(Array.from(existingByPath.values(), (file) => file.fileId)),
     ];
+    await prepareFirstStructuralSymbolWrite(structuralVersionId);
     if (
       shouldDeleteExistingFilesBeforeFullPass1({
         mode,
@@ -3781,6 +3960,7 @@ async function indexRepoImpl(
         ladybugDb.deleteSymbolsByFileIds(conn, existingFileIds),
       );
     }
+    await pauseAfterFirstStructuralSymbolCommit();
     // Full refresh has already replaced the old symbol graph up front, so the
     // pass-1 flush batches can skip per-file stale deletes. File IDs are stable
     // (`repoId:relPath`), so an empty map still reconstructs the same IDs.
@@ -3989,6 +4169,7 @@ async function indexRepoImpl(
     };
 
     let pass1EngineUsed: "rust" | "ts" = useRustEngine ? "rust" : "ts";
+    await prepareFirstStructuralSymbolWrite(structuralVersionId);
     const pass1Acc: Pass1Accumulator = await measurePhase(
       "pass1",
       async () => {
@@ -4066,6 +4247,7 @@ async function indexRepoImpl(
             })
         : undefined;
     await measurePhase("pass1Drain", () => pass1DrainPromise);
+    await pauseAfterFirstStructuralSymbolCommit();
     const pass2Task = measurePhase("pass2", async () =>
       runPass2Resolvers({
         repoId,
@@ -4279,6 +4461,27 @@ async function indexRepoImpl(
       mode === "incremental" ? changedPass2FilePaths : undefined;
     const hasIndexMutations = changedFiles > 0 || totalEdgesCreated > 0;
     const deferSemanticRefresh = providerFirstScipMaterialized;
+    await ensureSemanticInvalidatedBeforeStructuralWrite(versionId);
+    const semanticLifecycle =
+      appConfig.semantic?.enabled === true && !deferSemanticRefresh && !semanticInvalidationWasNoOp
+        ? createRepositorySemanticLifecycle({
+            repoId,
+            versionId,
+            appConfig,
+            postIndexSessionTimeoutMs,
+          })
+        : undefined;
+    const finalizeSemanticFailure = async (error: unknown): Promise<void> => {
+      if (!semanticLifecycle) return;
+      try {
+        await semanticLifecycle.onFailureOutsideGate(error);
+      } catch (finalizationError) {
+        throw new AggregateError(
+          [error, finalizationError],
+          "Semantic work and failure finalization both failed",
+        );
+      }
+    };
     const finalizeResult = await measurePhase("finalizeIndexing", () =>
       finalizeIndexing({
         repoId,
@@ -4299,9 +4502,14 @@ async function indexRepoImpl(
         prepareGraphIntegrityPlaceholderPruning: graphIntegrity.prepareForPlaceholderPruning,
         deferSemanticRefresh,
         postIndexSessionTimeoutMs,
+        onSymbolEmbeddingFailureInsideGate:
+          semanticLifecycle?.onFailureInsideGate,
         onProgress,
       }),
-    );
+    ).catch(async (error) => {
+      await finalizeSemanticFailure(error);
+      throw error;
+    });
     recordFinalizeIndexingSubphaseTimings(finalizeResult.timings);
     const phaseOutcome = await withPostIndexWriteSession(
       async () => {
@@ -4355,13 +4563,15 @@ async function indexRepoImpl(
         }
 
         // --- Phase: build deferred indexes (fresh DB only) ---
-        await measurePhase("buildDeferredIndexes", async () => {
-          await buildDeferredIndexes({
-            deferSemanticVectorIndexes: finalizeResult.semanticDeferred,
-            deferSemanticTextIndexes: finalizeResult.semanticDeferred,
-            recordTiming: recordIndexSubphaseTiming,
-          });
-        });
+        if (!semanticLifecycle) {
+          await measurePhase("buildDeferredIndexes", () =>
+            buildDeferredIndexes({
+              deferSemanticVectorIndexes: finalizeResult.semanticDeferred,
+              deferSemanticTextIndexes: finalizeResult.semanticDeferred,
+              recordTiming: recordIndexSubphaseTiming,
+            }),
+          );
+        }
 
         // --- Phase: memory management (staleness flagging + file import) ---
         await measurePhase("memorySync", async () => {
@@ -4407,7 +4617,26 @@ async function indexRepoImpl(
         };
       },
       { timeoutMs: postIndexSessionTimeoutMs, repoId },
-    );
+    ).catch(async (error) => {
+      await finalizeSemanticFailure(error);
+      throw error;
+    });
+    if (semanticLifecycle) {
+      await semanticLifecycle
+        .commitSuccess(() =>
+          measurePhase("buildDeferredIndexes", () =>
+            buildDeferredIndexes({
+              deferSemanticVectorIndexes: false,
+              deferSemanticTextIndexes: false,
+              recordTiming: recordIndexSubphaseTiming,
+            }),
+          ),
+        )
+        .catch(async (error) => {
+          await finalizeSemanticFailure(error);
+          throw error;
+        });
+    }
 
     let {
       summaryStats,

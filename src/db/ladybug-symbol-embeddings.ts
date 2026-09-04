@@ -1,4 +1,4 @@
-/** Model-aware storage helpers for the dedicated SymbolVectorEmbedding table. */
+/** Model-aware storage helpers for repository-scoped Symbol vector tables. */
 import { createHash } from "node:crypto";
 
 import type { Connection } from "kuzu";
@@ -9,11 +9,10 @@ import {
   EMBEDDING_MODELS,
   getVecPropertyName,
   getVectorIndexName,
-  SYMBOL_VECTOR_EMBEDDING_TABLE,
 } from "../retrieval/model-mapping.js";
-import { logger } from "../util/logger.js";
 import {
   exec,
+  execCheckpoint,
   execDdl,
   queryAll,
   querySingle,
@@ -44,10 +43,12 @@ export interface SymbolVectorPhysicalIdentity {
 }
 
 const SAFE_IDENTIFIER = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
+const SYMBOL_VECTOR_TABLE_PREFIX = "SymbolVectorEmbedding_r_";
 
 function hashRepositoryId(repoId: string): string {
   return createHash("sha256").update(repoId).digest("hex").slice(0, 32);
 }
+
 
 function getEffectiveLogicalIndexStem(
   model: string,
@@ -85,6 +86,7 @@ export function resolveSymbolVectorPhysicalIdentity(
   repoId: string,
   model: string,
   semanticConfig?: SemanticConfig,
+  logicalIndexStemOverride?: string,
 ): SymbolVectorPhysicalIdentity {
   if (repoId.length === 0) {
     throw new IndexError(
@@ -93,7 +95,8 @@ export function resolveSymbolVectorPhysicalIdentity(
   }
 
   const propertyName = getVecPropertyName(model);
-  const logicalIndexStem = getEffectiveLogicalIndexStem(model, semanticConfig);
+  const logicalIndexStem =
+    logicalIndexStemOverride ?? getEffectiveLogicalIndexStem(model, semanticConfig);
   if (!propertyName || !logicalIndexStem) {
     throw new IndexError(
       `Unsupported embedding model "${model}": cannot resolve Symbol vector physical identity.`,
@@ -113,7 +116,7 @@ export function resolveSymbolVectorPhysicalIdentity(
   }
 
   const repoHash = hashRepositoryId(repoId);
-  const tableName = `${SYMBOL_VECTOR_EMBEDDING_TABLE}_r_${repoHash}`;
+  const tableName = `${SYMBOL_VECTOR_TABLE_PREFIX}${repoHash}`;
   const indexName = `${logicalIndexStem}_r_${repoHash}`;
 
   assertPhysicalIdentifier(tableName, "table", model);
@@ -138,178 +141,6 @@ function resolveVectorProperty(model: string): string {
 function getEmbeddingId(symbolId: string, model: string): string {
   return `${model}:${symbolId}`;
 }
-
-/** True when the selected model has at least one complete persisted vector row. */
-export async function hasCompleteSymbolVectorEmbedding(
-  conn: Connection,
-  model: string,
-): Promise<boolean> {
-  const vectorProperty = resolveVectorProperty(model);
-  const row = await querySingle<{ embeddingId: string }>(
-    conn,
-    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE} {model: $model})
-     WHERE e.embeddingVector IS NOT NULL
-       AND e.cardHash IS NOT NULL
-       AND e.${vectorProperty} IS NOT NULL
-     RETURN e.embeddingId AS embeddingId
-     LIMIT 1`,
-    { model },
-  );
-  return row !== null;
-}
-
-export async function deleteSymbolVectorEmbeddingsBySymbolIds(
-  conn: Connection,
-  symbolIds: readonly string[],
-): Promise<void> {
-  if (symbolIds.length === 0) return;
-  await exec(
-    conn,
-    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE})
-     WHERE e.symbolId IN $symbolIds
-     DELETE e`,
-    { symbolIds: [...symbolIds] },
-  );
-}
-
-export async function getSymbolVectorEmbedding(
-  conn: Connection,
-  symbolId: string,
-  model: string,
-): Promise<SymbolVectorEmbeddingRow | null> {
-  const vectorProperty = resolveVectorProperty(model);
-  const row = await querySingle<{
-    vector: string | null;
-    cardHash: string | null;
-    updatedAt: string | null;
-  }>(
-    conn,
-    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE} {embeddingId: $embeddingId})
-     WHERE e.embeddingVector IS NOT NULL
-       AND e.cardHash IS NOT NULL
-       AND e.${vectorProperty} IS NOT NULL
-     RETURN e.embeddingVector AS vector,
-            e.cardHash AS cardHash,
-            e.updatedAt AS updatedAt`,
-    { embeddingId: getEmbeddingId(symbolId, model) },
-  );
-
-  if (!row || row.vector === null || row.cardHash === null) return null;
-  return {
-    vector: row.vector,
-    cardHash: row.cardHash,
-    updatedAt: row.updatedAt ?? "",
-  };
-}
-
-export async function getSymbolVectorEmbeddings(
-  conn: Connection,
-  symbolIds: string[],
-  model: string,
-): Promise<Map<string, SymbolVectorEmbeddingRow>> {
-  const result = new Map<string, SymbolVectorEmbeddingRow>();
-  if (symbolIds.length === 0) return result;
-
-  const vectorProperty = resolveVectorProperty(model);
-  const embeddingIds = symbolIds.map((symbolId) =>
-    getEmbeddingId(symbolId, model),
-  );
-  const rows = await queryAll<{
-    symbolId: string;
-    vector: string | null;
-    cardHash: string | null;
-    updatedAt: string | null;
-  }>(
-    conn,
-    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE})
-     WHERE e.embeddingId IN $embeddingIds
-       AND e.embeddingVector IS NOT NULL
-       AND e.cardHash IS NOT NULL
-       AND e.${vectorProperty} IS NOT NULL
-     RETURN e.symbolId AS symbolId,
-            e.embeddingVector AS vector,
-            e.cardHash AS cardHash,
-            e.updatedAt AS updatedAt`,
-    { embeddingIds },
-  );
-
-  for (const row of rows) {
-    if (row.vector === null || row.cardHash === null) continue;
-    result.set(row.symbolId, {
-      vector: row.vector,
-      cardHash: row.cardHash,
-      updatedAt: row.updatedAt ?? "",
-    });
-  }
-
-  logger.debug(
-    "getSymbolVectorEmbeddings: loaded complete model-scoped embeddings",
-    { model, requested: symbolIds.length, found: result.size },
-  );
-  return result;
-}
-
-export async function setSymbolVectorEmbedding(
-  conn: Connection,
-  repoId: string,
-  symbolId: string,
-  model: string,
-  vector: string,
-  cardHash: string,
-  vectorArray: number[],
-): Promise<void> {
-  await setSymbolVectorEmbeddingBatch(
-    conn,
-    repoId,
-    model,
-    [{ symbolId, vector, cardHash, vectorArray }],
-  );
-}
-
-export async function setSymbolVectorEmbeddingBatch(
-  conn: Connection,
-  repoId: string,
-  model: string,
-  items: SymbolVectorEmbeddingBatchItem[],
-): Promise<void> {
-  if (items.length === 0) return;
-
-  const vectorProperty = resolveVectorProperty(model);
-  const updatedAt = new Date().toISOString();
-  const rows = items.map((item) => ({
-    embeddingId: getEmbeddingId(item.symbolId, model),
-    repoId,
-    symbolId: item.symbolId,
-    model,
-    vector: item.vector,
-    cardHash: item.cardHash,
-    updatedAt,
-    vectorArray: item.vectorArray,
-  }));
-
-  // Separate autocommits make an interrupted replacement visible to dirty/retry.
-  await exec(
-    conn,
-    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE})
-     WHERE e.embeddingId IN $embeddingIds
-     DELETE e`,
-    { embeddingIds: rows.map((row) => row.embeddingId) },
-  );
-  await exec(
-    conn,
-    `UNWIND $rows AS r
-     MERGE (e:${SYMBOL_VECTOR_EMBEDDING_TABLE} {embeddingId: r.embeddingId})
-     SET e.repoId = r.repoId,
-         e.symbolId = r.symbolId,
-         e.model = r.model,
-         e.embeddingVector = r.vector,
-         e.cardHash = r.cardHash,
-         e.updatedAt = r.updatedAt,
-         e.${vectorProperty} = r.vectorArray`,
-    { rows },
-  );
-}
-
 
 interface RepoVectorCatalogTableRow {
   name?: unknown;
@@ -683,6 +514,15 @@ export async function setRepoSymbolVectorEmbeddingBatch(
   repoId: string,
   model: string,
   items: SymbolVectorEmbeddingBatchItem[],
+  options?: {
+    liveHnsw?: boolean;
+    onOperation?: (
+      operation:
+        | "after-vector-delete"
+        | "after-vector-merge"
+        | "after-vector-create",
+    ) => Promise<void> | void;
+  },
 ): Promise<void> {
   if (items.length === 0) return;
   const tableName = await ensureRepoSymbolVectorTable(conn, repoId);
@@ -700,32 +540,138 @@ export async function setRepoSymbolVectorEmbeddingBatch(
     vectorArray: item.vectorArray,
   }));
 
-  // Keep replacement as separate autocommits. Indexed vectors cannot be SET
-  // in place, and combining DELETE + MERGE in a transaction is unsupported.
-  await exec(
+  const deleteRows = (symbolIds: string[]) =>
+    exec(
+      conn,
+      `MATCH (e:${tableName})
+       WHERE e.repoId = $repoId
+         AND e.model = $model
+         AND e.symbolId IN $symbolIds
+       DELETE e`,
+      { repoId, model, symbolIds },
+    );
+  const mergeRows = (batchRows: typeof rows) =>
+    exec(
+      conn,
+      `UNWIND $rows AS r
+       MERGE (e:${tableName} {embeddingId: r.embeddingId})
+       SET e.repoId = r.repoId,
+           e.symbolId = r.symbolId,
+           e.model = r.model,
+           e.embeddingVector = r.vector,
+           e.cardHash = r.cardHash,
+           e.updatedAt = r.updatedAt,
+           e.${vectorProperty} = r.vectorArray`,
+      { rows: batchRows },
+    );
+  const createReplacementRow = (row: (typeof rows)[number]) =>
+    exec(
+      conn,
+      `CREATE (e:${tableName} {
+         embeddingId: $embeddingId,
+         repoId: $repoId,
+         symbolId: $symbolId,
+         model: $model,
+         embeddingVector: $vector,
+         cardHash: $cardHash,
+         updatedAt: $updatedAt,
+         ${vectorProperty}: $vectorArray
+       })`,
+      row,
+    );
+
+  if (options?.liveHnsw) {
+    // This is deliberately replacement-after-delete, not an upsert. With the
+    // pinned @ladybugdb/core 0.19.0 Windows driver, MERGE ... SET hard-exits
+    // after seven replacements while an HNSW remains live. An exact committed
+    // DELETE followed by unconditional CREATE survives 1-50 replacements.
+    // Checkpoint each completed pair so a retry can safely delete and recreate
+    // the same primary key without exposing partial semantic readiness.
+    for (const [index, row] of rows.entries()) {
+      await deleteRows([row.symbolId]);
+      if (index === 0) {
+        await options.onOperation?.("after-vector-delete");
+      }
+      await createReplacementRow(row);
+      await execCheckpoint(conn);
+    }
+    await options.onOperation?.("after-vector-create");
+  } else {
+    await deleteRows(rows.map((row) => row.symbolId));
+    await options?.onOperation?.("after-vector-delete");
+    await mergeRows(rows);
+    await options?.onOperation?.("after-vector-merge");
+  }
+}
+
+
+export interface RepoSymbolVectorProbe {
+  embeddingId: string;
+  repoId: string;
+  symbolId: string;
+  model: string;
+  vectorArray: number[];
+}
+
+/** Read one complete, ownership-validated vector for a required ANN probe. */
+export async function getRepoSymbolVectorProbe(
+  conn: Connection,
+  identity: SymbolVectorPhysicalIdentity,
+  repoId: string,
+  model: string,
+): Promise<RepoSymbolVectorProbe | null> {
+  assertPhysicalIdentifier(identity.tableName, "table", model);
+  assertPhysicalIdentifier(identity.indexName, "index", model);
+  const expectedProperty = resolveVectorProperty(model);
+  if (identity.propertyName !== expectedProperty) {
+    throw new IndexError(
+      `Repository Symbol vector probe property "${identity.propertyName}" does not match model "${model}".`,
+    );
+  }
+  const row = await querySingle<Record<string, unknown>>(
     conn,
-    `MATCH (e:${tableName})
+    `MATCH (e:${identity.tableName})
      WHERE e.repoId = $repoId
        AND e.model = $model
-       AND e.symbolId IN $symbolIds
-     DELETE e`,
-    {
-      repoId,
-      model,
-      symbolIds: rows.map((row) => row.symbolId),
-    },
+       AND e.embeddingVector IS NOT NULL
+       AND e.cardHash IS NOT NULL
+       AND e.${identity.propertyName} IS NOT NULL
+     RETURN e.embeddingId AS embeddingId,
+            e.repoId AS repoId,
+            e.symbolId AS symbolId,
+            e.model AS model,
+            e.${identity.propertyName} AS vectorArray
+     ORDER BY e.embeddingId
+     LIMIT 1`,
+    { repoId, model },
   );
-  await exec(
-    conn,
-    `UNWIND $rows AS r
-     MERGE (e:${tableName} {embeddingId: r.embeddingId})
-     SET e.repoId = r.repoId,
-         e.symbolId = r.symbolId,
-         e.model = r.model,
-         e.embeddingVector = r.vector,
-         e.cardHash = r.cardHash,
-         e.updatedAt = r.updatedAt,
-         e.${vectorProperty} = r.vectorArray`,
-    { rows },
-  );
+  if (!row) return null;
+
+  const embeddingId =
+    typeof row.embeddingId === "string" ? row.embeddingId : "";
+  const rowRepoId = typeof row.repoId === "string" ? row.repoId : "";
+  const symbolId = typeof row.symbolId === "string" ? row.symbolId : "";
+  const rowModel = typeof row.model === "string" ? row.model : "";
+  const vectorArray = Array.isArray(row.vectorArray)
+    ? row.vectorArray.filter((value): value is number => typeof value === "number")
+    : [];
+  if (
+    rowRepoId !== repoId ||
+    rowModel !== model ||
+    symbolId.length === 0 ||
+    embeddingId !== `${model}:${symbolId}` ||
+    vectorArray.length !== (EMBEDDING_MODELS[model]?.dimension ?? -1)
+  ) {
+    throw new IndexError(
+      `Repository Symbol vector probe row violates ownership for repository "${repoId}" and model "${model}".`,
+    );
+  }
+
+  return {
+    embeddingId,
+    repoId: rowRepoId,
+    symbolId,
+    model: rowModel,
+    vectorArray,
+  };
 }

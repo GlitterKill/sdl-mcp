@@ -20,7 +20,6 @@ import {
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 import { resolveLadybugWriteChunkSize } from "./ladybug-batching.js";
-import { deleteSymbolVectorEmbeddingsBySymbolIds } from "./ladybug-symbol-embeddings.js";
 
 // ---------------------------------------------------------------------------
 // 1. mergeScipSymbolProperties — update existing symbol with SCIP metadata
@@ -874,7 +873,6 @@ export async function pruneStaleScipExternalSymbols(
          DELETE sc`,
         { symbolIds },
       );
-      await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
       await exec(
         txConn,
         `MATCH (s:Symbol)
@@ -895,13 +893,6 @@ export async function pruneStaleScipExternalSymbols(
          MATCH (s:Symbol {symbolId: replacement.symbolId})-[r:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
          DELETE r
          SET s.repoId = replacement.ownerRepoId`,
-        { replacements, repoId },
-      );
-      await exec(
-        txConn,
-        `UNWIND $replacements AS replacement
-         MATCH (e:SymbolVectorEmbedding {symbolId: replacement.symbolId, repoId: $repoId})
-         SET e.repoId = replacement.ownerRepoId`,
         { replacements, repoId },
       );
     }

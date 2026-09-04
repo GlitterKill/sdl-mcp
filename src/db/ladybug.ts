@@ -8,7 +8,10 @@ import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { DB_SHUTDOWN_DRAIN_TIMEOUT_MS } from "../config/constants.js";
-import { DatabaseError } from "../domain/errors.js";
+import {
+  DatabaseError,
+  SafeRebuildRequiredError,
+} from "../domain/errors.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
 import {
   markExtensionLoaded,
@@ -56,6 +59,7 @@ import {
   drainConnMutex,
   isConnectionPoisoned,
   isConnStuck,
+  queryStoredProcAll,
 } from "./ladybug-core.js";
 import {
   createManagedLadybugDatabase,
@@ -1445,18 +1449,36 @@ async function initLadybugDbInternal(
     await getLadybugDbInternal(normalizedPath, options, acquireLease);
     await getLadybugConn(); // triggers pool init
 
-    // Step 2: Read current schema version (may throw if table doesn't exist)
-    let currentVersion: number | null = null;
-    try {
-      const conn = await getLadybugConn();
-      currentVersion = await getSchemaVersion(conn);
-    } catch {
-      // SchemaVersion table does not exist — fresh database
-      currentVersion = null;
+    // Step 2: Classify the database from a successful catalog read. Catalog
+    // failures must remain fatal; otherwise a damaged database can look fresh.
+    const schemaConn = await getLadybugConn();
+    const catalogRows = await queryStoredProcAll<{ name?: unknown }>(
+      schemaConn,
+      "CALL SHOW_TABLES() RETURN name",
+    );
+    const tableNames = new Set(
+      catalogRows.map((row) => {
+        if (typeof row.name !== "string" || row.name.length === 0) {
+          throw new DatabaseError(
+            "LadybugDB table catalog returned an invalid table name.",
+          );
+        }
+        return row.name;
+      }),
+    );
+    const currentVersion = tableNames.has("SchemaVersion")
+      ? await getSchemaVersion(schemaConn)
+      : null;
+
+    if (currentVersion === null && tableNames.size > 0) {
+      const reason = tableNames.has("SymbolVectorEmbedding")
+        ? "The database contains the legacy shared Symbol vector table without a current schema version."
+        : "The database contains schema objects but no current schema version.";
+      throw new SafeRebuildRequiredError(reason);
     }
 
     if (currentVersion === null) {
-      // Fresh DB (SchemaVersion table missing) or corrupted (table exists, no row).
+      // Only a successfully inspected, catalog-empty database is fresh.
       // Run createSchema() to set up everything at latest version.
       freshlyCreated = true;
       deferredIndexesPending = true;

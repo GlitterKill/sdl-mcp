@@ -13,6 +13,8 @@ export interface Migration {
   version: number;
   /** Human-readable description for logging. */
   description: string;
+  /** Refuse startup before any pending migration when a fresh database is required. */
+  requiresFreshDatabase?: boolean;
   /** Migration function. Receives the dedicated write connection. */
   up: (conn: Connection) => Promise<void>;
 }

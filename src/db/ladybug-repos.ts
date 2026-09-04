@@ -24,7 +24,6 @@ import {
   deleteFileParserStatesByFileIdsInTransaction,
   deleteParserProvenanceForRepoInTransaction,
 } from "./ladybug-parser-provenance.js";
-import { deleteSymbolVectorEmbeddingsBySymbolIds } from "./ladybug-symbol-embeddings.js";
 import { prepareSymbolsForFileDeletionInTransaction } from "./ladybug-symbols.js";
 
 export interface MetricsRow {
@@ -262,7 +261,6 @@ export async function deleteRepo(
       ]) {
         await exec(txConn, statement, { deletedSymbolIds });
       }
-      await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, deletedSymbolIds);
       await exec(
         txConn,
         `MATCH (s:Symbol) WHERE s.symbolId IN $deletedSymbolIds DELETE s`,
@@ -282,19 +280,7 @@ export async function deleteRepo(
          SET s.repoId = replacement.ownerRepoId`,
         { replacements, repoId },
       );
-      await exec(
-        txConn,
-        `UNWIND $replacements AS replacement
-         MATCH (e:SymbolVectorEmbedding {symbolId: replacement.symbolId, repoId: $repoId})
-         SET e.repoId = replacement.ownerRepoId`,
-        { replacements, repoId },
-      );
     }
-    await exec(
-      txConn,
-      `MATCH (e:SymbolVectorEmbedding {repoId: $repoId}) DELETE e`,
-      { repoId },
-    );
 
     await exec(
       txConn,
@@ -781,7 +767,6 @@ async function _deleteFilesByIdsInner(
       { symbolIds },
     );
 
-    await deleteSymbolVectorEmbeddingsBySymbolIds(conn, symbolIds);
     // Step 6: Batch-delete Symbol nodes
     await exec(
       conn,

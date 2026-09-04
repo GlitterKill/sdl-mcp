@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { basename, dirname, join } from "path";
 import { tmpdir } from "os";
 
 import { initValidatedTestLadybugClone } from "../helpers/ladybug-validated-clone.ts";
@@ -12,6 +13,16 @@ let getSchemaVersion: (
   conn: import("kuzu").Connection,
 ) => Promise<number | null>;
 let LADYBUG_SCHEMA_VERSION: number;
+let migrations: typeof import("../../dist/db/migrations/index.js").migrations;
+let runPendingMigrations: typeof import(
+  "../../dist/db/migration-runner.js"
+).runPendingMigrations;
+let withLadybugInitialization: typeof import(
+  "../../dist/db/ladybug-operation-gate.js"
+).withLadybugInitialization;
+let SafeRebuildRequiredError: typeof import(
+  "../../dist/domain/errors.js"
+).SafeRebuildRequiredError;
 let ladybugQueries: typeof import("../../dist/db/ladybug-queries.js");
 let queryAll: typeof import("../../dist/db/ladybug-core.js").queryAll;
 let ladybugAvailable = false;
@@ -20,12 +31,19 @@ try {
   const ladybugMod = await import("../../dist/db/ladybug.js");
   const schemaMod = await import("../../dist/db/ladybug-schema.js");
   const migMod = await import("../../dist/db/migrations/index.js");
+  const runnerMod = await import("../../dist/db/migration-runner.js");
+  const gateMod = await import("../../dist/db/ladybug-operation-gate.js");
+  const errorMod = await import("../../dist/domain/errors.js");
   const coreMod = await import("../../dist/db/ladybug-core.js");
   ladybugQueries = await import("../../dist/db/ladybug-queries.js");
   closeLadybugDb = ladybugMod.closeLadybugDb;
   getLadybugConn = ladybugMod.getLadybugConn;
   getSchemaVersion = schemaMod.getSchemaVersion;
   LADYBUG_SCHEMA_VERSION = migMod.LADYBUG_SCHEMA_VERSION;
+  migrations = migMod.migrations;
+  runPendingMigrations = runnerMod.runPendingMigrations;
+  withLadybugInitialization = gateMod.withLadybugInitialization;
+  SafeRebuildRequiredError = errorMod.SafeRebuildRequiredError;
   queryAll = coreMod.queryAll;
   ladybugAvailable = true;
 } catch {
@@ -209,6 +227,225 @@ async function createV15DatabaseWithLegacyScipExternal(
   await db.close();
 }
 
+async function createBoundaryDatabase(
+  dbPath: string,
+  options: {
+    schemaVersion?: number;
+    includeSharedVectorTable?: boolean;
+    emptyCatalog?: boolean;
+  },
+): Promise<void> {
+  const kuzu = await import("kuzu");
+  const db = new kuzu.Database(dbPath);
+  const conn = new kuzu.Connection(db);
+
+  if (options.emptyCatalog) {
+    closeResult(
+      await conn.query("CREATE NODE TABLE Temp (id STRING PRIMARY KEY)"),
+    );
+    closeResult(await conn.query("DROP TABLE Temp"));
+    await conn.close();
+    await db.close();
+    return;
+  }
+
+  for (const statement of [
+    `CREATE NODE TABLE SchemaVersion (
+       id STRING PRIMARY KEY,
+       schemaVersion INT64,
+       createdAt STRING,
+       updatedAt STRING
+     )`,
+    `CREATE NODE TABLE MigrationSentinel (
+       id STRING PRIMARY KEY,
+       value STRING
+     )`,
+    `CREATE (m:MigrationSentinel {id: 'sentinel', value: 'unchanged'})`,
+  ]) {
+    closeResult(await conn.query(statement));
+  }
+
+  if (options.includeSharedVectorTable) {
+    closeResult(
+      await conn.query(
+        `CREATE NODE TABLE SymbolVectorEmbedding (
+           embeddingId STRING PRIMARY KEY,
+           repoId STRING,
+           symbolId STRING,
+           model STRING,
+           embeddingVector STRING,
+           cardHash STRING,
+           updatedAt STRING,
+           embeddingJinaCodeVec DOUBLE[768],
+           embeddingNomicVec DOUBLE[768]
+         )`,
+      ),
+    );
+    closeResult(
+      await conn.query(
+        `CREATE (e:SymbolVectorEmbedding {
+           embeddingId: 'legacy:sentinel',
+           repoId: 'repo-1',
+           symbolId: 'sentinel',
+           model: 'legacy',
+           embeddingVector: '[]',
+           cardHash: 'unchanged',
+           updatedAt: '2026-09-03T00:00:00.000Z'
+         })`,
+      ),
+    );
+  }
+
+  if (options.schemaVersion !== undefined) {
+    closeResult(
+      await conn.query(
+        `CREATE (sv:SchemaVersion {
+           id: 'current',
+           schemaVersion: ${options.schemaVersion},
+           createdAt: '2026-09-03T00:00:00.000Z',
+           updatedAt: '2026-09-03T00:00:00.000Z'
+         })`,
+      ),
+    );
+  }
+
+  await conn.close();
+  await db.close();
+}
+
+async function rawQueryAll<T>(
+  conn: import("kuzu").Connection,
+  statement: string,
+): Promise<T[]> {
+  const result = await conn.query(statement);
+  const queryResults = Array.isArray(result) ? result : [result];
+  try {
+    const rows: T[] = [];
+    for (const queryResult of queryResults) {
+      rows.push(...((await queryResult.getAll()) as T[]));
+    }
+    return rows;
+  } finally {
+    for (const queryResult of queryResults) {
+      queryResult.close();
+    }
+  }
+}
+
+async function inspectDatabase<T>(
+  dbPath: string,
+  inspect: (conn: import("kuzu").Connection) => Promise<T>,
+): Promise<T> {
+  const kuzu = await import("kuzu");
+  const db = new kuzu.Database(dbPath);
+  const conn = new kuzu.Connection(db);
+  try {
+    return await inspect(conn);
+  } finally {
+    await conn.close();
+    await db.close();
+  }
+}
+
+interface CatalogSnapshot {
+  schemaVersion: number | null;
+  tables: string[];
+  sentinelValues: string[];
+  sharedVectorRows: Array<{
+    embeddingId: string;
+    cardHash: string;
+  }>;
+}
+
+async function readCatalogSnapshot(dbPath: string): Promise<CatalogSnapshot> {
+  return inspectDatabase(dbPath, async (conn) => {
+    const tables = (
+      await rawQueryAll<{ name: string }>(
+        conn,
+        "CALL SHOW_TABLES() RETURN name",
+      )
+    )
+      .map((row) => row.name)
+      .sort();
+    const schemaRows = tables.includes("SchemaVersion")
+      ? await rawQueryAll<{ schemaVersion: bigint | number }>(
+          conn,
+          "MATCH (sv:SchemaVersion {id: 'current'}) RETURN sv.schemaVersion AS schemaVersion",
+        )
+      : [];
+    const sentinelValues = tables.includes("MigrationSentinel")
+      ? (
+          await rawQueryAll<{ value: string }>(
+            conn,
+            "MATCH (m:MigrationSentinel {id: 'sentinel'}) RETURN m.value AS value",
+          )
+        ).map((row) => row.value)
+      : [];
+    const sharedVectorRows = tables.includes("SymbolVectorEmbedding")
+      ? await rawQueryAll<{ embeddingId: string; cardHash: string }>(
+          conn,
+          `MATCH (e:SymbolVectorEmbedding)
+           RETURN e.embeddingId AS embeddingId, e.cardHash AS cardHash
+           ORDER BY e.embeddingId`,
+        )
+      : [];
+
+    return {
+      schemaVersion: schemaRows[0]
+        ? Number(schemaRows[0].schemaVersion)
+        : null,
+      tables,
+      sentinelValues,
+      sharedVectorRows,
+    };
+  });
+}
+
+function validatedClonePath(sourceDbPath: string): string {
+  return join(
+    dirname(sourceDbPath),
+    ".validated-clones",
+    createHash("sha256").update(sourceDbPath).digest("hex").slice(0, 16),
+    basename(sourceDbPath),
+  );
+}
+
+const migratedDatabaseCleanups: Array<() => Promise<void>> = [];
+
+async function migrateDatabaseThroughV26(
+  dbPath: string,
+  currentVersion: number,
+): Promise<import("kuzu").Connection> {
+  const kuzu = await import("kuzu");
+  const db = new kuzu.Database(dbPath);
+  const conn = new kuzu.Connection(db);
+  try {
+    await withLadybugInitialization(() =>
+      runPendingMigrations(
+        conn,
+        currentVersion,
+        migrations.filter((migration) => migration.version <= 26),
+      ),
+    );
+  } catch (error) {
+    await conn.close();
+    await db.close();
+    throw error;
+  }
+
+  migratedDatabaseCleanups.push(async () => {
+    await conn.close();
+    await db.close();
+  });
+  return conn;
+}
+
+async function closeMigratedDatabases(): Promise<void> {
+  for (const cleanup of migratedDatabaseCleanups.splice(0)) {
+    await cleanup();
+  }
+}
+
 describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
   const testRoot = join(
     tmpdir(),
@@ -216,37 +453,38 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
   );
 
   afterEach(async () => {
+    await closeMigratedDatabases();
     await closeLadybugDb();
     if (existsSync(testRoot)) {
       rmSync(testRoot, { recursive: true, force: true });
     }
   });
 
-  it("migrates v4 DB to latest version", async () => {
+  it("refuses a v4-to-v27 upgrade before any migration mutates it", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v4.lbug");
-
-    // Create a v4 database
     await createV4Database(dbPath);
+    const before = await readCatalogSnapshot(dbPath);
+    const clonePath = validatedClonePath(dbPath);
 
-    // Now init (should apply migrations)
-    await initValidatedTestLadybugClone(dbPath);
+    await assert.rejects(
+      () => initValidatedTestLadybugClone(dbPath),
+      SafeRebuildRequiredError,
+    );
+    await closeLadybugDb();
 
-    const conn = await getLadybugConn();
-    const version = await getSchemaVersion(conn);
-
-    assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
-    assert.ok(LADYBUG_SCHEMA_VERSION >= 5, "Version should be at least 5");
+    assert.deepStrictEqual(await readCatalogSnapshot(clonePath), before);
   });
 
-  it("Memory table exists after migration", async () => {
+  it("Memory table exists after migrations through v26", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v4-memory.lbug");
 
     await createV4Database(dbPath);
-    await initValidatedTestLadybugClone(dbPath);
-
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      4,
+    );
 
     // Query the Memory table — should not throw
     const result = await conn.query("MATCH (m:Memory) RETURN count(m) AS cnt");
@@ -258,19 +496,21 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     assert.ok(rows.length > 0);
   });
 
-  it("idempotent: re-init on already-migrated DB is a no-op", async () => {
+  it("idempotent: re-init on a current schema 27 DB is a no-op", async () => {
     mkdirSync(testRoot, { recursive: true });
-    const dbPath = join(testRoot, "v4-idempotent.lbug");
+    const dbPath = join(testRoot, "v27-idempotent.lbug");
+    await createBoundaryDatabase(dbPath, { emptyCatalog: true });
 
-    await createV4Database(dbPath);
     await initValidatedTestLadybugClone(dbPath);
     await closeLadybugDb();
 
-    // Re-init on same DB — should not throw, should stay at same version
     await initValidatedTestLadybugClone(dbPath);
     const conn = await getLadybugConn();
-    const version = await getSchemaVersion(conn);
-    assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
+
+    assert.strictEqual(
+      await getSchemaVersion(conn),
+      LADYBUG_SCHEMA_VERSION,
+    );
   });
 
   it("v25 -> v26: migrates only complete model embedding tuples idempotently", async () => {
@@ -364,8 +604,10 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     await seedConn.close();
     await db.close();
 
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      25,
+    );
     assert.strictEqual(await getSchemaVersion(conn), 26);
 
     const readRows = () => queryAll<{
@@ -427,14 +669,15 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     assert.deepStrictEqual(await readRows(), expected);
   });
 
-  it("upgrades old v8 DBs that are missing Symbol summary metadata columns", async () => {
+  it("upgrades old v8 DBs through v26 with Symbol summary metadata", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v8-summary-metadata.lbug");
 
     await createV8DatabaseWithoutSummaryMetadata(dbPath);
-    await initValidatedTestLadybugClone(dbPath);
-
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      8,
+    );
     const result = await conn.query(
       `MATCH (s:Symbol {symbolId: 'sym-1'})
        RETURN s.summaryQuality AS summaryQuality,
@@ -455,14 +698,15 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     assert.strictEqual(rows[0].repoId, "repo-1");
   });
 
-  it("v8 -> latest: m016 backfills Symbol placeholder status columns", async () => {
+  it("v8 -> v26: m016 backfills Symbol placeholder status columns", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v8-placeholder-status.lbug");
 
     await createV8DatabaseWithoutSummaryMetadata(dbPath);
-    await initValidatedTestLadybugClone(dbPath);
-
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      8,
+    );
     const result = await conn.query(
       `MATCH (real:Symbol {symbolId: 'sym-1'})
        MATCH (placeholder:Symbol {symbolId: 'unresolved:call:legacyHelper'})
@@ -522,14 +766,15 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     );
   });
 
-  it("v15 -> latest: m016 types legacy placeholders and SCIP externals", async () => {
+  it("v15 -> v26: m016 types legacy placeholders and SCIP externals", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v15-placeholder-and-scip-status.lbug");
 
     await createV15DatabaseWithLegacyScipExternal(dbPath);
-    await initValidatedTestLadybugClone(dbPath);
-
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      15,
+    );
     const result = await conn.query(
       `MATCH (s:Symbol {repoId: 'repo-1'})
        RETURN s.symbolId AS symbolId,
@@ -660,7 +905,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     );
   });
 
-  it("v16 -> latest: m017 repairs placeholder metadata and prunes isolated placeholders", async () => {
+  it("v16 -> v26: m017 repairs placeholder metadata and prunes isolated placeholders", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v16-placeholder-quality.lbug");
     const kuzu = await import("kuzu");
@@ -697,8 +942,10 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     await seedConn.close();
     await db.close();
 
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      16,
+    );
     const result = await conn.query(
       `MATCH (s:Symbol {repoId: 'repo-1'})
        WHERE s.symbolId STARTS WITH 'unresolved:'
@@ -737,7 +984,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     ]);
   });
 
-  it("v17 -> latest: m018 creates semantic enrichment provider tables", async () => {
+  it("v17 -> v26: m018 creates semantic enrichment provider tables", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v17-semantic-enrichment.lbug");
     const kuzu = await import("kuzu");
@@ -758,10 +1005,12 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     await seedConn.close();
     await db.close();
 
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      17,
+    );
     const version = await getSchemaVersion(conn);
-    assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
+    assert.strictEqual(version, 26);
 
     for (const stmt of [
       `CREATE (r:SemanticProviderRun {runId: 'run-1', repoId: 'repo-1', providerType: 'scip', providerId: 'scip-typescript', providerVersion: '1.0.0', languagesJson: '["typescript"]', sourceIndexPath: 'index.scip', sourceHash: 'hash-1', cacheKey: 'cache-1', configHash: 'config-1', ledgerVersion: 'v1', status: 'completed', startedAt: '${now}', finishedAt: '${now}', documentsProcessed: 1, symbolsMatched: 2, edgesCreated: 3, edgesUpgraded: 4, edgesReplaced: 0, edgesSkipped: 1, diagnosticsCount: 1, precisionScore: 0.95, cacheHit: false, canAffectPass2: true, selected: true, metadataJson: '{}', error: null})`,
@@ -799,7 +1048,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     ]);
   });
 
-  it("v18 -> latest: m019 creates predictive prefetch outcome tables", async () => {
+  it("v18 -> v26: m019 creates predictive prefetch outcome tables", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v18-prefetch-outcomes.lbug");
     const kuzu = await import("kuzu");
@@ -820,10 +1069,12 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     await seedConn.close();
     await db.close();
 
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      18,
+    );
     const version = await getSchemaVersion(conn);
-    assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
+    assert.strictEqual(version, 26);
     assert.ok(LADYBUG_SCHEMA_VERSION >= 19);
 
     await ladybugQueries.upsertPrefetchOutcomeAndAggregate(
@@ -886,7 +1137,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     assert.strictEqual(Number(rows[0].offered), 1);
   });
 
-  it("v8 -> latest: m011 adds pageRank/kCore columns to Metrics", async () => {
+  it("v8 -> v26: m011 adds pageRank/kCore columns to Metrics", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v8-m011-centrality.lbug");
 
@@ -907,10 +1158,12 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
       await db.close();
     }
 
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      8,
+    );
     const version = await getSchemaVersion(conn);
-    assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
+    assert.strictEqual(version, 26);
 
     const result = await conn.query(
       `MATCH (m:Metrics {symbolId: 'sym-1'}) RETURN m.pageRank AS pageRank, m.kCore AS kCore, m.fanIn AS fanIn`,
@@ -929,13 +1182,15 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     assert.strictEqual(Number(rows[0].fanIn), 2);
   });
 
-  it("v8 -> latest: m011 creates ShadowCluster node/rel tables", async () => {
+  it("v8 -> v26: m011 creates ShadowCluster node/rel tables", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v8-m011-shadow.lbug");
 
     await createV8DatabaseWithoutSummaryMetadata(dbPath);
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
+    const conn = await migrateDatabaseThroughV26(
+      dbPath,
+      8,
+    );
 
     // ShadowCluster node table should exist and accept inserts.
     const now = new Date().toISOString();
@@ -951,6 +1206,84 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     const rows = (await qr.getAll()) as Array<{ c: unknown }>;
     qr.close();
     assert.strictEqual(Number(rows[0].c), 1);
+  });
+
+  it("refuses schema 26 with the shared vector table without mutation", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "v26-shared-vector.lbug");
+    await createBoundaryDatabase(dbPath, {
+      schemaVersion: 26,
+      includeSharedVectorTable: true,
+    });
+    const before = await readCatalogSnapshot(dbPath);
+    const clonePath = validatedClonePath(dbPath);
+
+    await assert.rejects(
+      () => initValidatedTestLadybugClone(dbPath),
+      SafeRebuildRequiredError,
+    );
+    await closeLadybugDb();
+
+    assert.deepStrictEqual(await readCatalogSnapshot(clonePath), before);
+  });
+
+  it("does not mistake a null schema row plus shared vectors for fresh", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "null-schema-shared-vector.lbug");
+    await createBoundaryDatabase(dbPath, {
+      includeSharedVectorTable: true,
+    });
+    const before = await readCatalogSnapshot(dbPath);
+    const clonePath = validatedClonePath(dbPath);
+
+    await assert.rejects(
+      () => initValidatedTestLadybugClone(dbPath),
+      SafeRebuildRequiredError,
+    );
+    await closeLadybugDb();
+
+    assert.deepStrictEqual(await readCatalogSnapshot(clonePath), before);
+  });
+
+  it("fails closed on a nonempty catalog with no current schema row", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "null-schema-nonempty.lbug");
+    await createBoundaryDatabase(dbPath, {});
+    const before = await readCatalogSnapshot(dbPath);
+    const clonePath = validatedClonePath(dbPath);
+
+    await assert.rejects(
+      () => initValidatedTestLadybugClone(dbPath),
+      SafeRebuildRequiredError,
+    );
+    await closeLadybugDb();
+
+    assert.deepStrictEqual(await readCatalogSnapshot(clonePath), before);
+  });
+
+  it("initializes a catalog-empty database with steady embedding lifecycle", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "empty.lbug");
+    await createBoundaryDatabase(dbPath, { emptyCatalog: true });
+
+    await initValidatedTestLadybugClone(dbPath);
+
+    const conn = await getLadybugConn();
+    assert.strictEqual(await getSchemaVersion(conn), 27);
+    const prepared = await conn.prepare(
+      "CREATE (d:DerivedState {repoId: $repoId})",
+    );
+    const result = await conn.execute(prepared, { repoId: "fresh-repo" });
+    result.close();
+    assert.deepStrictEqual(
+      await queryAll<{ lifecycleState: string }>(
+        conn,
+        `MATCH (d:DerivedState {repoId: $repoId})
+         RETURN d.embeddingLifecycleState AS lifecycleState`,
+        { repoId: "fresh-repo" },
+      ),
+      [{ lifecycleState: "steady" }],
+    );
   });
 
   it("best-effort: DB newer than code logs warning but does not throw", async () => {

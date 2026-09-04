@@ -4,6 +4,13 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { LADYBUG_SCHEMA_VERSION } from "../../dist/db/ladybug-schema.js";
+import { resolveSymbolVectorPhysicalIdentity } from "../../dist/db/ladybug-symbol-embeddings.js";
+import {
+  clearRepositorySymbolVectorHealth,
+  getRepositorySymbolVectorHealthSnapshots,
+  invalidateRepositorySymbolVectorHealth,
+  publishRepositorySymbolVectorHealthBatch,
+} from "../../dist/retrieval/health.js";
 
 const modulePath = "../../dist/benchmark/context-quality-cache.js";
 const source = readFileSync(
@@ -12,6 +19,10 @@ const source = readFileSync(
 );
 
 function exactSnapshot() {
+  const symbolVectorIdentity = resolveSymbolVectorPhysicalIdentity(
+    "fixture",
+    "jina-embeddings-v2-base-code",
+  );
   return {
     repos: [{ repoId: "fixture", rootPath: "C:/fixtures/repo" }],
     ladybugSchemaVersion: LADYBUG_SCHEMA_VERSION,
@@ -52,8 +63,8 @@ function exactSnapshot() {
       symbolVectors: [
         {
           model: "jina-embeddings-v2-base-code",
-          tableName: "SymbolVectorEmbedding",
-          name: "symbol_embedding_jina_code_vec_v1",
+          tableName: symbolVectorIdentity.tableName,
+          name: symbolVectorIdentity.indexName,
           type: "vector",
           property: "embeddingJinaCodeVec",
           healthy: true,
@@ -88,9 +99,10 @@ const expectation = {
 };
 
 describe("context-quality database cache identity", () => {
-  it("routes SymbolVectorEmbedding coverage through symbol coverage", () => {
-    assert.ok(source.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
-    assert.ok(!source.includes('"SymbolVectorEmbedding"'));
+  it("routes repository Symbol vector coverage through symbol coverage", () => {
+    assert.ok(source.includes("resolveSymbolVectorPhysicalIdentity"));
+    assert.ok(source.includes("getSymbolRetrievalCoverage"));
+    assert.ok(!source.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
   });
 
   it("accepts only the exact closed-graph provenance snapshot", async () => {
@@ -207,4 +219,251 @@ describe("context-quality database cache identity", () => {
       );
     }
   });
+});
+
+
+describe("repository Symbol vector health cache", () => {
+  const repoId = "cache-repo";
+  const versionId = "v1";
+  const jina = "jina-embeddings-v2-base-code";
+  const nomic = "nomic-embed-text-v1.5";
+  const oneModelConfig = {
+    enabled: true,
+    symbolEmbeddingModels: [jina],
+    fileSummaryEmbeddingModels: [],
+  } as never;
+  const twoModelConfig = {
+    enabled: true,
+    symbolEmbeddingModels: [jina, nomic],
+    fileSummaryEmbeddingModels: [],
+  } as never;
+
+  it("rejects a stale assessment after lifecycle invalidation", () => {
+    clearRepositorySymbolVectorHealth(repoId);
+    const generationN = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      oneModelConfig,
+      "refreshing",
+    );
+    const staleBatch = [
+      ...getRepositorySymbolVectorHealthSnapshots(repoId)!.values(),
+    ].map((snapshot) => ({
+      ...snapshot,
+      eligibleSymbolCount: 1,
+      completeVectorCount: 1,
+      lifecycleState: "steady" as const,
+      mode: "exact" as const,
+      exactFallbackAllowed: true,
+      reason: undefined,
+    }));
+
+    const generationN1 = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      oneModelConfig,
+      "refreshing",
+    );
+    assert.equal(generationN1, generationN + 1);
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId,
+        capturedGeneration: generationN,
+        enabledModels: [jina],
+        snapshots: staleBatch,
+      }),
+      false,
+    );
+
+    const current = getRepositorySymbolVectorHealthSnapshots(repoId)!;
+    assert.equal(current.get(jina)?.generation, generationN1);
+    assert.equal(current.get(jina)?.mode, "degraded");
+    assert.equal(current.get(jina)?.exactFallbackAllowed, false);
+    clearRepositorySymbolVectorHealth(repoId);
+  });
+
+  it("replaces a complete two-model batch atomically or not at all", () => {
+    clearRepositorySymbolVectorHealth(repoId);
+    const generation = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      twoModelConfig,
+      "refreshing",
+    );
+    const degraded = getRepositorySymbolVectorHealthSnapshots(repoId)!;
+    assert.deepEqual([...degraded.keys()], [jina, nomic]);
+
+    const healthy = [...degraded.values()].map((snapshot) => ({
+      ...snapshot,
+      eligibleSymbolCount: 1,
+      completeVectorCount: 1,
+      lifecycleState: "steady" as const,
+      mode: "exact" as const,
+      exactFallbackAllowed: true,
+      reason: undefined,
+    }));
+
+    const beforeShortened = getRepositorySymbolVectorHealthSnapshots(repoId)!;
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId,
+        capturedGeneration: generation,
+        enabledModels: [jina],
+        snapshots: healthy.slice(0, 1),
+      }),
+      false,
+    );
+    assert.strictEqual(
+      getRepositorySymbolVectorHealthSnapshots(repoId),
+      beforeShortened,
+    );
+    assert.deepEqual([...beforeShortened.keys()], [jina, nomic]);
+
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId,
+        capturedGeneration: generation,
+        enabledModels: [jina, nomic],
+        snapshots: healthy.slice(0, 1),
+      }),
+      false,
+    );
+    assert.deepEqual(
+      [...getRepositorySymbolVectorHealthSnapshots(repoId)!.values()].map(
+        (snapshot) => snapshot.mode,
+      ),
+      ["degraded", "degraded"],
+    );
+
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId,
+        capturedGeneration: generation,
+        enabledModels: [jina, nomic],
+        snapshots: healthy,
+      }),
+      true,
+    );
+    assert.deepEqual(
+      [...getRepositorySymbolVectorHealthSnapshots(repoId)!.values()].map(
+        (snapshot) => snapshot.mode,
+      ),
+      ["exact", "exact"],
+    );
+    clearRepositorySymbolVectorHealth(repoId);
+  });
+
+  it("does not reuse a generation after clear and re-invalidation", () => {
+    clearRepositorySymbolVectorHealth(repoId);
+    const staleGeneration = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      oneModelConfig,
+      "refreshing",
+    );
+    const staleBatch = [
+      ...getRepositorySymbolVectorHealthSnapshots(repoId)!.values(),
+    ].map((snapshot) => ({
+      ...snapshot,
+      eligibleSymbolCount: 1,
+      completeVectorCount: 1,
+      lifecycleState: "steady" as const,
+      mode: "exact" as const,
+      exactFallbackAllowed: true,
+      reason: undefined,
+    }));
+
+    clearRepositorySymbolVectorHealth(repoId);
+    const currentGeneration = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      oneModelConfig,
+      "refreshing",
+    );
+    assert.ok(currentGeneration > staleGeneration);
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId,
+        capturedGeneration: staleGeneration,
+        enabledModels: [jina],
+        snapshots: staleBatch,
+      }),
+      false,
+    );
+    assert.equal(
+      getRepositorySymbolVectorHealthSnapshots(repoId)!.get(jina)?.generation,
+      currentGeneration,
+    );
+    clearRepositorySymbolVectorHealth(repoId);
+  });
+
+  it("removes old health when invalidation identity construction throws", () => {
+    clearRepositorySymbolVectorHealth(repoId);
+    const healthyGeneration = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      oneModelConfig,
+      "refreshing",
+    );
+    const healthy = [
+      ...getRepositorySymbolVectorHealthSnapshots(repoId)!.values(),
+    ].map((snapshot) => ({
+      ...snapshot,
+      eligibleSymbolCount: 1,
+      completeVectorCount: 1,
+      lifecycleState: "steady" as const,
+      mode: "exact" as const,
+      exactFallbackAllowed: true,
+      reason: undefined,
+    }));
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId,
+        capturedGeneration: healthyGeneration,
+        enabledModels: [jina],
+        snapshots: healthy,
+      }),
+      true,
+    );
+
+    const invalidIdentityConfig = {
+      enabled: true,
+      symbolEmbeddingModels: [jina],
+      fileSummaryEmbeddingModels: [],
+      retrieval: {
+        vector: {
+          indexes: {
+            [jina]: { indexName: "invalid-index" },
+          },
+        },
+      },
+    } as never;
+    assert.throws(
+      () =>
+        invalidateRepositorySymbolVectorHealth(
+          repoId,
+          versionId,
+          invalidIdentityConfig,
+          "refreshing",
+        ),
+      /identifier .* is invalid/,
+    );
+    assert.equal(getRepositorySymbolVectorHealthSnapshots(repoId), null);
+
+    const laterGeneration = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      oneModelConfig,
+      "refreshing",
+    );
+    assert.equal(laterGeneration, healthyGeneration + 2);
+    clearRepositorySymbolVectorHealth(repoId);
+  });
+
 });

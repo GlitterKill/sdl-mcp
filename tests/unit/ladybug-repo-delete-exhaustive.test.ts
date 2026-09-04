@@ -6,12 +6,15 @@ import { after, before, describe, it } from "node:test";
 
 import type { Connection } from "kuzu";
 
+import { _teardownRepositoryDatabaseForTesting } from "../../dist/mcp/tools/repo.js";
+
 const DB_PATH = join(tmpdir(), `sdl-repo-delete-exhaustive-${process.pid}.lbug`);
 
 describe("deleteRepo exhaustive current-schema cleanup", () => {
   let db: import("kuzu").Database;
   let conn: Connection;
   let queries: typeof import("../../dist/db/ladybug-queries.js");
+  let symbolEmbeddings: typeof import("../../dist/db/ladybug-symbol-embeddings.js");
 
   async function exec(statement: string): Promise<void> {
     const result = await conn.query(statement);
@@ -105,15 +108,18 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
     const { createSchema } = await import("../../dist/db/ladybug-schema.js");
     await createSchema(conn);
     queries = await import("../../dist/db/ladybug-queries.js");
+    symbolEmbeddings = await import("../../dist/db/ladybug-symbol-embeddings.js");
     await exec("CREATE (:CardHash {cardHash: 'global_card'})");
     await exec("CREATE (:ToolPolicyHash {policyHash: 'global_policy'})");
     await exec("CREATE (:TsconfigHash {tsconfigHash: 'global_tsconfig'})");
     await seedRepo("remove-repo");
     await seedRepo("keep-repo");
+    const { withExclusiveLadybugOperation } = await import("../../dist/db/ladybug-operation-gate.js");
+    await withExclusiveLadybugOperation(async () => {
     for (const repoId of ["remove-repo", "keep-repo"]) {
       const id = repoId.replaceAll("-", "_");
       for (const symbolId of [`symbol_${id}`, `placeholder_${id}`]) {
-        await queries.setSymbolVectorEmbedding(
+        await symbolEmbeddings.setRepoSymbolVectorEmbedding(
           conn,
           repoId,
           symbolId,
@@ -122,7 +128,7 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
           `${symbolId}-jina-hash`,
           new Array<number>(768).fill(0.1),
         );
-        await queries.setSymbolVectorEmbedding(
+        await symbolEmbeddings.setRepoSymbolVectorEmbedding(
           conn,
           repoId,
           symbolId,
@@ -133,7 +139,7 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
         );
       }
     }
-    await queries.setSymbolVectorEmbedding(
+    await symbolEmbeddings.setRepoSymbolVectorEmbedding(
       conn,
       "remove-repo",
       "orphan_embedding_remove_repo",
@@ -160,7 +166,7 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       ["jina-embeddings-v2-base-code", "jina", 0.4],
       ["nomic-embed-text-v1.5", "nomic", 0.5],
     ] as const) {
-      await queries.setSymbolVectorEmbedding(
+      await symbolEmbeddings.setRepoSymbolVectorEmbedding(
         conn,
         "remove-repo",
         "shared_placeholder",
@@ -169,7 +175,7 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
         `shared-${suffix}-hash`,
         new Array<number>(768).fill(value),
       );
-      await queries.setSymbolVectorEmbedding(
+      await symbolEmbeddings.setRepoSymbolVectorEmbedding(
         conn,
         "remove-repo",
         "shared_file_symbol",
@@ -179,6 +185,7 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
         new Array<number>(768).fill(value + 0.1),
       );
     }
+    });
   });
 
   after(async () => {
@@ -218,7 +225,6 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       "GraphIntegrityFilelessState",
       "FileParserState",
       "RepoParserState",
-      "SymbolVectorEmbedding",
     ];
     for (const table of repoScopedTables) {
       assert.strictEqual(
@@ -243,39 +249,17 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       ["Metrics", "symbolId", "placeholder_remove_repo", "placeholder_keep_repo"],
       ["SymbolEmbedding", "symbolId", "placeholder_remove_repo", "placeholder_keep_repo"],
       ["SummaryCache", "symbolId", "placeholder_remove_repo", "placeholder_keep_repo"],
-      [
-        "SymbolVectorEmbedding",
-        "embeddingId",
-        "jina-embeddings-v2-base-code:symbol_remove_repo",
-        "jina-embeddings-v2-base-code:symbol_keep_repo",
-      ],
-      [
-        "SymbolVectorEmbedding",
-        "embeddingId",
-        "nomic-embed-text-v1.5:symbol_remove_repo",
-        "nomic-embed-text-v1.5:symbol_keep_repo",
-      ],
-      [
-        "SymbolVectorEmbedding",
-        "embeddingId",
-        "jina-embeddings-v2-base-code:placeholder_remove_repo",
-        "jina-embeddings-v2-base-code:placeholder_keep_repo",
-      ],
-      [
-        "SymbolVectorEmbedding",
-        "embeddingId",
-        "nomic-embed-text-v1.5:placeholder_remove_repo",
-        "nomic-embed-text-v1.5:placeholder_keep_repo",
-      ],
     ]) {
       assert.strictEqual(await count(`MATCH (n:${table} {${key}: '${target}'}) RETURN count(n) AS c`), 0);
       assert.strictEqual(await count(`MATCH (n:${table} {${key}: '${keeper}'}) RETURN count(n) AS c`), 1);
     }
-    assert.strictEqual(
-      await count(
-        "MATCH (e:SymbolVectorEmbedding {embeddingId: 'jina-embeddings-v2-base-code:orphan_embedding_remove_repo'}) RETURN count(e) AS c",
+    assert.ok(
+      await symbolEmbeddings.getRepoSymbolVectorEmbedding(
+        conn,
+        "remove-repo",
+        "orphan_embedding_remove_repo",
+        "jina-embeddings-v2-base-code",
       ),
-      0,
     );
     assert.strictEqual(
       await count(
@@ -283,12 +267,19 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       ),
       1,
     );
-    assert.strictEqual(
-      await count(
-        "MATCH (e:SymbolVectorEmbedding {symbolId: 'shared_file_symbol', repoId: 'keep-repo'}) RETURN count(e) AS c",
-      ),
-      2,
-    );
+    for (const model of [
+      "jina-embeddings-v2-base-code",
+      "nomic-embed-text-v1.5",
+    ]) {
+      assert.ok(
+        await symbolEmbeddings.getRepoSymbolVectorEmbedding(
+          conn,
+          "remove-repo",
+          "shared_file_symbol",
+          model,
+        ),
+      );
+    }
     assert.strictEqual(
       await count(
         "MATCH (s:Symbol {symbolId: 'shared_file_symbol'})-[:SYMBOL_IN_FILE]->(:File {fileId: 'file_keep_repo'}) RETURN count(s) AS c",
@@ -335,18 +326,28 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       ),
       1,
     );
-    assert.strictEqual(
-      await count(
-        "MATCH (e:SymbolVectorEmbedding {symbolId: 'shared_placeholder', repoId: 'keep-repo'}) RETURN count(e) AS c",
-      ),
-      2,
-    );
-    assert.strictEqual(
-      await count(
-        "MATCH (e:SymbolVectorEmbedding {symbolId: 'shared_placeholder', repoId: 'remove-repo'}) RETURN count(e) AS c",
-      ),
-      0,
-    );
+    for (const model of [
+      "jina-embeddings-v2-base-code",
+      "nomic-embed-text-v1.5",
+    ]) {
+      assert.ok(
+        await symbolEmbeddings.getRepoSymbolVectorEmbedding(
+          conn,
+          "remove-repo",
+          "shared_placeholder",
+          model,
+        ),
+      );
+      assert.strictEqual(
+        await symbolEmbeddings.getRepoSymbolVectorEmbedding(
+          conn,
+          "keep-repo",
+          "shared_placeholder",
+          model,
+        ),
+        null,
+      );
+    }
     for (const table of ["SymbolVersion", "Metrics", "SymbolEmbedding", "SummaryCache"]) {
       assert.strictEqual(
         await count(
@@ -370,5 +371,54 @@ describe("deleteRepo exhaustive current-schema cleanup", () => {
       ),
       1,
     );
+  });
+
+  it("treats an already absent internal teardown as completed", async () => {
+    const events: string[] = [];
+    const fakeConnection = {} as Connection;
+    const unexpected = (name: string): never => {
+      throw new Error(`unexpected teardown dependency: ${name}`);
+    };
+
+    await _teardownRepositoryDatabaseForTesting(
+      "already-absent",
+      undefined,
+      {
+        withExclusiveOperation: async (task) => {
+          events.push("gate");
+          return task();
+        },
+        withWriteConnection: async (task) => {
+          events.push("write");
+          return task(fakeConnection);
+        },
+        getRepo: async () => {
+          events.push("getRepo");
+          return null;
+        },
+        getLatestVersion: async () => unexpected("getLatestVersion"),
+        markDeleting: async () => unexpected("markDeleting"),
+        invalidateHealth: () => unexpected("invalidateHealth"),
+        inspectTable: async () => unexpected("inspectTable"),
+        validateOwnership: async () => unexpected("validateOwnership"),
+        showIndexes: async () => unexpected("showIndexes"),
+        dropIndex: async () => unexpected("dropIndex"),
+        dropTable: async () => unexpected("dropTable"),
+        resetPreparedCaches: () => unexpected("resetPreparedCaches"),
+        deleteGraph: async () => unexpected("deleteGraph"),
+        clearHealth: (repoId) => events.push(`clearHealth:${repoId}`),
+        getDerivedState: async () => unexpected("getDerivedState"),
+        assessHealth: async () => unexpected("assessHealth"),
+        publishHealth: () => unexpected("publishHealth"),
+        publishDiagnostic: () => unexpected("publishDiagnostic"),
+      },
+    );
+
+    assert.deepStrictEqual(events, [
+      "gate",
+      "write",
+      "getRepo",
+      "clearHealth:already-absent",
+    ]);
   });
 });

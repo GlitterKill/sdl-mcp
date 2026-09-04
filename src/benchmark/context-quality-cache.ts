@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import type { SemanticConfig } from "../config/types.js";
 import { resolveSemanticEmbeddingModelPlan } from "../config/semantic-embedding-model-plan.js";
 import { getDerivedStateFromConnection } from "../db/ladybug-derived-state.js";
+import { resolveSymbolVectorPhysicalIdentity } from "../db/ladybug-symbol-embeddings.js";
 import {
   getFileSummaryRetrievalCoverage,
   getSymbolRetrievalCoverage,
@@ -25,7 +26,6 @@ import {
   type RequiredRetrievalIndex,
 } from "../retrieval/health.js";
 import { showIndexesStrict } from "../retrieval/index-lifecycle.js";
-import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "../retrieval/model-mapping.js";
 import { normalizePath } from "../util/paths.js";
 
 export interface ContextQualityCacheExpectation {
@@ -40,7 +40,7 @@ export interface ContextQualityCacheExpectation {
 
 export interface ContextQualityCacheIndexIdentity {
   model?: string;
-  tableName: "Symbol" | typeof SYMBOL_VECTOR_EMBEDDING_TABLE | "FileSummary";
+  tableName: string;
   name: string;
   type: "fts" | "vector";
   property: string;
@@ -108,7 +108,7 @@ function assertExactArray(
 
 function assertHealthyIndex(
   index: ContextQualityCacheIndexIdentity,
-  tableName: "Symbol" | typeof SYMBOL_VECTOR_EMBEDDING_TABLE | "FileSummary",
+  tableName: string,
   type: "fts" | "vector",
 ): void {
   if (
@@ -125,7 +125,7 @@ function assertHealthyIndex(
 function assertCompleteVectorCoverage(
   indexes: readonly ContextQualityCacheIndexIdentity[],
   models: readonly string[],
-  tableName: "Symbol" | typeof SYMBOL_VECTOR_EMBEDDING_TABLE | "FileSummary",
+  tableName: string,
 ): void {
   assertExactArray(
     indexes.map((index) => index.model ?? ""),
@@ -220,7 +220,10 @@ export function validateContextQualityCacheSnapshot(
   assertCompleteVectorCoverage(
     snapshot.indexes.symbolVectors,
     expectation.symbolEmbeddingModels,
-    SYMBOL_VECTOR_EMBEDDING_TABLE,
+    resolveSymbolVectorPhysicalIdentity(
+      expectation.repoId,
+      "jina-embeddings-v2-base-code",
+    ).tableName,
   );
   assertCompleteVectorCoverage(
     snapshot.indexes.fileSummaryVectors,
@@ -277,7 +280,7 @@ async function vectorIndexIdentity(
 ): Promise<ContextQualityCacheIndexIdentity> {
   const identity = exactIndexIdentity(indexes, required);
   const coverage =
-    required.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE
+    required.tableName !== "FileSummary"
       ? await getSymbolRetrievalCoverage(
           connection,
           repoId,
@@ -333,7 +336,10 @@ export async function validateContextQualityCacheFamily(
           plan.unsupportedModels.join(", "),
       );
     }
-    const required = resolveRequiredRetrievalIndexes(options.semanticConfig);
+    const required = resolveRequiredRetrievalIndexes(
+      options.semanticConfig,
+      options.expectation.repoId,
+    );
     const [
       repos,
       latestVersion,

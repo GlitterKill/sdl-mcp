@@ -46,6 +46,8 @@ export interface FinalizeIndexingParams {
   deferSemanticRefresh?: boolean;
   preFinalize?: () => Promise<void>;
   postIndexSessionTimeoutMs?: number;
+  /** Failure finalization runs inside the Symbol HNSW exclusive cycle. */
+  onSymbolEmbeddingFailureInsideGate?: (error: unknown) => Promise<void>;
   prepareGraphIntegrityPlaceholderPruning?: (
     conn: Connection,
   ) => Promise<boolean> | boolean;
@@ -89,6 +91,7 @@ export async function finalizeIndexing({
   deferSemanticRefresh = false,
   preFinalize,
   postIndexSessionTimeoutMs,
+  onSymbolEmbeddingFailureInsideGate,
   prepareGraphIntegrityPlaceholderPruning,
   onProgress,
 }: FinalizeIndexingParams): Promise<FinalizeIndexingResult> {
@@ -371,6 +374,8 @@ export async function finalizeIndexing({
                 semanticConfig.retrieval?.vector.indexes?.[embModel]
                   ?.indexName,
               vectorEfc: semanticConfig.retrieval?.vector.efc,
+              semanticConfig,
+              onFailureInsideGate: onSymbolEmbeddingFailureInsideGate,
               postIndexSessionTimeoutMs,
             }),
         );
@@ -379,8 +384,9 @@ export async function finalizeIndexing({
         );
       } catch (error) {
         logger.warn(
-          `Semantic embedding refresh skipped for ${embModel}: ${String(error)}`,
+          `Semantic embedding refresh failed for ${embModel}: ${String(error)}`,
         );
+        throw error;
       }
     };
 
@@ -397,9 +403,22 @@ export async function finalizeIndexing({
       // pools can overlap. Best when ORT does NOT serialize sessions —
       // model jobs interleave at the batch boundary and total wall time is
       // close to max(model_a, model_b).
-      await Promise.all(
+      const outcomes = await Promise.allSettled(
         modelPlan.symbolEmbeddingModels.map((embModel) => runOneModel(embModel)),
       );
+      const failures = outcomes
+        .filter(
+          (outcome): outcome is PromiseRejectedResult =>
+            outcome.status === "rejected",
+        )
+        .map((outcome) => outcome.reason);
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) {
+        throw new AggregateError(
+          failures,
+          "Multiple Symbol embedding refreshes failed",
+        );
+      }
     }
   }
 

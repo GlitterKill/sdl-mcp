@@ -30,7 +30,6 @@ import {
   resolveLadybugWriteChunkSize,
   type LadybugWriteChunkOptions,
 } from "./ladybug-batching.js";
-import { deleteSymbolVectorEmbeddingsBySymbolIds } from "./ladybug-symbol-embeddings.js";
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
 const PRESERVE_OPTIONAL_SYMBOL_FIELD = "__sdl_preserve_optional_symbol_field__";
@@ -965,7 +964,7 @@ async function countFileBackedDependencyMetadataRepairs(
 export async function pruneIsolatedPlaceholderSymbols(
   conn: Connection,
   repoId: string,
-  options: { deleteSymbolVectorEmbeddings?: boolean } = {},
+  _options: { deleteSymbolVectorEmbeddings?: boolean } = {},
 ): Promise<number> {
   const rows = await queryAll<{ symbolId: string }>(
     conn,
@@ -1188,9 +1187,6 @@ export async function pruneIsolatedPlaceholderSymbols(
       );
     }
     if (symbolIds.length > 0) {
-      if (options.deleteSymbolVectorEmbeddings !== false) {
-        await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
-      }
       await exec(
         txConn,
         `MATCH (s:Symbol)
@@ -1222,13 +1218,7 @@ async function transferSymbolOwnershipInTransaction(
      SET s.repoId = replacement.ownerRepoId`,
     { replacements },
   );
-  await exec(
-    conn,
-    `UNWIND $replacements AS replacement
-     MATCH (e:SymbolVectorEmbedding {symbolId: replacement.symbolId})
-     SET e.repoId = replacement.ownerRepoId`,
-    { replacements },
-  );
+
 }
 
 async function cleanupPatternExists(
@@ -2432,7 +2422,6 @@ export async function deleteSymbolsByFileIds(
          DELETE r`,
         { symbolIds },
       );
-      await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
       // Symbol graph relationships are all incident to Symbol nodes. DETACH
       // DELETE removes them without touching shared rows filtered above.
       await exec(
@@ -2578,7 +2567,6 @@ export async function deleteSymbolsByIds(
       { symbolIds },
     );
 
-    await deleteSymbolVectorEmbeddingsBySymbolIds(txConn, symbolIds);
     // Symbol nodes
     await exec(
       txConn,

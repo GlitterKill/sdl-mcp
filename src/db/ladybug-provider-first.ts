@@ -16,7 +16,6 @@ import {
   withTransaction,
 } from "./ladybug-core.js";
 import { normalizePath } from "../util/paths.js";
-import { deleteSymbolVectorEmbeddingsBySymbolIds } from "./ladybug-symbol-embeddings.js";
 
 const PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE = 256;
 
@@ -172,7 +171,6 @@ async function retireProviderSymbolsByIds(
     ),
   ];
 
-  await deleteSymbolVectorEmbeddingsBySymbolIds(conn, deletedSymbolIds);
   for (const [query, params] of [
     [
       `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)

@@ -1,24 +1,29 @@
 import type { Connection } from "kuzu";
 
-import {
-  EMBEDDING_MODELS,
-  SYMBOL_VECTOR_EMBEDDING_TABLE,
-} from "../retrieval/model-mapping.js";
+import { EMBEDDING_MODELS } from "../retrieval/model-mapping.js";
 import { queryAll, queryExactVectorAll } from "./ladybug-core.js";
+import { resolveSymbolVectorPhysicalIdentity } from "./ladybug-symbol-embeddings.js";
 
 export interface RetrievalSeedCandidateRow {
   symbolId: string;
   score: number;
 }
 
-/** Rank one repository exactly when bounded global ANN cannot provide enough owned rows. */
+export interface RepositorySymbolVectorCandidateRow
+  extends RetrievalSeedCandidateRow {
+  repoId: string;
+  model: string;
+  embeddingId: string;
+}
+
+/** Rank one repository exactly through its derived physical table. */
 export async function rankRepoSymbolVectorsExact(
   conn: Connection,
   repoId: string,
   modelName: string,
   embedding: number[],
   limit: number,
-): Promise<RetrievalSeedCandidateRow[]> {
+): Promise<RepositorySymbolVectorCandidateRow[]> {
   const model = EMBEDDING_MODELS[modelName];
   if (!model) {
     throw new Error(`Unknown embedding model "${modelName}"`);
@@ -35,20 +40,25 @@ export async function rankRepoSymbolVectorsExact(
     throw new Error(`limit must be an integer from 1 to 10000, got ${limit}`);
   }
 
-  return queryExactVectorAll<RetrievalSeedCandidateRow>(
+  const identity = resolveSymbolVectorPhysicalIdentity(repoId, modelName);
+  return queryExactVectorAll<RepositorySymbolVectorCandidateRow>(
     conn,
-    `MATCH (e:${SYMBOL_VECTOR_EMBEDDING_TABLE})
+    `MATCH (e:${identity.tableName})
      WHERE e.repoId = $repoId
-       AND e.${model.vecProperty} IS NOT NULL
-     WITH e.symbolId AS symbolId,
+       AND e.model = $model
+       AND e.${identity.propertyName} IS NOT NULL
+     WITH e.repoId AS repoId,
+          e.model AS model,
+          e.embeddingId AS embeddingId,
+          e.symbolId AS symbolId,
           array_cosine_similarity(
-            e.${model.vecProperty},
+            e.${identity.propertyName},
             CAST($embedding, 'DOUBLE[${model.dimension}]')
           ) AS score
-     RETURN symbolId, score
+     RETURN repoId, model, embeddingId, symbolId, score
      ORDER BY score DESC, symbolId ASC
      LIMIT $limit`,
-    { repoId, embedding, limit },
+    { repoId, model: modelName, embedding, limit },
   );
 }
 

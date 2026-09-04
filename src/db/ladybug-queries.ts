@@ -61,13 +61,7 @@ export * from "./ladybug-embeddings.js";
 
 // Model-aware Symbol vector embedding helpers
 export {
-  deleteSymbolVectorEmbeddingsBySymbolIds,
-  getSymbolVectorEmbedding,
-  getSymbolVectorEmbeddings,
-  hasCompleteSymbolVectorEmbedding,
   resolveSymbolVectorPhysicalIdentity,
-  setSymbolVectorEmbedding,
-  setSymbolVectorEmbeddingBatch,
   type SymbolVectorEmbeddingBatchItem,
   type SymbolVectorEmbeddingRow,
   type SymbolVectorPhysicalIdentity,

@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Connection } from "kuzu";
 
 import {
@@ -25,15 +23,6 @@ const healthy: RetrievalCapabilities = {
     fileSummaryVector: 1000,
   },
 };
-
-const orchestratorSrc = readFileSync(
-  join(process.cwd(), "src/retrieval/orchestrator.ts"),
-  "utf8",
-);
-const retrievalDbSrc = readFileSync(
-  join(process.cwd(), "src/db/ladybug-retrieval.ts"),
-  "utf8",
-);
 
 describe("request-scoped retrieval work", () => {
   it("preserves the checked-out connection and initializes backend outcomes", () => {
@@ -290,27 +279,287 @@ describe("request-scoped retrieval work", () => {
     );
   });
 
-  it("queries symbol ANN on SymbolVectorEmbedding and returns symbol IDs", () => {
-    assert.ok(retrievalDbSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
-    assert.ok(
-      orchestratorSrc.includes(
-        "`CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding'",
-      ),
+  it("continues FTS while cached Symbol vectors are non-queryable", async (t) => {
+    const ladybug = await import("../../dist/db/ladybug.js");
+    const core = await import("../../dist/db/ladybug-core.js");
+    const ladybugDb = await import("../../dist/db/ladybug-queries.js");
+    const loadConfigModule = await import("../../dist/config/loadConfig.js");
+    const embeddings = await import("../../dist/indexer/embeddings.js");
+    const graphAdmission = await import(
+      "../../dist/services/graph-retrieval-availability.js"
     );
-    assert.ok(orchestratorSrc.includes("node.symbolId AS symbolId"));
-    assert.ok(orchestratorSrc.includes("AS owned"));
-  });
+    const health = await import("../../dist/retrieval/health.js");
+    const { SemanticConfigSchema } = await import(
+      "../../dist/config/types.js"
+    );
+    const { resolveSymbolVectorPhysicalIdentity } = await import(
+      "../../dist/db/ladybug-symbol-embeddings.js"
+    );
 
-  it("runs both Symbol ANN paths through the repository-safe helper", () => {
-    assert.ok(!retrievalDbSrc.includes("PROJECT_GRAPH_CYPHER"));
-    assert.ok(!retrievalDbSrc.includes("queryRepoSymbolVectorAnn"));
-    assert.ok(retrievalDbSrc.includes("rankRepoSymbolVectorsExact"));
-    assert.strictEqual(
-      orchestratorSrc.match(
-        /queryRepoSymbolVectorIndex\(/g,
-      )?.length,
-      3,
+    const model = "jina-embeddings-v2-base-code";
+    const repoId = "repo-fts-continuation";
+    const versionId = "v-fts-continuation";
+    const embedding = [1, ...Array<number>(767).fill(0)];
+    const conn = {} as unknown as Connection;
+    const semantic = SemanticConfigSchema.parse({
+      enabled: true,
+      provider: "local",
+      embeddingProfile: "specialized",
+      symbolEmbeddingModels: [model],
+      fileSummaryEmbeddingModels: [],
+      retrieval: {
+        fts: { enabled: true },
+        vector: { enabled: true, topK: 2, efs: 3 },
+      },
+    });
+    let ftsQueries = 0;
+    let vectorQueries = 0;
+    let exactCalls = 0;
+    let exactRows: Array<Record<string, unknown>> = [];
+
+    t.mock.module("../../dist/db/ladybug.js", {
+      namedExports: {
+        ...ladybug,
+        getLadybugConn: async () => conn,
+      },
+    });
+    t.mock.module("../../dist/db/ladybug-core.js", {
+      namedExports: {
+        ...core,
+        isConnStuck: () => false,
+        queryStoredProcAll: async (
+          _conn: Connection,
+          statement: string,
+        ) => {
+          if (statement.includes("QUERY_FTS_INDEX")) {
+            ftsQueries += 1;
+            return [{ node: { symbolId: "fts-only" }, score: 2 }];
+          }
+          if (statement.includes("QUERY_VECTOR_INDEX")) {
+            vectorQueries += 1;
+            return [];
+          }
+          if (/SHOW_INDEXES|count\s*\(/i.test(statement)) {
+            throw new Error("request-time physical inspection is forbidden");
+          }
+          return [];
+        },
+      },
+    });
+    t.mock.module("../../dist/db/ladybug-queries.js", {
+      namedExports: {
+        ...ladybugDb,
+        rankRepoSymbolVectorsExact: async () => {
+          exactCalls += 1;
+          return exactRows;
+        },
+      },
+    });
+    t.mock.module("../../dist/config/loadConfig.js", {
+      namedExports: {
+        ...loadConfigModule,
+        loadConfig: () => ({ semantic }),
+      },
+    });
+    t.mock.module("../../dist/indexer/embeddings.js", {
+      namedExports: {
+        ...embeddings,
+        getEmbeddingProvider: () => ({
+          initialize: async () => undefined,
+          embed: async () => [embedding],
+          getDimension: () => embedding.length,
+          isMockFallback: () => false,
+        }),
+      },
+    });
+    t.mock.module("../../dist/services/graph-retrieval-availability.js", {
+      namedExports: {
+        ...graphAdmission,
+        assertGraphRetrievalAvailable: async () => undefined,
+      },
+    });
+    t.mock.module("../../dist/retrieval/health.js", {
+      namedExports: {
+        ...health,
+        checkRetrievalHealth: async () => ({
+          fts: true,
+          fileSummaryFts: false,
+          vectorNomic: false,
+          vectorJinaCode: true,
+          vectorByEntityModel: {
+            symbol: { [model]: true },
+            fileSummary: {},
+          },
+          modelCoveragePermille: {
+            symbol: { [model]: 1000 },
+            fileSummary: {},
+          },
+          coveragePermille: {
+            symbolVector: 1000,
+            fileSummaryVector: 0,
+          },
+        }),
+      },
+    });
+
+    const orchestrator = await import(
+      "../../dist/retrieval/orchestrator.js?fts-after-vector-invalidation"
     );
+
+    function publish(
+      mode: "none" | "exact" | "hnsw",
+      exactFallbackAllowed: boolean,
+    ): void {
+      const identity = resolveSymbolVectorPhysicalIdentity(
+        repoId,
+        model,
+        semantic,
+      );
+      const generation = health.invalidateRepositorySymbolVectorHealth(
+        repoId,
+        versionId,
+        semantic,
+        "refreshing",
+      );
+      const expectedIndexIdentity = {
+        model,
+        tableName: identity.tableName,
+        name: identity.indexName,
+        type: "vector" as const,
+        property: identity.propertyName,
+      };
+      const snapshot = {
+        repoId,
+        versionId,
+        generation,
+        model,
+        eligibleSymbolCount: 1,
+        completeVectorCount: 1,
+        lifecycleState: "steady" as const,
+        expectedIndexIdentity,
+        observedIndexIdentity:
+          mode === "hnsw"
+            ? {
+                ...expectedIndexIdentity,
+                status: "healthy" as const,
+                extensionLoaded: true,
+              }
+            : null,
+        mode,
+        exactFallbackAllowed,
+      };
+      assert.equal(
+        health.publishRepositorySymbolVectorHealthBatch({
+          repoId,
+          versionId,
+          capturedGeneration: generation,
+          enabledModels: [model],
+          snapshots: [snapshot],
+        }),
+        true,
+      );
+    }
+
+    function reset(): void {
+      health.clearRepositorySymbolVectorHealth(repoId);
+      ftsQueries = 0;
+      vectorQueries = 0;
+      exactCalls = 0;
+      exactRows = [];
+    }
+
+    async function run() {
+      return orchestrator.hybridSearch(
+        {
+          repoId,
+          query: "find FTS",
+          limit: 5,
+          ftsEnabled: true,
+          vectorEnabled: true,
+          includeEvidence: true,
+        },
+        orchestrator.createRetrievalQueryContext({ connection: conn }),
+      );
+    }
+
+    const cases: Array<{
+      name: string;
+      arrange: () => void;
+    }> = [
+      {
+        name: "absent snapshot",
+        arrange: () => undefined,
+      },
+      {
+        name: "none snapshot",
+        arrange: () => publish("none", false),
+      },
+      {
+        name: "post-admission invalidation",
+        arrange: () => {
+          publish("hnsw", true);
+          health.invalidateRepositorySymbolVectorHealth(
+            repoId,
+            versionId,
+            semantic,
+            "refreshing",
+          );
+        },
+      },
+    ];
+
+    for (const scenario of cases) {
+      reset();
+      scenario.arrange();
+
+      const result = await run();
+
+      assert.deepEqual(
+        result.results.map((row) => row.symbolId),
+        ["fts-only"],
+        scenario.name,
+      );
+      assert.equal(ftsQueries, 1, scenario.name);
+      assert.equal(vectorQueries, 0, scenario.name);
+      assert.equal(exactCalls, 0, scenario.name);
+      assert.deepEqual(result.evidence?.sources, ["fts"], scenario.name);
+    }
+
+    reset();
+    publish("exact", true);
+    exactRows = [
+      {
+        repoId: "foreign-repo",
+        model,
+        embeddingId: model + ":foreign",
+        symbolId: "foreign",
+        score: 1,
+      },
+    ];
+
+    const invalidExactResult = await run();
+
+    assert.deepEqual(
+      invalidExactResult.results.map((row) => row.symbolId),
+      ["fts-only"],
+    );
+    assert.equal(JSON.stringify(invalidExactResult).includes("foreign"), false);
+    assert.equal(ftsQueries, 1);
+    assert.equal(vectorQueries, 0);
+    assert.equal(exactCalls, 1);
+    assert.equal(
+      health.getRepositorySymbolVectorHealthSnapshot(repoId, model)?.mode,
+      "degraded",
+    );
+    assert.equal(
+      health.getRepositorySymbolVectorHealthSnapshot(repoId, model)
+        ?.exactFallbackAllowed,
+      false,
+    );
+
+    t.after(() => {
+      health.clearRepositorySymbolVectorHealth(repoId);
+    });
   });
 
   it("uses the stable ID tie-break for non-finite vector distances", () => {

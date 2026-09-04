@@ -19,6 +19,12 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
+import {
+  resolveSymbolVectorPhysicalIdentity,
+  setRepoSymbolVectorEmbedding,
+} from "../../dist/db/ladybug-symbol-embeddings.js";
+import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const TEST_DB_PATH = join(tmpdir(), ".lbug-symbol-batch-upsert-test-db.lbug");
@@ -342,7 +348,7 @@ describe("upsertSymbolBatch — integration", () => {
   );
 
   it(
-    "provider retirement deletes every vector model for exact retired Symbols",
+    "provider retirement defers vector cleanup to semantic reconciliation",
     { skip: !ladybugAvailable },
     async () => {
       const conn_ = conn as unknown as import("kuzu").Connection;
@@ -375,27 +381,33 @@ describe("upsertSymbolBatch — integration", () => {
         "preserved",
       );
       await queries.upsertSymbolBatch(conn_, [scoped, incoming, preserved]);
+      const vectorTableName = resolveSymbolVectorPhysicalIdentity(
+        repoId,
+        "jina-embeddings-v2-base-code",
+      ).tableName;
 
-      for (const symbol of [scoped, incoming, preserved]) {
-        await queries.setSymbolVectorEmbedding(
-          conn_,
-          repoId,
-          symbol.symbolId,
-          "jina-embeddings-v2-base-code",
-          `${symbol.symbolId}-jina`,
-          `${symbol.symbolId}-jina-hash`,
-          new Array<number>(768).fill(0.1),
-        );
-        await queries.setSymbolVectorEmbedding(
-          conn_,
-          repoId,
-          symbol.symbolId,
-          "nomic-embed-text-v1.5",
-          `${symbol.symbolId}-nomic`,
-          `${symbol.symbolId}-nomic-hash`,
-          new Array<number>(768).fill(0.2),
-        );
-      }
+      await withExclusiveLadybugOperation(async () => {
+        for (const symbol of [scoped, incoming, preserved]) {
+          await setRepoSymbolVectorEmbedding(
+            conn_,
+            repoId,
+            symbol.symbolId,
+            "jina-embeddings-v2-base-code",
+            `${symbol.symbolId}-jina`,
+            `${symbol.symbolId}-jina-hash`,
+            new Array<number>(768).fill(0.1),
+          );
+          await setRepoSymbolVectorEmbedding(
+            conn_,
+            repoId,
+            symbol.symbolId,
+            "nomic-embed-text-v1.5",
+            `${symbol.symbolId}-nomic`,
+            `${symbol.symbolId}-nomic-hash`,
+            new Array<number>(768).fill(0.2),
+          );
+        }
+      });
 
       await queries.deleteProviderReplacementSymbols(
         conn_,
@@ -406,11 +418,15 @@ describe("upsertSymbolBatch — integration", () => {
 
       const rows = await queries.queryAll<{ symbolId: string; model: string }>(
         conn_,
-        `MATCH (e:SymbolVectorEmbedding)
+        `MATCH (e:${vectorTableName})
          RETURN e.symbolId AS symbolId, e.model AS model
          ORDER BY e.symbolId, e.model`,
       );
       assert.deepStrictEqual(rows, [
+        { symbolId: incoming.symbolId, model: "jina-embeddings-v2-base-code" },
+        { symbolId: incoming.symbolId, model: "nomic-embed-text-v1.5" },
+        { symbolId: scoped.symbolId, model: "jina-embeddings-v2-base-code" },
+        { symbolId: scoped.symbolId, model: "nomic-embed-text-v1.5" },
         { symbolId: preserved.symbolId, model: "jina-embeddings-v2-base-code" },
         { symbolId: preserved.symbolId, model: "nomic-embed-text-v1.5" },
       ]);
@@ -471,14 +487,20 @@ describe("upsertSymbolBatch — integration", () => {
          CREATE (s)-[:SYMBOL_IN_FILE]->(otherFile)`,
         { symbolId: shared.symbolId, sameRepoFileId, otherFileId },
       );
-      await queries.setSymbolVectorEmbedding(
-        conn_,
+      const vectorTableName = resolveSymbolVectorPhysicalIdentity(
         repoId,
-        shared.symbolId,
         "jina-embeddings-v2-base-code",
-        "shared-vector",
-        "shared-vector-hash",
-        new Array<number>(768).fill(0.3),
+      ).tableName;
+      await withExclusiveLadybugOperation(() =>
+        setRepoSymbolVectorEmbedding(
+          conn_,
+          repoId,
+          shared.symbolId,
+          "jina-embeddings-v2-base-code",
+          "shared-vector",
+          "shared-vector-hash",
+          new Array<number>(768).fill(0.3),
+        ),
       );
 
       await queries.deleteProviderReplacementSymbols(
@@ -524,7 +546,7 @@ describe("upsertSymbolBatch — integration", () => {
       assert.deepStrictEqual(
         await queries.querySingle<{ repoId: string; cardHash: string }>(
           conn_,
-          `MATCH (e:SymbolVectorEmbedding {symbolId: $symbolId})
+          `MATCH (e:${vectorTableName} {symbolId: $symbolId})
            RETURN e.repoId AS repoId, e.cardHash AS cardHash`,
           { symbolId: shared.symbolId },
         ),

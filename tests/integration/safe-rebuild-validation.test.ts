@@ -4,18 +4,20 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import {
   invalidateConfigCache,
   loadConfig,
 } from "../../dist/config/loadConfig.js";
+import { SemanticConfigSchema } from "../../dist/config/types.js";
 import {
   getLadybugDbPath,
   getLadybugConn,
@@ -29,9 +31,18 @@ import {
   initSafeRebuildGraphDb,
   reopenSafeRebuildGraphDb,
 } from "../../dist/db/initGraphDb.js";
-import { exec, querySingle } from "../../dist/db/ladybug-core.js";
+import {
+  exec,
+  execCheckpoint,
+  execDdl,
+  querySingle,
+} from "../../dist/db/ladybug-core.js";
+import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
+import { getEligibleRepoSymbolIds } from "../../dist/db/ladybug-retrieval-health.js";
+import { setRepoSymbolVectorEmbeddingBatch } from "../../dist/db/ladybug-symbol-embeddings.js";
 import { getLadybugLineageMarkerPath } from "../../dist/db/ladybug-lineage.js";
 import {
+  freezeSafeRebuildCandidatePlan,
   runSafeRebuild,
   validateSafeRebuildCandidate,
 } from "../../dist/cli/commands/index-safe-rebuild.js";
@@ -127,12 +138,27 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
     return { activePath, candidatePath, configPath, sentinel };
   }
 
-  it("builds every configured repo and validates only after close/reopen", async () => {
+  function snapshotDatabaseFamily(graphPath: string): Record<string, string> {
+    const directory = dirname(graphPath);
+    const prefix = basename(graphPath);
+    return Object.fromEntries(
+      readdirSync(directory)
+        .filter((name) => name.startsWith(prefix))
+        .sort((left, right) => left.localeCompare(right))
+        .map((name) => [
+          name,
+          readFileSync(join(directory, name)).toString("base64"),
+        ]),
+    );
+  }
+
+  it("builds every configured repo and validates before close and after reopen", async () => {
     const fixture = createFixture();
     const events: string[] = [];
     const markerStates: boolean[] = [];
     const repoValidationOrder: string[] = [];
     const indexOptions: Array<Record<string, unknown> | undefined> = [];
+    let candidateValidationCalls = 0;
     const config = loadConfig(fixture.configPath);
     const result = await runSafeRebuild({
       options: {
@@ -156,6 +182,10 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
         indexOptions.push(args[4]);
         return indexRepo(...args);
       },
+      _validateCandidateForTesting: async (plan) => {
+        candidateValidationCalls += 1;
+        return validateSafeRebuildCandidate(plan);
+      },
       onRepoComplete: (repoId) => {
         repoValidationOrder.push(`complete:${repoId}`);
       },
@@ -170,6 +200,9 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
       "safe-rebuild-source",
     ]);
     assert.ok(result.validation.physicalSymbolTotal > 0);
+    assert.equal(candidateValidationCalls, 2);
+    assert.deepEqual(result.validation.repositoryVectorTables, []);
+    assert.deepEqual(result.validation.repositoryVectors, []);
     assert.ok(
       events.indexOf("candidate:closed-before-reopen") <
         events.indexOf("candidate:reopened"),
@@ -288,6 +321,42 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
     );
     await closeLadybugDb();
     assert.equal(getLadybugDbPath(), null);
+  });
+
+  it("uses the frozen configuration after the caller reorders repositories", async () => {
+    const fixture = createFixture();
+    const config = loadConfig(fixture.configPath);
+    const activeFamilyBefore = snapshotDatabaseFamily(fixture.activePath);
+    const startedRepoIds: string[] = [];
+
+    const result = await runSafeRebuild({
+      options: {
+        config: fixture.configPath,
+        force: true,
+        safeRebuildPath: fixture.candidatePath,
+      },
+      config,
+      configPath: fixture.configPath,
+      activeGraphDbPath: fixture.activePath,
+      _beforeCandidateInitForTesting: () => {
+        config.repos.reverse();
+      },
+      onRepoStart: (repoId) => startedRepoIds.push(repoId),
+    });
+
+    assert.deepEqual(startedRepoIds, [
+      "safe-rebuild-source",
+      "safe-rebuild-empty",
+    ]);
+    assert.deepEqual(result.validation.repoIds, [
+      "safe-rebuild-empty",
+      "safe-rebuild-source",
+    ]);
+    assert.deepEqual(
+      snapshotDatabaseFamily(fixture.activePath),
+      activeFamilyBefore,
+    );
+    assert.equal(process.env.SDL_GRAPH_DB_PATH, fixture.activePath);
   });
 
   it("reopens a safe-rebuild candidate without bootstrapping retrieval indexes", async () => {
@@ -549,9 +618,16 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
         config: loadConfig(fixture.configPath),
         configPath: fixture.configPath,
         activeGraphDbPath: fixture.activePath,
-        _validateCandidateForTesting: async () => {
-          throw new Error("injected post-reopen validation failure");
-        },
+        _validateCandidateForTesting: (() => {
+          let calls = 0;
+          return async (plan) => {
+            calls += 1;
+            if (calls === 2) {
+              throw new Error("injected post-reopen validation failure");
+            }
+            return validateSafeRebuildCandidate(plan);
+          };
+        })(),
       }),
       /injected post-reopen validation failure/,
     );
@@ -566,18 +642,104 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
     );
   });
 
-  it("rejects a non-empty semantic candidate with no Jina vectors", async () => {
+  it("accepts repository exact mode below the HNSW threshold", async () => {
     const fixture = createFixture();
-    const rawConfig = JSON.parse(
-      readFileSync(fixture.configPath, "utf8"),
-    ) as Record<string, unknown>;
-    rawConfig.semantic = {
-      enabled: true,
-      provider: "mock",
-      generateSummaries: false,
-    };
-    writeFileSync(fixture.configPath, JSON.stringify(rawConfig), "utf8");
-    invalidateConfigCache();
+    const activeFamilyBefore = snapshotDatabaseFamily(fixture.activePath);
+    const disabledConfig = loadConfig(fixture.configPath);
+
+    // Build and reopen a structurally verified candidate without relying on a
+    // test embedding provider. The validator fixture adds real disk-backed
+    // vectors only after the normal safe-rebuild lifecycle has completed.
+    await runSafeRebuild({
+      options: {
+        config: fixture.configPath,
+        force: true,
+        safeRebuildPath: fixture.candidatePath,
+      },
+      config: disabledConfig,
+      configPath: fixture.configPath,
+      activeGraphDbPath: fixture.activePath,
+    });
+
+    const model = "jina-embeddings-v2-base-code";
+    const enabledPlan = freezeSafeRebuildCandidatePlan({
+      ...disabledConfig,
+      semantic: SemanticConfigSchema.parse({
+        enabled: true,
+        provider: "local",
+        generateSummaries: false,
+        embeddingProfile: "specialized",
+        symbolEmbeddingModels: [model],
+        fileSummaryEmbeddingModels: [],
+        retrieval: {
+          extensionsOptional: true,
+          candidateLimit: 100,
+          fts: { enabled: false, indexName: "unused_fts", topK: 10 },
+          vector: { enabled: true, topK: 10, efc: 20, efs: 20 },
+          fusion: { strategy: "rrf", rrfK: 60 },
+        },
+      }),
+    });
+
+    await initLadybugDb(fixture.candidatePath);
+    let eligibleSymbolIds: string[] = [];
+    const vectorArray = [1, ...Array<number>(767).fill(0)];
+    await withExclusiveLadybugOperation(() =>
+      withWriteConn(async (conn) => {
+        eligibleSymbolIds = await getEligibleRepoSymbolIds(
+          conn,
+          "safe-rebuild-source",
+        );
+        await setRepoSymbolVectorEmbeddingBatch(
+          conn,
+          "safe-rebuild-source",
+          model,
+          eligibleSymbolIds.map((symbolId) => ({
+            symbolId,
+            vector: JSON.stringify(vectorArray),
+            cardHash: `hash-${symbolId}`,
+            vectorArray,
+          })),
+        );
+        await execCheckpoint(conn);
+      }),
+    );
+    assert.ok(eligibleSymbolIds.length > 0);
+
+    const validationBeforeReopen =
+      await validateSafeRebuildCandidate(enabledPlan);
+    await closeLadybugDb({ strict: true });
+    await initLadybugDb(fixture.candidatePath);
+    const validation = await validateSafeRebuildCandidate(enabledPlan);
+    assert.deepEqual(validation, validationBeforeReopen);
+
+    const sourceVector = validation.repositoryVectors.find(
+      (entry) => entry.repoId === "safe-rebuild-source",
+    );
+    const emptyVector = validation.repositoryVectors.find(
+      (entry) => entry.repoId === "safe-rebuild-empty",
+    );
+    assert.equal(sourceVector?.mode, "exact");
+    assert.equal(sourceVector?.completeVectorCount, eligibleSymbolIds.length);
+    assert.equal(sourceVector?.indexName, undefined);
+    assert.equal(emptyVector?.mode, "none");
+    assert.deepEqual(validation.repositoryVectorTables, [
+      sourceVector?.tableName,
+    ]);
+    assert.deepEqual(
+      snapshotDatabaseFamily(fixture.activePath),
+      activeFamilyBefore,
+    );
+    assert.equal(
+      existsSync(getLadybugLineageMarkerPath(fixture.candidatePath)),
+      true,
+    );
+  });
+
+  it("rejects an unexpected repository-vector table introduced after pre-close validation", async () => {
+    const fixture = createFixture();
+    const activeFamilyBefore = snapshotDatabaseFamily(fixture.activePath);
+    let validationCalls = 0;
 
     await assert.rejects(
       runSafeRebuild({
@@ -589,9 +751,31 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
         config: loadConfig(fixture.configPath),
         configPath: fixture.configPath,
         activeGraphDbPath: fixture.activePath,
+        _validateCandidateForTesting: async (plan) => {
+          const validation = await validateSafeRebuildCandidate(plan);
+          validationCalls += 1;
+          if (validationCalls === 1) {
+            await withWriteConn((conn) =>
+              execDdl(
+                conn,
+                "CREATE NODE TABLE SymbolVectorEmbedding_r_unexpected (embeddingId STRING PRIMARY KEY)",
+              ),
+            );
+          }
+          return validation;
+        },
       }),
-      /non-empty candidate.*no valid Jina vectors/i,
+      /repository vector tables.*SymbolVectorEmbedding_r_unexpected/iu,
     );
+
+    assert.equal(validationCalls, 1);
+    assert.deepEqual(
+      snapshotDatabaseFamily(fixture.activePath),
+      activeFamilyBefore,
+    );
+    assert.equal(process.env.SDL_GRAPH_DB_PATH, fixture.activePath);
+    assert.equal(getLadybugDbPath(), null);
+    assert.equal(existsSync(fixture.candidatePath), true);
     assert.equal(
       existsSync(getLadybugLineageMarkerPath(fixture.candidatePath)),
       false,
@@ -672,13 +856,18 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
         config: loadConfig(fixture.configPath),
         configPath: fixture.configPath,
         activeGraphDbPath: fixture.activePath,
-        _validateCandidateForTesting: async (config) => {
-          const validation = await validateSafeRebuildCandidate(config);
-          registerDbCloseHook(() => {
+        _validateCandidateForTesting: (() => {
+          let calls = 0;
+          return async (plan) => {
+            const validation = await validateSafeRebuildCandidate(plan);
+            calls += 1;
+            if (calls !== 2) return validation;
+            registerDbCloseHook(() => {
             throw new Error("injected final candidate close failure");
-          });
-          return validation;
-        },
+            });
+            return validation;
+          };
+        })(),
       }),
       (error: unknown) => {
         assert.ok(error instanceof AggregateError);

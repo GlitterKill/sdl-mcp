@@ -59,9 +59,11 @@ export interface ActivateProviderFirstShadowDbParams {
 export interface ActivateProviderFirstShadowDbWithHandoffParams
   extends ActivateProviderFirstShadowDbParams {
   prepareHandoff?: () => Promise<void>;
+  invalidateAllRepositoryVectorHealth: () => void;
   closeActiveDb: () => Promise<void>;
   reopenActiveDb: (activeDbPath: string) => Promise<void>;
   validateActivatedDb?: (activeDbPath: string) => Promise<void>;
+  reassessActiveDb: () => Promise<void>;
 }
 
 export function summarizeProviderFirstShadowActivationReadiness(
@@ -264,14 +266,18 @@ export async function activateProviderFirstShadowDbWithHandoff(
   }
 
   try {
-    await params.closeActiveDb();
+    params.invalidateAllRepositoryVectorHealth();
+    // Starting the close synchronously here fences the root DB family before
+    // any later await can admit stale vector-health publication.
+    const closePromise = params.closeActiveDb();
+    await closePromise;
   } catch (err) {
     return {
       status: "failed",
       activeDbPath,
       shadowDbPath,
       rollback: "notNeeded",
-      reasons: [`active LadybugDB could not be closed: ${errorMessage(err)}`],
+      reasons: [`active LadybugDB could not be invalidated and closed: ${errorMessage(err)}`],
     };
   }
 
@@ -290,7 +296,6 @@ export async function activateProviderFirstShadowDbWithHandoff(
   try {
     await params.reopenActiveDb(activeDbPath);
     await params.validateActivatedDb?.(activeDbPath);
-    return activation;
   } catch (err) {
     const reopenReason = `activated shadow LadybugDB could not be reopened or validated; rolling back to previous active DB: ${errorMessage(err)}`;
     return rollbackAfterReopenFailure({
@@ -299,6 +304,19 @@ export async function activateProviderFirstShadowDbWithHandoff(
       activeDbPath,
       reopenReason,
     });
+  }
+
+  try {
+    await params.reassessActiveDb();
+    return activation;
+  } catch (err) {
+    return {
+      ...activation,
+      status: "failed",
+      reasons: [
+        `activated shadow LadybugDB vector health could not be reassessed: ${errorMessage(err)}`,
+      ],
+    };
   }
 }
 
@@ -309,6 +327,9 @@ async function reopenAfterFailedActivation(
 ): Promise<ProviderFirstShadowActivationSummary> {
   try {
     await params.reopenActiveDb(activeDbPath);
+    if (activation.rollback === "restored") {
+      await params.reassessActiveDb();
+    }
     return activation;
   } catch (err) {
     return {
@@ -375,6 +396,7 @@ async function rollbackAfterReopenFailure(params: {
 
   try {
     await params.params.reopenActiveDb(params.activeDbPath);
+    await params.params.reassessActiveDb();
     return {
       ...params.activation,
       status: "failed",
@@ -388,7 +410,7 @@ async function rollbackAfterReopenFailure(params: {
       rollback: "failed",
       reasons: [
         params.reopenReason,
-        `previous active DB was restored but could not be reopened: ${errorMessage(err)}`,
+        `previous active DB was restored but could not be reopened or reassessed: ${errorMessage(err)}`,
       ],
     };
   }

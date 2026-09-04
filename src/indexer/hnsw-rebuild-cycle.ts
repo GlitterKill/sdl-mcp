@@ -13,19 +13,24 @@ async function requireCheckpoint(
   );
 }
 
+export interface HnswRebuildCycleOptions<T> {
+  preCheckpointPhase: string;
+  postCheckpointPhase: string;
+  body: () => Promise<T>;
+  onSuccess?: (result: T) => Promise<void> | void;
+  onFailureInsideGate?: (error: unknown) => Promise<void> | void;
+  timeoutMs?: number;
+  recordTiming?: (phaseName: string, durationMs: number) => void;
+  /** Validated caller identity forwarded only to post-index telemetry. */
+  repoId?: string;
+}
+
 /**
  * Isolate one destructive HNSW cycle between durable WAL boundaries.
- * One outer exclusive admission covers pre-checkpoint, the nested write
- * session, and post-checkpoint so no operation can enter between phases.
+ * Failure finalization runs before exclusive admission reopens.
  */
 export function runHnswRebuildCycle<T>(
-  preCheckpointPhase: string,
-  postCheckpointPhase: string,
-  rebuild: () => Promise<T>,
-  timeoutMs?: number,
-  recordTiming?: (phaseName: string, durationMs: number) => void,
-  /** Validated caller identity forwarded only to post-index telemetry. */
-  repoId?: string,
+  options: HnswRebuildCycleOptions<T>,
 ): Promise<T> {
   return withExclusiveLadybugOperation(async () => {
     const measure = async (
@@ -36,46 +41,60 @@ export function runHnswRebuildCycle<T>(
       try {
         await fn();
       } finally {
-        recordTiming?.(phaseName, Date.now() - startedAt);
+        options.recordTiming?.(phaseName, Date.now() - startedAt);
       }
     };
 
-    await measure("checkpoint.pre", () =>
-      requireCheckpoint(preCheckpointPhase, "pre"),
-    );
-
-    let result!: T;
-    let rebuildFailed = false;
-    let rebuildError: unknown;
     try {
-      result = await withPostIndexWriteSession(async () => rebuild(), {
-        timeoutMs,
-        repoId,
-      });
-    } catch (error) {
-      rebuildFailed = true;
-      rebuildError = error;
-    }
-
-    let postCheckpointFailed = false;
-    let postCheckpointError: unknown;
-    try {
-      await measure("checkpoint.post", () =>
-        requireCheckpoint(postCheckpointPhase, "post"),
+      await measure("checkpoint.pre", () =>
+        requireCheckpoint(options.preCheckpointPhase, "pre"),
       );
-    } catch (error) {
-      postCheckpointFailed = true;
-      postCheckpointError = error;
-    }
 
-    if (rebuildFailed && postCheckpointFailed) {
-      throw new AggregateError(
-        [rebuildError, postCheckpointError],
-        "HNSW rebuild and post-checkpoint both failed",
-      );
+      let result!: T;
+      let bodyFailed = false;
+      let bodyError: unknown;
+      try {
+        result = await withPostIndexWriteSession(options.body, {
+          timeoutMs: options.timeoutMs,
+          repoId: options.repoId,
+        });
+      } catch (error) {
+        bodyFailed = true;
+        bodyError = error;
+      }
+
+      let postCheckpointFailed = false;
+      let postCheckpointError: unknown;
+      try {
+        await measure("checkpoint.post", () =>
+          requireCheckpoint(options.postCheckpointPhase, "post"),
+        );
+      } catch (error) {
+        postCheckpointFailed = true;
+        postCheckpointError = error;
+      }
+
+      if (bodyFailed && postCheckpointFailed) {
+        throw new AggregateError(
+          [bodyError, postCheckpointError],
+          "HNSW rebuild and post-checkpoint both failed",
+        );
+      }
+      if (bodyFailed) throw bodyError;
+      if (postCheckpointFailed) throw postCheckpointError;
+
+      await options.onSuccess?.(result);
+      return result;
+    } catch (error) {
+      try {
+        await options.onFailureInsideGate?.(error);
+      } catch (finalizationError) {
+        throw new AggregateError(
+          [error, finalizationError],
+          "HNSW rebuild and failure finalization both failed",
+        );
+      }
+      throw error;
     }
-    if (rebuildFailed) throw rebuildError;
-    if (postCheckpointFailed) throw postCheckpointError;
-    return result;
-  }, timeoutMs);
+  }, options.timeoutMs);
 }

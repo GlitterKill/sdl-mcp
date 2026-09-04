@@ -85,10 +85,10 @@ describe("HNSW rebuild lifecycle", () => {
       });
     })();
 
-    const result = await runHnswRebuildCycle(
-      "test-hnsw-pre",
-      "test-hnsw-post",
-      async () => {
+    const result = await runHnswRebuildCycle({
+      preCheckpointPhase: "test-hnsw-pre",
+      postCheckpointPhase: "test-hnsw-post",
+      body: async () => {
         const afterPreCheckpoint = existsSync(walPath) ? statSync(walPath).size : 0;
         assert.ok(afterPreCheckpoint < beforePreCheckpoint);
         events.push("drop");
@@ -108,12 +108,15 @@ describe("HNSW rebuild lifecycle", () => {
         events.push("create");
         return "rebuilt";
       },
-    );
+      onSuccess: async () => {
+        events.push("success");
+      },
+    });
 
     await competitor;
     assert.equal(result, "rebuilt");
-    assert.deepEqual(events.slice(0, 3), ["drop", "write", "create"]);
-    assert.equal(events[3], "competitor");
+    assert.deepEqual(events.slice(0, 4), ["drop", "write", "create", "success"]);
+    assert.equal(events[4], "competitor");
     const afterPostCheckpoint = existsSync(walPath) ? statSync(walPath).size : 0;
     assert.ok(afterPostCheckpoint < beforePreCheckpoint);
   });
@@ -142,13 +145,13 @@ describe("HNSW rebuild lifecycle", () => {
     };
 
     try {
-      const cycle = runHnswRebuildCycle(
-        "queued-during-pre",
-        "queued-during-post",
-        async () => {
+      const cycle = runHnswRebuildCycle({
+        preCheckpointPhase: "queued-during-pre",
+        postCheckpointPhase: "queued-during-post",
+        body: async () => {
           events.push("body");
         },
-      );
+      });
       await checkpointEntered.promise;
 
       const competitor = withWriteConn(async () => {
@@ -189,13 +192,13 @@ describe("HNSW rebuild lifecycle", () => {
 
     try {
       await assert.rejects(
-        runHnswRebuildCycle(
-          "aggregate-pre",
-          "aggregate-post",
-          async () => {
+        runHnswRebuildCycle({
+          preCheckpointPhase: "aggregate-pre",
+          postCheckpointPhase: "aggregate-post",
+          body: async () => {
             throw new Error("forced rebuild failure");
           },
-        ),
+        }),
         (error: unknown) => {
           assert.ok(error instanceof AggregateError);
           const messages = error.errors.map((entry) =>
@@ -216,26 +219,26 @@ describe("HNSW rebuild lifecycle", () => {
     const releaseFirstBody = deferred();
     const events: string[] = [];
 
-    const firstCycle = runHnswRebuildCycle(
-      "serialized-first-pre",
-      "serialized-first-post",
-      async () => {
+    const firstCycle = runHnswRebuildCycle({
+      preCheckpointPhase: "serialized-first-pre",
+      postCheckpointPhase: "serialized-first-post",
+      body: async () => {
         events.push("first-body");
         firstBodyEntered.resolve();
         await releaseFirstBody.promise;
       },
-    ).then(() => {
+    }).then(() => {
       events.push("first-complete");
     });
 
     await firstBodyEntered.promise;
-    const secondCycle = runHnswRebuildCycle(
-      "serialized-second-pre",
-      "serialized-second-post",
-      async () => {
+    const secondCycle = runHnswRebuildCycle({
+      preCheckpointPhase: "serialized-second-pre",
+      postCheckpointPhase: "serialized-second-post",
+      body: async () => {
         events.push("second-body");
       },
-    ).then(() => {
+    }).then(() => {
       events.push("second-complete");
     });
 
@@ -256,13 +259,13 @@ describe("HNSW rebuild lifecycle", () => {
     let bodyRan = false;
     await withPostIndexWriteSession(async () => {
       await assert.rejects(
-        runHnswRebuildCycle(
-          "nested-hnsw-pre",
-          "nested-hnsw-post",
-          async () => {
+        runHnswRebuildCycle({
+          preCheckpointPhase: "nested-hnsw-pre",
+          postCheckpointPhase: "nested-hnsw-post",
+          body: async () => {
             bodyRan = true;
           },
-        ),
+        }),
         (error: unknown) => {
           assert.ok(error instanceof DatabaseError);
           assert.match(error.message, /Cannot upgrade/i);
@@ -281,17 +284,91 @@ describe("HNSW rebuild lifecycle", () => {
         : () => {},
     }));
     try {
-      await runHnswRebuildCycle(
-        "attributed-hnsw-pre",
-        "attributed-hnsw-post",
-        async () => undefined,
-        undefined,
-        undefined,
-        "repo-hnsw",
-      );
+      await runHnswRebuildCycle({
+        preCheckpointPhase: "attributed-hnsw-pre",
+        postCheckpointPhase: "attributed-hnsw-post",
+        body: async () => undefined,
+        repoId: "repo-hnsw",
+      });
     } finally {
       resetObservabilityTap();
     }
     assert.deepEqual(events.map(({ repoId }) => repoId), ["repo-hnsw"]);
   });
+
+  it("finishes failure finalization before admission reopens for every cycle phase", async () => {
+    for (const phase of ["pre", "body", "post", "success"] as const) {
+      let checkpointConn!: import("kuzu").Connection;
+      await withWriteConn(async (conn) => {
+        checkpointConn = conn;
+      });
+      const originalQuery = checkpointConn.query.bind(checkpointConn);
+      let checkpointCount = 0;
+      checkpointConn.query = async function (statement, progressCallback) {
+        if (/^CHECKPOINT\s*;?$/i.test(statement.trim())) {
+          checkpointCount += 1;
+          if (
+            (phase === "pre" && checkpointCount === 1) ||
+            (phase === "post" && checkpointCount === 2)
+          ) {
+            throw new Error(`forced ${phase} failure`);
+          }
+        }
+        return originalQuery(statement, progressCallback);
+      };
+
+      const failureEntered = deferred();
+      const releaseFailure = deferred();
+      const events: string[] = [];
+      let competitorCompleted = false;
+      try {
+        const cycle = runHnswRebuildCycle({
+          preCheckpointPhase: `failure-${phase}-pre`,
+          postCheckpointPhase: `failure-${phase}-post`,
+          body: async () => {
+            events.push("body");
+            if (phase === "body") throw new Error("forced body failure");
+          },
+          onSuccess: async () => {
+            events.push("success");
+            if (phase === "success") throw new Error("forced success failure");
+          },
+          onFailureInsideGate: async (error) => {
+            assert.ok(error instanceof Error || error instanceof AggregateError);
+            events.push("failure-start");
+            failureEntered.resolve();
+            await releaseFailure.promise;
+            events.push("failure-end");
+          },
+        });
+        const rejected = assert.rejects(cycle, /failure/i);
+        await failureEntered.promise;
+
+        const competitor = withWriteConn(async () => {
+          events.push("competitor");
+          competitorCompleted = true;
+        });
+        await nextTurn();
+        await nextTurn();
+        assert.equal(
+          competitorCompleted,
+          false,
+          `${phase} failure reopened admission before its finalizer finished`,
+        );
+
+        releaseFailure.resolve();
+        await rejected;
+        await competitor;
+        assert.deepEqual(events.slice(-3), [
+          "failure-start",
+          "failure-end",
+          "competitor",
+        ]);
+      } finally {
+        releaseFailure.resolve();
+        checkpointConn.query = originalQuery;
+      }
+    }
+  });
+
 });

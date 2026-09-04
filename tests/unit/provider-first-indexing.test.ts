@@ -104,8 +104,10 @@ import {
   mergeProviderFirstGraphRows,
 } from "../../dist/indexer/provider-first/legacy-shadow-rows.js";
 import {
+  createRepositorySemanticLifecycle,
   resolveProviderFirstSemanticReadinessDeferral,
   runProviderFirstSemanticReadinessRefresh,
+  type RepositorySemanticLifecycle,
 } from "../../dist/indexer/provider-first/semantic-readiness.js";
 import {
   exec as dbExec,
@@ -132,10 +134,22 @@ import {
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import * as derivedState from "../../dist/db/ladybug-derived-state.js";
 import {
+  clearRepositorySymbolVectorHealth,
+  commitPreparedRepositorySymbolVectorHealthBatch,
+  getRepositorySymbolVectorHealthGeneration,
+  getRepositorySymbolVectorHealthSnapshots,
+  invalidateRepositorySymbolVectorHealth,
+  prepareRepositorySymbolVectorHealthBatch,
+  publishRepositorySymbolVectorHealthBatch,
+  type RepositorySymbolVectorTableName,
+  type SymbolVectorHealthSnapshot,
+} from "../../dist/retrieval/health.js";
+import { reassessAndPublishAllRepositoryVectorHealth } from "../../dist/startup/derived-state-recovery.js";
+import {
   createBaseSchema,
   createSecondaryIndexes,
 } from "../../dist/db/ladybug-schema.js";
-import { setSymbolVectorEmbeddingBatch } from "../../dist/db/ladybug-symbol-embeddings.js";
+import { setRepoSymbolVectorEmbeddingBatch } from "../../dist/db/ladybug-symbol-embeddings.js";
 import { unresolvedCallSymbolId } from "../../dist/db/symbol-placeholders.js";
 import { ensureFtsIndexForNonEmptyTable } from "../../dist/retrieval/index-lifecycle.js";
 import { normalizePath } from "../../dist/util/paths.js";
@@ -153,6 +167,161 @@ beforeEach(async () => {
 
 const TEST_CASE_JSON =
   '{"framework":"node:test","title":"keeps sdl.info callable","suitePath":["Code Mode"],"modifiers":["only"]}';
+
+
+function semanticLifecycleStub(
+  overrides: Partial<RepositorySemanticLifecycle> = {},
+): RepositorySemanticLifecycle {
+  return {
+    onFailureInsideGate: async () => {},
+    onFailureOutsideGate: async () => {},
+    commitSuccess: async (beforeAssessment) => {
+      await beforeAssessment?.();
+      return [];
+    },
+    failureFinalizationStartedInsideGate: () => false,
+    ...overrides,
+  };
+}
+
+function semanticHealthSnapshot(params: {
+  repoId: string;
+  versionId: string | null;
+  generation: number;
+  model: string;
+  lifecycleState?: "steady" | "refreshing" | "deleting";
+  mode?: "none" | "exact" | "hnsw" | "degraded";
+}): SymbolVectorHealthSnapshot {
+  const mode = params.mode ?? "exact";
+  return {
+    repoId: params.repoId,
+    versionId: params.versionId,
+    generation: params.generation,
+    model: params.model,
+    eligibleSymbolCount: 1,
+    completeVectorCount: 1,
+    lifecycleState: params.lifecycleState ?? "steady",
+    expectedIndexIdentity: {
+      model: params.model,
+      tableName:
+        "SymbolVectorEmbedding_r_test" as RepositorySymbolVectorTableName,
+      name: `symbol_vec_${params.model.replace(/[^A-Za-z0-9_]/g, "_")}`,
+      type: "vector",
+      property: "vecJina",
+    },
+    observedIndexIdentity: null,
+    mode,
+    exactFallbackAllowed: mode === "exact" || mode === "hnsw",
+    ...(mode === "degraded" ? { reason: "test degradation" } : {}),
+  };
+}
+
+function semanticDerivedStateRow(
+  repoId: string,
+  versionId: string,
+): derivedState.DerivedStateRow {
+  return {
+    repoId,
+    clustersDirty: false,
+    processesDirty: false,
+    algorithmsDirty: false,
+    summariesDirty: false,
+    embeddingsDirty: true,
+    embeddingLifecycleState: "refreshing",
+    targetVersionId: versionId,
+    computedVersionId: versionId,
+    updatedAt: null,
+    lastError: null,
+    graphIntegrityState: "verified",
+    graphIntegrityVersionId: versionId,
+    graphIntegrityDigest: null,
+    graphIntegrityError: null,
+    graphIntegrityRevision: 0,
+    graphIntegrityVerifiedRevision: 0,
+    graphIntegrityFilelessPruningSupported: true,
+    graphIntegrityManifestEstablished: true,
+  };
+}
+
+function seedHealthyRepositoryVectorCache(params: {
+  repoId: string;
+  versionId: string;
+  semanticConfig: NonNullable<AppConfig["semantic"]>;
+}): number {
+  clearRepositorySymbolVectorHealth(params.repoId);
+  const generation = invalidateRepositorySymbolVectorHealth(
+    params.repoId,
+    params.versionId,
+    params.semanticConfig,
+    "refreshing",
+  );
+  const current = getRepositorySymbolVectorHealthSnapshots(params.repoId);
+  assert.ok(current);
+  const enabledModels = [...current.keys()];
+  assert.equal(
+    publishRepositorySymbolVectorHealthBatch({
+      repoId: params.repoId,
+      versionId: params.versionId,
+      capturedGeneration: generation,
+      enabledModels,
+      snapshots: enabledModels.map((model) =>
+        semanticHealthSnapshot({
+          repoId: params.repoId,
+          versionId: params.versionId,
+          generation,
+          model,
+        }),
+      ),
+    }),
+    true,
+  );
+  return generation;
+}
+
+async function reassessTestRepositoryVectors(params: {
+  storedRepoIds: readonly string[];
+  configuredRepoIds: readonly string[];
+  semanticConfig: NonNullable<AppConfig["semantic"]>;
+  events?: string[];
+}): Promise<readonly string[]> {
+  return reassessAndPublishAllRepositoryVectorHealth(
+    {
+      repos: params.configuredRepoIds.map((repoId) => ({ repoId })),
+      semantic: params.semanticConfig,
+    } as AppConfig,
+    {
+      listCachedRepoIds: () => [],
+      getConnection: async () => ({}) as Connection,
+      listStoredRepoIds: async () => [...params.storedRepoIds],
+      listVectorTables: async () => [],
+      getLatestVersion: async (_conn, repoId) =>
+        ({
+          versionId: `v-${repoId}`,
+        }) as Awaited<ReturnType<typeof ladybugDb.getLatestVersion>>,
+      getDerivedState: async (_conn, repoId) => ({
+        ...semanticDerivedStateRow(repoId, `v-${repoId}`),
+        embeddingsDirty: false,
+        embeddingLifecycleState: "steady",
+      }),
+      assess: async (_conn, input) => {
+        params.events?.push(`assess:${input.repoId}`);
+        const models = [
+          ...(getRepositorySymbolVectorHealthSnapshots(input.repoId)?.keys() ??
+            []),
+        ];
+        return models.map((model) =>
+          semanticHealthSnapshot({
+            repoId: input.repoId,
+            versionId: input.versionId,
+            generation: input.generation,
+            model,
+            lifecycleState: input.lifecycleState,
+          }),
+        );
+      },
+    },
+  );
+}
 
 describe("provider-first indexing foundation", () => {
   it("defaults indexing to automatic provider-first selection with shadow activation", () => {
@@ -482,6 +651,16 @@ describe("provider-first indexing foundation", () => {
         recordDerivedStateError: async () => {
           throw new Error("recordDerivedStateError should not run");
         },
+        semanticLifecycle: semanticLifecycleStub({
+          commitSuccess: async (beforeAssessment) => {
+            await beforeAssessment?.();
+            calls.push("lifecycle:commit");
+            return [];
+          },
+          onFailureOutsideGate: async (error) => {
+            throw error;
+          },
+        }),
       },
     });
 
@@ -490,8 +669,9 @@ describe("provider-first indexing foundation", () => {
       "summaries",
       "file:nomic-embed-text-v1.5",
       "symbol:jina-embeddings-v2-base-code",
+      "computed:true:undefined",
       "indexes:false",
-      "computed:true:true",
+      "lifecycle:commit",
     ]);
     assert.ok(
       timings.includes(
@@ -509,14 +689,8 @@ describe("provider-first indexing foundation", () => {
         name: "file deferred",
         file: "deferred",
         symbol: "ok",
-        expectedCalls: [
-          "summaries",
-          "file",
-          "symbol",
-          "indexes",
-          "computed:true:false:true",
-        ],
-        expectedError: false,
+        expectedCalls: ["summaries", "file", "symbol"],
+        expectedError: true,
       },
       {
         name: "file degradation",
@@ -529,28 +703,15 @@ describe("provider-first indexing foundation", () => {
         name: "first file model deferred",
         file: "first-deferred",
         symbol: "ok",
-        expectedCalls: [
-          "summaries",
-          "file",
-          "file",
-          "symbol",
-          "indexes",
-          "computed:true:false:true",
-        ],
-        expectedError: false,
+        expectedCalls: ["summaries", "file", "file", "symbol"],
+        expectedError: true,
       },
       {
         name: "symbol deferred",
         file: "ok",
         symbol: "deferred",
-        expectedCalls: [
-          "summaries",
-          "file",
-          "symbol",
-          "indexes",
-          "computed:true:false:true",
-        ],
-        expectedError: false,
+        expectedCalls: ["summaries", "file", "symbol"],
+        expectedError: true,
       },
       {
         name: "later symbol degradation supersedes file deferral",
@@ -639,9 +800,19 @@ describe("provider-first indexing foundation", () => {
               `computed:${String(flags?.summaries)}:${String(flags?.embeddings)}:${String(options?.clearError)}`,
             );
           },
-          recordDerivedStateError: async (_repoId, message) => {
-            calls.push(`error:${message}`);
+          recordDerivedStateError: async () => {
+            throw new Error("recordDerivedStateError should be lifecycle-owned");
           },
+          semanticLifecycle: semanticLifecycleStub({
+            onFailureOutsideGate: async (error) => {
+              calls.push(
+                `error:${error instanceof Error ? error.message : String(error)}`,
+              );
+            },
+            commitSuccess: async () => {
+              throw new Error("commitSuccess should not run");
+            },
+          }),
         },
       });
 
@@ -673,6 +844,487 @@ describe("provider-first indexing foundation", () => {
             : ["nomic-embed-text-v1.5"],
           testCase.name,
         );
+      }
+    }
+  });
+
+  it("publishes two Symbol models atomically after preparing the cache before durable steady", async () => {
+    const repoId = "repo-semantic-atomic";
+    const versionId = "v-semantic-atomic";
+    const models = [
+      "jina-embeddings-v2-base-code",
+      "nomic-embed-text-v1.5",
+    ];
+    const semanticConfig = {
+      enabled: true,
+      provider: "local",
+      symbolEmbeddingModels: models,
+      fileSummaryEmbeddingModels: [],
+    } as NonNullable<AppConfig["semantic"]>;
+    const events: string[] = [];
+    clearRepositorySymbolVectorHealth(repoId);
+    invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      semanticConfig,
+      "refreshing",
+    );
+
+    try {
+      const lifecycle = createRepositorySemanticLifecycle({
+        repoId,
+        versionId,
+        appConfig: { semantic: semanticConfig },
+        deps: {
+          getConnection: async () => ({}) as Connection,
+          getDerivedState: async () =>
+            semanticDerivedStateRow(repoId, versionId),
+          withWriteConnection: async (operation) =>
+            operation({} as Connection),
+          markRefreshingIfCurrent: async () => {
+            throw new Error("failure finalizer should not run");
+          },
+          markSteadyIfCurrent: async () => {
+            events.push("durable:steady");
+            assert.equal(
+              [
+                ...(getRepositorySymbolVectorHealthSnapshots(repoId)?.values() ??
+                  []),
+              ].every((snapshot) => snapshot.mode === "degraded"),
+              true,
+              "cache changed before durable steady",
+            );
+            return true;
+          },
+          assess: async (_conn, input) => {
+            events.push(`assess:${input.lifecycleState}`);
+            return models.map((model) =>
+              semanticHealthSnapshot({
+                repoId,
+                versionId,
+                generation: input.generation,
+                model,
+                lifecycleState: input.lifecycleState,
+              }),
+            );
+          },
+          prepareSuccessBatch: (input) => {
+            events.push("cache:prepare");
+            const prepared = prepareRepositorySymbolVectorHealthBatch(input);
+            assert.ok(prepared);
+            return prepared;
+          },
+          commitPreparedSuccessBatch: (prepared) => {
+            events.push("cache:commit");
+            commitPreparedRepositorySymbolVectorHealthBatch(prepared);
+          },
+          publish: () => {
+            throw new Error("success must not use fallible publication");
+          },
+          recordError: async () => {
+            throw new Error("failure finalizer should not run");
+          },
+        },
+      });
+      let completedModels = 0;
+      const result = await runProviderFirstSemanticReadinessRefresh({
+        repoId,
+        versionId,
+        appConfig: { semantic: semanticConfig },
+        deps: {
+          semanticLifecycle: lifecycle,
+          generateSummariesForRepo: async () => {
+            throw new Error("summaries are disabled");
+          },
+          refreshFileSummaryEmbeddings: async () => {
+            throw new Error("file-summary models are disabled");
+          },
+          refreshSymbolEmbeddings: async ({ model }) => {
+            completedModels += 1;
+            events.push(`symbol:${model}`);
+            assert.equal(
+              [
+                ...(getRepositorySymbolVectorHealthSnapshots(repoId)?.values() ??
+                  []),
+              ].every((snapshot) => snapshot.mode === "degraded"),
+              true,
+              "one model published before the repository batch completed",
+            );
+            return { embedded: 1, skipped: 0 };
+          },
+          buildDeferredIndexes: async () => {
+            events.push("indexes");
+          },
+          markDerivedStateComputed: async () => {
+            throw new Error("summary state should not be touched");
+          },
+          recordDerivedStateError: async () => {
+            throw new Error("failure state should not be touched");
+          },
+        },
+      });
+
+      assert.equal(result.semanticDeferred, false);
+      assert.equal(completedModels, 2);
+      assert.deepEqual(events, [
+        "symbol:jina-embeddings-v2-base-code",
+        "symbol:nomic-embed-text-v1.5",
+        "indexes",
+        "assess:steady",
+        "cache:prepare",
+        "durable:steady",
+        "cache:commit",
+      ]);
+      assert.deepEqual(
+        [
+          ...(getRepositorySymbolVectorHealthSnapshots(repoId)?.values() ?? []),
+        ].map((snapshot) => [snapshot.model, snapshot.mode]),
+        models.map((model) => [model, "exact"]),
+      );
+    } finally {
+      clearRepositorySymbolVectorHealth(repoId);
+    }
+  });
+
+  it("skips the repository lifecycle coordinator for the exact zero-model no-op path", async () => {
+    const calls: string[] = [];
+    const forbiddenLifecycle = semanticLifecycleStub({
+      onFailureInsideGate: async () => {
+        throw new Error("lifecycle must not be created or used");
+      },
+      onFailureOutsideGate: async () => {
+        throw new Error("lifecycle must not be created or used");
+      },
+      commitSuccess: async () => {
+        throw new Error("lifecycle must not be created or used");
+      },
+      failureFinalizationStartedInsideGate: () => {
+        throw new Error("lifecycle must not be created or used");
+      },
+    });
+    const result = await runProviderFirstSemanticReadinessRefresh({
+      repoId: "repo-zero-symbol-models",
+      versionId: "v-zero-symbol-models",
+      appConfig: {
+        semantic: {
+          enabled: true,
+          symbolEmbeddingModels: [],
+          fileSummaryEmbeddingModels: [],
+        },
+      } as AppConfig,
+      skipSymbolVectorLifecycle: true,
+      deps: {
+        semanticLifecycle: forbiddenLifecycle,
+        generateSummariesForRepo: async () => {
+          throw new Error("summaries are disabled");
+        },
+        refreshFileSummaryEmbeddings: async () => {
+          throw new Error("no FileSummary model should run");
+        },
+        refreshSymbolEmbeddings: async () => {
+          throw new Error("no Symbol model should run");
+        },
+        buildDeferredIndexes: async () => {
+          calls.push("indexes");
+        },
+        markDerivedStateComputed: async () => {
+          throw new Error("semantic state is already clean");
+        },
+        recordDerivedStateError: async () => {
+          throw new Error("semantic state is already clean");
+        },
+      },
+    });
+
+    assert.deepEqual(calls, ["indexes"]);
+    assert.equal(result.semanticDeferred, false);
+  });
+
+  it("finishes semantic failure finalization before exclusive admission reopens", async () => {
+    const models = [
+      "jina-embeddings-v2-base-code",
+      "nomic-embed-text-v1.5",
+    ];
+    const semanticConfig = {
+      enabled: true,
+      provider: "local",
+      symbolEmbeddingModels: models,
+      fileSummaryEmbeddingModels: [],
+    } as NonNullable<AppConfig["semantic"]>;
+
+    for (const failurePoint of [
+      "model-work",
+      "deferred-index",
+      "final-assessment",
+      "pre-steady",
+    ] as const) {
+      const repoId = `repo-semantic-failure-${failurePoint}`;
+      const versionId = `v-semantic-failure-${failurePoint}`;
+      seedHealthyRepositoryVectorCache({
+        repoId,
+        versionId,
+        semanticConfig,
+      });
+      invalidateRepositorySymbolVectorHealth(
+        repoId,
+        versionId,
+        semanticConfig,
+        "refreshing",
+      );
+      const events: string[] = [];
+      let gateTail = Promise.resolve();
+      const withTestExclusiveOperation = async <T>(
+        operation: () => Promise<T>,
+      ): Promise<T> => {
+        const previous = gateTail;
+        let release!: () => void;
+        gateTail = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        await previous;
+        events.push("gate:enter");
+        try {
+          return await operation();
+        } finally {
+          events.push("gate:exit");
+          release();
+        }
+      };
+      let competitorPromise: Promise<void> | undefined;
+
+      try {
+        const lifecycle = createRepositorySemanticLifecycle({
+          repoId,
+          versionId,
+          appConfig: { semantic: semanticConfig },
+          beforeSteadyCommit: async () => {
+            events.push("before-steady");
+            if (failurePoint === "pre-steady") {
+              throw new Error("pre-steady failure");
+            }
+          },
+          deps: {
+            getConnection: async () => ({}) as Connection,
+            withExclusiveOperation: withTestExclusiveOperation,
+            getDerivedState: async () =>
+              semanticDerivedStateRow(repoId, versionId),
+            withWriteConnection: async (operation) =>
+              operation({} as Connection),
+            markRefreshingIfCurrent: async () => {
+              events.push("finalizer:refreshing");
+              return true;
+            },
+            markSteadyIfCurrent: async () => {
+              throw new Error("durable steady must not publish on failure");
+            },
+            assess: async (_conn, input) => {
+              if (
+                input.lifecycleState === "steady" &&
+                failurePoint === "final-assessment"
+              ) {
+                events.push("assess:failed");
+                throw new Error("final assessment failed");
+              }
+              events.push(`assess:${input.lifecycleState}`);
+              return models.map((model) =>
+                semanticHealthSnapshot({
+                  repoId,
+                  versionId,
+                  generation: input.generation,
+                  model,
+                  lifecycleState: input.lifecycleState,
+                }),
+              );
+            },
+            prepareSuccessBatch: (input) => {
+              events.push("cache:prepare");
+              const prepared = prepareRepositorySymbolVectorHealthBatch(input);
+              assert.ok(prepared);
+              return prepared;
+            },
+            commitPreparedSuccessBatch: () => {
+              throw new Error("prepared success batch must remain unpublished");
+            },
+            recordError: async () => {
+              events.push("finalizer:error");
+              competitorPromise = withTestExclusiveOperation(async () => {
+                events.push("competitor");
+              });
+              await Promise.resolve();
+              events.push("finalizer:error-recorded");
+            },
+            publish: (input) => {
+              events.push("finalizer:publish");
+              assert.equal(
+                input.snapshots.every(
+                  (snapshot) =>
+                    snapshot.mode === "degraded" &&
+                    snapshot.exactFallbackAllowed === false,
+                ),
+                true,
+              );
+              return publishRepositorySymbolVectorHealthBatch(input);
+            },
+          },
+        });
+
+        const result = await runProviderFirstSemanticReadinessRefresh({
+          repoId,
+          versionId,
+          appConfig: { semantic: semanticConfig },
+          deps: {
+            semanticLifecycle: lifecycle,
+            generateSummariesForRepo: async () => {
+              throw new Error("summaries are disabled");
+            },
+            refreshFileSummaryEmbeddings: async () => {
+              throw new Error("file-summary models are disabled");
+            },
+            refreshSymbolEmbeddings: async () => {
+              if (failurePoint === "model-work") {
+                throw new Error("model work failed");
+              }
+              return { embedded: 1, skipped: 0 };
+            },
+            buildDeferredIndexes: async () => {
+              if (failurePoint === "deferred-index") {
+                throw new Error("deferred index failed");
+              }
+            },
+            markDerivedStateComputed: async () => {},
+            recordDerivedStateError: async () => {},
+          },
+        });
+        assert.equal(result.semanticDeferred, true, failurePoint);
+        assert.equal(
+          lifecycle.failureFinalizationStartedInsideGate(),
+          true,
+          failurePoint,
+        );
+        assert.ok(competitorPromise, failurePoint);
+        await competitorPromise;
+        assert.ok(
+          events.indexOf("finalizer:publish") < events.indexOf("competitor"),
+          `${failurePoint}: admission reopened before final publication`,
+        );
+        assert.equal(
+          events.filter((event) => event === "finalizer:publish").length,
+          1,
+          failurePoint,
+        );
+        assert.equal(
+          [
+            ...(getRepositorySymbolVectorHealthSnapshots(repoId)?.values() ??
+              []),
+          ].every(
+            (snapshot) =>
+              snapshot.mode === "degraded" &&
+              snapshot.exactFallbackAllowed === false,
+          ),
+          true,
+          `${failurePoint}: a partial healthy batch became visible`,
+        );
+      } finally {
+        clearRepositorySymbolVectorHealth(repoId);
+      }
+    }
+  });
+
+  it("fences cached and configured repository vectors before startup discovery fails", async () => {
+    const semanticConfig = {
+      enabled: true,
+      symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
+    } as NonNullable<AppConfig["semantic"]>;
+    const configuredRepoIds = ["configured-b", "configured-a"];
+    const cachedRepoId = "cached-z";
+    const knownRepoIds = [cachedRepoId, ...configuredRepoIds];
+    const expectedFenceOrder = [...knownRepoIds].sort((left, right) =>
+      left.localeCompare(right),
+    );
+
+    for (const failurePoint of ["getConnection", "listStoredRepoIds"] as const) {
+      const oldGenerations = new Map(
+        knownRepoIds.map((repoId) => [
+          repoId,
+          seedHealthyRepositoryVectorCache({
+            repoId,
+            versionId: "v-startup",
+            semanticConfig,
+          }),
+        ]),
+      );
+      const invalidated: string[] = [];
+      const assertKnownRepositoriesAreFenced = (): void => {
+        for (const repoId of knownRepoIds) {
+          assert.ok(
+            getRepositorySymbolVectorHealthGeneration(repoId) >
+              (oldGenerations.get(repoId) ?? -1),
+            `${failurePoint}: ${repoId} generation was not fenced`,
+          );
+          assert.equal(
+            [
+              ...(getRepositorySymbolVectorHealthSnapshots(repoId)?.values() ??
+                []),
+            ].every(
+              (snapshot) =>
+                snapshot.mode === "degraded" &&
+                snapshot.exactFallbackAllowed === false,
+            ),
+            true,
+            `${failurePoint}: ${repoId} remained queryable`,
+          );
+        }
+      };
+
+      try {
+        await assert.rejects(
+          reassessAndPublishAllRepositoryVectorHealth(
+            {
+              repos: configuredRepoIds.map((repoId) => ({ repoId })),
+              semantic: semanticConfig,
+            } as AppConfig,
+            {
+              listCachedRepoIds: () => [cachedRepoId],
+              invalidate: (
+                repoId,
+                versionId,
+                configuredSemantic,
+                lifecycleState,
+              ) => {
+                invalidated.push(repoId);
+                return invalidateRepositorySymbolVectorHealth(
+                  repoId,
+                  versionId,
+                  configuredSemantic,
+                  lifecycleState,
+                );
+              },
+              getConnection: async () => {
+                assertKnownRepositoriesAreFenced();
+                if (failurePoint === "getConnection") {
+                  throw new Error("connection discovery failed");
+                }
+                return {} as Connection;
+              },
+              listStoredRepoIds: async () => {
+                assertKnownRepositoriesAreFenced();
+                throw new Error("stored repository discovery failed");
+              },
+            },
+          ),
+          /discovery failed/,
+        );
+
+        assert.deepEqual(
+          invalidated.slice(0, expectedFenceOrder.length),
+          expectedFenceOrder,
+          failurePoint,
+        );
+        assertKnownRepositoriesAreFenced();
+      } finally {
+        for (const repoId of knownRepoIds) {
+          clearRepositorySymbolVectorHealth(repoId);
+        }
       }
     }
   });
@@ -8722,7 +9374,8 @@ describe("provider-first indexing foundation", () => {
     try {
       await closeLadybugDb();
       await initLadybugDb(activeDbPath);
-      await withWriteConn(async (writeConn) => {
+      await withExclusiveLadybugOperation(() =>
+        withWriteConn(async (writeConn) => {
         await ladybugDb.upsertRepo(writeConn, {
           repoId,
           rootPath: root,
@@ -8807,7 +9460,7 @@ describe("provider-first indexing foundation", () => {
           "qa:release-scale",
           now,
         );
-        await setSymbolVectorEmbeddingBatch(
+        await setRepoSymbolVectorEmbeddingBatch(
           writeConn,
           repoId,
           "jina-embeddings-v2-base-code",
@@ -8858,7 +9511,8 @@ describe("provider-first indexing foundation", () => {
           mutatedPlaceholders,
           expectedRelationships,
         );
-      });
+        }),
+      );
       activeConn = await getLadybugConn();
 
       const shadowBuild = await stageProviderFirstShadowBuild({
@@ -11671,6 +12325,8 @@ describe("provider-first indexing foundation", () => {
         activeDbPath: activePath,
         shadowDbPath: shadowPath,
         generationId: "provider-first:test",
+        invalidateAllRepositoryVectorHealth: () => {},
+        reassessActiveDb: async () => {},
         closeActiveDb: async () => {
           calls.push("close");
         },
@@ -11710,6 +12366,428 @@ describe("provider-first indexing foundation", () => {
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+
+  it("invalidates every repository before the close fence and reassesses after activation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sdl-provider-first-vector-handoff-"));
+    const activePath = join(root, "active.lbug");
+    const shadowPath = join(root, "shadow.lbug");
+    const repoIds = ["handoff-vector-a", "handoff-vector-b"] as const;
+    const semanticConfig = { enabled: true } as NonNullable<AppConfig["semantic"]>;
+    const publishHealthy = (repoId: string, generation: number): boolean => {
+      const current = getRepositorySymbolVectorHealthSnapshots(repoId);
+      assert.ok(current);
+      const enabledModels = [...current.keys()];
+      return publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId: "v-handoff",
+        capturedGeneration: generation,
+        enabledModels,
+        snapshots: [...current.values()].map((snapshot) => ({
+          ...snapshot,
+          lifecycleState: "steady" as const,
+          mode: "exact" as const,
+          exactFallbackAllowed: true,
+          reason: undefined,
+        })),
+      });
+    };
+
+    try {
+      mkdirSync(activePath);
+      mkdirSync(shadowPath);
+      writeFileSync(join(activePath, "marker.txt"), "active", "utf8");
+      writeFileSync(join(shadowPath, "marker.txt"), "shadow", "utf8");
+      const oldGenerations = new Map<string, number>();
+      for (const repoId of repoIds) {
+        clearRepositorySymbolVectorHealth(repoId);
+        const generation = invalidateRepositorySymbolVectorHealth(
+          repoId,
+          "v-handoff",
+          semanticConfig,
+          "refreshing",
+        );
+        assert.equal(publishHealthy(repoId, generation), true);
+        oldGenerations.set(repoId, generation);
+      }
+
+      const calls: string[] = [];
+      let stalePublicationWon = true;
+      const activation = await activateProviderFirstShadowDbWithHandoff({
+        activeDbPath: activePath,
+        shadowDbPath: shadowPath,
+        generationId: "vector-health-handoff",
+        prepareHandoff: async () => {
+          calls.push("prepare:start");
+          await Promise.resolve();
+          calls.push("prepare:end");
+        },
+        invalidateAllRepositoryVectorHealth: () => {
+          for (const repoId of repoIds) {
+            calls.push(`invalidate:${repoId}`);
+            invalidateRepositorySymbolVectorHealth(
+              repoId,
+              "v-handoff",
+              semanticConfig,
+              "refreshing",
+            );
+          }
+        },
+        closeActiveDb: () => {
+          calls.push("close");
+          const repoId = repoIds[0];
+          stalePublicationWon = publishHealthy(
+            repoId,
+            oldGenerations.get(repoId) ?? -1,
+          );
+          return Promise.resolve();
+        },
+        reopenActiveDb: async () => {
+          calls.push("reopen");
+        },
+        validateActivatedDb: async () => {
+          calls.push("validate");
+        },
+        reassessActiveDb: async () => {
+          calls.push(`reassess:${repoIds.join(",")}`);
+          for (const repoId of repoIds) {
+            assert.equal(
+              publishHealthy(
+                repoId,
+                getRepositorySymbolVectorHealthGeneration(repoId),
+              ),
+              true,
+            );
+          }
+        },
+        fs: {
+          rename: async (from, to) => {
+            calls.push("rename");
+            await fsRename(from, to);
+          },
+        },
+      });
+
+      assert.equal(activation.status, "activated");
+      assert.equal(stalePublicationWon, false);
+      assert.deepEqual(calls, [
+        "prepare:start",
+        "prepare:end",
+        "invalidate:handoff-vector-a",
+        "invalidate:handoff-vector-b",
+        "close",
+        "rename",
+        "rename",
+        "reopen",
+        "validate",
+        "reassess:handoff-vector-a,handoff-vector-b",
+      ]);
+      for (const repoId of repoIds) {
+        assert.equal(
+          [...(getRepositorySymbolVectorHealthSnapshots(repoId)?.values() ?? [])]
+            .every((snapshot) => snapshot.mode === "exact"),
+          true,
+        );
+      }
+    } finally {
+      for (const repoId of repoIds) {
+        clearRepositorySymbolVectorHealth(repoId);
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+
+  it("reassesses the complete stored-plus-configured union after candidate or restored rollback reopen", async () => {
+    const semanticConfig = {
+      enabled: true,
+      symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
+    } as NonNullable<AppConfig["semantic"]>;
+    const storedRepoIds = ["stored-z", "configured-b"];
+    const configuredRepoIds = ["configured-b", "configured-a"];
+    const allRepoIds = ["configured-a", "configured-b", "stored-z"];
+
+    for (const outcome of ["candidate", "restored"] as const) {
+      const root = mkdtempSync(
+        join(tmpdir(), `sdl-provider-first-vector-${outcome}-`),
+      );
+      const activePath = join(root, "active.lbug");
+      const shadowPath = join(root, "shadow.lbug");
+      mkdirSync(activePath);
+      mkdirSync(shadowPath);
+      for (const repoId of allRepoIds) {
+        seedHealthyRepositoryVectorCache({
+          repoId,
+          versionId: `old-${repoId}`,
+          semanticConfig,
+        });
+      }
+
+      try {
+        let reassessedRepoIds: readonly string[] = [];
+        const activation = await activateProviderFirstShadowDbWithHandoff({
+          activeDbPath: activePath,
+          shadowDbPath: shadowPath,
+          generationId: `union-${outcome}`,
+          invalidateAllRepositoryVectorHealth: () => {
+            for (const repoId of allRepoIds) {
+              invalidateRepositorySymbolVectorHealth(
+                repoId,
+                null,
+                semanticConfig,
+                "refreshing",
+              );
+            }
+          },
+          closeActiveDb: async () => {},
+          reopenActiveDb: async () => {},
+          validateActivatedDb: async () => {
+            if (outcome === "restored") {
+              throw new Error("candidate validation failed");
+            }
+          },
+          reassessActiveDb: async () => {
+            reassessedRepoIds = await reassessTestRepositoryVectors({
+              storedRepoIds,
+              configuredRepoIds,
+              semanticConfig,
+            });
+          },
+        });
+
+        assert.equal(
+          activation.status,
+          outcome === "candidate" ? "activated" : "failed",
+        );
+        assert.equal(
+          activation.rollback,
+          outcome === "candidate" ? "notNeeded" : "restored",
+        );
+        assert.deepEqual(reassessedRepoIds, allRepoIds);
+        for (const repoId of allRepoIds) {
+          assert.equal(
+            [
+              ...(getRepositorySymbolVectorHealthSnapshots(repoId)?.values() ??
+                []),
+            ].every(
+              (snapshot) =>
+                snapshot.lifecycleState === "steady" &&
+                snapshot.mode === "exact" &&
+                snapshot.exactFallbackAllowed,
+            ),
+            true,
+            `${outcome}: ${repoId} was not reassessed`,
+          );
+        }
+      } finally {
+        for (const repoId of allRepoIds) {
+          clearRepositorySymbolVectorHealth(repoId);
+        }
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("keeps reopened repository vectors non-queryable when latest Version outruns derived state", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-vector-version-gap-"),
+    );
+    const activePath = join(root, "active.lbug");
+    const shadowPath = join(root, "shadow.lbug");
+    const repoId = "handoff-version-gap";
+    const model = "jina-embeddings-v2-base-code";
+    const semanticConfig = {
+      enabled: true,
+      symbolEmbeddingModels: [model],
+    } as NonNullable<AppConfig["semantic"]>;
+    mkdirSync(activePath);
+    mkdirSync(shadowPath);
+    const beforeGeneration = seedHealthyRepositoryVectorCache({
+      repoId,
+      versionId: "v1",
+      semanticConfig,
+    });
+    const assessments: Array<{
+      versionId: string | null;
+      lifecycleState: "steady" | "refreshing" | "deleting";
+    }> = [];
+
+    try {
+      const activation = await activateProviderFirstShadowDbWithHandoff({
+        activeDbPath: activePath,
+        shadowDbPath: shadowPath,
+        generationId: "version-gap",
+        invalidateAllRepositoryVectorHealth: () => {
+          invalidateRepositorySymbolVectorHealth(
+            repoId,
+            null,
+            semanticConfig,
+            "refreshing",
+          );
+        },
+        closeActiveDb: async () => {},
+        reopenActiveDb: async () => {},
+        validateActivatedDb: async () => {},
+        reassessActiveDb: async () => {
+          await reassessAndPublishAllRepositoryVectorHealth(
+            {
+              repos: [{ repoId }],
+              semantic: semanticConfig,
+            } as AppConfig,
+            {
+              listCachedRepoIds: () => [repoId],
+              getConnection: async () => ({}) as Connection,
+              listStoredRepoIds: async () => [repoId],
+              listVectorTables: async () => [],
+              getLatestVersion: async () =>
+                ({
+                  versionId: "v2",
+                }) as Awaited<ReturnType<typeof ladybugDb.getLatestVersion>>,
+              getDerivedState: async () => ({
+                ...semanticDerivedStateRow(repoId, "v1"),
+                embeddingsDirty: false,
+                embeddingLifecycleState: "steady",
+              }),
+              assess: async (_conn, input) => {
+                assessments.push({
+                  versionId: input.versionId,
+                  lifecycleState: input.lifecycleState,
+                });
+                return [
+                  semanticHealthSnapshot({
+                    repoId,
+                    versionId: input.versionId,
+                    generation: input.generation,
+                    model,
+                    lifecycleState: input.lifecycleState,
+                    mode:
+                      input.lifecycleState === "steady" ? "exact" : "degraded",
+                  }),
+                ];
+              },
+            },
+          );
+        },
+      });
+
+      assert.equal(activation.status, "activated");
+      assert.deepEqual(assessments, [
+        {
+          versionId: "v2",
+          lifecycleState: "refreshing",
+        },
+      ]);
+      assert.ok(
+        getRepositorySymbolVectorHealthGeneration(repoId) > beforeGeneration,
+      );
+      const snapshots = getRepositorySymbolVectorHealthSnapshots(repoId);
+      assert.deepEqual(snapshots && [...snapshots.keys()], [model]);
+      const snapshot = snapshots?.get(model);
+      assert.equal(snapshot?.versionId, "v2");
+      assert.equal(snapshot?.lifecycleState, "refreshing");
+      assert.equal(snapshot?.mode, "degraded");
+      assert.equal(snapshot?.exactFallbackAllowed, false);
+    } finally {
+      clearRepositorySymbolVectorHealth(repoId);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps every repository vector batch non-queryable when handoff outcome is indeterminate", async () => {
+    const semanticConfig = {
+      enabled: true,
+      symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
+    } as NonNullable<AppConfig["semantic"]>;
+    const repoIds = ["handoff-failure-a", "handoff-failure-b"];
+
+    for (const failurePoint of [
+      "reopen",
+      "validation-reopen",
+      "rollback",
+      "reassessment",
+    ] as const) {
+      for (const repoId of repoIds) {
+        seedHealthyRepositoryVectorCache({
+          repoId,
+          versionId: "v-before-handoff",
+          semanticConfig,
+        });
+      }
+      let renameCalls = 0;
+      let reopenCalls = 0;
+
+      try {
+        const activation = await activateProviderFirstShadowDbWithHandoff({
+          activeDbPath: "C:/vector-handoff/active.lbug",
+          shadowDbPath: "C:/vector-handoff/shadow.lbug",
+          generationId: failurePoint,
+          invalidateAllRepositoryVectorHealth: () => {
+            for (const repoId of repoIds) {
+              invalidateRepositorySymbolVectorHealth(
+                repoId,
+                null,
+                semanticConfig,
+                "refreshing",
+              );
+            }
+          },
+          closeActiveDb: async () => {},
+          reopenActiveDb: async () => {
+            reopenCalls += 1;
+            if (
+              failurePoint === "reopen" ||
+              (failurePoint === "validation-reopen" && reopenCalls > 1)
+            ) {
+              throw new Error("active database reopen failed");
+            }
+          },
+          validateActivatedDb: async () => {
+            if (
+              failurePoint === "validation-reopen" ||
+              failurePoint === "rollback"
+            ) {
+              throw new Error("candidate validation failed");
+            }
+          },
+          reassessActiveDb: async () => {
+            if (failurePoint === "reassessment") {
+              throw new Error("repository discovery is unknown");
+            }
+          },
+          fs: {
+            access: async () => {},
+            rm: async () => {},
+            rename: async () => {
+              renameCalls += 1;
+              if (failurePoint === "rollback" && renameCalls === 4) {
+                throw new Error("previous active database restore failed");
+              }
+            },
+          },
+        });
+
+        assert.equal(activation.status, "failed", failurePoint);
+        for (const repoId of repoIds) {
+          assert.equal(
+            [
+              ...(getRepositorySymbolVectorHealthSnapshots(repoId)?.values() ??
+                []),
+            ].every(
+              (snapshot) =>
+                snapshot.mode === "degraded" &&
+                snapshot.exactFallbackAllowed === false,
+            ),
+            true,
+            `${failurePoint}: ${repoId} became queryable`,
+          );
+        }
+      } finally {
+        for (const repoId of repoIds) {
+          clearRepositorySymbolVectorHealth(repoId);
+        }
+      }
     }
   });
 
@@ -11852,6 +12930,8 @@ describe("provider-first indexing foundation", () => {
         activeDbPath: activePath,
         shadowDbPath: shadowPath,
         generationId: "stale-revision",
+        invalidateAllRepositoryVectorHealth: () => {},
+        reassessActiveDb: async () => {},
         prepareHandoff: async () => {
           await cancelAndWaitForGraphIntegrityVerifier(repoId);
           if (
@@ -11925,6 +13005,8 @@ describe("provider-first indexing foundation", () => {
         activeDbPath: activePath,
         shadowDbPath: shadowPath,
         generationId: "provider-first:fts-validation",
+        invalidateAllRepositoryVectorHealth: () => {},
+        reassessActiveDb: async () => {},
         closeActiveDb: () => closeLadybugDb({ preserveCloseHooks: true }),
         reopenActiveDb: async (path) => {
           reopenCalls++;
@@ -12000,6 +13082,8 @@ describe("provider-first indexing foundation", () => {
         activeDbPath: activePath,
         shadowDbPath: shadowPath,
         generationId: "provider-first:fts-validation",
+        invalidateAllRepositoryVectorHealth: () => {},
+        reassessActiveDb: async () => {},
         closeActiveDb: async () => {},
         reopenActiveDb: async () => {},
         validateActivatedDb: async () => {

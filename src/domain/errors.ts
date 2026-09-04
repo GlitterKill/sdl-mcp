@@ -82,10 +82,13 @@ export class GraphRetrievalUnavailableError extends IndexError {
   }
 }
 
-/** A destructive full refresh was refused on an active populated database. */
-export class SafeRebuildRequiredError extends IndexError {
+export const SAFE_REBUILD_RECOVERY_GUIDANCE =
+  "Stop the service and run the existing safe-rebuild workflow before restarting.";
+
+/** An existing database cannot cross a fresh-schema-only boundary in place. */
+export class SafeRebuildRequiredError extends DatabaseError {
   constructor(message: string) {
-    super(message);
+    super(`${message} ${SAFE_REBUILD_RECOVERY_GUIDANCE}`);
     this.name = "SafeRebuildRequiredError";
   }
 }

@@ -9,7 +9,10 @@ import type { Connection } from "kuzu";
 import type { Migration } from "./migrations/types.js";
 import { exec, clearPreparedStatementCache } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
-import { DatabaseError } from "../domain/errors.js";
+import {
+  DatabaseError,
+  SafeRebuildRequiredError,
+} from "../domain/errors.js";
 
 /**
  * LadybugDB/Kuzu phrasings that mean an idempotent DDL statement has already
@@ -70,6 +73,15 @@ export async function runPendingMigrations(
   if (pending.length === 0) {
     logger.info("Schema up to date", { version: currentVersion });
     return currentVersion;
+  }
+
+  const freshDatabaseBoundary = pending.find(
+    (migration) => migration.requiresFreshDatabase === true,
+  );
+  if (freshDatabaseBoundary) {
+    throw new SafeRebuildRequiredError(
+      `Migration "${freshDatabaseBoundary.description}" (schema ${currentVersion} -> ${freshDatabaseBoundary.version}) requires a fresh database.`,
+    );
   }
 
   logger.info("Applying schema migrations", {

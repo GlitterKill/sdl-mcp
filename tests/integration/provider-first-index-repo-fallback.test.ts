@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -12,7 +13,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+import {
+  invalidateConfigCache,
+  loadConfig,
+} from "../../dist/config/loadConfig.js";
 import {
   closeLadybugDb,
   getExtensionCapabilities,
@@ -22,7 +26,16 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { execDdl } from "../../dist/db/ladybug-core.js";
-import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
+import {
+  getDerivedState,
+  markEmbeddingLifecycleSteadyIfCurrent,
+} from "../../dist/db/ladybug-derived-state.js";
+import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
+import {
+  ensureRepoSymbolVectorTable,
+  getRepoSymbolVectorEmbedding,
+  setRepoSymbolVectorEmbedding,
+} from "../../dist/db/ladybug-symbol-embeddings.js";
 import {
   getGraphSnapshotStats,
   setGraphSnapshot,
@@ -35,6 +48,13 @@ import {
 import { indexRepo as runIndexRepo } from "../../dist/indexer/indexer.js";
 import { processWatchedFileChange } from "../../dist/indexer/watcher.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
+import {
+  getRepositorySymbolVectorHealthGeneration,
+  getRepositorySymbolVectorHealthSnapshots,
+  invalidateRepositorySymbolVectorHealth,
+  publishRepositorySymbolVectorHealthBatch,
+  type SymbolVectorHealthSnapshot,
+} from "../../dist/retrieval/health.js";
 import {
   indexExistsForTable,
   showIndexes,
@@ -52,6 +72,20 @@ const RELEASE_SCALE_SYMBOL_COUNT = 2_112;
 const RELEASE_SCALE_PROVIDER_ID = "release-scale-scip";
 const RELEASE_SCALE_REL_PATH = "src/index.ts";
 const RELEASE_SCALE_NAME_COLUMN = 16;
+
+async function queryFromPublishedVectorHealth<T>(
+  snapshot: SymbolVectorHealthSnapshot | null | undefined,
+  lanes: {
+    exact: () => Promise<T[]>;
+    ann: () => Promise<T[]>;
+  },
+): Promise<T[]> {
+  if (snapshot?.mode === "hnsw") return lanes.ann();
+  if (snapshot?.mode === "exact" || snapshot?.exactFallbackAllowed === true) {
+    return lanes.exact();
+  }
+  return [];
+}
 
 // Every full build in this file targets a per-test disposable database.
 const indexRepo: typeof runIndexRepo = (
@@ -847,6 +881,222 @@ describe("provider-first indexRepo fallback", () => {
     await assert.rejects(
       () => indexRepo(repoId, "incremental"),
       /provider-first SCIP incremental execution requires an enabled scip\.generator/i,
+    );
+  });
+
+  it("keeps repository vectors non-queryable after provider-first commits a file removal", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      semanticProvider: "mock",
+      semanticRetrieval: true,
+    });
+    const removedPath = join(repoDir, "src", "removed.ts");
+    writeFileSync(
+      removedPath,
+      "export function removedLegacy() { return 7; }\n",
+      "utf8",
+    );
+
+    const baseline = await indexRepo(repoId, "full");
+    const conn = await getLadybugConn();
+    const removedFile = await ladybugDb.getFileByRepoPath(
+      conn,
+      repoId,
+      "src/removed.ts",
+    );
+    assert.ok(removedFile);
+    const removedSymbol = (await ladybugDb.getSymbolsByFile(
+      conn,
+      removedFile.fileId,
+    )).find((symbol) => symbol.name === "removedLegacy");
+    assert.ok(removedSymbol);
+
+    const semanticConfig = loadConfig().semantic;
+    const seededGeneration = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      baseline.versionId,
+      semanticConfig,
+      "refreshing",
+    );
+    const seededSnapshots = getRepositorySymbolVectorHealthSnapshots(repoId);
+    assert.ok(seededSnapshots);
+    const enabledModels = [...seededSnapshots.keys()];
+    assert.ok(enabledModels.length > 0);
+
+    await withExclusiveLadybugOperation(() =>
+      withWriteConn(async (writeConn) => {
+        await ensureRepoSymbolVectorTable(writeConn, repoId);
+        for (const model of enabledModels) {
+          const vector = new Array<number>(768).fill(0);
+          vector[0] = 1;
+          await setRepoSymbolVectorEmbedding(
+            writeConn,
+            repoId,
+            removedSymbol.symbolId,
+            model,
+            JSON.stringify(vector),
+            "removed-card",
+            vector,
+          );
+        }
+      }),
+    );
+    assert.equal(
+      await withWriteConn((writeConn) =>
+        markEmbeddingLifecycleSteadyIfCurrent(
+          writeConn,
+          repoId,
+          baseline.versionId,
+        ),
+      ),
+      true,
+    );
+    const healthySnapshots = enabledModels.map((model) => {
+      const snapshot = seededSnapshots.get(model);
+      assert.ok(snapshot);
+      return {
+        ...snapshot,
+        lifecycleState: "steady" as const,
+        eligibleSymbolCount: 1,
+        completeVectorCount: 1,
+        mode: "exact" as const,
+        exactFallbackAllowed: true,
+        reason: undefined,
+      };
+    });
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId: baseline.versionId,
+        capturedGeneration: seededGeneration,
+        enabledModels,
+        snapshots: healthySnapshots,
+      }),
+      true,
+    );
+
+    assert.ok(
+      await getRepoSymbolVectorEmbedding(
+        conn,
+        repoId,
+        removedSymbol.symbolId,
+        enabledModels[0],
+      ),
+      "the seeded repository vector row should be readable",
+    );
+
+    const mutableConfig = JSON.parse(readFileSync(configPath, "utf8")) as {
+      scip: { generator: { enabled: boolean } };
+    };
+    mutableConfig.scip.generator.enabled = true;
+    writeFileSync(configPath, JSON.stringify(mutableConfig, null, 2), "utf8");
+    invalidateConfigCache();
+    rmSync(removedPath);
+
+    let enterPause!: () => void;
+    let releasePause!: () => void;
+    const pauseEntered = new Promise<void>((resolve) => {
+      enterPause = resolve;
+    });
+    const pauseBarrier = new Promise<void>((resolve) => {
+      releasePause = resolve;
+    });
+    const beforeGeneration =
+      getRepositorySymbolVectorHealthGeneration(repoId);
+    const incremental = indexRepo(
+      repoId,
+      "incremental",
+      undefined,
+      undefined,
+      {
+        afterFirstStructuralSymbolWriteCommitted: async () => {
+          enterPause();
+          await pauseBarrier;
+        },
+      },
+    );
+
+    await Promise.race([
+      pauseEntered,
+      incremental.then(() => {
+        throw new Error("incremental index completed before the pause barrier");
+      }),
+    ]);
+
+    try {
+      const pausedState = await getDerivedState(repoId);
+      assert.equal(pausedState?.embeddingsDirty, true);
+      assert.equal(pausedState?.embeddingLifecycleState, "refreshing");
+      assert.equal(
+        getRepositorySymbolVectorHealthGeneration(repoId),
+        beforeGeneration + 1,
+      );
+
+      const pausedSnapshots =
+        getRepositorySymbolVectorHealthSnapshots(repoId);
+      assert.ok(pausedSnapshots);
+      assert.deepEqual([...pausedSnapshots.keys()], enabledModels);
+      assert.ok(
+        [...pausedSnapshots.values()].every(
+          (snapshot) =>
+            snapshot.generation === beforeGeneration + 1 &&
+            snapshot.lifecycleState === "refreshing" &&
+            snapshot.mode === "degraded" &&
+            snapshot.exactFallbackAllowed === false,
+        ),
+        "the complete model batch must be non-queryable while semantic reconciliation is pending",
+      );
+      const pausedConn = await getLadybugConn();
+      assert.equal(
+        await ladybugDb.getFileByRepoPath(
+          pausedConn,
+          repoId,
+          "src/removed.ts",
+        ),
+        null,
+        "the removed File must be committed before the pause",
+      );
+      assert.equal(
+        await ladybugDb.getSymbol(pausedConn, removedSymbol.symbolId),
+        null,
+        "the removed Symbol must be committed before the pause",
+      );
+      const staleVectorRow = await getRepoSymbolVectorEmbedding(
+        pausedConn,
+        repoId,
+        removedSymbol.symbolId,
+        enabledModels[0],
+      );
+      assert.ok(
+        staleVectorRow,
+        "semantic reconciliation, not the structural commit, removes the stale vector",
+      );
+
+      let exactQueries = 0;
+      let annQueries = 0;
+      const concurrentResults = await queryFromPublishedVectorHealth(
+        pausedSnapshots.get(enabledModels[0]),
+        {
+          exact: async () => {
+            exactQueries += 1;
+            return [staleVectorRow];
+          },
+          ann: async () => {
+            annQueries += 1;
+            return [staleVectorRow];
+          },
+        },
+      );
+      assert.deepEqual(concurrentResults, []);
+      assert.equal(exactQueries, 0);
+      assert.equal(annQueries, 0);
+    } finally {
+      releasePause();
+    }
+
+    await assert.rejects(
+      incremental,
+      /Semantic final assessment is incomplete/,
     );
   });
 

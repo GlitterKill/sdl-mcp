@@ -15,6 +15,11 @@ import {
   RepoOverviewResponse,
 } from "../tools.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
+import {
+  execDdl,
+  resetPreparedStatementCaches,
+} from "../../db/ladybug-core.js";
+import { withExclusiveLadybugOperation } from "../../db/ladybug-operation-gate.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   getWatcherHealth,
@@ -23,7 +28,7 @@ import {
 } from "../../indexer/indexer.js";
 import { assertIndexStoragePreflight } from "../../indexer/index-storage-preflight.js";
 import { createVersionAndSnapshot } from "../../indexer/indexer-version.js";
-import { RepoConfig } from "../../config/types.js";
+import { RepoConfig, type SemanticConfig } from "../../config/types.js";
 import { LanguageSchema } from "../../config/types.js";
 import { normalizePath } from "../../util/paths.js";
 import {
@@ -85,12 +90,35 @@ import {
   withRepoMutation,
 } from "../../services/repo-lifecycle.js";
 import {
+  getDerivedStateFromConnection,
   getDerivedStateSummary,
+  markEmbeddingLifecycleDeleting,
   graphIntegrityIsAvailableForVersion,
   graphIntegrityIsVerifiedForVersion,
   graphIntegrityNextBestAction,
 } from "../../db/ladybug-derived-state.js";
 import { withGraphIntegrityVerifierQuiesced } from "../../indexer/provider-first/background-graph-integrity-verifier.js";
+import {
+  inspectRepoSymbolVectorTable,
+  resolveSymbolVectorPhysicalIdentity,
+  validateRepoSymbolVectorOwnership,
+} from "../../db/ladybug-symbol-embeddings.js";
+import {
+  dropVectorIndex,
+  showIndexesStrict,
+  type IndexInfo,
+} from "../../retrieval/index-lifecycle.js";
+import {
+  assessRepositorySymbolVectorHealth,
+  clearRepositorySymbolVectorHealth,
+  clearRepositorySymbolVectorDiagnostics,
+  createRepositorySymbolVectorDiagnostic,
+  invalidateRepositorySymbolVectorHealth,
+  listRepositorySymbolVectorTableNames,
+  publishRepositorySymbolVectorDiagnostic,
+  publishRepositorySymbolVectorHealthBatch,
+  resolveRequiredRetrievalIndexes,
+} from "../../retrieval/health.js";
 import {
   retainIndexRefreshAdmissionUntil,
   runOutsideToolDispatchContext,
@@ -492,6 +520,30 @@ export async function handleRepoRegister(
     };
   }
 
+  if (!existingRepo) {
+    const tableName = resolveSymbolVectorPhysicalIdentity(
+      repoId,
+      "jina-embeddings-v2-base-code",
+    ).tableName;
+    const vectorTables = await listRepositorySymbolVectorTableNames(conn);
+    if (vectorTables.some((candidate) => candidate === tableName)) {
+      const diagnostic = createRepositorySymbolVectorDiagnostic(
+        "orphan-table",
+        tableName,
+        repoId,
+      );
+      publishRepositorySymbolVectorDiagnostic(diagnostic);
+      logger.warn(diagnostic.message, {
+        code: diagnostic.code,
+        repoId,
+        tableName,
+      });
+      throw new DatabaseError(
+        `Cannot register repository "${repoId}" while leftover vector table "${tableName}" exists. Use an explicit repair or deletion action first.`,
+      );
+    }
+  }
+
   await withWriteConn(async (wConn) => {
     await ladybugDb.upsertRepo(wConn, {
       repoId,
@@ -622,6 +674,323 @@ function detectWorkspaces(packageJsonPath: string): string[] | undefined {
   return undefined;
 }
 
+type RepositoryVectorTeardownDependencies = {
+  withExclusiveOperation: <T>(task: () => Promise<T>) => Promise<T>;
+  withWriteConnection: <T>(
+    task: (conn: Connection) => Promise<T>,
+  ) => Promise<T>;
+  getRepo: (
+    conn: Connection,
+    repoId: string,
+  ) => Promise<{ repoId: string } | null>;
+  getLatestVersion: (
+    conn: Connection,
+    repoId: string,
+  ) => Promise<{ versionId: string } | null>;
+  markDeleting: (conn: Connection, repoId: string) => Promise<void>;
+  invalidateHealth: typeof invalidateRepositorySymbolVectorHealth;
+  inspectTable: typeof inspectRepoSymbolVectorTable;
+  validateOwnership: (
+    conn: Connection,
+    repoId: string,
+    model: string,
+  ) => Promise<void>;
+  showIndexes: (conn: Connection) => Promise<IndexInfo[]>;
+  dropIndex: typeof dropVectorIndex;
+  dropTable: (conn: Connection, tableName: string) => Promise<void>;
+  resetPreparedCaches: () => void;
+  deleteGraph: (conn: Connection, repoId: string) => Promise<void>;
+  clearHealth: (repoId: string) => void;
+  getDerivedState: typeof getDerivedStateFromConnection;
+  assessHealth: typeof assessRepositorySymbolVectorHealth;
+  publishHealth: typeof publishRepositorySymbolVectorHealthBatch;
+  publishDiagnostic: typeof publishRepositorySymbolVectorDiagnostic;
+};
+
+function repositoryVectorTeardownDependencies():
+  RepositoryVectorTeardownDependencies {
+  return {
+    withExclusiveOperation: withExclusiveLadybugOperation,
+    withWriteConnection: withWriteConn,
+    getRepo: ladybugDb.getRepo,
+    getLatestVersion: ladybugDb.getLatestVersion,
+    markDeleting: markEmbeddingLifecycleDeleting,
+    invalidateHealth: invalidateRepositorySymbolVectorHealth,
+    inspectTable: inspectRepoSymbolVectorTable,
+    validateOwnership: validateRepoSymbolVectorOwnership,
+    showIndexes: showIndexesStrict,
+    dropIndex: dropVectorIndex,
+    dropTable: async (conn, tableName) => {
+      await execDdl(conn, `DROP TABLE ${tableName}`);
+    },
+    resetPreparedCaches: resetPreparedStatementCaches,
+    deleteGraph: ladybugDb.deleteRepo,
+    clearHealth: (repoId) => {
+      clearRepositorySymbolVectorHealth(repoId);
+      clearRepositorySymbolVectorDiagnostics(repoId);
+    },
+    getDerivedState: getDerivedStateFromConnection,
+    assessHealth: assessRepositorySymbolVectorHealth,
+    publishHealth: publishRepositorySymbolVectorHealthBatch,
+    publishDiagnostic: publishRepositorySymbolVectorDiagnostic,
+  };
+}
+
+function expectedRepositoryVectorIndexes(
+  repoId: string,
+  semanticConfig: SemanticConfig | undefined,
+): Array<{ name: string; property: string; tableName: string }> {
+  return resolveRequiredRetrievalIndexes(semanticConfig, repoId)
+    .symbolVectors.flatMap((index) =>
+      index.name && index.property
+        ? [{
+            name: index.name,
+            property: index.property,
+            tableName: index.tableName,
+          }]
+        : [],
+    );
+}
+
+function validateRepositoryVectorTeardownCatalog(
+  tableName: string,
+  tableState: "absent" | "present",
+  expectedIndexes: readonly {
+    name: string;
+    property: string;
+    tableName: string;
+  }[],
+  indexes: readonly IndexInfo[],
+): Set<string> {
+  const presentExpectedIndexes = new Set<string>();
+
+  for (const expected of expectedIndexes) {
+    const relevant = indexes.filter(
+      (index) =>
+        index.name === expected.name ||
+        (index.tableName === tableName &&
+          index.property === expected.property),
+    );
+    if (relevant.length > 1) {
+      throw new DatabaseError(
+        `Repository Symbol vector index identity "${expected.name}" is ambiguous for table "${tableName}".`,
+      );
+    }
+    if (relevant.length === 0) continue;
+
+    const [observed] = relevant;
+    if (
+      observed?.name !== expected.name ||
+      observed.tableName !== expected.tableName ||
+      observed.type !== "vector" ||
+      observed.property !== expected.property
+    ) {
+      throw new DatabaseError(
+        `Repository Symbol vector index identity "${expected.name}" is incompatible with table "${tableName}".`,
+      );
+    }
+    presentExpectedIndexes.add(expected.name);
+  }
+
+  const unexpected = indexes
+    .filter(
+      (index) =>
+        index.type === "vector" &&
+        index.tableName === tableName &&
+        !expectedIndexes.some(
+          (expected) =>
+            index.name === expected.name &&
+            index.property === expected.property &&
+            index.tableName === expected.tableName,
+        ),
+    )
+    .map((index) => index.name)
+    .sort((left, right) => left.localeCompare(right));
+  if (unexpected.length > 0) {
+    throw new DatabaseError(
+      `Repository Symbol vector table "${tableName}" has unexpected vector index identity: ${unexpected.join(", ")}.`,
+    );
+  }
+  if (tableState === "absent" && presentExpectedIndexes.size > 0) {
+    throw new DatabaseError(
+      `Repository Symbol vector table "${tableName}" is absent while its vector index remains catalogued.`,
+    );
+  }
+
+  return presentExpectedIndexes;
+}
+
+async function publishDeletionPendingHealth(
+  conn: Connection,
+  repoId: string,
+  semanticConfig: SemanticConfig | undefined,
+  deps: RepositoryVectorTeardownDependencies,
+): Promise<void> {
+  const tableName = resolveSymbolVectorPhysicalIdentity(
+    repoId,
+    "jina-embeddings-v2-base-code",
+  ).tableName;
+  deps.publishDiagnostic(
+    createRepositorySymbolVectorDiagnostic(
+      "deletion-pending",
+      tableName,
+      repoId,
+    ),
+  );
+
+  let versionId: string | null = null;
+  try {
+    const latestVersion = await deps.getLatestVersion(conn, repoId);
+    const derivedState = await deps.getDerivedState(conn, repoId);
+    versionId =
+      latestVersion?.versionId ?? derivedState?.targetVersionId ?? null;
+    const generation = deps.invalidateHealth(
+      repoId,
+      versionId,
+      semanticConfig,
+      "deleting",
+    );
+    if (derivedState?.embeddingLifecycleState !== "deleting") return;
+
+    const snapshots = await deps.assessHealth(conn, {
+      repoId,
+      versionId,
+      generation,
+      lifecycleState: "deleting",
+      semanticConfig,
+    });
+    if (
+      !deps.publishHealth({
+        repoId,
+        versionId,
+        capturedGeneration: generation,
+        enabledModels: snapshots.map((snapshot) => snapshot.model),
+        snapshots,
+      })
+    ) {
+      deps.invalidateHealth(repoId, versionId, semanticConfig, "deleting");
+    }
+  } catch (error) {
+    try {
+      deps.invalidateHealth(repoId, versionId, semanticConfig, "deleting");
+    } catch {
+      // The invalidator removes the cache entry before propagating, which is
+      // still fail-closed when even the hard-degraded batch cannot be built.
+    }
+    logger.warn("Repository vector teardown health assessment failed", {
+      repoId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function teardownRepositoryDatabase(
+  repoId: string,
+  semanticConfig: SemanticConfig | undefined,
+  dependencies?: RepositoryVectorTeardownDependencies,
+): Promise<void> {
+  const deps = dependencies ?? repositoryVectorTeardownDependencies();
+  await deps.withExclusiveOperation(async () => {
+    await deps.withWriteConnection(async (writeConn) => {
+      let teardownCompleted = false;
+      try {
+        if (!(await deps.getRepo(writeConn, repoId))) {
+          // Internal retries can arrive after graph deletion committed. Treat the
+          // durable absence as completion without recreating deletion health.
+          deps.clearHealth(repoId);
+          teardownCompleted = true;
+          return;
+        }
+        const latestVersion = await deps.getLatestVersion(writeConn, repoId);
+        const versionId = latestVersion?.versionId ?? null;
+
+        await deps.markDeleting(writeConn, repoId);
+        deps.invalidateHealth(
+          repoId,
+          versionId,
+          semanticConfig,
+          "deleting",
+        );
+
+        const expectedTableName = resolveSymbolVectorPhysicalIdentity(
+          repoId,
+          "jina-embeddings-v2-base-code",
+        ).tableName;
+        const inspection = await deps.inspectTable(writeConn, repoId);
+        if (inspection.tableName !== expectedTableName) {
+          throw new DatabaseError(
+            `Repository Symbol vector table identity "${inspection.tableName}" does not match expected table "${expectedTableName}".`,
+          );
+        }
+
+        const expectedIndexes = expectedRepositoryVectorIndexes(
+          repoId,
+          semanticConfig,
+        );
+        const indexes = await deps.showIndexes(writeConn);
+        const presentExpectedIndexes =
+          validateRepositoryVectorTeardownCatalog(
+            inspection.tableName,
+            inspection.state,
+            expectedIndexes,
+            indexes,
+          );
+
+        if (inspection.state === "present") {
+          await deps.validateOwnership(
+            writeConn,
+            repoId,
+            "jina-embeddings-v2-base-code",
+          );
+          for (const index of expectedIndexes) {
+            if (!presentExpectedIndexes.has(index.name)) continue;
+            const result = await deps.dropIndex(
+              writeConn,
+              inspection.tableName,
+              index.name,
+            );
+            if (result.status === "failed") {
+              throw new DatabaseError(
+                result.error ??
+                  `Failed to drop repository Symbol vector index "${index.name}".`,
+              );
+            }
+          }
+
+          await deps.dropTable(writeConn, inspection.tableName);
+          // DDL invalidates plans held by both the writer and pooled readers.
+          deps.resetPreparedCaches();
+        }
+
+        await deps.deleteGraph(writeConn, repoId);
+        deps.clearHealth(repoId);
+        teardownCompleted = true;
+      } finally {
+        if (!teardownCompleted) {
+          await publishDeletionPendingHealth(
+            writeConn,
+            repoId,
+            semanticConfig,
+            deps,
+          );
+        }
+      }
+    });
+  });
+}
+
+/**
+ * Narrow dependency seam for Task 10's teardown failure matrix.
+ * @internal
+ */
+export async function _teardownRepositoryDatabaseForTesting(
+  repoId: string,
+  semanticConfig: SemanticConfig | undefined,
+  dependencies: RepositoryVectorTeardownDependencies,
+): Promise<void> {
+  await teardownRepositoryDatabase(repoId, semanticConfig, dependencies);
+}
+
 /** Permanently remove a runtime-only repository registration and its graph data. */
 export async function handleRepoUnregister(
   args: unknown,
@@ -663,15 +1032,10 @@ export async function handleRepoUnregister(
     }
 
     await withGraphIntegrityVerifierQuiesced(repoId, () =>
-      withWriteConn(async (writeConn) => {
-        if (!(await ladybugDb.getRepo(writeConn, repoId))) {
-          throw new NotFoundError(`Repository not found: ${repoId}`);
-        }
-        await ladybugDb.deleteRepo(writeConn, repoId);
-        removal.commitTombstone();
-        tombstoned = true;
-      }),
+      teardownRepositoryDatabase(repoId, appConfig.semantic),
     );
+    removal.commitTombstone();
+    tombstoned = true;
   } finally {
     if (!tombstoned) removal.abort();
   }

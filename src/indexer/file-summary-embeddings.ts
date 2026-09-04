@@ -308,14 +308,13 @@ export async function refreshFileSummaryEmbeddings(params: {
     };
   };
   if (!useRebuildPath) return runPersistenceCycle();
-  return runHnswRebuildCycle(
-    "filesummary-vector-rebuild-pre-drop",
-    "filesummary-vector-rebuild-post-create",
-    runPersistenceCycle,
-    params.postIndexSessionTimeoutMs,
-    undefined,
-    params.repoId,
-  );
+  return runHnswRebuildCycle({
+    preCheckpointPhase: "filesummary-vector-rebuild-pre-drop",
+    postCheckpointPhase: "filesummary-vector-rebuild-post-create",
+    body: runPersistenceCycle,
+    timeoutMs: params.postIndexSessionTimeoutMs,
+    repoId: params.repoId,
+  });
 }
 
 

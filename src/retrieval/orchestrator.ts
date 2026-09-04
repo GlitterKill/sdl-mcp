@@ -66,7 +66,12 @@ import { applyQueryPrefix } from "../indexer/model-registry.js";
 import { EMBEDDING_MODELS } from "./model-mapping.js";
 import { ENTITY_FTS_INDEX_NAMES } from "./index-lifecycle.js";
 import { assertGraphRetrievalAvailable } from "../services/graph-retrieval-availability.js";
-import { checkRetrievalHealth } from "./health.js";
+import {
+  checkRetrievalHealth,
+  getRepositorySymbolVectorHealthSnapshot,
+  invalidateRepositorySymbolVectorHealth,
+  type SymbolVectorHealthSnapshot,
+} from "./health.js";
 import type {
   HybridSearchOptions,
   HybridSearchResult,
@@ -97,6 +102,9 @@ interface FtsRawRow {
 
 /** Raw row returned by Kuzu vector index query. */
 interface VectorRawRow {
+  repoId?: string;
+  model?: string;
+  embeddingId?: string;
   symbolId?: string;
   node?: { symbolId?: string; [key: string]: unknown };
   _node?: { symbolId?: string; [key: string]: unknown };
@@ -104,7 +112,6 @@ interface VectorRawRow {
   _score?: number;
   distance?: number;
   _distance?: number;
-  owned?: boolean;
   [key: string]: unknown;
 }
 
@@ -498,115 +505,235 @@ function vectorDistance(row: VectorRawRow): number {
   return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY;
 }
 
-function vectorRowId(row: VectorRawRow, idField = "symbolId"): string {
-  const candidates = [
-    row[idField],
-    row.node?.[idField],
-    row._node?.[idField],
-    row.symbolId,
-    row.node?.symbolId,
-    row._node?.symbolId,
-  ];
+function vectorRowField(row: VectorRawRow, field: string): string {
+  const candidates = [row[field], row.node?.[field], row._node?.[field]];
   return candidates.find((value): value is string => typeof value === "string") ?? "";
 }
 
-/** Query physical Symbol HNSW, filtering ownership before any caller sees rows. */
+function vectorRowId(row: VectorRawRow, idField = "symbolId"): string {
+  return vectorRowField(row, idField) || vectorRowField(row, "symbolId");
+}
+
+function repositoryVectorRowsAreValid(
+  rows: readonly VectorRawRow[],
+  repoId: string,
+  modelName: string,
+  metric: "score" | "distance",
+): boolean {
+  return rows.every((row) => {
+    const symbolId = vectorRowField(row, "symbolId");
+    const value =
+      metric === "score"
+        ? Number(row.score ?? row._score)
+        : Number(row.distance ?? row._distance);
+    return (
+      symbolId.length > 0 &&
+      vectorRowField(row, "repoId") === repoId &&
+      vectorRowField(row, "model") === modelName &&
+      vectorRowField(row, "embeddingId") === `${modelName}:${symbolId}` &&
+      Number.isFinite(value)
+    );
+  });
+}
+
+function symbolVectorSnapshotIsCurrent(
+  snapshot: SymbolVectorHealthSnapshot,
+  generation = snapshot.generation,
+): boolean {
+  const current = getRepositorySymbolVectorHealthSnapshot(
+    snapshot.repoId,
+    snapshot.model,
+  );
+  return (
+    current?.versionId === snapshot.versionId &&
+    current.generation === generation
+  );
+}
+
+function invalidateCapturedSymbolVectorHealth(
+  snapshot: SymbolVectorHealthSnapshot,
+): number | null {
+  if (!symbolVectorSnapshotIsCurrent(snapshot)) return null;
+  let semanticConfig: SemanticConfig | undefined;
+  try {
+    semanticConfig = loadConfig().semantic;
+  } catch {
+    // A configuration read failure must still remove the captured healthy batch.
+    semanticConfig = undefined;
+  }
+  try {
+    return invalidateRepositorySymbolVectorHealth(
+      snapshot.repoId,
+      snapshot.versionId,
+      semanticConfig,
+      "refreshing",
+    );
+  } catch (error) {
+    logger.warn("[retrieval] Failed to invalidate unsafe Symbol vector health", {
+      repoId: snapshot.repoId,
+      modelName: snapshot.model,
+      error,
+    });
+    return null;
+  }
+}
+
+function observedIndexMatchesSnapshot(
+  snapshot: SymbolVectorHealthSnapshot,
+): boolean {
+  const expected = snapshot.expectedIndexIdentity;
+  const observed = snapshot.observedIndexIdentity;
+  return (
+    expected.name !== null &&
+    expected.property !== null &&
+    observed !== null &&
+    observed.name === expected.name &&
+    observed.tableName === expected.tableName &&
+    observed.type === expected.type &&
+    observed.property === expected.property &&
+    observed.status === "healthy" &&
+    observed.extensionLoaded === true
+  );
+}
+
+function rankExactVectorRows(
+  rows: readonly VectorRawRow[],
+  limit: number,
+): { symbolId: string; score: number }[] {
+  const seen = new Set<string>();
+  return [...rows]
+    .sort((left, right) => {
+      const scoreDelta =
+        Number(right.score ?? right._score) - Number(left.score ?? left._score);
+      if (scoreDelta !== 0) return scoreDelta;
+      const leftId = vectorRowId(left);
+      const rightId = vectorRowId(right);
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+    })
+    .flatMap((row) => {
+      const symbolId = vectorRowId(row);
+      if (seen.has(symbolId)) return [];
+      seen.add(symbolId);
+      return [{ symbolId, score: Number(row.score ?? row._score) }];
+    })
+    .slice(0, limit);
+}
+
+function rankAnnVectorRows(
+  rows: readonly VectorRawRow[],
+  limit: number,
+): { symbolId: string; score: number }[] {
+  const seen = new Set<string>();
+  return sortVectorRowsByDistance(rows)
+    .flatMap((row) => {
+      const symbolId = vectorRowId(row);
+      if (seen.has(symbolId)) return [];
+      seen.add(symbolId);
+      return [{ symbolId, score: 1 / (1 + vectorDistance(row)) }];
+    })
+    .slice(0, limit);
+}
+
+/**
+ * Query one repository's Symbol vector lane from its published health snapshot.
+ * Physical names are trusted only from that snapshot; callers never supply them.
+ */
 export async function queryRepoSymbolVectorIndex(
   conn: Connection,
   repoId: string,
   modelName: string,
-  indexName: string,
   embedding: number[],
   topK: number,
   configuredEfs: number,
 ): Promise<{ symbolId: string; score: number }[]> {
-  assertIndexName(indexName);
+  const snapshot = getRepositorySymbolVectorHealthSnapshot(repoId, modelName);
   const k = assertPositiveInt(topK, "topK");
   if (!Number.isSafeInteger(configuredEfs) || configuredEfs <= 0) {
     throw new Error(`efs must be a positive integer, got ${configuredEfs}`);
   }
+  if (!snapshot || snapshot.mode === "none") return [];
+  if (snapshot.mode === "degraded" && !snapshot.exactFallbackAllowed) return [];
 
   const exact = async (
-    reason: string,
-    annError?: Error,
+    expectedGeneration: number,
+    invalidateInvalidRows: boolean,
   ): Promise<{ symbolId: string; score: number }[]> => {
-    if (annError) {
-      logger.warn("[retrieval] Symbol ANN failed; using exact fallback", {
-        reason,
-        modelName,
-        indexName,
-        error: annError,
-      });
-    } else {
-      logger.debug("[retrieval] Symbol ANN shortage; using exact fallback", {
-        reason,
-        modelName,
-        indexName,
-      });
-    }
+    let rows: VectorRawRow[];
     try {
       const exactConn = isConnStuck(conn) ? await getLadybugConn() : conn;
-      return await ladybugDb.rankRepoSymbolVectorsExact(
+      const exactRows = await ladybugDb.rankRepoSymbolVectorsExact(
         exactConn,
         repoId,
         modelName,
         embedding,
         k,
       );
-    } catch (exactError) {
-      if (!annError) throw exactError;
-      const normalizedExactError =
-        exactError instanceof Error ? exactError : new Error(String(exactError));
-      throw new AggregateError(
-        [annError, normalizedExactError],
-        `Symbol ANN failed: ${annError.message}; exact fallback failed: ${normalizedExactError.message}`,
-      );
+      rows = exactRows.map((row) => ({ ...row }));
+    } catch (error) {
+      logger.warn("[retrieval] Exact Symbol vector query failed", {
+        repoId,
+        modelName,
+        error,
+      });
+      return [];
     }
+    if (!symbolVectorSnapshotIsCurrent(snapshot, expectedGeneration)) return [];
+    if (!repositoryVectorRowsAreValid(rows, repoId, modelName, "score")) {
+      if (invalidateInvalidRows) {
+        invalidateCapturedSymbolVectorHealth(snapshot);
+      }
+      return [];
+    }
+    return rankExactVectorRows(rows, k);
   };
-  const ann = async (
-    window: number,
-  ): Promise<{ rawCount: number; rows: { symbolId: string; score: number }[] }> => {
-    const rows = await queryStoredProcAll<VectorRawRow>(
+
+  const invalidateThenExact = async (
+    reason: string,
+    error?: unknown,
+  ): Promise<{ symbolId: string; score: number }[]> => {
+    const generation = invalidateCapturedSymbolVectorHealth(snapshot);
+    if (generation === null || !snapshot.exactFallbackAllowed) return [];
+    logger.warn("[retrieval] Symbol ANN rejected; using guarded exact fallback", {
+      reason,
+      repoId,
+      modelName,
+      ...(error === undefined ? {} : { error }),
+    });
+    return exact(generation, false);
+  };
+
+  if (snapshot.mode === "exact" || snapshot.mode === "degraded") {
+    return exact(snapshot.generation, true);
+  }
+  if (!observedIndexMatchesSnapshot(snapshot)) {
+    return invalidateThenExact("published-index-identity-mismatch");
+  }
+
+  const tableName = snapshot.expectedIndexIdentity.tableName;
+  const indexName = snapshot.expectedIndexIdentity.name;
+  if (!indexName) return invalidateThenExact("published-index-name-missing");
+  assertTableName(tableName);
+  assertIndexName(indexName);
+
+  let rows: VectorRawRow[];
+  try {
+    rows = await queryStoredProcAll<VectorRawRow>(
       conn,
-      `CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding', '${indexName}', ${cypherNumberArray(embedding)}, ${window}, efs := ${Math.max(configuredEfs, window)})
-       RETURN node.symbolId AS symbolId,
-              distance,
-              node.repoId = ${cypherSingleQuotedString(repoId)} AS owned`,
+      `CALL QUERY_VECTOR_INDEX('${tableName}', '${indexName}', ${cypherNumberArray(embedding)}, ${k}, efs := ${Math.max(configuredEfs, k)})
+       RETURN node.repoId AS repoId,
+              node.model AS model,
+              node.embeddingId AS embeddingId,
+              node.symbolId AS symbolId,
+              distance`,
     );
-    const seen = new Set<string>();
-    const owned: { symbolId: string; score: number }[] = [];
-    for (const row of sortVectorRowsByDistance(rows)) {
-      const symbolId = vectorRowId(row);
-      if (row.owned !== true || !symbolId || seen.has(symbolId)) continue;
-      seen.add(symbolId);
-      owned.push({ symbolId, score: 1 / (1 + vectorDistance(row)) });
-      if (owned.length === k) break;
-    }
-    return { rawCount: rows.length, rows: owned };
-  };
-
-  let first: Awaited<ReturnType<typeof ann>>;
-  try {
-    first = await ann(k);
-  } catch (err) {
-    return exact(
-      "initial-query-error",
-      err instanceof Error ? err : new Error(String(err)),
-    );
+  } catch (error) {
+    return invalidateThenExact("ann-query-error", error);
   }
-  if (first.rows.length >= k) return first.rows;
-  if (first.rawCount < k) return exact("initial-window-short");
-  if (k === 10_000) return exact("candidate-ceiling");
-
-  try {
-    const retry = await ann(Math.min(10_000, k * 2));
-    return retry.rows.length >= k ? retry.rows : exact("retry-shortage");
-  } catch (err) {
-    return exact(
-      "retry-query-error",
-      err instanceof Error ? err : new Error(String(err)),
-    );
+  if (!symbolVectorSnapshotIsCurrent(snapshot)) return [];
+  if (!repositoryVectorRowsAreValid(rows, repoId, modelName, "distance")) {
+    return invalidateThenExact("ann-row-identity-invalid");
   }
+  return rankAnnVectorRows(rows, k);
 }
 function timingKeySegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
@@ -701,7 +828,6 @@ async function queryVectorIndex(
   conn: Connection,
   repoId: string,
   modelName: string,
-  indexName: string,
   embedding: number[],
   topK: number,
   efs: number,
@@ -712,7 +838,6 @@ async function queryVectorIndex(
       conn,
       repoId,
       modelName,
-      indexName,
       embedding,
       topK,
       efs,
@@ -944,7 +1069,7 @@ export async function hybridSearch(
           m.includes("jina") ? 0 : m.includes("nomic") ? 1 : 2;
         return priority(a) - priority(b);
       });
-    for (const [modelName, modelInfo] of sortedModels) {
+    for (const [modelName] of sortedModels) {
       // Check capability for this specific model.
       const source = vectorSourceForModel(modelName);
       const capAvailable =
@@ -963,9 +1088,7 @@ export async function hybridSearch(
         continue;
       }
 
-      // Resolve the index name from config override or model-mapping default.
-      const configIndexEntry = config.vector.indexes?.[modelName];
-      const indexName = configIndexEntry?.indexName ?? modelInfo.indexName;
+
 
       // Generate query embedding.
       let queryEmbedding: number[];
@@ -1020,7 +1143,6 @@ export async function hybridSearch(
         conn,
         options.repoId,
         modelName,
-        indexName,
         queryEmbedding,
         vectorTopK,
         config.vector.efs,
@@ -1453,9 +1575,9 @@ async function runEntitySearch<T = never>(
       }
     }
 
-    for (const [modelName, modelInfo] of Object.entries(
-      EMBEDDING_MODELS,
-    ).filter(([name]) => configuredEntityModels.has(name))) {
+    for (const [modelName] of Object.entries(EMBEDDING_MODELS).filter(
+      ([name]) => configuredEntityModels.has(name),
+    )) {
       const source = vectorSourceForModel(modelName);
       const legacyModelAvailable =
         (source === "vector:nomic" && caps.vectorNomic) ||
@@ -1546,12 +1668,7 @@ async function runEntitySearch<T = never>(
           continue;
         }
 
-        // Resolve the index name from config override or entity-vector config default.
-        const configIndexEntry = config.vector.indexes?.[modelName];
-        const indexName =
-          entityType === "symbol"
-            ? (configIndexEntry?.indexName ?? modelInfo.indexName)
-            : entityVecCfg.indexName;
+
 
         let vecRows: { symbolId: string; score: number }[] = [];
         const entityFtsCfg = ENTITY_FTS_CONFIG[entityType];
@@ -1565,12 +1682,12 @@ async function runEntitySearch<T = never>(
               conn,
               options.repoId,
               modelName,
-              indexName,
               queryEmbedding,
               k,
               config.vector.efs,
             );
           } else {
+            const indexName = entityVecCfg.indexName;
             const vectorTableName = entityFtsCfg.tableName;
             assertTableName(vectorTableName);
             assertIndexName(indexName);

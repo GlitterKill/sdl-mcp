@@ -1,6 +1,5 @@
 import type { Connection } from "kuzu";
 
-import { SYMBOL_VECTOR_EMBEDDING_TABLE } from "../retrieval/model-mapping.js";
 import {
   assertSafeInt,
   queryAll,
@@ -22,19 +21,6 @@ export interface SafeRebuildSymbolPointLookupSample {
     symbolId: string;
     fields: string[];
   }>;
-}
-
-export async function readSafeRebuildJinaVectorProbe(
-  conn: Connection,
-): Promise<unknown | null> {
-  const row = await querySingle<{ vector: unknown }>(
-    conn,
-    `MATCH (s:${SYMBOL_VECTOR_EMBEDDING_TABLE})
-     WHERE s.embeddingJinaCodeVec IS NOT NULL
-     RETURN s.embeddingJinaCodeVec AS vector
-     LIMIT 1`,
-  );
-  return row?.vector ?? null;
 }
 
 const SAFE_REBUILD_SYMBOL_POINT_LOOKUP_PAGE_SIZE = 2_048;

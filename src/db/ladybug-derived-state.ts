@@ -25,6 +25,8 @@ export type GraphIntegrityState =
   | "verified"
   | "failed";
 
+export type EmbeddingLifecycleState = "steady" | "refreshing" | "deleting";
+
 export interface DerivedStateRow {
   repoId: string;
   clustersDirty: boolean;
@@ -32,6 +34,7 @@ export interface DerivedStateRow {
   algorithmsDirty: boolean;
   summariesDirty: boolean;
   embeddingsDirty: boolean;
+  embeddingLifecycleState?: EmbeddingLifecycleState;
   targetVersionId: string | null;
   computedVersionId: string | null;
   updatedAt: string | null;
@@ -61,6 +64,12 @@ function nullableInt64(value: unknown, name: string): number | null {
   return number;
 }
 
+function normalizeEmbeddingLifecycleState(
+  value: unknown,
+): EmbeddingLifecycleState {
+  return value === "refreshing" || value === "deleting" ? value : "steady";
+}
+
 function normalizeRow(
   raw: Record<string, unknown> | null,
 ): DerivedStateRow | null {
@@ -72,6 +81,9 @@ function normalizeRow(
     algorithmsDirty: Boolean(raw.algorithmsDirty),
     summariesDirty: Boolean(raw.summariesDirty),
     embeddingsDirty: Boolean(raw.embeddingsDirty),
+    embeddingLifecycleState: normalizeEmbeddingLifecycleState(
+      raw.embeddingLifecycleState,
+    ),
     targetVersionId: (raw.targetVersionId as string | null) ?? null,
     computedVersionId: (raw.computedVersionId as string | null) ?? null,
     updatedAt: (raw.updatedAt as string | null) ?? null,
@@ -117,10 +129,119 @@ export async function getDerivedStateFromConnection(
 ): Promise<DerivedStateRow | null> {
   const rows = await queryAll<Record<string, unknown>>(
     conn,
-    "MATCH (d:DerivedState {repoId: $repoId}) RETURN d.repoId AS repoId, d.clustersDirty AS clustersDirty, d.processesDirty AS processesDirty, d.algorithmsDirty AS algorithmsDirty, d.summariesDirty AS summariesDirty, d.embeddingsDirty AS embeddingsDirty, d.targetVersionId AS targetVersionId, d.computedVersionId AS computedVersionId, d.updatedAt AS updatedAt, d.lastError AS lastError, d.graphIntegrityState AS graphIntegrityState, d.graphIntegrityVersionId AS graphIntegrityVersionId, d.graphIntegrityDigest AS graphIntegrityDigest, d.graphIntegrityError AS graphIntegrityError, d.graphIntegrityRevision AS graphIntegrityRevision, d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision, d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported, d.graphIntegrityManifestEstablished AS graphIntegrityManifestEstablished",
+    "MATCH (d:DerivedState {repoId: $repoId}) RETURN d.repoId AS repoId, d.clustersDirty AS clustersDirty, d.processesDirty AS processesDirty, d.algorithmsDirty AS algorithmsDirty, d.summariesDirty AS summariesDirty, d.embeddingsDirty AS embeddingsDirty, d.embeddingLifecycleState AS embeddingLifecycleState, d.targetVersionId AS targetVersionId, d.computedVersionId AS computedVersionId, d.updatedAt AS updatedAt, d.lastError AS lastError, d.graphIntegrityState AS graphIntegrityState, d.graphIntegrityVersionId AS graphIntegrityVersionId, d.graphIntegrityDigest AS graphIntegrityDigest, d.graphIntegrityError AS graphIntegrityError, d.graphIntegrityRevision AS graphIntegrityRevision, d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision, d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported, d.graphIntegrityManifestEstablished AS graphIntegrityManifestEstablished",
     { repoId },
   );
   return normalizeRow(rows[0] ?? null);
+}
+
+/**
+ * Publish the semantic write barrier in one autocommitted statement so no
+ * structural writer can observe a dirty target without the refreshing fence.
+ */
+export async function markEmbeddingLifecycleRefreshingForTarget(
+  conn: Connection,
+  repoId: string,
+  expectedTargetVersionId: string | null,
+  versionId: string,
+): Promise<boolean> {
+  const updatedAt = getCurrentTimestamp();
+  const row = await querySingle<{
+    targetVersionId: string | null;
+    embeddingsDirty: boolean;
+    embeddingLifecycleState: string;
+  }>(
+    conn,
+    `MERGE (d:DerivedState {repoId: $repoId})
+     ON CREATE SET d.clustersDirty = false,
+                   d.processesDirty = false,
+                   d.algorithmsDirty = false,
+                   d.summariesDirty = false,
+                   d.embeddingsDirty = true,
+                   d.embeddingLifecycleState = 'refreshing',
+                   d.targetVersionId = $versionId,
+                   d.updatedAt = $updatedAt
+     ON MATCH SET d.embeddingsDirty =
+       CASE WHEN d.targetVersionId = $expectedTargetVersionId
+                  OR d.targetVersionId = $versionId
+                  OR (d.targetVersionId IS NULL AND $expectedTargetVersionId IS NULL)
+            THEN true ELSE d.embeddingsDirty END,
+       d.embeddingLifecycleState =
+       CASE WHEN d.targetVersionId = $expectedTargetVersionId
+                  OR d.targetVersionId = $versionId
+                  OR (d.targetVersionId IS NULL AND $expectedTargetVersionId IS NULL)
+            THEN 'refreshing' ELSE d.embeddingLifecycleState END,
+       d.targetVersionId =
+       CASE WHEN d.targetVersionId = $expectedTargetVersionId
+                  OR d.targetVersionId = $versionId
+                  OR (d.targetVersionId IS NULL AND $expectedTargetVersionId IS NULL)
+            THEN $versionId ELSE d.targetVersionId END,
+       d.updatedAt =
+       CASE WHEN d.targetVersionId = $versionId
+            THEN $updatedAt ELSE d.updatedAt END
+     RETURN d.targetVersionId AS targetVersionId,
+            d.embeddingsDirty AS embeddingsDirty,
+            d.embeddingLifecycleState AS embeddingLifecycleState`,
+    { repoId, expectedTargetVersionId, versionId, updatedAt },
+  );
+  return (
+    row?.targetVersionId === versionId &&
+    Boolean(row.embeddingsDirty) &&
+    row.embeddingLifecycleState === "refreshing"
+  );
+}
+
+export async function markEmbeddingLifecycleRefreshingIfCurrent(
+  conn: Connection,
+  repoId: string,
+  versionId: string,
+): Promise<boolean> {
+  const row = await querySingle<{ repoId: string }>(
+    conn,
+    `MATCH (d:DerivedState {repoId: $repoId})
+     WHERE d.targetVersionId = $versionId
+     SET d.embeddingsDirty = true,
+         d.embeddingLifecycleState = 'refreshing',
+         d.updatedAt = $updatedAt
+     RETURN d.repoId AS repoId`,
+    { repoId, versionId, updatedAt: getCurrentTimestamp() },
+  );
+  return row !== null;
+}
+
+export async function markEmbeddingLifecycleDeleting(
+  conn: Connection,
+  repoId: string,
+): Promise<void> {
+  await exec(
+    conn,
+    `MERGE (d:DerivedState {repoId: $repoId})
+     SET d.embeddingsDirty = true,
+         d.embeddingLifecycleState = 'deleting',
+         d.updatedAt = $updatedAt`,
+    { repoId, updatedAt: getCurrentTimestamp() },
+  );
+}
+
+export async function markEmbeddingLifecycleSteadyIfCurrent(
+  conn: Connection,
+  repoId: string,
+  versionId: string,
+): Promise<boolean> {
+  const row = await querySingle<{ repoId: string }>(
+    conn,
+    `MATCH (d:DerivedState {repoId: $repoId})
+     WHERE d.targetVersionId = $versionId
+     SET d.embeddingsDirty = false,
+         d.embeddingLifecycleState = 'steady',
+         d.computedVersionId = $versionId,
+         d.targetVersionId = $versionId,
+         d.lastError = NULL,
+         d.updatedAt = $updatedAt
+     RETURN d.repoId AS repoId`,
+    { repoId, versionId, updatedAt: getCurrentTimestamp() },
+  );
+  return row !== null;
 }
 
 export async function markDerivedStateDirty(
@@ -165,7 +286,7 @@ export async function markDerivedStateComputed(
   await withWriteConn(async (wConn) => {
     await exec(
       wConn,
-      "MERGE (d:DerivedState {repoId: $repoId}) SET d.clustersDirty = CASE WHEN $clearClusters THEN false ELSE d.clustersDirty END, d.processesDirty = CASE WHEN $clearProcesses THEN false ELSE d.processesDirty END, d.algorithmsDirty = CASE WHEN $clearAlgorithms THEN false ELSE d.algorithmsDirty END, d.summariesDirty = CASE WHEN $clearSummaries THEN false ELSE d.summariesDirty END, d.embeddingsDirty = CASE WHEN $clearEmbeddings THEN false ELSE d.embeddingsDirty END, d.computedVersionId = $computedVersionId, d.targetVersionId = $computedVersionId, d.updatedAt = $updatedAt, d.lastError = CASE WHEN $clearError THEN null ELSE d.lastError END",
+      "MERGE (d:DerivedState {repoId: $repoId}) SET d.clustersDirty = CASE WHEN $clearClusters THEN false ELSE d.clustersDirty END, d.processesDirty = CASE WHEN $clearProcesses THEN false ELSE d.processesDirty END, d.algorithmsDirty = CASE WHEN $clearAlgorithms THEN false ELSE d.algorithmsDirty END, d.summariesDirty = CASE WHEN $clearSummaries THEN false ELSE d.summariesDirty END, d.embeddingsDirty = CASE WHEN $clearEmbeddings THEN false ELSE d.embeddingsDirty END, d.embeddingLifecycleState = CASE WHEN $clearEmbeddings THEN 'steady' ELSE d.embeddingLifecycleState END, d.computedVersionId = $computedVersionId, d.targetVersionId = $computedVersionId, d.updatedAt = $updatedAt, d.lastError = CASE WHEN $clearError THEN null ELSE d.lastError END",
       {
         repoId,
         clearClusters,
@@ -199,7 +320,7 @@ export async function markDerivedStateComputedIfCurrent(
   return withWriteConn(async (wConn) => {
     const updated = await querySingle<{ repoId: string }>(
       wConn,
-      "MATCH (d:DerivedState {repoId: $repoId}) WHERE d.targetVersionId = $computedVersionId SET d.clustersDirty = CASE WHEN $clearClusters THEN false ELSE d.clustersDirty END, d.processesDirty = CASE WHEN $clearProcesses THEN false ELSE d.processesDirty END, d.algorithmsDirty = CASE WHEN $clearAlgorithms THEN false ELSE d.algorithmsDirty END, d.summariesDirty = CASE WHEN $clearSummaries THEN false ELSE d.summariesDirty END, d.embeddingsDirty = CASE WHEN $clearEmbeddings THEN false ELSE d.embeddingsDirty END, d.computedVersionId = $computedVersionId, d.targetVersionId = $computedVersionId, d.updatedAt = $updatedAt, d.lastError = CASE WHEN $clearError THEN null ELSE d.lastError END RETURN d.repoId AS repoId",
+      "MATCH (d:DerivedState {repoId: $repoId}) WHERE d.targetVersionId = $computedVersionId SET d.clustersDirty = CASE WHEN $clearClusters THEN false ELSE d.clustersDirty END, d.processesDirty = CASE WHEN $clearProcesses THEN false ELSE d.processesDirty END, d.algorithmsDirty = CASE WHEN $clearAlgorithms THEN false ELSE d.algorithmsDirty END, d.summariesDirty = CASE WHEN $clearSummaries THEN false ELSE d.summariesDirty END, d.embeddingsDirty = CASE WHEN $clearEmbeddings THEN false ELSE d.embeddingsDirty END, d.embeddingLifecycleState = CASE WHEN $clearEmbeddings THEN 'steady' ELSE d.embeddingLifecycleState END, d.computedVersionId = $computedVersionId, d.targetVersionId = $computedVersionId, d.updatedAt = $updatedAt, d.lastError = CASE WHEN $clearError THEN null ELSE d.lastError END RETURN d.repoId AS repoId",
       {
         repoId,
         clearClusters,

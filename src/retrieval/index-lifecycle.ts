@@ -1,5 +1,5 @@
 /**
- * Index lifecycle helpers for Kuzu FTS and vector indexes on Symbol properties.
+ * Index lifecycle helpers for Symbol FTS and entity FTS/vector indexes.
  *
  * All index operations are wrapped in try/catch and fail gracefully because
  * Kuzu's FTS and vector extension support may be limited or unavailable on the
@@ -12,17 +12,10 @@ import {
   queryStoredProcAll,
 } from "../db/ladybug-core.js";
 import { countRowsInNodeTable } from "../db/ladybug-index-lifecycle.js";
-import { hasCompleteSymbolVectorEmbedding } from "../db/ladybug-symbol-embeddings.js";
+import type { SymbolVectorPhysicalIdentity } from "../db/ladybug-symbol-embeddings.js";
 import { getExtensionCapabilities } from "../db/extension-caps.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
-import {
-  EMBEDDING_MODELS,
-  getEmbeddingPropertyName,
-  getVecPropertyName,
-  getVectorIndexName,
-  SYMBOL_VECTOR_EMBEDDING_TABLE,
-} from "./model-mapping.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -372,28 +365,66 @@ export async function createVectorIndex(
 
 export async function queryVectorIndexProbe(
   conn: Connection,
-  indexName: string,
+  identity: SymbolVectorPhysicalIdentity,
+  expectedRepoId: string,
+  expectedModel: string,
   embedding: number[],
 ): Promise<number> {
-  validateIdentifier(indexName, "index name");
+  validateIdentifier(identity.tableName, "table name");
+  validateIdentifier(identity.indexName, "index name");
+  validateIdentifier(identity.propertyName, "property name");
+  validateProbeEmbedding(embedding);
+  const rows = await queryStoredProcAll<{
+    embeddingId: unknown;
+    repoId: unknown;
+    symbolId: unknown;
+    model: unknown;
+    distance: unknown;
+  }>(
+    conn,
+    `CALL QUERY_VECTOR_INDEX('${identity.tableName}', '${identity.indexName}', ${JSON.stringify(embedding)}, 10, efs := 200)
+     RETURN node.embeddingId AS embeddingId,
+            node.repoId AS repoId,
+            node.symbolId AS symbolId,
+            node.model AS model,
+            distance`,
+  );
+  validateProbeRows(rows);
+  for (const row of rows) {
+    if (row.repoId !== expectedRepoId) {
+      throw new Error("Vector index probe returned a foreign owner row");
+    }
+    if (row.model !== expectedModel) {
+      throw new Error("Vector index probe returned a wrong model row");
+    }
+    if (row.embeddingId !== `${expectedModel}:${row.symbolId}`) {
+      throw new Error("Vector index probe returned a bad embedding ID");
+    }
+  }
+  return rows.length;
+}
+
+function validateProbeEmbedding(embedding: number[]): void {
   if (
     embedding.length === 0 ||
     !embedding.every((value) => Number.isFinite(value))
   ) {
     throw new Error("Vector index probe requires finite embedding values");
   }
-  const rows = await queryStoredProcAll<{ id: unknown; distance: unknown }>(
-    conn,
-    `CALL QUERY_VECTOR_INDEX('${SYMBOL_VECTOR_EMBEDDING_TABLE}', '${indexName}', ${JSON.stringify(embedding)}, 10, efs := 200) RETURN node.symbolId AS id, distance`,
-  );
+}
+
+function validateProbeRows(
+  rows: Array<{ symbolId: unknown; distance: unknown }>,
+): void {
   for (const row of rows) {
+    if (typeof row.symbolId !== "string" || row.symbolId.length === 0) {
+      throw new Error("Vector index probe returned an invalid symbol result");
+    }
     if (
-      typeof row.id !== "string" ||
-      row.id.length === 0 ||
       typeof row.distance !== "number" ||
       !Number.isFinite(row.distance)
     ) {
-      throw new Error("Vector index probe returned an invalid symbol result");
+      throw new Error("Vector index probe returned an invalid distance");
     }
   }
   if (
@@ -405,7 +436,6 @@ export async function queryVectorIndexProbe(
   ) {
     throw new Error("Vector index probe returned no near-zero neighbor");
   }
-  return rows.length;
 }
 
 /**
@@ -725,7 +755,7 @@ export const AGENTFEEDBACK_EMBEDDING_PROPERTIES = {
 } as const;
 
 /**
- * Check whether the expected FTS and vector indexes exist and are healthy.
+ * Check whether the fixed Symbol FTS index exists and is healthy.
  *
  * Uses showIndexes() for introspection; returns unknown status when the
  * SHOW_INDEXES procedure is unavailable.
@@ -742,31 +772,6 @@ export async function checkIndexHealth(
     "fts",
   );
 
-  const vectors = Object.entries(EMBEDDING_MODELS).map(([model]) => {
-    const fallbackName = getVectorIndexName(model);
-    const propName =
-      getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
-    const match =
-      fallbackName === null || propName === null
-        ? undefined
-        : indexes.find((index) =>
-            indexMatchesExactIdentity(
-              index,
-              SYMBOL_VECTOR_EMBEDDING_TABLE,
-              fallbackName,
-              "vector",
-              propName,
-            ),
-          );
-    const exists = match !== undefined;
-    return {
-      model,
-      exists,
-      healthy: match?.status === "healthy",
-      indexName: fallbackName,
-    };
-  });
-
   return {
     fts: {
       exists: ftsExists,
@@ -781,7 +786,7 @@ export async function checkIndexHealth(
         ),
       indexName: DEFAULT_FTS_INDEX_NAME,
     },
-    vectors,
+    vectors: [],
   };
 }
 
@@ -790,10 +795,9 @@ export async function checkIndexHealth(
 // ---------------------------------------------------------------------------
 
 /**
- * Idempotently create all indexes required by the given retrieval config.
+ * Idempotently create the fixed Symbol FTS index when configured.
  *
- * Checks getExtensionCapabilities() first - if neither FTS nor vector
- * extensions are available, all operations are skipped gracefully.
+ * Checks getExtensionCapabilities() first and skips gracefully when FTS is unavailable.
  *
  * @returns Structured result listing which indexes were created, skipped, or failed.
  */
@@ -804,7 +808,6 @@ export async function ensureIndexes(
 ): Promise<IndexEnsureResult> {
   const result: IndexEnsureResult = { created: [], skipped: [], failed: [] };
   const includeFtsIndex = options.includeFtsIndex !== false;
-  const includeVectorIndexes = options.includeVectorIndexes !== false;
 
   const caps = getExtensionCapabilities();
 
@@ -859,121 +862,6 @@ export async function ensureIndexes(
       } else {
         logger.debug(
           "[index-lifecycle] FTS index creation skipped (disabled in config)",
-        );
-      }
-    },
-  );
-
-  // ------------------------------------------------------------------
-  // Vector indexes - one per configured model
-  // ------------------------------------------------------------------
-  const vectorConfig = config.vector;
-  await measureIndexLifecyclePhase(
-    options.recordTiming,
-    "symbolVectors",
-    async () => {
-      if (vectorConfig?.enabled !== false) {
-        if (!includeVectorIndexes) {
-          logger.debug(
-            "[index-lifecycle] Skipping Symbol vector indexes - semantic refresh deferred",
-          );
-          for (const model of Object.keys(EMBEDDING_MODELS)) {
-            const name =
-              vectorConfig?.indexes?.[model]?.indexName ??
-              getVectorIndexName(model) ??
-              model;
-            result.skipped.push(name);
-          }
-        } else if (!caps.vector) {
-          logger.debug(
-            "[index-lifecycle] Skipping vector indexes - extension unavailable",
-          );
-          // Record all expected vector index names as skipped
-          for (const model of Object.keys(EMBEDDING_MODELS)) {
-            const name =
-              vectorConfig?.indexes?.[model]?.indexName ??
-              getVectorIndexName(model) ??
-              model;
-            result.skipped.push(name);
-          }
-        } else {
-          const efc = vectorConfig?.efc ?? vectorConfig?.efs ?? 200;
-
-          for (const [model, modelInfo] of Object.entries(EMBEDDING_MODELS)) {
-            const propName =
-              getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
-            if (propName === null) {
-              logger.debug(
-                `[index-lifecycle] No property name for model '${model}', skipping`,
-              );
-              continue;
-            }
-
-            // Prefer the index name from config's per-model override; fall back to
-            // the deterministic name from model-mapping.
-            const configuredEntry = vectorConfig?.indexes?.[model];
-            const indexName =
-              configuredEntry?.indexName ??
-              getVectorIndexName(model) ??
-              `symbol_vec_${propName.toLowerCase()}`;
-
-            if (
-              existing.some((index) =>
-                indexMatchesExactIdentity(
-                  index,
-                  SYMBOL_VECTOR_EMBEDDING_TABLE,
-                  indexName,
-                  "vector",
-                  propName,
-                ),
-              )
-            ) {
-              logger.debug(
-                `[index-lifecycle] Vector index '${indexName}' already exists, skipping`,
-              );
-              result.skipped.push(indexName);
-              continue;
-            }
-
-            const conflictingIndex = existing.find(
-              (index) =>
-                index.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE &&
-                index.name === indexName,
-            );
-            if (conflictingIndex) {
-              logger.warn(
-                `[index-lifecycle] Vector index '${indexName}' is attached to ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${conflictingIndex.property} (${conflictingIndex.type}), expected ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${propName}`,
-              );
-              result.failed.push(indexName);
-              continue;
-            }
-
-            if (!(await hasCompleteSymbolVectorEmbedding(conn, model))) {
-              logger.debug(
-                `[index-lifecycle] No complete '${model}' rows, skipping vector index '${indexName}'`,
-              );
-              result.skipped.push(indexName);
-              continue;
-            }
-
-            const ok = await createVectorIndex(
-              conn,
-              SYMBOL_VECTOR_EMBEDDING_TABLE,
-              propName,
-              indexName,
-              modelInfo.dimension,
-              efc,
-            );
-            if (ok) {
-              result.created.push(indexName);
-            } else {
-              result.failed.push(indexName);
-            }
-          }
-        }
-      } else {
-        logger.debug(
-          "[index-lifecycle] Vector index creation skipped (disabled in config)",
         );
       }
     },

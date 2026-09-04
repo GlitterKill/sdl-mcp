@@ -115,7 +115,6 @@ export async function finalizeDerivedState(
           processes: true,
           algorithms: !algorithmDiagnostics.dirty,
           summaries: true,
-          embeddings: true,
         },
         { clearError: !algorithmDiagnostics.dirty },
       );

@@ -2,7 +2,19 @@ import { beforeEach, afterEach, describe, it } from "node:test";
 import assert from "node:assert";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+
+import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+import { SemanticConfigSchema } from "../../dist/config/types.js";
+import {
+  getRepoSymbolVectorEmbedding,
+  getRepoSymbolVectorEmbeddings,
+  resolveSymbolVectorPhysicalIdentity,
+  setRepoSymbolVectorEmbedding,
+  setRepoSymbolVectorEmbeddingBatch,
+} from "../../dist/db/ladybug-symbol-embeddings.js";
+import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
+import { indexRepo as runIndexRepo } from "../../dist/indexer/indexer.js";
 
 import {
   initLadybugDb,
@@ -18,15 +30,14 @@ import {
   type EmbeddingProvider,
 } from "../../dist/indexer/embeddings.js";
 import { refreshFileSummaryEmbeddings } from "../../dist/indexer/file-summary-embeddings.js";
-import { readSafeRebuildJinaVectorProbe } from "../../dist/db/ladybug-safe-rebuild.js";
+import { finalizeDerivedState } from "../../dist/indexer/finalize-derived-state.js";
+
 import {
   AGENTFEEDBACK_EMBEDDING_PROPERTIES,
   AGENTFEEDBACK_VECTOR_INDEX_NAMES,
-  checkIndexHealth,
   createFtsIndex,
   createVectorIndex,
   dropVectorIndex,
-  ensureIndexes,
   FILESUMMARY_EMBEDDING_PROPERTIES,
   FILESUMMARY_VECTOR_INDEX_NAMES,
   queryVectorIndexProbe,
@@ -38,9 +49,20 @@ import {
   narrowFilesForQuery,
 } from "../../dist/retrieval/orchestrator.js";
 import { applyQueryPrefix } from "../../dist/indexer/model-registry.js";
-import { SemanticRetrievalConfigSchema } from "../../dist/config/types.js";
-import { beginGraphIntegrityVersion } from "../../dist/db/ladybug-derived-state.js";
-import { checkRetrievalHealth } from "../../dist/retrieval/health.js";
+import {
+  beginGraphIntegrityVersion,
+  getDerivedState,
+} from "../../dist/db/ladybug-derived-state.js";
+import {
+  assessRepositorySymbolVectorHealth,
+  clearRepositorySymbolVectorHealth,
+  getRepositorySymbolVectorHealthGeneration,
+  getRepositorySymbolVectorHealthSnapshots,
+  invalidateRepositorySymbolVectorHealth,
+  publishRepositorySymbolVectorHealthBatch,
+  resolveRequiredRetrievalIndexes,
+  type SymbolVectorHealthSnapshot,
+} from "../../dist/retrieval/health.js";
 import { getSymbolRetrievalCoverage } from "../../dist/db/ladybug-retrieval-health.js";
 import {
   installObservabilityTap,
@@ -52,11 +74,41 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+async function queryFromPublishedVectorHealth<T>(
+  snapshot: SymbolVectorHealthSnapshot | null | undefined,
+  lanes: {
+    exact: () => Promise<T[]>;
+    ann: () => Promise<T[]>;
+  },
+): Promise<T[]> {
+  if (snapshot?.mode === "hnsw") return lanes.ann();
+  if (snapshot?.mode === "exact" || snapshot?.exactFallbackAllowed === true) {
+    return lanes.exact();
+  }
+  return [];
+}
+
 describe("Semantic Embedding Pipeline", () => {
   const testDir = join(__dirname, "test-semantic-embedding");
   const graphDbPath = join(testDir, "graph");
   const repoId = "embed-test-repo";
   const jinaModel = "jina-embeddings-v2-base-code";
+  const replacementRaceRepoId = "semantic-replacement-race";
+  const previousConfig = process.env.SDL_CONFIG;
+  const previousConfigPath = process.env.SDL_CONFIG_PATH;
+
+  function vectorIdentity(targetRepoId = repoId, model = jinaModel) {
+    return resolveSymbolVectorPhysicalIdentity(targetRepoId, model);
+  }
+
+  // Repository table creation and vector DML share one exclusive admission boundary.
+  async function withExclusiveVectorWrite<T>(
+    body: (
+      conn: Awaited<ReturnType<typeof getLadybugConn>>,
+    ) => Promise<T>,
+  ): Promise<T> {
+    return withExclusiveLadybugOperation(() => withWriteConn(body));
+  }
 
   const symbols: ladybugDb.SymbolRow[] = [
     {
@@ -77,6 +129,7 @@ describe("Semantic Embedding Pipeline", () => {
         "(username: string, password: string) => Promise<User>",
       ),
       summary: "Authenticate a user with username and password credentials",
+      searchText: "authenticate user username password credentials",
       invariantsJson: null,
       sideEffectsJson: null,
       updatedAt: new Date().toISOString(),
@@ -97,6 +150,7 @@ describe("Semantic Embedding Pipeline", () => {
       astFingerprint: "fp-fetch",
       signatureJson: JSON.stringify("(userId: string) => Promise<UserData>"),
       summary: "Fetch user profile data from the database",
+      searchText: "fetch user profile data database",
       invariantsJson: null,
       sideEffectsJson: null,
       updatedAt: new Date().toISOString(),
@@ -117,6 +171,7 @@ describe("Semantic Embedding Pipeline", () => {
       astFingerprint: "fp-render",
       signatureJson: JSON.stringify("(data: DashboardData) => JSX.Element"),
       summary: "Render the main dashboard UI component",
+      searchText: "render main dashboard UI component",
       invariantsJson: null,
       sideEffectsJson: null,
       updatedAt: new Date().toISOString(),
@@ -177,6 +232,13 @@ describe("Semantic Embedding Pipeline", () => {
 
   afterEach(async () => {
     resetObservabilityTap();
+    clearRepositorySymbolVectorHealth(replacementRaceRepoId);
+    clearRepositorySymbolVectorHealth(repoId);
+    invalidateConfigCache();
+    if (previousConfig === undefined) delete process.env.SDL_CONFIG;
+    else process.env.SDL_CONFIG = previousConfig;
+    if (previousConfigPath === undefined) delete process.env.SDL_CONFIG_PATH;
+    else process.env.SDL_CONFIG_PATH = previousConfigPath;
     await closeLadybugDb();
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
@@ -301,7 +363,7 @@ describe("Semantic Embedding Pipeline", () => {
   ): Promise<number> {
     const row = await ladybugDb.querySingle<{ count: number | bigint }>(
       conn,
-      "MATCH (e:SymbolVectorEmbedding) RETURN count(e) AS count",
+      `MATCH (e:${vectorIdentity().tableName}) RETURN count(e) AS count`,
     );
     return ladybugDb.toNumber(row?.count ?? 0);
   }
@@ -310,12 +372,13 @@ describe("Semantic Embedding Pipeline", () => {
     conn: Awaited<ReturnType<typeof getLadybugConn>>,
     vector: number[],
   ): Promise<{ symbolId: string; distance: number }> {
+    const identity = vectorIdentity();
     const rows = await queryStoredProcAll<{
       symbolId: string;
       distance: number;
     }>(
       conn,
-      `CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding', 'symbol_vec_jina_code_v2', ${JSON.stringify(vector)}, 1, efs := 200) RETURN node.symbolId AS symbolId, distance`,
+      `CALL QUERY_VECTOR_INDEX('${identity.tableName}', '${identity.indexName}', ${JSON.stringify(vector)}, 1, efs := 200) RETURN node.symbolId AS symbolId, distance`,
     );
     assert.strictEqual(rows.length, 1);
     return rows[0];
@@ -333,11 +396,12 @@ describe("Semantic Embedding Pipeline", () => {
         makeDeterministicVector(symbol.symbolId, 10, index),
       ]),
     );
+    const identity = vectorIdentity();
 
-    await withWriteConn(async (conn) => {
+    await withExclusiveVectorWrite(async (conn) => {
       for (const symbol of allSymbols) {
         const jinaVector = jinaVectors.get(symbol.symbolId)!;
-        await ladybugDb.setSymbolVectorEmbedding(
+        await setRepoSymbolVectorEmbedding(
           conn,
           repoId,
           symbol.symbolId,
@@ -346,7 +410,7 @@ describe("Semantic Embedding Pipeline", () => {
           `${symbol.symbolId}-jina-hash`,
           jinaVector,
         );
-        await ladybugDb.setSymbolVectorEmbedding(
+        await setRepoSymbolVectorEmbedding(
           conn,
           repoId,
           symbol.symbolId,
@@ -362,9 +426,9 @@ describe("Semantic Embedding Pipeline", () => {
       }
       await createVectorIndex(
         conn,
-        "SymbolVectorEmbedding",
-        "embeddingJinaCodeVec",
-        "symbol_vec_jina_code_v2",
+        identity.tableName,
+        identity.propertyName,
+        identity.indexName,
         768,
       );
     });
@@ -372,25 +436,32 @@ describe("Semantic Embedding Pipeline", () => {
     return jinaVectors.get(preservedSymbol.symbolId)!;
   }
 
-  async function assertDeletedVectorsAndHealthyIndex(
+  async function assertGraphDeletionLeavesVectorsUntouched(
     deletedSymbolIds: string[],
     preservedSymbolId: string,
     preservedJinaVector: number[],
   ): Promise<void> {
     const conn = await getLadybugConn();
+    const identity = vectorIdentity();
     const rows = await ladybugDb.queryAll<{
       symbolId: string;
       model: string;
     }>(
       conn,
-      `MATCH (e:SymbolVectorEmbedding)
+      `MATCH (e:${identity.tableName})
        RETURN e.symbolId AS symbolId, e.model AS model
        ORDER BY e.symbolId, e.model`,
     );
-    assert.ok(
-      rows.every((row) => !deletedSymbolIds.includes(row.symbolId)),
-      "all model rows for deleted Symbols should be removed",
-    );
+    for (const symbolId of deletedSymbolIds) {
+      assert.deepStrictEqual(
+        rows.filter((row) => row.symbolId === symbolId),
+        [
+          { symbolId, model: jinaModel },
+          { symbolId, model: "nomic-embed-text-v1.5" },
+        ],
+        "structural graph deletion must not mutate semantic vector storage",
+      );
+    }
     assert.deepStrictEqual(
       rows.filter((row) => row.symbolId === preservedSymbolId),
       [
@@ -401,8 +472,7 @@ describe("Semantic Embedding Pipeline", () => {
     assert.ok(
       (await showIndexesStrict(conn)).some(
         ({ tableName, name }) =>
-          tableName === "SymbolVectorEmbedding" &&
-          name === "symbol_vec_jina_code_v2",
+          tableName === identity.tableName && name === identity.indexName,
       ),
     );
     const neighbor = await queryJinaNeighbor(conn, preservedJinaVector);
@@ -410,7 +480,7 @@ describe("Semantic Embedding Pipeline", () => {
     assert.ok(Math.abs(neighbor.distance) <= 1e-6);
   }
 
-  it("deleteSymbolsByFileId removes every model row and retains live HNSW", async () => {
+  it("deleteSymbolsByFileId leaves vector rows and live HNSW untouched", async () => {
     const preservedVector = await seedDeletionVectors(
       [symbols[0], symbols[1]],
       symbols[2],
@@ -420,14 +490,14 @@ describe("Semantic Embedding Pipeline", () => {
       ladybugDb.deleteSymbolsByFileId(conn, "file1"),
     );
 
-    await assertDeletedVectorsAndHealthyIndex(
+    await assertGraphDeletionLeavesVectorsUntouched(
       [symbols[0].symbolId, symbols[1].symbolId],
       symbols[2].symbolId,
       preservedVector,
     );
   });
 
-  it("deleteSymbolsByFileIds removes every model row and retains live HNSW", async () => {
+  it("deleteSymbolsByFileIds leaves vector rows and live HNSW untouched", async () => {
     const preservedVector = await seedDeletionVectors(
       [symbols[0], symbols[1]],
       symbols[2],
@@ -437,14 +507,14 @@ describe("Semantic Embedding Pipeline", () => {
       ladybugDb.deleteSymbolsByFileIds(conn, ["file1"]),
     );
 
-    await assertDeletedVectorsAndHealthyIndex(
+    await assertGraphDeletionLeavesVectorsUntouched(
       [symbols[0].symbolId, symbols[1].symbolId],
       symbols[2].symbolId,
       preservedVector,
     );
   });
 
-  it("deleteFilesByIds removes every model row and retains live HNSW", async () => {
+  it("deleteFilesByIds leaves vector rows and live HNSW untouched", async () => {
     const preservedVector = await seedDeletionVectors(
       [symbols[0], symbols[1]],
       symbols[2],
@@ -452,7 +522,7 @@ describe("Semantic Embedding Pipeline", () => {
 
     await withWriteConn((conn) => ladybugDb.deleteFilesByIds(conn, ["file1"]));
 
-    await assertDeletedVectorsAndHealthyIndex(
+    await assertGraphDeletionLeavesVectorsUntouched(
       [symbols[0].symbolId, symbols[1].symbolId],
       symbols[2].symbolId,
       preservedVector,
@@ -476,7 +546,7 @@ describe("Semantic Embedding Pipeline", () => {
         ladybugDb.deleteFilesByIds(conn, ["file1"]),
     ],
   ] as const) {
-    it(`${name} preserves symbols and vectors owned by another repository`, async () => {
+    it(`${name} preserves foreign graph ownership without rewriting stale vector ownership`, async () => {
       const conn = await getLadybugConn();
       const sharedSymbolId = symbols[0].symbolId;
       const otherRepoId = "embed-other-repo";
@@ -507,14 +577,16 @@ describe("Semantic Embedding Pipeline", () => {
          MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
         { symbolId: sharedSymbolId, fileId: otherFileId, repoId: otherRepoId },
       );
-      await ladybugDb.setSymbolVectorEmbedding(
-        conn,
-        repoId,
-        sharedSymbolId,
-        jinaModel,
-        "shared-vector",
-        "shared-vector-hash",
-        makeDeterministicVector("shared-vector", 30, 0),
+      await withExclusiveVectorWrite((writeConn) =>
+        setRepoSymbolVectorEmbedding(
+          writeConn,
+          repoId,
+          sharedSymbolId,
+          jinaModel,
+          "shared-vector",
+          "shared-vector-hash",
+          makeDeterministicVector("shared-vector", 30, 0),
+        ),
       );
 
       await withWriteConn(deleteTarget);
@@ -525,13 +597,13 @@ describe("Semantic Embedding Pipeline", () => {
       }>(
         conn,
         `MATCH (s:Symbol {symbolId: $symbolId})
-         MATCH (e:SymbolVectorEmbedding {symbolId: $symbolId})
+         MATCH (e:${vectorIdentity().tableName} {symbolId: $symbolId})
          RETURN s.repoId AS repoId, e.repoId AS embeddingRepoId`,
         { symbolId: sharedSymbolId },
       );
       assert.deepStrictEqual(ownership, {
         repoId: otherRepoId,
-        embeddingRepoId: otherRepoId,
+        embeddingRepoId: repoId,
       });
       const memberships = await ladybugDb.queryAll<{ repoId: string }>(
         conn,
@@ -552,18 +624,291 @@ describe("Semantic Embedding Pipeline", () => {
     });
   }
 
-  it("deleteSymbolsByIds removes every model row and retains live HNSW", async () => {
+  it("deleteSymbolsByIds leaves vector rows and live HNSW untouched", async () => {
     const preservedVector = await seedDeletionVectors([symbols[0]], symbols[1]);
 
     await withWriteConn((conn) =>
       ladybugDb.deleteSymbolsByIds(conn, [symbols[0].symbolId]),
     );
 
-    await assertDeletedVectorsAndHealthyIndex(
+    await assertGraphDeletionLeavesVectorsUntouched(
       [symbols[0].symbolId],
       symbols[1].symbolId,
       preservedVector,
     );
+  });
+
+  it("graph finalization preserves semantic dirty and refreshing lifecycle", async () => {
+    const versionId = "semantic-graph-finalization-v1";
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MERGE (d:DerivedState {repoId: $repoId})
+         SET d.clustersDirty = true,
+             d.processesDirty = true,
+             d.algorithmsDirty = true,
+             d.summariesDirty = true,
+             d.embeddingsDirty = true,
+             d.embeddingLifecycleState = 'refreshing',
+             d.targetVersionId = $versionId`,
+        { repoId, versionId },
+      ),
+    );
+
+    await finalizeDerivedState({
+      mode: "incremental",
+      conn: await getLadybugConn(),
+      repoId,
+      versionId,
+      filesTotal: 2,
+      phaseTimings: null,
+      measurePhase: async (_phaseName, operation) => operation(),
+    });
+
+    const finalized = await getDerivedState(repoId);
+    assert.equal(finalized?.embeddingsDirty, true);
+    assert.equal(finalized?.embeddingLifecycleState, "refreshing");
+  });
+
+  it("keeps stale vectors non-queryable after an incremental Symbol replacement commits", async () => {
+    const raceRepoDir = join(testDir, "replacement-race-repo");
+    const raceConfigPath = join(testDir, "replacement-race-config.json");
+    const sourcePath = join(raceRepoDir, "src", "replacement.ts");
+    mkdirSync(join(raceRepoDir, "src"), { recursive: true });
+    writeFileSync(
+      sourcePath,
+      "export function beforeChange() { return 1; }\n",
+      "utf8",
+    );
+
+    const semanticConfig = SemanticConfigSchema.parse({
+      enabled: true,
+      provider: "mock",
+      generateSummaries: false,
+      embeddingProfile: "specialized",
+      symbolEmbeddingModels: [jinaModel],
+      fileSummaryEmbeddingModels: [],
+      retrieval: {
+        fts: { enabled: false },
+        vector: { enabled: true },
+      },
+    });
+    const writeRaceConfig = (semanticEnabled: boolean): void => {
+      writeFileSync(
+        raceConfigPath,
+        JSON.stringify({
+          repos: [],
+          policy: {},
+          indexing: {
+            pipeline: "legacy",
+            engine: "typescript",
+            enableFileWatching: false,
+          },
+          semantic: semanticEnabled
+            ? semanticConfig
+            : { enabled: false, generateSummaries: false },
+          scip: {
+            enabled: false,
+            indexes: [],
+            generator: { enabled: false },
+          },
+        }),
+        "utf8",
+      );
+      process.env.SDL_CONFIG = raceConfigPath;
+      delete process.env.SDL_CONFIG_PATH;
+      invalidateConfigCache();
+    };
+
+    writeRaceConfig(false);
+    await withWriteConn((conn) =>
+      ladybugDb.upsertRepo(conn, {
+        repoId: replacementRaceRepoId,
+        rootPath: raceRepoDir,
+        configJson: JSON.stringify({
+          repoId: replacementRaceRepoId,
+          rootPath: raceRepoDir,
+          ignore: [],
+          languages: ["ts"],
+          maxFileBytes: 2_000_000,
+          includeNodeModulesTypes: true,
+        }),
+        createdAt: "2026-09-04T00:00:00.000Z",
+      }),
+    );
+    const baseline = await runIndexRepo(
+      replacementRaceRepoId,
+      "full",
+      undefined,
+      undefined,
+      { isolatedRebuild: true },
+    );
+    const baselineConn = await getLadybugConn();
+    const baselineSymbols = await ladybugDb.getSymbolsByRepo(
+      baselineConn,
+      replacementRaceRepoId,
+    );
+    const oldSymbol = baselineSymbols.find(
+      (symbol) => symbol.name === "beforeChange",
+    );
+    assert.ok(oldSymbol, "baseline index must contain the old Symbol identity");
+
+    await withExclusiveLadybugOperation(() =>
+      withWriteConn(async (conn) => {
+        for (const [index, symbol] of baselineSymbols.entries()) {
+          await setRepoSymbolVectorEmbedding(
+            conn,
+            replacementRaceRepoId,
+            symbol.symbolId,
+            jinaModel,
+            `seed-vector-${index}`,
+            `seed-card-${index}`,
+            makeDeterministicVector(symbol.symbolId, 40, index),
+          );
+        }
+      }),
+    );
+    await withWriteConn((conn) =>
+      ladybugDb.exec(
+        conn,
+        `MERGE (d:DerivedState {repoId: $repoId})
+         SET d.embeddingsDirty = false,
+             d.embeddingLifecycleState = 'steady',
+             d.computedVersionId = $versionId,
+             d.targetVersionId = $versionId`,
+        { repoId: replacementRaceRepoId, versionId: baseline.versionId },
+      ),
+    );
+
+    writeRaceConfig(true);
+    const seededGeneration = invalidateRepositorySymbolVectorHealth(
+      replacementRaceRepoId,
+      baseline.versionId,
+      semanticConfig,
+      "refreshing",
+    );
+    const healthySnapshots = await withWriteConn((conn) =>
+      assessRepositorySymbolVectorHealth(conn, {
+        repoId: replacementRaceRepoId,
+        versionId: baseline.versionId,
+        generation: seededGeneration,
+        lifecycleState: "steady",
+        semanticConfig,
+      }),
+    );
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId: replacementRaceRepoId,
+        versionId: baseline.versionId,
+        capturedGeneration: seededGeneration,
+        enabledModels: [jinaModel],
+        snapshots: healthySnapshots,
+      }),
+      true,
+    );
+    assert.equal(
+      getRepositorySymbolVectorHealthSnapshots(replacementRaceRepoId)?.get(
+        jinaModel,
+      )?.mode,
+      "exact",
+    );
+
+    writeFileSync(
+      sourcePath,
+      "export function afterChange() { return 2; }\n",
+      "utf8",
+    );
+    let enterBarrier!: () => void;
+    const barrierEntered = new Promise<void>((resolve) => {
+      enterBarrier = resolve;
+    });
+    let releaseBarrier!: () => void;
+    const barrierRelease = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    const incremental = runIndexRepo(
+      replacementRaceRepoId,
+      "incremental",
+      undefined,
+      undefined,
+      {
+        afterFirstStructuralSymbolWriteCommitted: async () => {
+          enterBarrier();
+          await barrierRelease;
+        },
+      },
+    ).then(
+      (result) => ({ result, error: undefined }),
+      (error: unknown) => ({ result: undefined, error }),
+    );
+
+    await barrierEntered;
+    const pausedState = await getDerivedState(replacementRaceRepoId);
+    assert.equal(pausedState?.embeddingsDirty, true);
+    assert.equal(pausedState?.embeddingLifecycleState, "refreshing");
+    assert.equal(
+      getRepositorySymbolVectorHealthGeneration(replacementRaceRepoId),
+      seededGeneration + 1,
+    );
+    const pausedSnapshots =
+      getRepositorySymbolVectorHealthSnapshots(replacementRaceRepoId);
+    assert.deepStrictEqual(pausedSnapshots && [...pausedSnapshots.keys()], [
+      jinaModel,
+    ]);
+    const pausedSnapshot = pausedSnapshots?.get(jinaModel);
+    assert.equal(pausedSnapshot?.lifecycleState, "refreshing");
+    assert.equal(pausedSnapshot?.mode, "degraded");
+    assert.equal(pausedSnapshot?.exactFallbackAllowed, false);
+
+    const pausedConn = await getLadybugConn();
+    const pausedSymbols = await ladybugDb.getSymbolsByRepo(
+      pausedConn,
+      replacementRaceRepoId,
+    );
+    assert.equal(
+      pausedSymbols.some((symbol) => symbol.symbolId === oldSymbol.symbolId),
+      false,
+      "the replaced Symbol identity must be committed before the pause",
+    );
+    assert.ok(
+      pausedSymbols.some((symbol) => symbol.name === "afterChange"),
+      "the replacement Symbol must be committed before the pause",
+    );
+    const staleVectorRow = await getRepoSymbolVectorEmbedding(
+      pausedConn,
+      replacementRaceRepoId,
+      oldSymbol.symbolId,
+      jinaModel,
+    );
+    assert.ok(
+      staleVectorRow,
+      "semantic reconciliation, not the structural commit, removes the stale vector",
+    );
+
+    let exactQueries = 0;
+    let annQueries = 0;
+    const concurrentResults = await queryFromPublishedVectorHealth(
+      pausedSnapshot,
+      {
+        exact: async () => {
+          exactQueries += 1;
+          return [staleVectorRow];
+        },
+        ann: async () => {
+          annQueries += 1;
+          return [staleVectorRow];
+        },
+      },
+    );
+    assert.deepStrictEqual(concurrentResults, []);
+    assert.equal(exactQueries, 0);
+    assert.equal(annQueries, 0);
+
+    releaseBarrier();
+    const outcome = await incremental;
+    if (outcome.error) {
+      assert.match(String(outcome.error), /(?:embedding refresh incomplete|semantic final assessment is incomplete)/i);
+    }
   });
 
   it("mock provider generates embeddings with expected dimension", async () => {
@@ -584,8 +929,8 @@ describe("Semantic Embedding Pipeline", () => {
     const jinaVector = makeDeterministicVector("jina", 1, 0);
     const nomicVector = makeDeterministicVector("nomic", 2, 0);
 
-    await withWriteConn(async (writeConn) => {
-      await ladybugDb.setSymbolVectorEmbeddingBatch(
+    await withExclusiveVectorWrite(async (writeConn) => {
+      await setRepoSymbolVectorEmbeddingBatch(
         writeConn,
         repoId,
         jinaModel,
@@ -598,7 +943,7 @@ describe("Semantic Embedding Pipeline", () => {
           },
         ],
       );
-      await ladybugDb.setSymbolVectorEmbedding(
+      await setRepoSymbolVectorEmbedding(
         writeConn,
         repoId,
         symbolId,
@@ -621,7 +966,7 @@ describe("Semantic Embedding Pipeline", () => {
       nomicVector: unknown;
     }>(
       conn,
-      `MATCH (e:SymbolVectorEmbedding {symbolId: $symbolId})
+      `MATCH (e:${vectorIdentity().tableName} {symbolId: $symbolId})
        RETURN e.embeddingId AS embeddingId,
               e.repoId AS repoId,
               e.symbolId AS symbolId,
@@ -673,13 +1018,14 @@ describe("Semantic Embedding Pipeline", () => {
 
     await ladybugDb.exec(
       conn,
-      `MATCH (e:SymbolVectorEmbedding {embeddingId: $embeddingId})
+      `MATCH (e:${vectorIdentity().tableName} {embeddingId: $embeddingId})
        SET e.embeddingJinaCodeVec = null`,
       { embeddingId: `${jinaModel}:${symbolId}` },
     );
 
-    const complete = await ladybugDb.getSymbolVectorEmbeddings(
+    const complete = await getRepoSymbolVectorEmbeddings(
       conn,
+      repoId,
       [symbolId],
       jinaModel,
     );
@@ -689,7 +1035,7 @@ describe("Semantic Embedding Pipeline", () => {
       "text and hash without the selected numeric vector must be recomputed",
     );
     assert.strictEqual(
-      await ladybugDb.getSymbolVectorEmbedding(conn, symbolId, jinaModel),
+      await getRepoSymbolVectorEmbedding(conn, repoId, symbolId, jinaModel),
       null,
     );
   });
@@ -700,8 +1046,8 @@ describe("Semantic Embedding Pipeline", () => {
     const firstVector = [1, ...new Array<number>(767).fill(0)];
     const replacementVector = [0, 1, ...new Array<number>(766).fill(0)];
 
-    await withWriteConn(async (writeConn) => {
-      await ladybugDb.setSymbolVectorEmbedding(
+    await withExclusiveVectorWrite(async (writeConn) => {
+      await setRepoSymbolVectorEmbedding(
         writeConn,
         repoId,
         symbolId,
@@ -713,14 +1059,14 @@ describe("Semantic Embedding Pipeline", () => {
       assert.equal(
         await createVectorIndex(
           writeConn,
-          "SymbolVectorEmbedding",
-          "embeddingJinaCodeVec",
-          "symbol_vec_jina_code_v2",
+          vectorIdentity().tableName,
+          vectorIdentity().propertyName,
+          vectorIdentity().indexName,
           768,
         ),
         true,
       );
-      await ladybugDb.setSymbolVectorEmbedding(
+      await setRepoSymbolVectorEmbedding(
         writeConn,
         repoId,
         symbolId,
@@ -731,8 +1077,9 @@ describe("Semantic Embedding Pipeline", () => {
       );
     });
 
-    const embedding = await ladybugDb.getSymbolVectorEmbedding(
+    const embedding = await getRepoSymbolVectorEmbedding(
       conn,
+      repoId,
       symbolId,
       jinaModel,
     );
@@ -744,7 +1091,7 @@ describe("Semantic Embedding Pipeline", () => {
       distance: number;
     }>(
       conn,
-      `CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding', 'symbol_vec_jina_code_v2', ${JSON.stringify(replacementVector)}, 1, efs := 200) RETURN node.symbolId AS symbolId, distance`,
+      `CALL QUERY_VECTOR_INDEX('${vectorIdentity().tableName}', '${vectorIdentity().indexName}', ${JSON.stringify(replacementVector)}, 1, efs := 200) RETURN node.symbolId AS symbolId, distance`,
     );
     assert.equal(neighbors[0]?.symbolId, symbolId);
     assert.ok(
@@ -792,8 +1139,8 @@ describe("Semantic Embedding Pipeline", () => {
     assert.equal(
       (await showIndexesStrict(await getLadybugConn())).some(
         ({ tableName, name }) =>
-          tableName === "SymbolVectorEmbedding" &&
-          name === "symbol_vec_jina_code_v2",
+          tableName === vectorIdentity().tableName &&
+          name === vectorIdentity().indexName,
       ),
       false,
     );
@@ -839,28 +1186,24 @@ describe("Semantic Embedding Pipeline", () => {
       },
     };
 
-    const result = await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: "jina-embeddings-v2-base-code",
-      symbols,
-      embeddingProvider,
-      onProgress: ({ current, total }) => progress.push({ current, total }),
-    });
-
-    assert.deepStrictEqual(result, {
-      embedded: 0,
-      skipped: 0,
-      degraded: true,
-    });
-    assert.ok(progress.length > 0);
+    await assert.rejects(
+      refreshSymbolEmbeddings({
+        repoId,
+        provider: "local",
+        model: "jina-embeddings-v2-base-code",
+        symbols,
+        embeddingProvider,
+        onProgress: ({ current, total }) => progress.push({ current, total }),
+      }),
+      /provider degraded to mock/i,
+    );
     assert.ok(progress.every(({ current, total }) => current < total));
   });
 
   it("fails the refresh when a replacement insert is rejected", async () => {
     const conn = await getLadybugConn();
-    await withWriteConn((writeConn) =>
-      ladybugDb.setSymbolVectorEmbedding(
+    await withExclusiveVectorWrite((writeConn) =>
+      setRepoSymbolVectorEmbedding(
         writeConn,
         repoId,
         symbols[0].symbolId,
@@ -892,803 +1235,72 @@ describe("Semantic Embedding Pipeline", () => {
         batchSize: 1,
         concurrency: 3,
       }),
-      /persistence failed/i,
+      /dimension 767 does not match 768/i,
     );
-    assert.equal(
-      await ladybugDb.getSymbolVectorEmbedding(
+    const preserved = await getRepoSymbolVectorEmbedding(
+      conn,
+      repoId,
+      symbols[0].symbolId,
+      jinaModel,
+    );
+    assert.equal(preserved?.vector, "stale-vector");
+    assert.equal(preserved?.cardHash, "stale-card-hash");
+  });
+
+  it("startup rejects a configured Symbol HNSW name attached to the wrong property", async () => {
+    const semanticConfig = SemanticConfigSchema.parse({
+      enabled: true,
+      provider: "mock",
+      generateSummaries: false,
+      embeddingProfile: "specialized",
+      symbolEmbeddingModels: [jinaModel],
+      fileSummaryEmbeddingModels: [],
+      retrieval: {
+        fts: { enabled: false },
+        vector: { enabled: true },
+      },
+    });
+    const identity = vectorIdentity();
+    await withExclusiveVectorWrite(async (conn) => {
+      await setRepoSymbolVectorEmbeddingBatch(
         conn,
-        symbols[0].symbolId,
-        jinaModel,
-      ),
-      null,
-    );
-  });
-
-  it("bootstraps HNSW and retains it during one-row incremental refresh", async () => {
-    const { provider: recordingProvider } = createRecordingProvider();
-    let embeddingCallsStarted = 0;
-    let releaseConcurrentCalls!: () => void;
-    const concurrentCallsStarted = new Promise<void>((resolve) => {
-      releaseConcurrentCalls = resolve;
-    });
-    const provider: EmbeddingProvider = {
-      ...recordingProvider,
-      async embed(texts): Promise<number[][]> {
-        if (++embeddingCallsStarted === 2) releaseConcurrentCalls();
-        await concurrentCallsStarted;
-        return recordingProvider.embed(texts);
-      },
-    };
-    const timings = new Map<string, number>();
-    const timingCalls: string[] = [];
-    const progressSubstages: Array<string | undefined> = [];
-    const memorySnapshots: Array<{
-      phase: string;
-      snapshot: Record<string, number>;
-    }> = [];
-
-    const refreshParams = {
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      embeddingProvider: provider,
-      batchSize: 1,
-      concurrency: 2,
-      onProgress: ({ substage }) => progressSubstages.push(substage),
-      recordTiming: (phaseName, durationMs) => {
-        timingCalls.push(phaseName);
-        timings.set(phaseName, (timings.get(phaseName) ?? 0) + durationMs);
-      },
-      recordMemorySnapshot: (
-        phase: string,
-        snapshot: Record<string, number>,
-      ) => memorySnapshots.push({ phase, snapshot }),
-    } as Parameters<typeof refreshSymbolEmbeddings>[0] & {
-      recordMemorySnapshot: (
-        phase: string,
-        snapshot: Record<string, number>,
-      ) => void;
-    };
-    const result = await refreshSymbolEmbeddings(refreshParams);
-
-    assert.deepStrictEqual(result, {
-      embedded: symbols.length,
-      skipped: 0,
-    });
-    assert.ok(
-      progressSubstages.includes("symbolVectorIndex"),
-      "the rebuild must expose HNSW construction after embedding progress",
-    );
-
-    const conn = await getLadybugConn();
-    for (const symbol of symbols) {
-      const embedding = await ladybugDb.getSymbolVectorEmbedding(
-        conn,
-        symbol.symbolId,
-        jinaModel,
-      );
-      assert.ok(embedding, `${symbol.symbolId} should persist an embedding`);
-      assert.ok(embedding.vector.length > 0);
-      assert.ok(embedding.cardHash.length > 0);
-    }
-    const rowCountBefore = await countSymbolVectorRows(conn);
-
-    for (const phaseName of [
-      "inference",
-      "hnsw.create",
-      "checkpoint.pre",
-      "checkpoint.post",
-    ]) {
-      assert.equal(
-        typeof timings.get(phaseName),
-        "number",
-        `expected ${phaseName} timing`,
-      );
-    }
-    assert.equal(
-      timingCalls.filter((phaseName) => phaseName === "inference").length,
-      Math.ceil(symbols.length / 2),
-      "overlapping inference batches should emit one wall-time interval per concurrency window",
-    );
-    assert.deepEqual(
-      memorySnapshots.map(({ phase }) => phase),
-      ["beforeInference", "afterInference", "beforeHnsw", "afterHnsw"],
-    );
-    for (const { snapshot } of memorySnapshots) {
-      for (const field of [
-        "rssBytes",
-        "heapUsedBytes",
-        "externalBytes",
-        "arrayBuffersBytes",
-        "systemFreeBytes",
-        "systemTotalBytes",
-      ]) {
-        assert.equal(typeof snapshot[field], "number", `expected ${field}`);
-        assert.ok(snapshot[field] >= 0, `expected non-negative ${field}`);
-      }
-    }
-
-    const changedSymbol = {
-      ...symbols[0],
-      signatureJson: JSON.stringify(
-        "(username: string, password: string, otp: string) => Promise<User>",
-      ),
-    };
-    const incrementalPhases: string[] = [];
-    const second = await refreshSymbolEmbeddings({
-      ...refreshParams,
-      symbols: [changedSymbol],
-      batchSize: 1,
-      concurrency: 1,
-      recordTiming: (phaseName) => incrementalPhases.push(phaseName),
-      recordMemorySnapshot: undefined,
-    });
-    assert.deepStrictEqual(second, { embedded: 1, skipped: 0 });
-    assert.deepStrictEqual(
-      incrementalPhases.filter((phaseName) =>
-        [
-          "checkpoint.pre",
-          "hnsw.drop",
-          "inference",
-          "hnsw.create",
-          "checkpoint.post",
-        ].includes(phaseName),
-      ),
-      ["inference"],
-      "one-row Symbol writes must retain the shared-table HNSW",
-    );
-    assert.strictEqual(await countSymbolVectorRows(conn), rowCountBefore);
-
-    const changedRow = await ladybugDb.querySingle<{ vector: unknown }>(
-      conn,
-      `MATCH (e:SymbolVectorEmbedding {embeddingId: $embeddingId})
-       RETURN e.embeddingJinaCodeVec AS vector`,
-      { embeddingId: `${jinaModel}:${changedSymbol.symbolId}` },
-    );
-    assert.ok(Array.isArray(changedRow?.vector));
-    const changedVector = changedRow.vector as number[];
-    let neighbor = await queryJinaNeighbor(conn, changedVector);
-    assert.strictEqual(neighbor.symbolId, changedSymbol.symbolId);
-    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
-
-    await closeLadybugDb({ strict: true });
-    await initLadybugDb(graphDbPath);
-    const reopenedConn = await getLadybugConn();
-    assert.strictEqual(await countSymbolVectorRows(reopenedConn), rowCountBefore);
-    neighbor = await queryJinaNeighbor(reopenedConn, changedVector);
-    assert.strictEqual(neighbor.symbolId, changedSymbol.symbolId);
-    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
-  });
-
-  it("retains HNSW through 50 changed rows and rebuilds it at 51", async () => {
-    const boundarySymbols = makeBoundarySymbols(51);
-    const conn = await getLadybugConn();
-    for (const symbol of boundarySymbols) {
-      await ladybugDb.upsertSymbol(conn, symbol);
-    }
-
-    const { provider } = createRecordingProvider();
-    await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      embeddingProvider: provider,
-      batchSize: 16,
-      concurrency: 1,
-    });
-    const rowCountBefore = await countSymbolVectorRows(conn);
-
-    const retainedSymbols = boundarySymbols.slice(0, 50).map((symbol, index) => ({
-      ...symbol,
-      signatureJson: JSON.stringify(
-        `(value${index}: string, retained: true) => string`,
-      ),
-    }));
-    const retainedPhases: string[] = [];
-    const retained = await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      symbols: retainedSymbols,
-      embeddingProvider: provider,
-      batchSize: 16,
-      concurrency: 1,
-      recordTiming: (phaseName) => retainedPhases.push(phaseName),
-    });
-    assert.deepStrictEqual(retained, { embedded: 50, skipped: 0 });
-    assert.equal(
-      retainedPhases.some((phaseName) =>
-        ["checkpoint.pre", "hnsw.drop", "hnsw.create", "checkpoint.post"].includes(
-          phaseName,
-        ),
-      ),
-      false,
-      "50 changed vectors must keep the live HNSW",
-    );
-
-    const retainedRow = await ladybugDb.querySingle<{ vector: unknown }>(
-      conn,
-      `MATCH (e:SymbolVectorEmbedding {embeddingId: $embeddingId})
-       RETURN e.embeddingJinaCodeVec AS vector`,
-      { embeddingId: `${jinaModel}:${retainedSymbols[0].symbolId}` },
-    );
-    assert.ok(Array.isArray(retainedRow?.vector));
-    let neighbor = await queryJinaNeighbor(conn, retainedRow.vector as number[]);
-    assert.strictEqual(neighbor.symbolId, retainedSymbols[0].symbolId);
-    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
-
-    const bulkSymbols = boundarySymbols.map((symbol, index) => ({
-      ...symbol,
-      signatureJson: JSON.stringify(
-        `(value${index}: string, bulk: true, revision: 2) => string`,
-      ),
-    }));
-    const bulkPhases: string[] = [];
-    const bulk = await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      symbols: bulkSymbols,
-      embeddingProvider: provider,
-      batchSize: 16,
-      concurrency: 1,
-      recordTiming: (phaseName) => bulkPhases.push(phaseName),
-    });
-    assert.deepStrictEqual(bulk, { embedded: 51, skipped: 0 });
-    assert.deepStrictEqual(
-      bulkPhases.filter((phaseName) =>
-        ["checkpoint.pre", "hnsw.drop", "hnsw.create", "checkpoint.post"].includes(
-          phaseName,
-        ),
-      ),
-      ["checkpoint.pre", "hnsw.drop", "hnsw.create", "checkpoint.post"],
-      "51 changed vectors must use the bulk HNSW safety lane",
-    );
-    assert.strictEqual(await countSymbolVectorRows(conn), rowCountBefore);
-
-    const bulkRow = await ladybugDb.querySingle<{ vector: unknown }>(
-      conn,
-      `MATCH (e:SymbolVectorEmbedding {embeddingId: $embeddingId})
-       RETURN e.embeddingJinaCodeVec AS vector`,
-      { embeddingId: `${jinaModel}:${bulkSymbols[0].symbolId}` },
-    );
-    assert.ok(Array.isArray(bulkRow?.vector));
-    const bulkVector = bulkRow.vector as number[];
-    neighbor = await queryJinaNeighbor(conn, bulkVector);
-    assert.strictEqual(neighbor.symbolId, bulkSymbols[0].symbolId);
-    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
-
-    await closeLadybugDb({ strict: true });
-    await initLadybugDb(graphDbPath);
-    const reopenedConn = await getLadybugConn();
-    assert.strictEqual(await countSymbolVectorRows(reopenedConn), rowCountBefore);
-    neighbor = await queryJinaNeighbor(reopenedConn, bulkVector);
-    assert.strictEqual(neighbor.symbolId, bulkSymbols[0].symbolId);
-    assert.ok(Math.abs(neighbor.distance) <= 1e-6);
-  });
-
-  it("bootstraps the embedding-table HNSW beside a same-named legacy Symbol index", async () => {
-    const indexName = "symbol_vec_jina_code_v2";
-    const { provider } = createRecordingProvider();
-    await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      embeddingProvider: provider,
-    });
-
-    let indexes = await showIndexesStrict(await getLadybugConn());
-    if (
-      !indexes.some(
-        ({ tableName, name }) => tableName === "Symbol" && name === indexName,
-      )
-    ) {
-      await withWriteConn((conn) =>
-        createVectorIndex(
-          conn,
-          "Symbol",
-          "embeddingJinaCodeVec",
-          indexName,
-          768,
-        ),
-      );
-    }
-    await withWriteConn((conn) =>
-      dropVectorIndex(conn, "SymbolVectorEmbedding", indexName),
-    );
-
-    indexes = await showIndexesStrict(await getLadybugConn());
-    assert.ok(
-      indexes.some(
-        ({ tableName, name }) => tableName === "Symbol" && name === indexName,
-      ),
-    );
-    assert.ok(
-      !indexes.some(
-        ({ tableName, name }) =>
-          tableName === "SymbolVectorEmbedding" && name === indexName,
-      ),
-    );
-
-    let providerCalls = 0;
-    const noInferenceProvider: EmbeddingProvider = {
-      async embed(): Promise<number[][]> {
-        providerCalls++;
-        throw new Error("cached rows must not invoke the provider");
-      },
-      getDimension: () => 768,
-      isMockFallback: () => false,
-    };
-    const phases: string[] = [];
-    const result = await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      embeddingProvider: noInferenceProvider,
-      recordTiming: (phaseName) => phases.push(phaseName),
-    });
-
-    assert.strictEqual(providerCalls, 0);
-    assert.strictEqual(
-      phases.filter((phaseName) => phaseName === "hnsw.create").length,
-      1,
-      "a zero-uncached refresh must create the missing embedding-table HNSW once",
-    );
-    assert.deepStrictEqual(result, { embedded: 0, skipped: symbols.length });
-    indexes = await showIndexesStrict(await getLadybugConn());
-    assert.deepStrictEqual(
-      indexes
-        .filter(({ name }) => name === indexName)
-        .map(({ tableName, property }) => ({ tableName, property }))
-        .sort((a, b) => (a.tableName ?? "").localeCompare(b.tableName ?? "")),
-      [
-        { tableName: "Symbol", property: "embeddingJinaCodeVec" },
-        {
-          tableName: "SymbolVectorEmbedding",
-          property: "embeddingJinaCodeVec",
-        },
-      ],
-    );
-  });
-
-  it("bootstraps migrated rows when the provider is already degraded", async () => {
-    const conn = await getLadybugConn();
-    await withWriteConn((writeConn) =>
-      ladybugDb.setSymbolVectorEmbeddingBatch(
-        writeConn,
         repoId,
         jinaModel,
         symbols.map((symbol, index) => ({
           symbolId: symbol.symbolId,
-          vector: `migrated-vector-${index}`,
-          cardHash: `migrated-card-hash-${index}`,
-          vectorArray: makeDeterministicVector("migrated", 1, index),
+          vector: `jina-vector-${index}`,
+          cardHash: `jina-hash-${index}`,
+          vectorArray: makeDeterministicVector(symbol.symbolId, 50, index),
         })),
-      ),
-    );
-    const readRows = () =>
-      ladybugDb.queryAll<{
-        embeddingId: string;
-        vector: string;
-        cardHash: string;
-        updatedAt: string;
-        vectorArray: number[];
-      }>(
-        conn,
-        `MATCH (e:SymbolVectorEmbedding)
-         RETURN e.embeddingId AS embeddingId,
-                e.embeddingVector AS vector,
-                e.cardHash AS cardHash,
-                e.updatedAt AS updatedAt,
-                e.embeddingJinaCodeVec AS vectorArray
-         ORDER BY e.embeddingId`,
-      );
-    const rowsBefore = await readRows();
-
-    let providerCalls = 0;
-    const degradedProvider: EmbeddingProvider = {
-      async embed(): Promise<number[][]> {
-        providerCalls++;
-        throw new Error("degraded provider must not run inference");
-      },
-      getDimension: () => 64,
-      isMockFallback: () => true,
-    };
-    const phases: string[] = [];
-    const result = await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      embeddingProvider: degradedProvider,
-      recordTiming: (phaseName) => phases.push(phaseName),
-    });
-
-    assert.deepStrictEqual(result, {
-      embedded: 0,
-      skipped: 0,
-      degraded: true,
-    });
-    assert.strictEqual(providerCalls, 0);
-    assert.strictEqual(
-      phases.filter((phaseName) => phaseName === "hnsw.create").length,
-      1,
-    );
-    assert.ok(
-      (await showIndexesStrict(conn)).some(
-        ({ tableName, name, property }) =>
-          tableName === "SymbolVectorEmbedding" &&
-          name === "symbol_vec_jina_code_v2" &&
-          property === "embeddingJinaCodeVec",
-      ),
-    );
-    assert.deepStrictEqual(await readRows(), rowsBefore);
-  });
-
-  it("uses the configured Symbol HNSW name during bootstrap", async () => {
-    const events: PostIndexSessionTapEvent[] = [];
-    installObservabilityTap(new Proxy({} as ObservabilityTap, {
-      get: (_target, property) => property === "postIndexSession"
-        ? (event: PostIndexSessionTapEvent) => events.push(event)
-        : () => {},
-    }));
-    const { provider } = createRecordingProvider();
-    await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      symbols,
-      embeddingProvider: provider,
-      vectorIndexName: "custom_jina_index",
-      vectorEfc: 42,
-    });
-
-    const indexes = await showIndexesStrict(await getLadybugConn());
-    assert.ok(
-      indexes.some(
-        ({ tableName, name, property }) =>
-          tableName === "SymbolVectorEmbedding" &&
-          name === "custom_jina_index" &&
-          property === "embeddingJinaCodeVec",
-      ),
-    );
-    assert.ok(
-      !indexes.some(({ name }) => name === "symbol_vec_jina_code_v2"),
-    );
-    assert.deepEqual(events.map(({ repoId }) => repoId), [repoId]);
-  });
-
-  it("rejects a configured embedding-table HNSW name owned by another model", async () => {
-    await withWriteConn((conn) =>
-      createVectorIndex(
-        conn,
-        "SymbolVectorEmbedding",
-        "embeddingNomicVec",
-        "shared_symbol_index",
-        768,
-      ),
-    );
-
-    const { provider } = createRecordingProvider();
-    await assert.rejects(
-      refreshSymbolEmbeddings({
-        repoId,
-        provider: "local",
-        model: jinaModel,
-        symbols,
-        embeddingProvider: provider,
-        vectorIndexName: "shared_symbol_index",
-      }),
-      /belongs to SymbolVectorEmbedding\.embeddingNomicVec/i,
-    );
-
-    const indexes = await showIndexesStrict(await getLadybugConn());
-    assert.ok(
-      indexes.some(
-        ({ tableName, name, property }) =>
-          tableName === "SymbolVectorEmbedding" &&
-          name === "shared_symbol_index" &&
-          property === "embeddingNomicVec",
-      ),
-    );
-  });
-
-  it("startup rejects a configured Symbol HNSW name attached to the wrong property", async () => {
-    const indexName = "symbol_vec_jina_code_v2";
-    const vector = [1, ...new Array<number>(767).fill(0)];
-    await withWriteConn(async (conn) => {
-      await ladybugDb.setSymbolVectorEmbedding(
-        conn,
-        repoId,
-        symbols[0].symbolId,
-        jinaModel,
-        "jina-vector",
-        "jina-hash",
-        vector,
       );
       assert.equal(
         await createVectorIndex(
           conn,
-          "SymbolVectorEmbedding",
+          identity.tableName,
           "embeddingNomicVec",
-          indexName,
+          identity.indexName,
           768,
         ),
         true,
       );
     });
 
-    const conn = await getLadybugConn();
-    const health = await checkIndexHealth(conn);
-    assert.equal(
-      health.vectors.find(({ model }) => model === jinaModel)?.exists,
-      false,
-    );
-
-    const config = SemanticRetrievalConfigSchema.parse({
-      fts: { enabled: false },
-      vector: {
-        enabled: true,
-        indexes: { [jinaModel]: { indexName } },
+    const snapshots = await assessRepositorySymbolVectorHealth(
+      await getLadybugConn(),
+      {
+        repoId,
+        versionId: "vector-health-v1",
+        generation: 1,
+        lifecycleState: "steady",
+        semanticConfig,
       },
-    });
-    const result = await ensureIndexes(conn, config);
-    assert.ok(result.failed.includes(indexName));
-    assert.ok(!result.skipped.includes(indexName));
-  });
-
-  it("rejects an HNSW probe that cannot recover a near-zero neighbor", async () => {
-    const { provider } = createRecordingProvider();
-    const legacyProbe = makeDeterministicVector("legacy-hnsw-probe", 1, 0);
-    await withWriteConn(async (conn) => {
-      await ladybugDb.exec(
-        conn,
-        `MATCH (s:Symbol {symbolId: $symbolId})
-         SET s.embeddingJinaCodeVec = $legacyProbe`,
-        { symbolId: symbols[0].symbolId, legacyProbe },
-      );
-      await createVectorIndex(
-        conn,
-        "Symbol",
-        "embeddingJinaCodeVec",
-        "symbol_vec_jina_code_v2",
-        768,
-      );
-    });
-    await refreshSymbolEmbeddings({
-      repoId,
-      provider: "local",
-      model: jinaModel,
-      symbols,
-      embeddingProvider: provider,
-    });
-
-    const conn = await getLadybugConn();
-    const stored = await readSafeRebuildJinaVectorProbe(conn);
-    assert.ok(Array.isArray(stored));
-    assert.ok(
-      (await queryVectorIndexProbe(
-        conn,
-        "symbol_vec_jina_code_v2",
-        stored,
-      )) > 0,
     );
-
-    const unrelated = new Array<number>(768).fill(0);
-    unrelated[767] = 1;
-    await assert.rejects(
-      queryVectorIndexProbe(
-        conn,
-        "symbol_vec_jina_code_v2",
-        unrelated,
-      ),
-      /near-zero/i,
-    );
-  });
-
-  it("isolates symbol vector health and ANN coverage by repository and model", async () => {
-    const conn = await getLadybugConn();
-    const otherRepoId = "embed-test-other-repo";
-    const otherSymbolId = "sym-other";
-    const nomicModel = "nomic-embed-text-v1.5";
-    const jinaVector = makeDeterministicVector("repo-one-jina", 1, 0);
-    const nomicVector = makeDeterministicVector("repo-one-nomic", 2, 0);
-    const otherJinaVector = makeDeterministicVector("repo-two-jina", 3, 0);
-    const now = new Date().toISOString();
-
-    await ladybugDb.upsertRepo(conn, {
-      repoId: otherRepoId,
-      rootPath: "/fake/embed-other-repo",
-      configJson: "{}",
-      createdAt: now,
-    });
-    await ladybugDb.upsertFile(conn, {
-      fileId: "other-file",
-      repoId: otherRepoId,
-      relPath: "src/other.ts",
-      contentHash: "other-hash",
-      language: "ts",
-      byteSize: 10,
-      lastIndexedAt: now,
-    });
-    await ladybugDb.upsertSymbol(conn, {
-      ...symbols[0],
-      symbolId: otherSymbolId,
-      repoId: otherRepoId,
-      fileId: "other-file",
-      name: "otherSymbol",
-      searchText: "other symbol",
-      updatedAt: now,
-    });
-    await ladybugDb.exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId}), (r:Repo {repoId: $otherRepoId})
-       CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
-      { symbolId: symbols[0].symbolId, otherRepoId },
-    );
-    await ladybugDb.exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId}), (f:File {fileId: $otherFileId})
-       CREATE (s)-[:SYMBOL_IN_FILE]->(f)`,
-      { symbolId: symbols[0].symbolId, otherFileId: "other-file" },
-    );
-    await ladybugDb.exec(
-      conn,
-      `MATCH (s:Symbol)
-       WHERE s.repoId = $repoId
-       SET s.searchText = s.name`,
-      { repoId },
-    );
-    await withWriteConn(async (writeConn) => {
-      await ladybugDb.setSymbolVectorEmbedding(
-        writeConn,
-        repoId,
-        symbols[0].symbolId,
-        jinaModel,
-        "repo-one-jina",
-        "repo-one-jina-hash",
-        jinaVector,
-      );
-      await ladybugDb.setSymbolVectorEmbedding(
-        writeConn,
-        repoId,
-        symbols[1].symbolId,
-        nomicModel,
-        "repo-one-nomic",
-        "repo-one-nomic-hash",
-        nomicVector,
-      );
-      await ladybugDb.setSymbolVectorEmbedding(
-        writeConn,
-        otherRepoId,
-        otherSymbolId,
-        jinaModel,
-        "repo-two-jina",
-        "repo-two-jina-hash",
-        otherJinaVector,
-      );
-      assert.strictEqual(
-        await createFtsIndex(writeConn, "Symbol", "symbol_search_text_v1"),
-        true,
-      );
-      assert.strictEqual(
-        await createVectorIndex(
-          writeConn,
-          "SymbolVectorEmbedding",
-          "embeddingJinaCodeVec",
-          "symbol_vec_jina_code_v2",
-          768,
-        ),
-        true,
-      );
-      assert.strictEqual(
-        await createVectorIndex(
-          writeConn,
-          "SymbolVectorEmbedding",
-          "embeddingNomicVec",
-          "symbol_vec_nomic_embed_v15",
-          768,
-        ),
-        true,
-      );
-      assert.strictEqual(
-        await createVectorIndex(
-          writeConn,
-          "FileSummary",
-          FILESUMMARY_EMBEDDING_PROPERTIES.nomic.property,
-          FILESUMMARY_VECTOR_INDEX_NAMES.nomic,
-          768,
-        ),
-        true,
-      );
-      assert.strictEqual(
-        await createVectorIndex(
-          writeConn,
-          "AgentFeedback",
-          AGENTFEEDBACK_EMBEDDING_PROPERTIES.jinaCode.property,
-          AGENTFEEDBACK_VECTOR_INDEX_NAMES.jinaCode,
-          768,
-        ),
-        true,
-      );
-    });
-
-    assert.deepStrictEqual(
-      await getSymbolRetrievalCoverage(conn, repoId, "embeddingJinaCodeVec"),
-      { eligible: 3, covered: 1 },
-    );
-    assert.deepStrictEqual(
-      await getSymbolRetrievalCoverage(conn, repoId, "embeddingNomicVec"),
-      { eligible: 3, covered: 1 },
-    );
-    assert.deepStrictEqual(
-      await getSymbolRetrievalCoverage(
-        conn,
-        otherRepoId,
-        "embeddingJinaCodeVec",
-      ),
-      { eligible: 2, covered: 2 },
-    );
-    assert.deepStrictEqual(
-      await getSymbolRetrievalCoverage(conn, otherRepoId, "embeddingNomicVec"),
-      { eligible: 2, covered: 0 },
-    );
-
-    const health = await checkRetrievalHealth(conn, repoId, {
-      embeddingProfile: "specialized",
-      symbolEmbeddingModels: [jinaModel, nomicModel],
-      fileSummaryEmbeddingModels: [],
-    });
-    assert.strictEqual(health.vectorJinaCode, true);
-    assert.strictEqual(health.vectorNomic, true);
-    assert.strictEqual(health.modelCoveragePermille?.symbol[jinaModel], 333);
-    assert.strictEqual(health.modelCoveragePermille?.symbol[nomicModel], 333);
-    assert.ok(
-      (await queryVectorIndexProbe(
-        conn,
-        "symbol_vec_jina_code_v2",
-        jinaVector,
-      )) > 0,
-    );
-    assert.ok(
-      (await queryVectorIndexProbe(
-        conn,
-        "symbol_vec_nomic_embed_v15",
-        nomicVector,
-      )) > 0,
-    );
-
-    const indexes = await showIndexesStrict(conn);
-    assert.ok(
-      indexes.some(
-        ({ tableName, name, type }) =>
-          tableName === "Symbol" &&
-          name === "symbol_search_text_v1" &&
-          type === "fts",
-      ),
-    );
-    assert.ok(
-      !indexes.some(
-        ({ tableName, type }) => tableName === "Symbol" && type === "vector",
-      ),
-    );
-    assert.ok(
-      indexes.some(
-        ({ tableName, name, property, type }) =>
-          tableName === "FileSummary" &&
-          name === FILESUMMARY_VECTOR_INDEX_NAMES.nomic &&
-          property === FILESUMMARY_EMBEDDING_PROPERTIES.nomic.property &&
-          type === "vector",
-      ),
-    );
-    assert.ok(
-      indexes.some(
-        ({ tableName, name, property, type }) =>
-          tableName === "AgentFeedback" &&
-          name === AGENTFEEDBACK_VECTOR_INDEX_NAMES.jinaCode &&
-          property === AGENTFEEDBACK_EMBEDDING_PROPERTIES.jinaCode.property &&
-          type === "vector",
-      ),
-    );
+    const snapshot = snapshots.find(({ model }) => model === jinaModel);
+    assert.equal(snapshot?.mode, "degraded");
+    assert.equal(snapshot?.exactFallbackAllowed, true);
+    assert.match(snapshot?.reason ?? "", /index identity is missing or ambiguous/);
+    assert.equal(snapshot?.observedIndexIdentity?.tableName, identity.tableName);
+    assert.equal(snapshot?.observedIndexIdentity?.property, "embeddingNomicVec");
   });
 
   it("keeps Symbol ANN retrieval and shared-symbol file narrowing inside the requested repository", async () => {
@@ -1745,8 +1357,8 @@ describe("Semantic Embedding Pipeline", () => {
       true,
     );
 
-    await withWriteConn(async (writeConn) => {
-      await ladybugDb.setSymbolVectorEmbedding(
+    await withExclusiveVectorWrite(async (writeConn) => {
+      await setRepoSymbolVectorEmbedding(
         writeConn,
         repoId,
         symbols[0].symbolId,
@@ -1755,7 +1367,7 @@ describe("Semantic Embedding Pipeline", () => {
         "local-vector-hash",
         localVector,
       );
-      await ladybugDb.setSymbolVectorEmbeddingBatch(
+      await setRepoSymbolVectorEmbeddingBatch(
         writeConn,
         otherRepoId,
         jinaModel,
@@ -1769,9 +1381,9 @@ describe("Semantic Embedding Pipeline", () => {
       assert.equal(
         await createVectorIndex(
           writeConn,
-          "SymbolVectorEmbedding",
-          "embeddingJinaCodeVec",
-          "symbol_vec_jina_code_v2",
+          vectorIdentity().tableName,
+          vectorIdentity().propertyName,
+          vectorIdentity().indexName,
           768,
         ),
         true,
@@ -1791,6 +1403,62 @@ describe("Semantic Embedding Pipeline", () => {
         },
       );
     });
+
+    const semanticConfig = SemanticConfigSchema.parse({
+      enabled: true,
+      provider: "mock",
+      generateSummaries: false,
+      embeddingProfile: "specialized",
+      symbolEmbeddingModels: [jinaModel],
+      fileSummaryEmbeddingModels: [],
+      retrieval: {
+        fts: { enabled: false },
+        vector: { enabled: true },
+      },
+    });
+    const versionId = `${repoId}:vector-scope-v1`;
+    const generation = invalidateRepositorySymbolVectorHealth(
+      repoId,
+      versionId,
+      semanticConfig,
+      "refreshing",
+    );
+    const expectedIndexIdentity = resolveRequiredRetrievalIndexes(
+      semanticConfig,
+      repoId,
+    ).symbolVectors.find(({ model }) => model === jinaModel);
+    const observedIndexIdentity = (await showIndexesStrict(conn)).find(
+      (index) =>
+        index.tableName === expectedIndexIdentity?.tableName &&
+        index.name === expectedIndexIdentity.name &&
+        index.property === expectedIndexIdentity.property,
+    );
+    assert.ok(expectedIndexIdentity);
+    assert.ok(observedIndexIdentity);
+    assert.equal(
+      publishRepositorySymbolVectorHealthBatch({
+        repoId,
+        versionId,
+        capturedGeneration: generation,
+        enabledModels: [jinaModel],
+        snapshots: [
+          {
+            repoId,
+            versionId,
+            generation,
+            model: jinaModel,
+            eligibleSymbolCount: 1,
+            completeVectorCount: 1,
+            lifecycleState: "steady",
+            expectedIndexIdentity,
+            observedIndexIdentity,
+            mode: "hnsw",
+            exactFallbackAllowed: true,
+          },
+        ],
+      }),
+      true,
+    );
 
     const prefixedQuery = applyQueryPrefix(jinaModel, query);
     const queryContext = createRetrievalQueryContext({

@@ -23,22 +23,29 @@ import {
 } from "./model-registry.js";
 import type { IndexProgress } from "./indexer.js";
 import {
-  getSymbolVectorEmbeddings,
-  hasCompleteSymbolVectorEmbedding,
-  setSymbolVectorEmbeddingBatch,
+  countCompleteRepoSymbolVectors,
+  deleteRepoSymbolVectorEmbeddingsBySymbolIds,
+  getRepoSymbolVectorEmbeddings,
+  getRepoSymbolVectorProbe,
+  inspectRepoSymbolVectorTable,
+  resolveSymbolVectorPhysicalIdentity,
+  setRepoSymbolVectorEmbeddingBatch,
+  validateRepoSymbolVectorOwnership,
   type SymbolVectorEmbeddingBatchItem,
 } from "../db/ladybug-symbol-embeddings.js";
 import {
   createVectorIndex,
   dropVectorIndex,
+  queryVectorIndexProbe,
   showIndexesStrict,
+  type IndexInfo,
 } from "../retrieval/index-lifecycle.js";
+import { EMBEDDING_MODELS } from "../retrieval/model-mapping.js";
 import {
-  EMBEDDING_MODELS,
-  getVecPropertyName,
-  getVectorIndexName,
-  SYMBOL_VECTOR_EMBEDDING_TABLE,
-} from "../retrieval/model-mapping.js";
+  getEligibleRepoSymbolIds,
+  getRepoSymbolVectorHealthRows,
+} from "../db/ladybug-retrieval-health.js";
+import type { SemanticConfig } from "../config/types.js";
 import { prepareSymbolEmbeddingInputs } from "./symbol-embedding-context.js";
 import { buildSymbolEmbeddingText } from "./symbol-embedding-text.js";
 import { IndexError } from "../domain/errors.js";
@@ -63,6 +70,49 @@ export const REFRESH_BATCH_SIZE = DEFAULT_EMBEDDING_BATCH_SIZE;
 // ponytail: keep this measured ceiling fixed until upstream live-HNSW writes
 // are proven safe at a larger boundary.
 const SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS = 50;
+
+export type RepositorySymbolVectorIndexMode = "exact" | "hnsw";
+
+export function resolveRepositorySymbolVectorIndexMode(
+  actualCompleteCount: number,
+): RepositorySymbolVectorIndexMode {
+  return actualCompleteCount >= 2_000 ? "hnsw" : "exact";
+}
+
+export interface RepositorySymbolVectorReconciliationPlanInput {
+  actualPreCount: number;
+  actualPostCount: number;
+  mutationCount: number;
+  expectedIndexHealthy: boolean;
+  expectedIndexPresent?: boolean;
+  /** Diagnostic only. Durable counts, never provider targets, drive DDL. */
+  providerTargetCount?: number;
+}
+
+export interface RepositorySymbolVectorReconciliationPlan {
+  retainExpectedIndex: boolean;
+  dropExpectedBeforeMutation: boolean;
+  requireExpectedIndexAfterMutation: boolean;
+}
+
+/** @internal Pure threshold planner shared by refresh and focused tests. */
+export function planRepositorySymbolVectorReconciliation(
+  input: RepositorySymbolVectorReconciliationPlanInput,
+): RepositorySymbolVectorReconciliationPlan {
+  const retainExpectedIndex =
+    input.expectedIndexHealthy &&
+    input.actualPreCount >= 2_000 &&
+    input.mutationCount <= SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS;
+  return {
+    retainExpectedIndex,
+    dropExpectedBeforeMutation:
+      input.mutationCount > 0 &&
+      (input.expectedIndexPresent ?? input.expectedIndexHealthy) &&
+      !retainExpectedIndex,
+    requireExpectedIndexAfterMutation:
+      resolveRepositorySymbolVectorIndexMode(input.actualPostCount) === "hnsw",
+  };
+}
 
 let embeddingFailureCount = 0;
 
@@ -391,27 +441,34 @@ export async function refreshSymbolEmbeddings(params: {
   model?: string;
   symbols?: ladybugDb.SymbolRow[];
   onProgress?: (progress: IndexProgress) => void;
-  /** Number of batches to process concurrently. Defaults to 1 (sequential). */
   concurrency?: number;
-  /**
-   * ONNX inference batch width. Defaults to `DEFAULT_EMBEDDING_BATCH_SIZE`
-   * (32). Clamped to `[1, MAX_EMBEDDING_BATCH_SIZE]` so a misconfigured
-   * value can't OOM the tokenizer or break ONNX session shape contracts.
-   */
   batchSize?: number;
   vectorIndexName?: string;
   vectorEfc?: number;
-  /** Preserve the repo-specific timeout for destructive rebuild sessions. */
+  semanticConfig?: SemanticConfig;
   postIndexSessionTimeoutMs?: number;
-  /** @internal Allows tests to exercise provider degradation deterministically. */
   embeddingProvider?: EmbeddingProvider;
-  /** Records internal phase durations for opt-in indexing diagnostics. */
   recordTiming?: (phaseName: string, durationMs: number) => void;
-  /** Records read-only process/system memory at semantic phase boundaries. */
   recordMemorySnapshot?: (
     phaseName: string,
     snapshot: EmbeddingMemorySnapshot,
   ) => void;
+  /** @internal Fault seam for focused reconciliation boundary tests. */
+  onReconciliationStep?: (
+    step:
+      | "catalog-classified"
+      | "before-vector-mutation"
+      | "after-index-drop"
+      | "after-vector-delete"
+      | "after-vector-merge"
+      | "after-vector-create"
+      | "after-index-create"
+      | "after-vector-mutation"
+      | "after-index-reconcile"
+      | "after-validation",
+  ) => Promise<void> | void;
+  /** @internal Runs before exclusive admission reopens after cycle failure. */
+  onFailureInsideGate?: (error: unknown) => Promise<void>;
 }): Promise<{
   embedded: number;
   skipped: number;
@@ -419,9 +476,19 @@ export async function refreshSymbolEmbeddings(params: {
   degraded?: boolean;
 }> {
   const modelName = params.model ?? "jina-embeddings-v2-base-code";
+  const modelInfo = EMBEDDING_MODELS[modelName];
+  if (!modelInfo) {
+    throw new IndexError(`Unsupported embedding model "${modelName}"`);
+  }
+
   const provider =
     params.embeddingProvider ?? getEmbeddingProvider(params.provider, modelName);
   await provider.initialize?.();
+  if (provider.isMockFallback?.()) {
+    // Mock vectors are never durable input and must not create repository tables.
+    return { embedded: 0, skipped: 0, degraded: true };
+  }
+
   const measure = async <T>(
     phaseName: string,
     fn: () => Promise<T>,
@@ -433,476 +500,486 @@ export async function refreshSymbolEmbeddings(params: {
       params.recordTiming?.(phaseName, Date.now() - startedAt);
     }
   };
-  // Record the union of overlapping calls so concurrency still reports wall time.
-  let activeInferenceCalls = 0;
-  let inferenceStartedAt = 0;
-  const measureInference = async <T>(fn: () => Promise<T>): Promise<T> => {
-    if (activeInferenceCalls++ === 0) inferenceStartedAt = Date.now();
-    try {
-      return await fn();
-    } finally {
-      activeInferenceCalls--;
-      if (activeInferenceCalls === 0) {
-        params.recordTiming?.("inference", Date.now() - inferenceStartedAt);
-      }
-    }
-  };
   const recordMemorySnapshot = (phaseName: string): void => {
     params.recordMemorySnapshot?.(
       phaseName,
       captureEmbeddingMemorySnapshot(),
     );
   };
+
   const conn = await getLadybugConn();
-  const symbols =
+  const eligibleSymbolIds = await getEligibleRepoSymbolIds(conn, params.repoId);
+  const eligibleSymbolIdSet = new Set(eligibleSymbolIds);
+  const existingEmbeddings = await getRepoSymbolVectorEmbeddings(
+    conn,
+    params.repoId,
+    eligibleSymbolIds,
+    modelName,
+  );
+  const suppliedSymbols =
     params.symbols ?? (await ladybugDb.getSymbolsByRepo(conn, params.repoId));
-
-  // Phase 4: Pin storageModel once at start.
-  const storageModel = provider.isMockFallback?.()
-    ? "mock-fallback"
-    : modelName;
-  const jinaCacheCompatibilityKey =
-    storageModel === "jina-embeddings-v2-base-code"
-      ? provider.getCacheCompatibilityKey?.()
-      : undefined;
-  let embedded = 0;
-  let skipped = 0;
-
-  const vecProp = getVecPropertyName(modelName);
-  const indexName = params.vectorIndexName ?? getVectorIndexName(modelName);
-  const modelInfo = EMBEDDING_MODELS[modelName];
-  let shouldBootstrapIndex = false;
-  if (vecProp !== null && indexName !== null && modelInfo) {
-    const configuredIndex = (await showIndexesStrict(conn)).find(
-      ({ tableName, name }) =>
-        tableName === SYMBOL_VECTOR_EMBEDDING_TABLE && name === indexName,
+  const symbolsById = new Map(
+    suppliedSymbols
+      .filter(
+        (symbol) =>
+          symbol.repoId === params.repoId &&
+          eligibleSymbolIdSet.has(symbol.symbolId),
+      )
+      .map((symbol) => [symbol.symbolId, symbol]),
+  );
+  const missingSymbolIds = eligibleSymbolIds.filter(
+    (symbolId) =>
+      !existingEmbeddings.has(symbolId) && !symbolsById.has(symbolId),
+  );
+  if (missingSymbolIds.length > 0) {
+    const missingSymbols = await ladybugDb.getSymbolsByIds(
+      conn,
+      missingSymbolIds,
     );
-    if (
-      configuredIndex &&
-      (configuredIndex.type !== "vector" ||
-        configuredIndex.property !== vecProp)
-    ) {
-      throw new IndexError(
-        `Configured vector index '${indexName}' belongs to ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${configuredIndex.property} (${configuredIndex.type}), not ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${vecProp}`,
-      );
+    for (const [symbolId, symbol] of missingSymbols) {
+      if (
+        symbol.repoId === params.repoId &&
+        eligibleSymbolIdSet.has(symbolId)
+      ) {
+        symbolsById.set(symbolId, symbol);
+      }
     }
-    shouldBootstrapIndex = configuredIndex === undefined;
   }
+  const symbols = [...symbolsById.values()];
 
-  const createRequiredVectorIndex = async (): Promise<void> => {
-    if (vecProp === null || indexName === null || !modelInfo) return;
-    recordMemorySnapshot("beforeHnsw");
-    params.onProgress?.({
-      stage: "embeddings",
-      substage: "symbolVectorIndex",
-      current: Math.min(skipped + embedded, symbols.length),
-      total: symbols.length,
-      model: storageModel,
-      message: "building HNSW",
-    });
-    let ok: boolean;
-    try {
-      ok = await measure("hnsw.create", () =>
-        withWriteConn((wConn) =>
-          createVectorIndex(
-            wConn,
-            SYMBOL_VECTOR_EMBEDDING_TABLE,
-            vecProp,
-            indexName,
-            modelInfo.dimension,
-            params.vectorEfc,
-          ),
-        ),
-      );
-    } finally {
-      recordMemorySnapshot("afterHnsw");
-    }
-    params.onProgress?.({
-      stage: "embeddings",
-      substage: "symbolVectorIndex",
-      current: Math.min(skipped + embedded, symbols.length),
-      total: symbols.length,
-      model: storageModel,
-      message: ok ? "ready" : "creation failed",
-    });
-    if (!ok) {
-      throw new IndexError(
-        `Failed to create required vector index '${indexName}' on ${SYMBOL_VECTOR_EMBEDDING_TABLE}.${vecProp}`,
-      );
-    }
-    logger.info(
-      `[embeddings] Vector index '${indexName}' created on ${SYMBOL_VECTOR_EMBEDDING_TABLE}`,
-    );
-  };
-
-  const bootstrapVectorIndex = async (): Promise<void> => {
-    if (!shouldBootstrapIndex) return;
-    if (!(await hasCompleteSymbolVectorEmbedding(conn, modelName))) return;
-    await runHnswRebuildCycle(
-      "symbol-vector-bootstrap-pre-create",
-      "symbol-vector-bootstrap-post-create",
-      createRequiredVectorIndex,
-      params.postIndexSessionTimeoutMs,
-      params.recordTiming,
-      params.repoId,
-    );
-  };
-
-  if (storageModel === "mock-fallback") {
-    // Mock-fallback vectors must not be persisted or reported as cache hits.
-    await bootstrapVectorIndex();
-    return { embedded: 0, skipped: 0, degraded: true };
-  }
-
-  // Load summary cache once for all symbols (used by prepareSymbolEmbeddingInputs).
   const summaryCacheMap = await ladybugDb.getSummaryCaches(
     conn,
-    symbols.map((s) => s.symbolId),
+    symbols.map((symbol) => symbol.symbolId),
   );
-
-  // Phase 4: Pre-pass - batch load existing embeddings for all symbols.
-  const allSymbolIds = symbols.map((s) => s.symbolId);
-  const existingEmbeddings = await getSymbolVectorEmbeddings(
-    conn,
-    allSymbolIds,
-    storageModel,
-  );
-
-  // Prepare inputs using model-aware payload builder (Phase 1-3).
   const preparedInputs = await prepareSymbolEmbeddingInputs(conn, symbols, {
     summaryCacheMap,
   });
-
-  // Build text payloads and card hashes, filter out cached symbols.
+  const jinaCacheCompatibilityKey =
+    modelName === "jina-embeddings-v2-base-code"
+      ? provider.getCacheCompatibilityKey?.()
+      : undefined;
   const uncachedItems: Array<{
     symbol: ladybugDb.SymbolRow;
     prefixedText: string;
     cardHash: string;
   }> = [];
-
-  for (let i = 0; i < symbols.length; i++) {
-    const symbol = symbols[i];
-    const prepared = preparedInputs[i];
-    const text = buildSymbolEmbeddingText(modelName, prepared);
+  let skipped = 0;
+  for (let index = 0; index < symbols.length; index += 1) {
+    const symbol = symbols[index];
+    const text = buildSymbolEmbeddingText(modelName, preparedInputs[index]);
     const prefixedText = applyDocumentPrefix(modelName, text);
     const cardHash = buildCardHash(
       symbol,
       prefixedText,
       jinaCacheCompatibilityKey,
     );
-
     const existing = existingEmbeddings.get(symbol.symbolId);
-    if (existing && existing.cardHash === cardHash) {
+    if (existing?.cardHash === cardHash) {
       skipped += 1;
-      continue;
+    } else {
+      uncachedItems.push({ symbol, prefixedText, cardHash });
     }
-
-    uncachedItems.push({ symbol, prefixedText, cardHash });
   }
+  uncachedItems.sort((left, right) => {
+    const lengthOrder = left.prefixedText.length - right.prefixedText.length;
+    return lengthOrder || left.symbol.symbolId.localeCompare(right.symbol.symbolId);
+  });
 
-  // P4: sort uncached items by prefixed-text length so each batch contains
-  // similarly sized inputs. Tokenizer padding pads every row in a batch to
-  // the longest sequence, so mixing one outlier with 31 short symbols
-  // multiplies the ONNX work for the whole batch. Bucketing by length
-  // typically cuts inference wall time 30–50% on heterogeneous corpora.
-  // Note: callers must not depend on write order — sort is purely a
-  // throughput optimisation.
-  uncachedItems.sort((a, b) => a.prefixedText.length - b.prefixedText.length);
-
-  // Keep ordinary incremental changes on the retained-HNSW path, but buffer
-  // them into one LadybugDB write. Larger changes use the drop/recreate safety
-  // lane because the observed native crash began on a second live-index write.
-  // An absent bootstrap index remains on the cheaper create-only path.
-  const hasLiveVectorIndex =
-    !shouldBootstrapIndex &&
-    vecProp !== null &&
-    indexName !== null &&
-    modelInfo !== undefined;
-  const retainLiveHnsw =
-    hasLiveVectorIndex &&
-    uncachedItems.length > 0 &&
-    uncachedItems.length <= SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS;
-  const useRebuildPath =
-    hasLiveVectorIndex &&
-    uncachedItems.length > SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS;
-
-  // Resolve concurrency: clamp to [1, MAX_EMBEDDING_CONCURRENCY].
+  const batchSize = Math.max(
+    1,
+    Math.min(
+      params.batchSize ?? DEFAULT_EMBEDDING_BATCH_SIZE,
+      MAX_EMBEDDING_BATCH_SIZE,
+    ),
+  );
   const maxConcurrency = Math.max(
     1,
     Math.min(params.concurrency ?? 1, MAX_EMBEDDING_CONCURRENCY),
   );
+  const batches: Array<typeof uncachedItems> = [];
+  for (let index = 0; index < uncachedItems.length; index += batchSize) {
+    batches.push(uncachedItems.slice(index, index + batchSize));
+  }
 
-  // P6: helper to fire smooth per-batch progress. We keep firing at the
-  // batch boundary instead of waiting for the whole chunk to finish so
-  // observers see a steady tick stream rather than a 0→56% jump. Under
-  // concurrency >1 the counters are mutated from concurrent closures —
-  // JS guarantees no torn writes, but two batches finishing near the
-  // same tick can both observe the same `current`. The monotonic clamp
-  // keeps the reported value non-decreasing so consumers don't see
-  // duplicate or backwards ticks.
-  let lastReported = -1;
-  const fireProgress = (): void => {
-    const current = Math.min(skipped + embedded, symbols.length);
-    if (current <= lastReported) return;
-    lastReported = current;
-    params.onProgress?.({
-      stage: "embeddings",
-      current,
-      total: symbols.length,
-      // Model tag lets the CLI keep per-model state. Two models run in
-      // parallel from metrics-updater.ts and previously interleaved into a
-      // single shared progress line, causing the displayed count to flicker
-      // between each model's value.
-      model: storageModel,
-    });
-  };
-
-  // Progress: fire at start (already includes the cache-hit skip count
-  // accumulated above, so the very first tick is non-zero whenever the
-  // pre-pass found cached embeddings — no surprise jump on first chunk).
-  fireProgress();
-
-  const runPersistenceCycle = async () => {
-    // Resolve effective batch size: clamp caller-supplied value to a sane
-    // window so a misconfigured `embeddingBatchSize` cannot OOM tokenizer
-    // padding or violate the ONNX session's expected input shape.
-    const batchSize = Math.max(
-      1,
-      Math.min(
-        params.batchSize ?? DEFAULT_EMBEDDING_BATCH_SIZE,
-        MAX_EMBEDDING_BATCH_SIZE,
-      ),
-    );
-
-    // Split uncached items into batches of `batchSize`.
-    type UncachedBatch = Array<{
-      symbol: ladybugDb.SymbolRow;
-      prefixedText: string;
-      cardHash: string;
-    }>;
-    const batches: UncachedBatch[] = [];
-    for (let i = 0; i < uncachedItems.length; i += batchSize) {
-      batches.push(uncachedItems.slice(i, i + batchSize));
-    }
-
-    // Shared mutable counters — updated inside processBatch results (not inside
-    // concurrent closures directly) so there are no data races.
-    type BatchResult = {
-      embedded: number;
-      skipped: number;
-      terminal: boolean;
-      failed: boolean;
-      degraded?: boolean;
-    };
-    const retainedBatchItems: SymbolVectorEmbeddingBatchItem[] = [];
-
-    const processBatch = async (batch: UncachedBatch): Promise<BatchResult> => {
-      const batchTexts = batch.map((item) => item.prefixedText);
-      let batchVectors: number[][];
-      try {
-        batchVectors = await measureInference(() => provider.embed(batchTexts));
-      } catch (error) {
-        recordEmbeddingFailure();
-        logger.warn("Batch embedding failed, continuing to next batch", {
-          batchSize: batch.length,
-          firstSymbolId: batch[0]?.symbol.symbolId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        if (
-          errorMsg.includes("SessionClosed") ||
-          errorMsg.includes("ECONNRESET")
-        ) {
-          logger.error("Terminal provider error, aborting refresh", {
-            error: errorMsg,
-          });
-          return { embedded: 0, skipped: 0, terminal: true, failed: true };
-        }
-        return { embedded: 0, skipped: 0, terminal: false, failed: true };
-      }
-
-      // Guard: validate provider returned correct vector count
-      if (batchVectors.length !== batch.length) {
-        logger.error("Provider returned wrong vector count", {
-          expected: batch.length,
-          received: batchVectors.length,
-          firstSymbolId: batch[0]?.symbol.symbolId,
-        });
-        recordEmbeddingFailure();
-        return { embedded: 0, skipped: 0, terminal: false, failed: true };
-      }
-
-      // Check if provider degraded to mock mid-refresh
-      if (provider.isMockFallback?.()) {
-        logger.debug("Provider degraded to mock, skipping batch persistence", {
-          batchSize: batch.length,
-        });
-        return {
-          embedded: 0,
-          skipped: 0,
-          terminal: true,
-          failed: false,
-          degraded: true,
-        };
-      }
-
-      // P5: post-embed recheck for race avoidance is now an in-memory lookup
-      // against the pre-pass snapshot rather than a fresh DB round-trip per
-      // batch. Authoritative reasoning: parallel calls in metrics-updater.ts
-      // each pass a distinct `model`, and each model writes to disjoint rows,
-      // so the per-model snapshots cannot race each other. If a future change
-      // adds a same-model parallel writer, this in-memory shortcut must be
-      // re-evaluated — writeLimiter serializes connections, not the in-memory
-      // snapshot, and two refreshes of the same model could write
-      // duplicate work. Cross-process races degrade to rare duplicate
-      // identical writes (harmless).
-      const postEmbedExisting = existingEmbeddings;
-      const batchItems: SymbolVectorEmbeddingBatchItem[] = [];
-      for (let i = 0; i < batch.length; i++) {
-        const postExisting = postEmbedExisting.get(batch[i].symbol.symbolId);
-        if (postExisting && postExisting.cardHash === batch[i].cardHash) {
-          continue;
-        }
-
-        batchItems.push({
-          symbolId: batch[i].symbol.symbolId,
-          vector: toFloat16Blob(batchVectors[i]),
-          cardHash: batch[i].cardHash,
-          vectorArray: batchVectors[i],
-        });
-      }
-
-      if (batchItems.length > 0) {
-        if (retainLiveHnsw) {
-          retainedBatchItems.push(...batchItems);
-        } else {
-          await withWriteConn(async (wConn) => {
-            await setSymbolVectorEmbeddingBatch(
-              wConn,
-              params.repoId,
-              storageModel,
-              batchItems,
+  const replacementItems: SymbolVectorEmbeddingBatchItem[] = [];
+  recordMemorySnapshot("beforeInference");
+  try {
+    for (
+      let chunkStart = 0;
+      chunkStart < batches.length;
+      chunkStart += maxConcurrency
+    ) {
+      const chunk = batches.slice(chunkStart, chunkStart + maxConcurrency);
+      const chunkItems = await Promise.all(
+        chunk.map(async (batch) => {
+          let vectors: number[][];
+          try {
+            vectors = await measure("inference", () =>
+              provider.embed(batch.map((item) => item.prefixedText)),
             );
-          });
-        }
-      }
-
-      return {
-        embedded: batchItems.length,
-        skipped: batch.length - batchItems.length,
-        terminal: false,
-        failed: false,
-      };
-    };
-
-    // Process batches with bounded concurrency using a sliding window.
-    // Each "chunk" is at most maxConcurrency batches run in parallel.
-    let aborted = false;
-    let degraded = false;
-    let failedBatches = 0;
-    let processedBatches = 0;
-    recordMemorySnapshot("beforeInference");
-    try {
-      for (
-        let chunkStart = 0;
-        chunkStart < batches.length && !aborted;
-        chunkStart += maxConcurrency
-      ) {
-        const chunk = batches.slice(chunkStart, chunkStart + maxConcurrency);
-        // P6: fire progress as each batch settles, not after the chunk wraps.
-        const settled = await Promise.allSettled(
-          chunk.map(async (b) => {
-            const res = await processBatch(b);
-            embedded += res.embedded;
-            skipped += res.skipped;
-            processedBatches++;
-            if (res.failed) failedBatches++;
-            if (res.degraded) degraded = true;
-            fireProgress();
-            return res;
-          }),
-        );
-
-        for (const result of settled) {
-          if (result.status === "fulfilled") {
-            if (result.value.terminal) {
-              aborted = true;
-            }
-          } else {
+          } catch (error) {
             recordEmbeddingFailure();
-            const reason =
-              result.reason instanceof Error
-                ? result.reason.message
-                : String(result.reason);
             throw new IndexError(
-              `Symbol embedding persistence failed: ${reason}`,
+              `Symbol embedding provider failed: ${error instanceof Error ? error.message : String(error)}`,
             );
           }
-        }
-
-        if (processedBatches > 0 && failedBatches / processedBatches > 0.5) {
-          throw new IndexError("Embedding failure rate exceeds 50%");
-        }
-      }
-      if (retainedBatchItems.length > 0) {
-        await withWriteConn((wConn) =>
-          setSymbolVectorEmbeddingBatch(
-            wConn,
-            params.repoId,
-            storageModel,
-            retainedBatchItems,
-          ),
-        );
-        logger.info(
-          `[embeddings] Retained vector index '${indexName}' for ${retainedBatchItems.length} changed Symbol vector(s) in one write`,
-        );
-      }
-      recordMemorySnapshot("afterInference");
-    } finally {
-      if (!useRebuildPath) await bootstrapVectorIndex();
-    }
-
-    // Progress: fire at end through fireProgress() so the monotonic clamp
-    // covers this final tick too — without it, a 0-symbol refresh would
-    // emit a duplicate {current:0, total:0} after the start tick. The
-    // clamp guarantees the final emit only fires when real progress was
-    // made beyond the last tick; for partial/aborted runs that means
-    // honest "current < total" rather than a dishonest forced-to-total.
-    fireProgress();
-    return degraded
-      ? { embedded, skipped, degraded: true }
-      : { embedded, skipped };
-  };
-  if (!useRebuildPath || indexName === null) return runPersistenceCycle();
-  return runHnswRebuildCycle(
-    "symbol-vector-rebuild-pre-drop",
-    "symbol-vector-rebuild-post-create",
-    async () => {
-      const dropResult = await measure("hnsw.drop", () =>
-        withWriteConn((wConn) =>
-          dropVectorIndex(
-            wConn,
-            SYMBOL_VECTOR_EMBEDDING_TABLE,
-            indexName,
-          ),
+          if (provider.isMockFallback?.()) {
+            throw new IndexError(
+              "Symbol embedding provider degraded to mock during refresh",
+            );
+          }
+          if (vectors.length !== batch.length) {
+            recordEmbeddingFailure();
+            throw new IndexError(
+              `Symbol embedding provider returned ${vectors.length} vectors for ${batch.length} inputs`,
+            );
+          }
+          return batch.map((item, index) => {
+            const vectorArray = vectors[index];
+            if (vectorArray.length !== modelInfo.dimension) {
+              throw new IndexError(
+                `Symbol embedding dimension ${vectorArray.length} does not match ${modelInfo.dimension} for ${modelName}`,
+              );
+            }
+            return {
+              symbolId: item.symbol.symbolId,
+              vector: toFloat16Blob(vectorArray),
+              cardHash: item.cardHash,
+              vectorArray,
+            };
+          });
+        }),
+      );
+      for (const items of chunkItems) replacementItems.push(...items);
+      params.onProgress?.({
+        stage: "embeddings",
+        current: Math.min(
+          skipped + replacementItems.length,
+          symbols.length,
         ),
-      );
-      if (dropResult.status === "failed") {
-        throw new IndexError(
-          `Failed to drop required vector index '${indexName}' before Symbol embedding writes: ${dropResult.error}`,
-        );
-      }
-      logger.info(
-        `[embeddings] Dropped vector index '${indexName}' for ${uncachedItems.length} changed Symbol vector(s)`,
-      );
-      try {
-        return await runPersistenceCycle();
-      } finally {
-        await createRequiredVectorIndex();
-      }
-    },
-    params.postIndexSessionTimeoutMs,
-    params.recordTiming,
+        total: symbols.length,
+        model: modelName,
+      });
+    }
+  } finally {
+    recordMemorySnapshot("afterInference");
+  }
+
+  const identity = resolveSymbolVectorPhysicalIdentity(
     params.repoId,
+    modelName,
+    params.semanticConfig,
+    params.vectorIndexName,
   );
+  let embedded = 0;
+
+  await runHnswRebuildCycle({
+    preCheckpointPhase: "symbol-vector-reconcile-pre-write",
+    postCheckpointPhase: "symbol-vector-reconcile-post-write",
+    timeoutMs: params.postIndexSessionTimeoutMs,
+    recordTiming: params.recordTiming,
+    repoId: params.repoId,
+    onFailureInsideGate: params.onFailureInsideGate,
+    body: () =>
+      withWriteConn(async (writeConn) => {
+        const inspection = await inspectRepoSymbolVectorTable(
+          writeConn,
+          params.repoId,
+        );
+        const indexes = await showIndexesStrict(writeConn);
+        const relevantIndexes = indexes.filter(
+          (index) =>
+            index.name === identity.indexName ||
+            (index.tableName === identity.tableName &&
+              index.property === identity.propertyName),
+        );
+        if (relevantIndexes.length > 1) {
+          throw new IndexError(
+            `Repository Symbol vector index identity for ${params.repoId}/${modelName} is ambiguous`,
+          );
+        }
+        const expectedIndex = relevantIndexes[0];
+        if (
+          expectedIndex &&
+          !isExpectedRepositoryVectorIndexIdentity(expectedIndex, identity)
+        ) {
+          throw new IndexError(
+            `Repository Symbol vector index identity for ${params.repoId}/${modelName} is incompatible`,
+          );
+        }
+        if (inspection.state === "absent" && expectedIndex) {
+          throw new IndexError(
+            `Repository Symbol vector index "${identity.indexName}" exists without its expected table`,
+          );
+        }
+        await validateRepoSymbolVectorOwnership(
+          writeConn,
+          params.repoId,
+          modelName,
+        );
+        await params.onReconciliationStep?.("catalog-classified");
+
+        const preCount = await countCompleteRepoSymbolVectors(
+          writeConn,
+          params.repoId,
+          modelName,
+        );
+        const healthRows = await getRepoSymbolVectorHealthRows(
+          writeConn,
+          params.repoId,
+        );
+        const staleSymbolIds = [
+          ...new Set(
+            healthRows.rows
+              .filter(
+                (row) =>
+                  row.model === modelName &&
+                  row.symbolId !== null &&
+                  !eligibleSymbolIdSet.has(row.symbolId),
+              )
+              .map((row) => row.symbolId)
+              .filter((symbolId): symbolId is string => symbolId !== null),
+          ),
+        ].sort((left, right) => left.localeCompare(right));
+        const mutationCount = staleSymbolIds.length + replacementItems.length;
+        const expectedIndexHealthy =
+          expectedIndex !== undefined &&
+          expectedIndex.status === "healthy" &&
+          expectedIndex.extensionLoaded === true;
+        const plan = planRepositorySymbolVectorReconciliation({
+          actualPreCount: preCount,
+          actualPostCount: preCount,
+          mutationCount,
+          expectedIndexHealthy,
+          expectedIndexPresent: expectedIndex !== undefined,
+        });
+        let expectedIndexPresent = expectedIndex !== undefined;
+
+        await params.onReconciliationStep?.("before-vector-mutation");
+        if (plan.dropExpectedBeforeMutation) {
+          await dropExpectedRepositoryVectorIndex(
+            writeConn,
+            identity.tableName,
+            identity.indexName,
+          );
+          await params.onReconciliationStep?.("after-index-drop");
+          expectedIndexPresent = false;
+        }
+        if (staleSymbolIds.length > 0) {
+          await deleteRepoSymbolVectorEmbeddingsBySymbolIds(
+            writeConn,
+            params.repoId,
+            modelName,
+            staleSymbolIds,
+          );
+          await params.onReconciliationStep?.("after-vector-delete");
+        }
+        if (replacementItems.length > 0) {
+          await setRepoSymbolVectorEmbeddingBatch(
+            writeConn,
+            params.repoId,
+            modelName,
+            replacementItems,
+            {
+              liveHnsw: plan.retainExpectedIndex,
+              onOperation: params.onReconciliationStep,
+            },
+          );
+        }
+        embedded = replacementItems.length;
+        await params.onReconciliationStep?.("after-vector-mutation");
+
+        const postCount = await countCompleteRepoSymbolVectors(
+          writeConn,
+          params.repoId,
+          modelName,
+        );
+        const requiredMode = resolveRepositorySymbolVectorIndexMode(postCount);
+        if (requiredMode === "exact" && expectedIndexPresent) {
+          await dropExpectedRepositoryVectorIndex(
+            writeConn,
+            identity.tableName,
+            identity.indexName,
+          );
+          await params.onReconciliationStep?.("after-index-drop");
+          expectedIndexPresent = false;
+        } else if (
+          requiredMode === "hnsw" &&
+          (!expectedIndexPresent || !expectedIndexHealthy)
+        ) {
+          if (expectedIndexPresent) {
+            await dropExpectedRepositoryVectorIndex(
+              writeConn,
+              identity.tableName,
+              identity.indexName,
+            );
+            await params.onReconciliationStep?.("after-index-drop");
+          }
+          recordMemorySnapshot("beforeHnsw");
+          let created: boolean;
+          try {
+            created = await measure("hnsw.create", () =>
+              createVectorIndex(
+                writeConn,
+                identity.tableName,
+                identity.propertyName,
+                identity.indexName,
+                modelInfo.dimension,
+                params.vectorEfc,
+              ),
+            );
+          } finally {
+            recordMemorySnapshot("afterHnsw");
+          }
+          if (!created) {
+            throw new IndexError(
+              `Failed to create required repository vector index "${identity.indexName}"`,
+            );
+          }
+          await params.onReconciliationStep?.("after-index-create");
+          expectedIndexPresent = true;
+        }
+        await params.onReconciliationStep?.("after-index-reconcile");
+
+        await validateRepoSymbolVectorOwnership(
+          writeConn,
+          params.repoId,
+          modelName,
+        );
+        const finalRows = await getRepoSymbolVectorHealthRows(
+          writeConn,
+          params.repoId,
+        );
+        const finalIndexes = await showIndexesStrict(writeConn);
+        assertCompleteRepositoryVectorCoverage({
+          repoId: params.repoId,
+          model: modelName,
+          identity,
+          eligibleSymbolIds,
+          rows: finalRows.rows,
+          indexes: finalIndexes,
+          requireHnsw: requiredMode === "hnsw",
+        });
+        if (requiredMode === "hnsw") {
+          const probe = await getRepoSymbolVectorProbe(
+            writeConn,
+            identity,
+            params.repoId,
+            modelName,
+          );
+          if (!probe) {
+            throw new IndexError(
+              `Repository vector index "${identity.indexName}" has no probe row`,
+            );
+          }
+          await queryVectorIndexProbe(
+            writeConn,
+            identity,
+            params.repoId,
+            modelName,
+            probe.vectorArray,
+          );
+        }
+        await params.onReconciliationStep?.("after-validation");
+      }),
+  });
+
+  params.onProgress?.({
+    stage: "embeddings",
+    current: Math.min(skipped + embedded, symbols.length),
+    total: symbols.length,
+    model: modelName,
+  });
+  return { embedded, skipped };
+}
+
+function isExpectedRepositoryVectorIndexIdentity(
+  index: IndexInfo,
+  identity: ReturnType<typeof resolveSymbolVectorPhysicalIdentity>,
+): boolean {
+  return (
+    index.name === identity.indexName &&
+    index.tableName === identity.tableName &&
+    index.type === "vector" &&
+    index.property === identity.propertyName
+  );
+}
+
+async function dropExpectedRepositoryVectorIndex(
+  conn: Awaited<ReturnType<typeof getLadybugConn>>,
+  tableName: string,
+  indexName: string,
+): Promise<void> {
+  const result = await dropVectorIndex(conn, tableName, indexName);
+  if (result.status === "failed") {
+    throw new IndexError(
+      `Failed to drop repository vector index "${indexName}": ${result.error}`,
+    );
+  }
+}
+
+function assertCompleteRepositoryVectorCoverage(params: {
+  repoId: string;
+  model: string;
+  identity: ReturnType<typeof resolveSymbolVectorPhysicalIdentity>;
+  eligibleSymbolIds: readonly string[];
+  rows: Awaited<ReturnType<typeof getRepoSymbolVectorHealthRows>>["rows"];
+  indexes: readonly IndexInfo[];
+  requireHnsw: boolean;
+}): void {
+  const completeIds: string[] = [];
+  for (const row of params.rows) {
+    const mappedVectorPresent =
+      params.identity.propertyName === "embeddingJinaCodeVec"
+        ? row.embeddingJinaCodeVecPresent
+        : row.embeddingNomicVecPresent;
+    if (row.model !== params.model && !mappedVectorPresent) continue;
+    if (
+      row.repoId !== params.repoId ||
+      row.model !== params.model ||
+      !row.symbolId ||
+      row.embeddingId !== `${params.model}:${row.symbolId}` ||
+      !row.embeddingVectorPresent ||
+      !row.cardHashPresent ||
+      !mappedVectorPresent
+    ) {
+      throw new IndexError(
+        `Repository vector row identity is invalid for ${params.repoId}/${params.model}`,
+      );
+    }
+    completeIds.push(row.symbolId);
+  }
+
+  const eligible = [...params.eligibleSymbolIds].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  completeIds.sort((left, right) => left.localeCompare(right));
+  if (
+    eligible.length !== completeIds.length ||
+    eligible.some((symbolId, index) => completeIds[index] !== symbolId)
+  ) {
+    throw new IndexError(
+      `Repository vector coverage is incomplete for ${params.repoId}/${params.model}`,
+    );
+  }
+
+  const relevant = params.indexes.filter(
+    (index) =>
+      index.name === params.identity.indexName ||
+      (index.tableName === params.identity.tableName &&
+        index.property === params.identity.propertyName),
+  );
+  const healthyExpected =
+    relevant.length === 1 &&
+    isExpectedRepositoryVectorIndexIdentity(relevant[0], params.identity) &&
+    relevant[0].status === "healthy" &&
+    relevant[0].extensionLoaded === true;
+  if (
+    (params.requireHnsw && !healthyExpected) ||
+    (!params.requireHnsw && relevant.length !== 0)
+  ) {
+    throw new IndexError(
+      `Repository vector catalog is not reconciled for ${params.repoId}/${params.model}`,
+    );
+  }
 }

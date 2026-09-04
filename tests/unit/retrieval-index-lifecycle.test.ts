@@ -51,20 +51,7 @@ describe("IndexHealthResult structure", () => {
         healthy: false,
         indexName: "symbol_search_text_v1",
       },
-      vectors: [
-        {
-          model: "jina-embeddings-v2-base-code",
-          exists: false,
-          healthy: false,
-          indexName: "symbol_vec_embeddingjina",
-        },
-        {
-          model: "nomic-embed-text-v1.5",
-          exists: false,
-          healthy: false,
-          indexName: "symbol_vec_embeddingnomic",
-        },
-      ],
+      vectors: [],
     };
 
     assert.ok(typeof result.fts === "object", "fts should be an object");
@@ -76,7 +63,7 @@ describe("IndexHealthResult structure", () => {
     );
 
     assert.ok(Array.isArray(result.vectors), "vectors should be an array");
-    assert.strictEqual(result.vectors.length, 2, "should have two vector entries");
+    assert.strictEqual(result.vectors.length, 0, "fixed Symbol vector health is removed");
 
     for (const v of result.vectors) {
       assert.ok(typeof v.model === "string", "vector.model should be string");
@@ -136,36 +123,16 @@ describe("ensureIndexes source verification", () => {
     );
   });
 
-  it("ensureIndexes skips when vector extension unavailable", () => {
+  it("does not bootstrap fixed Symbol vector indexes", () => {
     const fnStart = src.indexOf("export async function ensureIndexes");
-    // The vector caps check appears after the FTS section; use a wider slice.
-    const fnBody = src.slice(fnStart, fnStart + 3800);
-    assert.ok(
-      fnBody.includes("!caps.vector"),
-      "ensureIndexes should check !caps.vector before creating vector indexes",
+    const fnEnd = src.indexOf(
+      "export async function ensureEntityIndexes",
+      fnStart,
     );
-  });
-
-  it("ensureIndexes can skip Symbol vector indexes during deferred semantic refresh", () => {
-    const fnStart = src.indexOf("export async function ensureIndexes");
-    const fnBody = src.slice(fnStart, fnStart + 3500);
-    assert.ok(
-      fnBody.includes("includeVectorIndexes"),
-      "ensureIndexes should accept an includeVectorIndexes option",
-    );
-    assert.ok(
-      fnBody.includes("options.includeVectorIndexes !== false"),
-      "ensureIndexes should leave vectors enabled by default",
-    );
-  });
-
-  it("ensureIndexes skips Symbol HNSW creation until the model has a complete row", () => {
-    const fnStart = src.indexOf("export async function ensureIndexes");
-    const fnBody = src.slice(fnStart, fnStart + 7000);
-    assert.ok(
-      fnBody.includes("hasCompleteSymbolVectorEmbedding(conn, model)"),
-      "ensureIndexes should not create an empty model-specific Symbol HNSW",
-    );
+    const fnBody = src.slice(fnStart, fnEnd);
+    assert.ok(!fnBody.includes("CREATE_VECTOR_INDEX"));
+    assert.ok(!fnBody.includes("hasCompleteSymbolVectorEmbedding"));
+    assert.ok(!fnBody.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
   });
 
   it("ensureIndexes can skip Symbol FTS during deferred semantic readiness", () => {
@@ -195,10 +162,6 @@ describe("ensureIndexes source verification", () => {
     assert.ok(
       fnBody.includes('"symbolFts"'),
       "ensureIndexes should time Symbol FTS work",
-    );
-    assert.ok(
-      fnBody.includes('"symbolVectors"'),
-      "ensureIndexes should time Symbol vector work",
     );
   });
 
@@ -338,51 +301,25 @@ describe("showIndexes — SHOW_INDEXES() RETURN * compatibility", () => {
   });
 });
 
-describe("checkIndexHealth table-aware vector health", () => {
-  it("requires exact SymbolVectorEmbedding identity for vector health checks", () => {
+describe("fixed Symbol vector bootstrap removal", () => {
+  it("checkIndexHealth reports no global Symbol vector entries", () => {
     const fnStart = src.indexOf("export async function checkIndexHealth");
-    const fnBody = src.slice(fnStart, fnStart + 1800);
-    assert.ok(
-      fnBody.includes("indexMatchesExactIdentity("),
-      "Symbol vector health should use the exact identity predicate",
-    );
-    assert.ok(
-      fnBody.includes("SYMBOL_VECTOR_EMBEDDING_TABLE") &&
-        fnBody.includes("propName"),
-      "Symbol vector health should require the dedicated table and model property",
-    );
-    assert.ok(
-      !fnBody.includes("index.tableName === undefined"),
-      "health checks should not treat missing table metadata as Symbol confirmation",
-    );
-    assert.ok(
-      fnBody.includes('match?.status === "healthy"'),
-      "unloaded persisted indexes should exist but not report as healthy",
-    );
+    const fnEnd = src.indexOf("export async function ensureIndexes", fnStart);
+    const fnBody = src.slice(fnStart, fnEnd);
+    assert.ok(fnBody.includes("vectors: []"));
+    assert.ok(!fnBody.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
   });
-});
 
-describe("ensureIndexes vector table awareness", () => {
-  it("uses table-aware vector checks for Symbol and entity vector indexes", () => {
-    const fnStart = src.indexOf("export async function ensureIndexes");
-    const fnBody = src.slice(fnStart, fnStart + 7000);
-    assert.ok(
-      fnBody.includes("indexMatchesExactIdentity(") &&
-        fnBody.includes("SYMBOL_VECTOR_EMBEDDING_TABLE") &&
-        fnBody.includes("propName"),
-      "Symbol vector ensure should require exact table and property identity",
-    );
+  it("keeps entity vector index checks table-aware", () => {
     assert.ok(
       src.includes(
         'indexExistsForTable(existing, "FileSummary", indexName, "vector")',
       ),
-      "FileSummary vector ensure should be table-aware",
     );
     assert.ok(
       src.includes(
         'indexExistsForTable(existing, "AgentFeedback", indexName, "vector")',
       ),
-      "AgentFeedback vector ensure should be table-aware",
     );
   });
 });
@@ -533,35 +470,27 @@ describe("createVectorIndex — current Kuzu API", () => {
   it("builds a validated literal probe for QUERY_VECTOR_INDEX", () => {
     const fnStart = src.indexOf("export async function queryVectorIndexProbe");
     assert.ok(fnStart !== -1, "queryVectorIndexProbe function must exist");
-    const fnBody = src.slice(fnStart, fnStart + 1_400);
-    assert.ok(fnBody.includes("validateIdentifier(indexName"));
+    const fnBody = src.slice(fnStart, fnStart + 2_400);
+    assert.ok(fnBody.includes("validateIdentifier(identity.indexName"));
     assert.ok(fnBody.includes("Number.isFinite"));
     assert.ok(fnBody.includes("QUERY_VECTOR_INDEX"));
-    assert.ok(fnBody.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
-    assert.ok(fnBody.includes("node.symbolId AS id"));
+    assert.ok(fnBody.includes("identity.tableName"));
+    assert.ok(fnBody.includes("node.symbolId AS symbolId"));
     assert.ok(fnBody.includes("row.distance"));
     assert.ok(fnBody.includes("near-zero"));
     assert.ok(src.includes("@param efc - HNSW ef_construction"));
   });
 
-  it("safe rebuild reads and validates Jina vectors on the embedding table", () => {
+  it("safe rebuild validates repository vector table identities", () => {
+    assert.ok(!safeRebuildSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"));
     assert.ok(
-      safeRebuildSrc.includes(
-        "MATCH (s:${SYMBOL_VECTOR_EMBEDDING_TABLE})",
-      ),
-      "safe rebuild probe should read SymbolVectorEmbedding",
+      safeRebuildCliSrc.includes("assessRepositorySymbolVectorHealth"),
     );
     assert.ok(
-      safeRebuildCliSrc.includes(
-        "candidate.tableName === SYMBOL_VECTOR_EMBEDDING_TABLE",
-      ),
-      "safe rebuild validation should require the embedding-table HNSW",
+      safeRebuildCliSrc.includes("resolveSymbolVectorPhysicalIdentity"),
     );
     assert.ok(
-      safeRebuildCliSrc.includes(
-        "required healthy SymbolVectorEmbedding vector index",
-      ),
-      "safe rebuild validation error should name the required table",
+      safeRebuildCliSrc.includes("listRepositorySymbolVectorTableNames"),
     );
   });
 });
@@ -571,7 +500,7 @@ describe("indexMatchesExactIdentity", () => {
     name: "symbol_vec_jina_code_v2",
     type: "vector" as const,
     property: "embeddingJinaCodeVec",
-    tableName: "SymbolVectorEmbedding",
+    tableName: "RepoVectorTable",
     status: "healthy" as const,
   };
 
@@ -579,7 +508,7 @@ describe("indexMatchesExactIdentity", () => {
     assert.equal(
       indexMatchesExactIdentity(
         { ...index, property: "embeddingNomicVec" },
-        "SymbolVectorEmbedding",
+        "RepoVectorTable",
         "symbol_vec_jina_code_v2",
         "vector",
         "embeddingJinaCodeVec",
@@ -592,7 +521,7 @@ describe("indexMatchesExactIdentity", () => {
     assert.equal(
       indexMatchesExactIdentity(
         index,
-        "SymbolVectorEmbedding",
+        "RepoVectorTable",
         "symbol_vec_jina_code_v2",
         "vector",
         "embeddingJinaCodeVec",
@@ -835,11 +764,13 @@ describe("numeric array vector storage", () => {
     );
   });
 
-  it("ensureIndexes uses vecProperty for vector index creation", () => {
-    assert.ok(
-      src.includes("getVecPropertyName"),
-      "ensureIndexes should reference getVecPropertyName for vector-compatible columns",
+  it("keeps vecProperty mapping out of fixed Symbol bootstrap", () => {
+    const fnStart = src.indexOf("export async function ensureIndexes");
+    const fnEnd = src.indexOf(
+      "export async function ensureEntityIndexes",
+      fnStart,
     );
+    assert.ok(!src.slice(fnStart, fnEnd).includes("getVecPropertyName"));
   });
 });
 
@@ -856,10 +787,10 @@ describe("embedding persistence uses numeric arrays", () => {
     "utf8",
   );
 
-  it("setSymbolVectorEmbedding requires a numeric vector", () => {
+  it("setRepoSymbolVectorEmbedding requires a numeric vector", () => {
     assert.ok(
       embSrc.includes("vectorArray: number[]"),
-      "setSymbolVectorEmbedding should require a numeric vector",
+      "setRepoSymbolVectorEmbedding should require a numeric vector",
     );
   });
 
@@ -872,15 +803,15 @@ describe("embedding persistence uses numeric arrays", () => {
 
   it("routes single-row replacement through the batch delete/reinsert path", () => {
     const fnStart = embSrc.indexOf(
-      "export async function setSymbolVectorEmbedding(",
+      "export async function setRepoSymbolVectorEmbedding(",
     );
     const fnEnd = embSrc.indexOf(
-      "export async function setSymbolVectorEmbeddingBatch(",
+      "export async function setRepoSymbolVectorEmbeddingBatch(",
       fnStart,
     );
     const fnBody = embSrc.slice(fnStart, fnEnd);
 
-    assert.match(fnBody, /setSymbolVectorEmbeddingBatch\(/);
+    assert.match(fnBody, /setRepoSymbolVectorEmbeddingBatch\(/);
     assert.doesNotMatch(fnBody, /MERGE \(e:/);
   });
 
@@ -892,12 +823,12 @@ describe("embedding persistence uses numeric arrays", () => {
   });
 
   it("embedding caller passes raw vector array via batch", () => {
-    const callSite = callerSrc.indexOf("setSymbolVectorEmbeddingBatch(");
-    assert.ok(callSite > 0, "Should call setSymbolVectorEmbeddingBatch");
-    const batchItemSite = callerSrc.indexOf("vectorArray: batchVectors[");
-    assert.ok(
-      batchItemSite > 0,
-      "Caller should pass raw vector array in batch items",
+    const callSite = callerSrc.indexOf("setRepoSymbolVectorEmbeddingBatch(");
+    assert.ok(callSite > 0, "Should call setRepoSymbolVectorEmbeddingBatch");
+    assert.match(
+      callerSrc,
+      /const replacementItems:[\s\S]*?vectorArray,[\s\S]*?setRepoSymbolVectorEmbeddingBatch\([\s\S]*?replacementItems,/,
+      "Caller should pass raw vector arrays in repository batch items",
     );
   });
 });
@@ -934,17 +865,15 @@ describe("vector index API — efc/efs config distinction", () => {
     );
   });
 
-  it("ensureIndexes reads efc from config with efs fallback", () => {
+  it("does not consume vector config in fixed Symbol bootstrap", () => {
     const fnStart = src.indexOf("export async function ensureIndexes");
-    const fnBody = src.slice(fnStart, fnStart + 5000);
-    assert.ok(
-      fnBody.includes("vectorConfig?.efc"),
-      "ensureIndexes should read efc from config",
+    const fnEnd = src.indexOf(
+      "export async function ensureEntityIndexes",
+      fnStart,
     );
-    assert.ok(
-      fnBody.includes("vectorConfig?.efs"),
-      "ensureIndexes should fall back to efs for backward compat",
-    );
+    const fnBody = src.slice(fnStart, fnEnd);
+    assert.ok(!fnBody.includes("vectorConfig"));
+    assert.ok(!fnBody.includes("CREATE_VECTOR_INDEX"));
   });
 });
 
