@@ -547,12 +547,12 @@ This batching reduces ONNX inference overhead and speeds up re-indexing of large
 
 ### Embedding Storage
 
-Symbol embeddings are stored as **model-scoped `SymbolVectorEmbedding` rows** in LadybugDB. Each row has a stable model-plus-symbol identity and one model-specific numeric vector:
+Symbol embeddings are stored in a **repository-scoped vector table** in LadybugDB. Both supported models share the repository's table; each row has a stable model-plus-symbol identity and one model-specific numeric vector:
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Symbol["Symbol node"] e1@--> Row["SymbolVectorEmbedding<br/>repoId + symbolId + model<br/>embeddingVector + cardHash + updatedAt"]
+    Symbol["Symbol node"] e1@--> Row["Repository vector table<br/>repoId + symbolId + model<br/>embeddingVector + cardHash + updatedAt"]
     Row e2@--> Jina["embeddingJinaCodeVec"]
     Row e3@--> Nomic["embeddingNomicVec"]
 
@@ -570,33 +570,26 @@ Each row keeps the compact cache representation (`Float32 -> multiply by 10,000 
 
 Each embedding is tagged with a `cardHash` (SHA-256 of the payload plus the effective Jina artifact identity). When the effective Jina graph changes, Jina Symbol and FileSummary hashes invalidate on the next explicitly initiated semantic index; no index is started solely by changing the configuration.
 
-> **Migration note**: Migration m007 copied the deprecated `SymbolEmbedding` table into inline Symbol compatibility columns. Migration m026 copies complete supported inline vectors into `SymbolVectorEmbedding`. Current writes and HNSW indexes use the dedicated table; the older storage remains compatibility-only.
+> **Migration note**: Migration m007 copied the deprecated `SymbolEmbedding` table into inline Symbol compatibility columns. Migration m026 retained the historical shared vector-table layout. Schema version 27 requires a stopped safe rebuild to create repository-scoped tables; it never rewrites an existing populated database automatically.
 
 ### Vector Indexes
 
-Hybrid retrieval uses native Ladybug vector indexes for fast approximate nearest-neighbor search at query time:
+Hybrid retrieval selects a repository/model route from a cached durable health snapshot. Each repository has one deterministic vector table shared by its Symbol models, and each model's logical index stem receives that repository suffix. The routing state—not a global candidate window—determines the query:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    subgraph Indexes["Native Ladybug Vector Indexes"]
-        JinaIndex["symbol_vec_jina_code_v2<br/>Property: SymbolVectorEmbedding.embeddingJinaCodeVec<br/>Dimensions: 768"]
-        NomicIndex["symbol_vec_nomic_embed_v15<br/>Property: SymbolVectorEmbedding.embeddingNomicVec<br/>Dimensions: 768"]
-    end
-
-    Config["semantic.retrieval.vector<br/>vector.enabled = true<br/>vector.topK = 75<br/>vector.efs = 200"] e1@--> Indexes
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1 animate;
+    Query["Semantic query"] --> Snapshot["Cached repository/model health"]
+    Snapshot -->|none| None["No vector lane"]
+    Snapshot -->|exact| Exact["Repository exact cosine search"]
+    Snapshot -->|hnsw| Hnsw["Repository HNSW search"]
+    Snapshot -->|degraded + allowed| Fallback["Guarded exact fallback"]
+    Snapshot -->|degraded + denied| None
+    Exact --> Fusion["Deterministic fusion"]
+    Hnsw --> Fusion
+    Fallback --> Fusion
 ```
 
-Once bootstrapped, Symbol refresh buffers up to 50 changed model rows into one replacement write while retaining the healthy HNSW. Larger refreshes use one checkpointed drop/write/recreate cycle. Symbol ANN queries use the physical `SymbolVectorEmbedding` HNSW, mark ownership in the query, and discard foreign-repository candidates before ranking, fusion, or output. A short owned result set receives at most one bounded over-fetch retry; an ANN failure or remaining shortage falls back to a separately guarded exact cosine scan of the requested repository, ordered by score and then symbol ID. SDL-MCP does not create per-repository HNSW graphs.
+A single writer performs replacement and, when needed, the checkpointed HNSW rebuild. `none`, `exact`, `hnsw`, and `degraded` are internal routing states, not default MCP fields. Default responses expose normal retrieval evidence only; physical table/index names and operation timings remain diagnostic-only. A degraded snapshot can use exact search only when durable ownership, row validity, and lifecycle checks explicitly allow it.
 
 The current recommended configuration surface is `semantic.retrieval.vector`. Retired sidecar ANN configuration is intentionally omitted from current examples.
 

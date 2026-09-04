@@ -486,9 +486,16 @@ live outside those defaults.
 - Symptom: error "not compatible with the current graph engine" on startup
 - Cause: LadybugDB schema version changed between SDL-MCP releases in a way the current build cannot migrate automatically
 - Resolution:
-  - restart SDL-MCP once to allow any pending forward migrations to run
-  - if the database is still reported as incompatible, keep it stopped and use `index --force --safe-rebuild` to create and validate a replacement
+  - if the error is `SafeRebuildRequiredError`, keep SDL-MCP stopped: schema version 27 cannot migrate the historical shared Symbol-vector table in place
+  - use `index --force --safe-rebuild` to create and validate a replacement; no automatic migration or index refresh is attempted
   - retain the old database family until the replacement passes live validation
+
+#### Repository vector retrieval is exact-only, degraded, or deletion-pending
+
+- **Exact-only is healthy:** a repository with fewer than 2,000 complete owned vectors intentionally uses deterministic exact cosine search. It does not need an HNSW index or manual rebuild.
+- **Degraded with exact fallback:** inspect the reported retrieval health and database logs for ownership, vector-row, catalog, or lifecycle validation failures. Exact fallback remains available only when the cached health snapshot permits it; otherwise lexical retrieval continues without a vector lane. Do not create indexes manually.
+- **Deletion-pending:** repository removal marks its vector lifecycle as deleting before table and graph teardown. Retry the same authorized repository deletion after the underlying failure is corrected; do not reuse or edit the table by hand.
+- **Orphan diagnostics:** a vector row without its eligible Symbol, or an eligible Symbol without its complete model row, prevents healthy HNSW publication. Preserve the database family and use the safe-rebuild workflow if the mismatch survives the authorized semantic reconciliation; SDL-MCP does not run background orphan cleanup.
 
 ### Semantic / Embedding Setup Issues
 

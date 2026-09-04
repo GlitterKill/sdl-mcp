@@ -301,11 +301,15 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | Node Table          | Key Fields                                            |
 | :------------------ | :---------------------------------------------------- |
 | **SymbolEmbedding** | symbolId, embedding, model (deprecated compatibility table) |
-| **SymbolVectorEmbedding** | embeddingId, repoId, symbolId, model, embeddingVector, cardHash, updatedAt, model-specific numeric vector |
+| **Repository Symbol vectors** | one `SymbolVectorEmbedding_r_<sha256(repoId)[0..31]>` table per repository; rows retain embeddingId, repoId, symbolId, model, cardHash, and model-specific numeric vectors |
 | **SummaryCache**    | symbolId, summary, provider, model, cardHash, costUsd |
 | **SymbolReference** | referenceId, symbolId, file, line                     |
 
-Production Symbol vectors live in `SymbolVectorEmbedding`, with one complete row per Symbol and model. Model-specific HNSW indexes target this physical table. Incremental indexing and background semantic repair buffer up to 50 changed rows into one delete/reinsert write while retaining a healthy HNSW; larger changes use one checkpointed drop/write/recreate cycle. Index bootstrap occurs only when the exact table/name/type/property identity is absent and at least one complete row exists. Symbol ANN queries return an ownership marker, discard foreign-repository candidates before ranking, fusion, or output, and make at most one bounded over-fetch retry. If ANN fails or cannot provide enough owned rows, a separately guarded exact cosine scan of the requested repository returns deterministically ordered candidates. SDL-MCP does not maintain per-repository HNSW indexes.
+Production Symbol vectors are partitioned by repository. The central identity resolver derives one table named `SymbolVectorEmbedding_r_<sha256(repoId)[0..31]>`; both supported Symbol models share that table. For each model, its configured logical index stem becomes `<logical-stem>_r_<sha256(repoId)[0..31]>` and targets that model's numeric vector property. Callers use this resolver rather than constructing physical names.
+
+LadybugDB remains one shared database with one writer. Structural indexing marks a repository's vector lifecycle as refreshing; semantic reconciliation then owns the exclusive delete/write/rebuild sequence and publishes a cached health snapshot only from durable row counts, ownership validation, lifecycle state, and the exact catalog tuple. Repositories with fewer than 2,000 complete vectors use exact retrieval; healthy repositories at or above that cutoff use HNSW. Missing, malformed, or lifecycle-incompatible storage is degraded, with exact fallback allowed only when the cached snapshot explicitly permits it. Default MCP responses keep physical names and operational timings out of the model-facing payload.
+
+Schema version 27 changes the Symbol-vector layout and deliberately cannot migrate a populated shared-table database. Stop SDL-MCP and use the existing safe-rebuild workflow to create and validate a new database family. Startup does not perform an automatic migration, index refresh, or orphan cleanup.
 
 **Sync, policy, and memory nodes:**
 

@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-repository Symbol vector tables**: Symbol vectors now use one deterministic repository table shared by the supported Symbol models, with repository-specific HNSW indexes only at the internal eligibility threshold. Retrieval routes through cached `none`, `exact`, `hnsw`, or `degraded` health rather than a shared global ANN table.
+
 ### Changed
+
+- **Required vector-layout rebuild**: Schema version 27 requires SDL-MCP to be stopped and rebuilt through the safe-rebuild workflow when replacing a populated historical shared Symbol-vector table. Startup performs no automatic migration, index refresh, or background orphan cleanup.
 
 ### Fixed
 
