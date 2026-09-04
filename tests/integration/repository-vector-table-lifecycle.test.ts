@@ -15,11 +15,13 @@ import {
   withWriteConn,
 } from "../../dist/db/ladybug.js";
 import {
+  _configureVectorQueryGuardForTesting,
   exec,
   execCheckpoint,
   execDdl,
   queryAll,
   queryStoredProcAll,
+  resetPreparedStatementCaches,
 } from "../../dist/db/ladybug-core.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 import { createSchema } from "../../dist/db/ladybug-schema.js";
@@ -30,12 +32,14 @@ import {
   getRepoSymbolVectorEmbedding,
   getRepoSymbolVectorEmbeddings,
   getRepoSymbolVectorProbe,
+  inspectRepoSymbolVectorTable,
   resolveSymbolVectorPhysicalIdentity,
   setRepoSymbolVectorEmbedding,
 } from "../../dist/db/ladybug-symbol-embeddings.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { rankRepoSymbolVectorsExact } from "../../dist/db/ladybug-retrieval.js";
 import {
+  _teardownRepositoryDatabaseForTesting,
   handleRepoRegister,
   handleRepoUnregister,
 } from "../../dist/mcp/tools/repo.js";
@@ -44,10 +48,18 @@ import {
   validateRepoSymbolVectorOwnership,
 } from "../../dist/db/ladybug-retrieval-health.js";
 import {
+  assessRepositorySymbolVectorHealth,
   clearRepositorySymbolVectorDiagnostics,
+  clearRepositorySymbolVectorHealth,
+  commitPreparedRepositorySymbolVectorHealthBatch,
+  getRepositorySymbolVectorHealthSnapshot,
+  invalidateRepositorySymbolVectorHealth,
   listRepositorySymbolVectorDiagnostics,
+  publishRepositorySymbolVectorDiagnostic,
+  publishRepositorySymbolVectorHealthBatch,
 } from "../../dist/retrieval/health.js";
 import {
+  dropVectorIndex,
   queryVectorIndexProbe,
   showIndexesStrict,
 } from "../../dist/retrieval/index-lifecycle.js";
@@ -57,6 +69,15 @@ import {
   resolveRepositorySymbolVectorIndexMode,
   type EmbeddingProvider,
 } from "../../dist/indexer/embeddings.js";
+import {
+  getDerivedStateFromConnection,
+  markEmbeddingLifecycleDeleting,
+  markEmbeddingLifecycleRefreshingForTarget,
+  markEmbeddingLifecycleSteadyIfCurrent,
+} from "../../dist/db/ladybug-derived-state.js";
+import { createRepositorySemanticLifecycle } from "../../dist/indexer/provider-first/semantic-readiness.js";
+import { queryRepoSymbolVectorIndex } from "../../dist/retrieval/orchestrator.js";
+import type { SemanticConfig } from "../../dist/config/types.js";
 
 const JINA_MODEL = "jina-embeddings-v2-base-code";
 const NOMIC_MODEL = "nomic-embed-text-v1.5";
@@ -254,6 +275,912 @@ async function assertReconciledCountAndCatalog(
       assert.deepStrictEqual(relevant, []);
     }
   });
+}
+
+
+
+type RefreshRecoverySeam =
+  | "marker-commit"
+  | "table-create"
+  | "index-drop"
+  | "vector-delete"
+  | "vector-merge"
+  | "index-create"
+  | "probe"
+  | "checkpoint";
+type DeletionRecoverySeam = "deletion-table-drop" | "graph-deletion";
+type DurableRecoverySeam = RefreshRecoverySeam | DeletionRecoverySeam;
+type RecoveryCatalogExpectation = "none" | "healthy";
+
+const RECOVERY_SEMANTIC_CONFIG = {
+  enabled: true,
+  provider: "local",
+  symbolEmbeddingModels: [JINA_MODEL],
+  fileSummaryEmbeddingModels: [],
+} satisfies SemanticConfig;
+
+interface RecoveryStateExpectation {
+  repoPresent: boolean;
+  tableState: "absent" | "present";
+  completeVectorCount: number;
+  catalog: RecoveryCatalogExpectation;
+  lifecycleState: "refreshing" | "deleting" | "steady" | null;
+  mode: "degraded" | "exact" | "hnsw" | null;
+  exactFallbackAllowed: boolean | null;
+}
+
+interface DurableRecoveryFixture {
+  seam: DurableRecoverySeam;
+  repoId: string;
+  versionId: string;
+  expectedFinalCount: number;
+  controlRows: Array<Record<string, unknown>>;
+  events: string[];
+  failureState: RecoveryStateExpectation;
+  runRefresh(injectFailure: boolean): Promise<void>;
+  runDeletion(injectFailure: boolean): Promise<void>;
+}
+
+const REFRESH_FAILURE_STEP: Record<
+  RefreshRecoverySeam,
+  string | null
+> = {
+  "marker-commit": null,
+  "table-create": null,
+  "index-drop": "after-index-drop",
+  "vector-delete": "after-vector-delete",
+  "vector-merge": "after-vector-merge",
+  "index-create": "after-index-create",
+  probe: null,
+  checkpoint: null,
+};
+
+function recoveryStepEvent(step: string): string {
+  if (step === "catalog-classified") return "gate:catalog-classified";
+  if (step === "after-index-drop") return "ddl:index-drop";
+  if (step === "after-index-create") return "ddl:index-create";
+  if (step === "after-vector-delete") return "dml:vector-delete";
+  if (step === "after-vector-merge") return "dml:vector-merge";
+  if (step === "after-vector-create") return "dml:vector-create";
+  return `gate:${step}`;
+}
+
+const REFRESH_FAILURE_EVENT_ORDER: Readonly<
+  Record<RefreshRecoverySeam, readonly string[]>
+> = {
+  "marker-commit": [
+    "marker:refreshing",
+    "checkpoint:1",
+    "ddl:table-create",
+    "dml:vector-delete",
+    "dml:vector-merge",
+    "checkpoint:2",
+    "gate:start",
+    "marker:commit",
+    "publication:degraded",
+    "gate:release",
+  ],
+  "table-create": [
+    "marker:refreshing",
+    "checkpoint:1",
+    "gate:catalog-classified",
+    "gate:before-vector-mutation",
+    "ddl:table-create",
+    "checkpoint:2",
+    "gate:failure-finalize",
+    "publication:degraded",
+  ],
+  "index-drop": [
+    "marker:refreshing",
+    "checkpoint:1",
+    "gate:catalog-classified",
+    "gate:before-vector-mutation",
+    "ddl:index-drop",
+    "checkpoint:2",
+    "gate:failure-finalize",
+    "publication:degraded",
+  ],
+  "vector-delete": [
+    "marker:refreshing",
+    "checkpoint:1",
+    "gate:catalog-classified",
+    "gate:before-vector-mutation",
+    "dml:vector-delete",
+    "checkpoint:2",
+    "gate:failure-finalize",
+    "publication:degraded",
+  ],
+  "vector-merge": [
+    "marker:refreshing",
+    "checkpoint:1",
+    "ddl:table-create",
+    "dml:vector-delete",
+    "dml:vector-merge",
+    "checkpoint:2",
+    "gate:failure-finalize",
+    "publication:degraded",
+  ],
+  "index-create": [
+    "marker:refreshing",
+    "checkpoint:1",
+    "gate:catalog-classified",
+    "dml:vector-delete",
+    "dml:vector-merge",
+    "ddl:index-create",
+    "checkpoint:2",
+    "gate:failure-finalize",
+    "publication:degraded",
+  ],
+  probe: [
+    "marker:refreshing",
+    "checkpoint:1",
+    "gate:catalog-classified",
+    "dml:vector-delete",
+    "checkpoint:2",
+    "dml:vector-create",
+    "gate:after-index-reconcile",
+    "probe:ann-query",
+    "checkpoint:3",
+    "gate:failure-finalize",
+    "publication:degraded",
+  ],
+  checkpoint: [
+    "marker:refreshing",
+    "checkpoint:1",
+    "ddl:table-create",
+    "dml:vector-delete",
+    "dml:vector-merge",
+    "checkpoint:2",
+    "gate:failure-finalize",
+    "publication:degraded",
+  ],
+};
+
+const REFRESH_SUCCESS_EVENT_ORDER = [
+  "marker:refreshing",
+  "checkpoint:1",
+  "checkpoint:2",
+  "gate:start",
+  "marker:commit",
+  "marker:steady",
+  "publication:steady",
+  "gate:release",
+] as const;
+
+const DELETION_RECOVERY_EVENT_ORDER: Readonly<
+  Record<DeletionRecoverySeam, readonly string[]>
+> = {
+  "deletion-table-drop": [
+    "gate:start",
+    "marker:deleting",
+    "gate:catalog-table",
+    "gate:catalog-indexes",
+    "gate:ownership",
+    "ddl:table-drop",
+    "publication:diagnostic",
+    "publication:deletion-pending",
+    "gate:release",
+    "gate:start",
+    "marker:deleting",
+    "ddl:table-drop",
+    "ddl:prepared-cache-reset",
+    "dml:graph-delete",
+    "publication:clear",
+    "gate:release",
+    "gate:start",
+    "publication:clear",
+    "gate:release",
+  ],
+  "graph-deletion": [
+    "gate:start",
+    "marker:deleting",
+    "gate:catalog-table",
+    "gate:catalog-indexes",
+    "gate:ownership",
+    "ddl:table-drop",
+    "ddl:prepared-cache-reset",
+    "dml:graph-delete",
+    "publication:diagnostic",
+    "publication:deletion-pending",
+    "gate:release",
+    "gate:start",
+    "marker:deleting",
+    "dml:graph-delete",
+    "publication:clear",
+    "gate:release",
+    "gate:start",
+    "publication:clear",
+    "gate:release",
+  ],
+};
+
+function assertRecoveryEventOrder(fixture: DurableRecoveryFixture): void {
+  const expected =
+    fixture.seam === "deletion-table-drop" || fixture.seam === "graph-deletion"
+      ? DELETION_RECOVERY_EVENT_ORDER[fixture.seam]
+      : [
+          ...REFRESH_FAILURE_EVENT_ORDER[fixture.seam],
+          ...REFRESH_SUCCESS_EVENT_ORDER,
+        ];
+  let cursor = 0;
+  for (const event of expected) {
+    const index = fixture.events.indexOf(event, cursor);
+    assert.notStrictEqual(
+      index,
+      -1,
+      `${fixture.seam} missing ordered event ${event} after offset ${cursor}; observed ${JSON.stringify(fixture.events)}`,
+    );
+    cursor = index + 1;
+  }
+}
+
+async function reopenRecoveryDatabase(
+  resetVectorQueryGuard = false,
+): Promise<void> {
+  await closeLadybugDb({ strict: true });
+  if (resetVectorQueryGuard) {
+    // A fresh process has no in-memory circuit state. Reset only after closing
+    // the failed probe's connection so this reopen models that boundary.
+    _configureVectorQueryGuardForTesting();
+  }
+  await getLadybugDb(dbPath);
+  await exclusiveWrite((conn) =>
+    withWindowsFtsRuntime(() => execDdl(conn, "LOAD EXTENSION vector")),
+  );
+}
+
+async function seedRecoveryRepository(
+  repoId: string,
+  count: number,
+): Promise<{ symbols: ladybugDb.SymbolRow[]; versionId: string }> {
+  const symbols = await seedReconciliationRepo(repoId, count);
+  const versionId = `${repoId}:version`;
+  await exclusiveWrite(async (conn) => {
+    await ladybugDb.createVersion(conn, {
+      versionId,
+      repoId,
+      createdAt: "2026-09-03T00:00:00.000Z",
+      reason: "durable recovery fixture",
+      prevVersionHash: null,
+      versionHash: null,
+    });
+    assert.strictEqual(
+      await markEmbeddingLifecycleRefreshingForTarget(
+        conn,
+        repoId,
+        null,
+        versionId,
+      ),
+      true,
+    );
+    assert.strictEqual(
+      await markEmbeddingLifecycleSteadyIfCurrent(conn, repoId, versionId),
+      true,
+    );
+  });
+  return { symbols, versionId };
+}
+
+async function seedRecoveryControlOverlap(
+  symbolId: string,
+): Promise<Array<Record<string, unknown>>> {
+  const repoId = "vector-recovery-control";
+  await exclusiveWrite(async (conn) => {
+    if (!(await ladybugDb.getRepo(conn, repoId))) {
+      await ladybugDb.upsertRepo(conn, {
+        repoId,
+        rootPath: `/fixture/${repoId}`,
+        configJson: "{}",
+        createdAt: "2026-09-03T00:00:00.000Z",
+      });
+    }
+    await setRepoSymbolVectorEmbedding(
+      conn,
+      repoId,
+      symbolId,
+      JINA_MODEL,
+      `control-vector:${symbolId}`,
+      `control-hash:${symbolId}`,
+      vector(0.875),
+    );
+  });
+  return withWriteConn((conn) => tableRows(conn, repoId));
+}
+
+async function prepareRecoveryAttempt(
+  fixture: DurableRecoveryFixture,
+  injectFailure: boolean,
+) {
+  await exclusiveWrite(async (conn) => {
+    const state = await getDerivedStateFromConnection(conn, fixture.repoId);
+    assert.strictEqual(
+      await markEmbeddingLifecycleRefreshingForTarget(
+        conn,
+        fixture.repoId,
+        state?.targetVersionId ?? null,
+        fixture.versionId,
+      ),
+      true,
+    );
+  });
+  fixture.events.push("marker:refreshing");
+  invalidateRepositorySymbolVectorHealth(
+    fixture.repoId,
+    fixture.versionId,
+    RECOVERY_SEMANTIC_CONFIG,
+    "refreshing",
+  );
+
+  return createRepositorySemanticLifecycle({
+    repoId: fixture.repoId,
+    versionId: fixture.versionId,
+    appConfig: { semantic: RECOVERY_SEMANTIC_CONFIG },
+    beforeSteadyCommit: async () => {
+      fixture.events.push("marker:commit");
+      if (injectFailure && fixture.seam === "marker-commit") {
+        throw new Error("injected marker-commit failure");
+      }
+    },
+    deps: {
+      withExclusiveOperation: async (task, timeoutMs) => {
+        fixture.events.push("gate:start");
+        try {
+          return await withExclusiveLadybugOperation(task, timeoutMs);
+        } finally {
+          fixture.events.push("gate:release");
+        }
+      },
+      markSteadyIfCurrent: async (conn, repoId, versionId) => {
+        fixture.events.push("marker:steady");
+        return markEmbeddingLifecycleSteadyIfCurrent(conn, repoId, versionId);
+      },
+      publish: (input) => {
+        fixture.events.push("publication:degraded");
+        return publishRepositorySymbolVectorHealthBatch(input);
+      },
+      commitPreparedSuccessBatch: (prepared) => {
+        fixture.events.push("publication:steady");
+        commitPreparedRepositorySymbolVectorHealthBatch(prepared);
+      },
+    },
+  });
+}
+
+async function installRecoveryQueryObserver(
+  fixture: DurableRecoveryFixture,
+  injectFailure: boolean,
+): Promise<() => void> {
+  let writeConn!: Connection;
+  await withWriteConn(async (conn) => {
+    writeConn = conn;
+  });
+  const originalQuery = writeConn.query.bind(writeConn);
+  const identity = resolveSymbolVectorPhysicalIdentity(
+    fixture.repoId,
+    JINA_MODEL,
+  );
+  let checkpointCount = 0;
+
+  writeConn.query = async function (statement, progressCallback) {
+    const normalized = statement.trim();
+    if (/^CHECKPOINT\s*;?$/iu.test(normalized)) {
+      checkpointCount += 1;
+      fixture.events.push(`checkpoint:${checkpointCount}`);
+      if (
+        injectFailure &&
+        fixture.seam === "checkpoint" &&
+        checkpointCount === 2
+      ) {
+        throw new Error("injected checkpoint failure");
+      }
+    }
+    if (normalized.startsWith(`CREATE NODE TABLE ${identity.tableName}`)) {
+      fixture.events.push("ddl:table-create");
+      if (injectFailure && fixture.seam === "table-create") {
+        throw new Error("injected table-create failure");
+      }
+    }
+    if (
+      normalized.startsWith(
+        `CALL QUERY_VECTOR_INDEX('${identity.tableName}', '${identity.indexName}',`,
+      )
+    ) {
+      fixture.events.push("probe:ann-query");
+      if (injectFailure && fixture.seam === "probe") {
+        throw new Error("injected probe failure");
+      }
+    }
+    return originalQuery(statement, progressCallback);
+  };
+
+  return () => {
+    writeConn.query = originalQuery;
+  };
+}
+
+async function createDurableRecoveryFixture(
+  seam: DurableRecoverySeam,
+  ordinal: number,
+): Promise<DurableRecoveryFixture> {
+  const repoId = `vector-recovery-${ordinal}-${seam}`;
+  const initialCount =
+    seam === "index-create"
+      ? 1_999
+      : seam === "index-drop" || seam === "probe"
+        ? 2_000
+        : 1;
+  const seeded = await seedRecoveryRepository(repoId, initialCount);
+  let attemptSymbols = seeded.symbols;
+  const needsBaseline =
+    seam === "index-create" ||
+    seam === "index-drop" ||
+    seam === "probe" ||
+    seam === "vector-delete" ||
+    seam === "deletion-table-drop" ||
+    seam === "graph-deletion";
+
+  if (needsBaseline) {
+    await refreshReconciliationRepo({
+      repoId,
+      symbols: seeded.symbols,
+    });
+  }
+
+  if (seam === "index-create") {
+    const thresholdSymbol = reconciliationSymbol(repoId, 1_999);
+    await exclusiveWrite((conn) =>
+      ladybugDb.upsertSymbol(conn, thresholdSymbol),
+    );
+    attemptSymbols = [thresholdSymbol];
+  } else if (seam === "index-drop") {
+    attemptSymbols = seeded.symbols
+      .slice(0, 51)
+      .map((_, index) =>
+        reconciliationSymbol(repoId, index, "recovery-index-drop"),
+      );
+    await exclusiveWrite((conn) =>
+      ladybugDb.upsertSymbolBatch(conn, attemptSymbols),
+    );
+  } else if (seam === "probe" || seam === "vector-delete") {
+    const changed = reconciliationSymbol(repoId, 0, `recovery-${seam}`);
+    await exclusiveWrite((conn) => ladybugDb.upsertSymbol(conn, changed));
+    attemptSymbols = [changed];
+  }
+
+  const expectedFinalCount =
+    seam === "index-create" ? 2_000 : initialCount;
+  const overlapSymbolId =
+    attemptSymbols[0]?.symbolId ?? seeded.symbols[0]!.symbolId;
+  const controlRows = await seedRecoveryControlOverlap(overlapSymbolId);
+  const events: string[] = [];
+
+  const fixture: DurableRecoveryFixture = {
+    seam,
+    repoId,
+    versionId: seeded.versionId,
+    expectedFinalCount,
+    controlRows,
+    events,
+    failureState: (() => {
+      if (seam === "table-create") {
+        return {
+          repoPresent: true,
+          tableState: "absent",
+          completeVectorCount: 0,
+          catalog: "none",
+          lifecycleState: "refreshing",
+          mode: "degraded",
+          exactFallbackAllowed: false,
+        };
+      }
+      if (seam === "vector-delete") {
+        return {
+          repoPresent: true,
+          tableState: "present",
+          completeVectorCount: 0,
+          catalog: "none",
+          lifecycleState: "refreshing",
+          mode: "degraded",
+          exactFallbackAllowed: false,
+        };
+      }
+      if (seam === "index-drop") {
+        return {
+          repoPresent: true,
+          tableState: "present",
+          completeVectorCount: 2_000,
+          catalog: "none",
+          lifecycleState: "refreshing",
+          mode: "degraded",
+          exactFallbackAllowed: false,
+        };
+      }
+      if (seam === "deletion-table-drop") {
+        return {
+          repoPresent: true,
+          tableState: "present",
+          completeVectorCount: 1,
+          catalog: "none",
+          lifecycleState: "deleting",
+          mode: "degraded",
+          exactFallbackAllowed: false,
+        };
+      }
+      if (seam === "graph-deletion") {
+        return {
+          repoPresent: true,
+          tableState: "absent",
+          completeVectorCount: 0,
+          catalog: "none",
+          lifecycleState: "deleting",
+          mode: "degraded",
+          exactFallbackAllowed: false,
+        };
+      }
+      return {
+        repoPresent: true,
+        tableState: "present",
+        completeVectorCount: expectedFinalCount,
+        catalog: expectedFinalCount >= 2_000 ? "healthy" : "none",
+        lifecycleState: "refreshing",
+        mode: "degraded",
+        exactFallbackAllowed: false,
+      };
+    })(),
+    async runRefresh(shouldInject) {
+      if (seam === "deletion-table-drop" || seam === "graph-deletion") {
+        throw new Error(`refresh is unavailable for ${seam}`);
+      }
+      const lifecycle = await prepareRecoveryAttempt(fixture, shouldInject);
+      const restoreQuery = await installRecoveryQueryObserver(
+        fixture,
+        shouldInject,
+      );
+      try {
+        await refreshSymbolEmbeddings({
+          repoId,
+          provider: "local",
+          model: JINA_MODEL,
+          symbols: attemptSymbols,
+          embeddingProvider: reconciliationProvider(),
+          batchSize: 32,
+          concurrency: 2,
+          onReconciliationStep: async (step) => {
+            fixture.events.push(recoveryStepEvent(step));
+            if (
+              shouldInject &&
+              REFRESH_FAILURE_STEP[seam] === step
+            ) {
+              throw new Error(`injected ${seam} failure`);
+            }
+          },
+          onFailureInsideGate: async (error) => {
+            fixture.events.push("gate:failure-finalize");
+            await lifecycle.onFailureInsideGate(error);
+          },
+        });
+        await lifecycle.commitSuccess();
+      } catch (error) {
+        if (!lifecycle.failureFinalizationStartedInsideGate()) {
+          await lifecycle.onFailureOutsideGate(error);
+        }
+        throw error;
+      } finally {
+        restoreQuery();
+      }
+    },
+    async runDeletion(shouldInject) {
+      if (seam !== "deletion-table-drop" && seam !== "graph-deletion") {
+        throw new Error(`deletion is unavailable for ${seam}`);
+      }
+      await _teardownRepositoryDatabaseForTesting(
+        repoId,
+        RECOVERY_SEMANTIC_CONFIG,
+        {
+          withExclusiveOperation: async (task) => {
+            fixture.events.push("gate:start");
+            try {
+              return await withExclusiveLadybugOperation(task);
+            } finally {
+              fixture.events.push("gate:release");
+            }
+          },
+          withWriteConnection: withWriteConn,
+          getRepo: ladybugDb.getRepo,
+          getLatestVersion: ladybugDb.getLatestVersion,
+          markDeleting: async (conn, targetRepoId) => {
+            fixture.events.push("marker:deleting");
+            await markEmbeddingLifecycleDeleting(conn, targetRepoId);
+          },
+          invalidateHealth: (
+            targetRepoId,
+            versionId,
+            semanticConfig,
+            lifecycleState,
+          ) =>
+            invalidateRepositorySymbolVectorHealth(
+              targetRepoId,
+              versionId,
+              semanticConfig,
+              lifecycleState,
+            ),
+          inspectTable: async (conn, targetRepoId) => {
+            fixture.events.push("gate:catalog-table");
+            return inspectRepoSymbolVectorTable(conn, targetRepoId);
+          },
+          validateOwnership: async (conn, targetRepoId, model) => {
+            fixture.events.push("gate:ownership");
+            await validateRepoSymbolVectorOwnership(
+              conn,
+              targetRepoId,
+              model,
+            );
+          },
+          showIndexes: async (conn) => {
+            fixture.events.push("gate:catalog-indexes");
+            return showIndexesStrict(conn);
+          },
+          dropIndex: async (conn, tableName, indexName) => {
+            fixture.events.push("ddl:index-drop");
+            return dropVectorIndex(conn, tableName, indexName);
+          },
+          dropTable: async (conn, tableName) => {
+            fixture.events.push("ddl:table-drop");
+            if (shouldInject && seam === "deletion-table-drop") {
+              throw new Error("injected deletion-table-drop failure");
+            }
+            await execDdl(conn, `DROP TABLE ${tableName}`);
+          },
+          resetPreparedCaches: () => {
+            fixture.events.push("ddl:prepared-cache-reset");
+            resetPreparedStatementCaches();
+          },
+          deleteGraph: async (conn, targetRepoId) => {
+            fixture.events.push("dml:graph-delete");
+            if (shouldInject && seam === "graph-deletion") {
+              throw new Error("injected graph-deletion failure");
+            }
+            await ladybugDb.deleteRepo(conn, targetRepoId);
+          },
+          clearHealth: (targetRepoId) => {
+            fixture.events.push("publication:clear");
+            clearRepositorySymbolVectorHealth(targetRepoId);
+            clearRepositorySymbolVectorDiagnostics(targetRepoId);
+          },
+          getDerivedState: getDerivedStateFromConnection,
+          assessHealth: assessRepositorySymbolVectorHealth,
+          publishHealth: (input) => {
+            fixture.events.push("publication:deletion-pending");
+            return publishRepositorySymbolVectorHealthBatch(input);
+          },
+          publishDiagnostic: (diagnostic) => {
+            fixture.events.push("publication:diagnostic");
+            publishRepositorySymbolVectorDiagnostic(diagnostic);
+          },
+        },
+      );
+    },
+  };
+  return fixture;
+}
+
+async function assertRecoveryState(
+  fixture: DurableRecoveryFixture,
+  expected: RecoveryStateExpectation,
+  resetVectorQueryGuard = false,
+): Promise<void> {
+  await reopenRecoveryDatabase(resetVectorQueryGuard);
+  const identity = resolveSymbolVectorPhysicalIdentity(
+    fixture.repoId,
+    JINA_MODEL,
+  );
+  const controlIdentity = resolveSymbolVectorPhysicalIdentity(
+    "vector-recovery-control",
+    JINA_MODEL,
+  );
+
+  await withWriteConn(async (conn) => {
+    assert.strictEqual(
+      Boolean(await ladybugDb.getRepo(conn, fixture.repoId)),
+      expected.repoPresent,
+    );
+    const inspection = await inspectRepoSymbolVectorTable(
+      conn,
+      fixture.repoId,
+    );
+    assert.strictEqual(inspection.tableName, identity.tableName);
+    assert.strictEqual(inspection.state, expected.tableState);
+    assert.strictEqual(
+      await countCompleteRepoSymbolVectors(
+        conn,
+        fixture.repoId,
+        JINA_MODEL,
+      ),
+      expected.completeVectorCount,
+    );
+    await validateRepoSymbolVectorOwnership(
+      conn,
+      fixture.repoId,
+      JINA_MODEL,
+    );
+
+    const indexes = await showIndexesStrict(conn);
+    const relevant = indexes.filter(
+      (index) =>
+        index.name === identity.indexName ||
+        (index.tableName === identity.tableName &&
+          index.property === identity.propertyName),
+    );
+    if (expected.catalog === "healthy") {
+      assert.strictEqual(relevant.length, 1);
+      assert.deepStrictEqual(
+        {
+          name: relevant[0]?.name,
+          tableName: relevant[0]?.tableName,
+          type: relevant[0]?.type,
+          property: relevant[0]?.property,
+          status: relevant[0]?.status,
+          extensionLoaded: relevant[0]?.extensionLoaded,
+        },
+        {
+          name: identity.indexName,
+          tableName: identity.tableName,
+          type: "vector",
+          property: identity.propertyName,
+          status: "healthy",
+          extensionLoaded: true,
+        },
+      );
+    } else {
+      assert.deepStrictEqual(relevant, []);
+    }
+
+    const state = await getDerivedStateFromConnection(conn, fixture.repoId);
+    assert.strictEqual(
+      state?.embeddingLifecycleState ?? null,
+      expected.lifecycleState,
+    );
+    assert.deepStrictEqual(
+      await tableRows(conn, "vector-recovery-control"),
+      fixture.controlRows,
+    );
+    const controlIndexes = indexes.filter(
+      (index) =>
+        index.name === controlIdentity.indexName ||
+        (index.tableName === controlIdentity.tableName &&
+          index.property === controlIdentity.propertyName),
+    );
+    assert.deepStrictEqual(controlIndexes, []);
+  });
+
+  const snapshot = getRepositorySymbolVectorHealthSnapshot(
+    fixture.repoId,
+    JINA_MODEL,
+  );
+  assert.strictEqual(snapshot?.mode ?? null, expected.mode);
+  assert.strictEqual(
+    snapshot?.exactFallbackAllowed ?? null,
+    expected.exactFallbackAllowed,
+  );
+  if (snapshot) {
+    assert.strictEqual(
+      snapshot.lifecycleState,
+      expected.lifecycleState,
+    );
+  }
+}
+
+async function retrieveRecoveryBytes(
+  fixture: DurableRecoveryFixture,
+): Promise<string> {
+  const query = reconciliationVector(`query:${fixture.repoId}`);
+  return withWriteConn(async (conn) => {
+    const retrieve = () =>
+      fixture.expectedFinalCount >= 2_000
+        ? queryRepoSymbolVectorIndex(
+            conn,
+            fixture.repoId,
+            JINA_MODEL,
+            query,
+            10,
+            200,
+          )
+        : rankRepoSymbolVectorsExact(
+            conn,
+            fixture.repoId,
+            JINA_MODEL,
+            query,
+            10,
+          );
+    const first = JSON.stringify(await retrieve());
+    const second = JSON.stringify(await retrieve());
+    assert.strictEqual(second, first);
+    assert.notStrictEqual(first, "[]");
+    return first;
+  });
+}
+
+async function assertRefreshRecovery(
+  fixture: DurableRecoveryFixture,
+): Promise<void> {
+  await assert.rejects(
+    fixture.runRefresh(true),
+    fixture.seam === "checkpoint"
+      ? /post-checkpoint failed/iu
+      : new RegExp(`injected ${fixture.seam} failure`, "iu"),
+  );
+  await assertRecoveryState(
+    fixture,
+    fixture.failureState,
+    fixture.seam === "probe",
+  );
+  assert.ok(fixture.events.includes("publication:degraded"));
+
+  await fixture.runRefresh(false);
+  const steadyState: RecoveryStateExpectation = {
+    repoPresent: true,
+    tableState: "present",
+    completeVectorCount: fixture.expectedFinalCount,
+    catalog: fixture.expectedFinalCount >= 2_000 ? "healthy" : "none",
+    lifecycleState: "steady",
+    mode: fixture.expectedFinalCount >= 2_000 ? "hnsw" : "exact",
+    exactFallbackAllowed: true,
+  };
+  await assertRecoveryState(fixture, steadyState);
+  const firstRetryBytes = await retrieveRecoveryBytes(fixture);
+
+  const secondRetryStart = fixture.events.length;
+  await fixture.runRefresh(false);
+  const secondRetryEvents = fixture.events.slice(secondRetryStart);
+  assert.strictEqual(
+    secondRetryEvents.some(
+      (event) => event.startsWith("dml:") || event.startsWith("ddl:"),
+    ),
+    false,
+    `${fixture.seam} second retry emitted vector DML or DDL`,
+  );
+  await assertRecoveryState(fixture, steadyState);
+  assert.strictEqual(
+    await retrieveRecoveryBytes(fixture),
+    firstRetryBytes,
+  );
+}
+
+async function assertDeletionRecovery(
+  fixture: DurableRecoveryFixture,
+): Promise<void> {
+  await assert.rejects(
+    fixture.runDeletion(true),
+    new RegExp(`injected ${fixture.seam} failure`, "iu"),
+  );
+  await assertRecoveryState(fixture, fixture.failureState);
+
+  await fixture.runDeletion(false);
+  const terminalState: RecoveryStateExpectation = {
+    repoPresent: false,
+    tableState: "absent",
+    completeVectorCount: 0,
+    catalog: "none",
+    lifecycleState: null,
+    mode: null,
+    exactFallbackAllowed: null,
+  };
+  await assertRecoveryState(fixture, terminalState);
+  const secondRetryStart = fixture.events.length;
+  await fixture.runDeletion(false);
+  await assertRecoveryState(fixture, terminalState);
+  assert.strictEqual(
+    fixture.events
+      .slice(secondRetryStart)
+      .some(
+        (event) =>
+          event.startsWith("dml:") ||
+          event.startsWith("ddl:table") ||
+          event.startsWith("ddl:index"),
+      ),
+    false,
+    `${fixture.seam} terminal retry mutated durable storage`,
+  );
 }
 
 
@@ -1490,6 +2417,60 @@ describe(
         rmSync(rootPath, { recursive: true, force: true });
       }
     });
+
+
+    it(
+      "recovers every durable repository-vector failure seam",
+      { timeout: 600_000 },
+      async () => {
+        const allEvents: string[] = [];
+        const refreshSeams: readonly RefreshRecoverySeam[] = [
+          "marker-commit",
+          "table-create",
+          "index-drop",
+          "vector-delete",
+          "vector-merge",
+          "index-create",
+          "probe",
+          "checkpoint",
+        ];
+        for (const [index, seam] of refreshSeams.entries()) {
+          const fixture = await createDurableRecoveryFixture(seam, index);
+          await assertRefreshRecovery(fixture);
+          assertRecoveryEventOrder(fixture);
+          allEvents.push(...fixture.events);
+        }
+
+        const deletionSeams: readonly DeletionRecoverySeam[] = [
+          "deletion-table-drop",
+          "graph-deletion",
+        ];
+        for (const [index, seam] of deletionSeams.entries()) {
+          const fixture = await createDurableRecoveryFixture(
+            seam,
+            refreshSeams.length + index,
+          );
+          await assertDeletionRecovery(fixture);
+          assertRecoveryEventOrder(fixture);
+          allEvents.push(...fixture.events);
+        }
+
+        for (const category of [
+          "marker:",
+          "ddl:",
+          "dml:",
+          "probe:",
+          "checkpoint:",
+          "gate:",
+          "publication:",
+        ]) {
+          assert.ok(
+            allEvents.some((event) => event.startsWith(category)),
+            `recovery matrix did not record ${category}`,
+          );
+        }
+      },
+    );
 
 
 

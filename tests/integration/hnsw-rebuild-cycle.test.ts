@@ -10,7 +10,7 @@ import {
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
-import { exec, execDdl } from "../../dist/db/ladybug-core.js";
+import { exec, execDdl, querySingle } from "../../dist/db/ladybug-core.js";
 import { withPostIndexWriteSession } from "../../dist/db/write-session.js";
 import { runHnswRebuildCycle } from "../../dist/indexer/hnsw-rebuild-cycle.js";
 import {
@@ -369,6 +369,89 @@ describe("HNSW rebuild lifecycle", () => {
         checkpointConn.query = originalQuery;
       }
     }
+  });
+
+  it("persists rebuild state after the post-checkpoint and before admission reopens", async () => {
+    const successEntered = deferred();
+    const releaseSuccess = deferred();
+    const events: string[] = [];
+    let checkpointConn!: import("kuzu").Connection;
+    await withWriteConn(async (conn) => {
+      checkpointConn = conn;
+    });
+    const originalQuery = checkpointConn.query.bind(checkpointConn);
+    let checkpointCount = 0;
+
+    checkpointConn.query = async function (statement, progressCallback) {
+      if (/^CHECKPOINT\s*;?$/i.test(statement.trim())) {
+        checkpointCount += 1;
+        events.push(`checkpoint:${checkpointCount}:start`);
+        const result = await originalQuery(statement, progressCallback);
+        events.push(`checkpoint:${checkpointCount}:end`);
+        return result;
+      }
+      return originalQuery(statement, progressCallback);
+    };
+
+    try {
+      const cycle = runHnswRebuildCycle({
+        preCheckpointPhase: "durable-order-pre",
+        postCheckpointPhase: "durable-order-post",
+        body: async () => {
+          await withWriteConn(async (conn) => {
+            await exec(
+              conn,
+              "MATCH (n:HnswCycleProbe {id: $id}) SET n.value = $value",
+              { id: 1, value: "durable-after-post-checkpoint" },
+            );
+          });
+          events.push("body:write");
+        },
+        onSuccess: async () => {
+          events.push("gate:success");
+          successEntered.resolve();
+          await releaseSuccess.promise;
+        },
+      });
+
+      await successEntered.promise;
+      assert.deepEqual(events, [
+        "checkpoint:1:start",
+        "checkpoint:1:end",
+        "body:write",
+        "checkpoint:2:start",
+        "checkpoint:2:end",
+        "gate:success",
+      ]);
+
+      let competitorCompleted = false;
+      const competitor = withWriteConn(async () => {
+        competitorCompleted = true;
+        events.push("competitor");
+      });
+      await nextTurn();
+      await nextTurn();
+      assert.equal(competitorCompleted, false);
+
+      releaseSuccess.resolve();
+      await Promise.all([cycle, competitor]);
+      assert.equal(checkpointCount, 2);
+      assert.equal(events.at(-1), "competitor");
+    } finally {
+      releaseSuccess.resolve();
+      checkpointConn.query = originalQuery;
+    }
+
+    await closeLadybugDb({ strict: true });
+    await initLadybugDb(dbPath);
+    const reopened = await withWriteConn((conn) =>
+      querySingle<{ value: string }>(
+        conn,
+        "MATCH (n:HnswCycleProbe {id: $id}) RETURN n.value AS value",
+        { id: 1 },
+      ),
+    );
+    assert.equal(reopened?.value, "durable-after-post-checkpoint");
   });
 
 });

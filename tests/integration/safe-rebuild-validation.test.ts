@@ -24,6 +24,7 @@ import {
   closeLadybugDb,
   closeSafeRebuildBeforeReopen,
   initLadybugDb,
+  initValidatedLadybugClone,
   registerDbCloseHook,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
@@ -38,6 +39,7 @@ import {
   querySingle,
 } from "../../dist/db/ladybug-core.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
+import { copyLadybugFamilyForValidatedClone } from "../../dist/db/ladybug-family-files.js";
 import { getEligibleRepoSymbolIds } from "../../dist/db/ladybug-retrieval-health.js";
 import { setRepoSymbolVectorEmbeddingBatch } from "../../dist/db/ladybug-symbol-embeddings.js";
 import { getLadybugLineageMarkerPath } from "../../dist/db/ladybug-lineage.js";
@@ -567,9 +569,12 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
     );
   });
 
-  it("closes a candidate whose reopen initialization opens then fails", async () => {
+  it("validates a byte-verified clone of the retained candidate after reopen failure", async () => {
     const fixture = createFixture();
     const events: string[] = [];
+    const config = loadConfig(fixture.configPath);
+    const candidatePlan = freezeSafeRebuildCandidatePlan(config);
+    const activeFamilyBefore = snapshotDatabaseFamily(fixture.activePath);
     let initCalls = 0;
 
     await assert.rejects(
@@ -579,7 +584,7 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
           force: true,
           safeRebuildPath: fixture.candidatePath,
         },
-        config: loadConfig(fixture.configPath),
+        config,
         configPath: fixture.configPath,
         activeGraphDbPath: fixture.activePath,
         onLifecycleEvent: (event) => events.push(event),
@@ -596,12 +601,43 @@ describe("safe rebuild candidate lifecycle", { concurrency: 1 }, () => {
     assert.equal(initCalls, 2);
     assert.equal(getLadybugDbPath(), null);
     assert.equal(existsSync(fixture.candidatePath), true);
-    assert.equal(readFileSync(fixture.activePath, "utf8"), fixture.sentinel);
     assert.equal(process.env.SDL_GRAPH_DB_PATH, fixture.activePath);
     assert.equal(events.at(-1), "candidate:closed-after-failure");
+    assert.equal(events.includes("candidate:validated"), false);
     assert.equal(
       existsSync(getLadybugLineageMarkerPath(fixture.candidatePath)),
       false,
+    );
+
+    const retainedFamilyBefore = snapshotDatabaseFamily(fixture.candidatePath);
+    const validationClonePath = join(
+      dirname(fixture.candidatePath),
+      "retained-validation-clone.lbug",
+    );
+    const capability = copyLadybugFamilyForValidatedClone(
+      fixture.candidatePath,
+      validationClonePath,
+    );
+    await initValidatedLadybugClone(validationClonePath, capability);
+    const firstValidation = await validateSafeRebuildCandidate(candidatePlan);
+    const firstValidationBytes = JSON.stringify(firstValidation);
+    const secondValidation = await validateSafeRebuildCandidate(candidatePlan);
+    assert.equal(JSON.stringify(secondValidation), firstValidationBytes);
+    await closeLadybugDb({ strict: true });
+
+    assert.deepEqual(
+      snapshotDatabaseFamily(fixture.candidatePath),
+      retainedFamilyBefore,
+      "validated-clone inspection must not mutate the retained candidate",
+    );
+    assert.equal(
+      existsSync(getLadybugLineageMarkerPath(fixture.candidatePath)),
+      false,
+      "validated-clone inspection must not publish the retained candidate",
+    );
+    assert.deepEqual(
+      snapshotDatabaseFamily(fixture.activePath),
+      activeFamilyBefore,
     );
   });
 
