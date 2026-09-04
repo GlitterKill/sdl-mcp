@@ -5,6 +5,9 @@ import type { IndexProgress } from "../indexer/indexer.js";
 
 export const PER_REPO_SYMBOL_VECTOR_TRACE_MARKER =
   "SDL_MCP_PER_REPO_SYMBOL_VECTOR_TRACE_V1\n";
+export const MAX_PER_REPO_SYMBOL_VECTOR_TRACE_BYTES =
+  16 * 1_024 * 1_024;
+export const PER_REPO_SYMBOL_VECTOR_TRACE_TERMINAL_RESERVE_BYTES = 1_024;
 
 interface RepositoryVectorIdentityEvent {
   repoId: string;
@@ -97,14 +100,25 @@ export function openPerRepoSymbolVectorTraceSink(
     return null;
   }
 
-  let position = marker.length;
+  let writtenBytes = marker.length;
   return (event) => {
-    position = writeAllAt(
-      fd,
-      Buffer.from(`${JSON.stringify(event)}\n`, "utf8"),
-      position,
-    );
-    if (event.type === "process-end") fsyncSync(fd);
+    const eventBuffer = Buffer.from(`${JSON.stringify(event)}\n`, "utf8");
+    const terminal = event.type === "process-end";
+    const writeLimit = terminal
+      ? MAX_PER_REPO_SYMBOL_VECTOR_TRACE_BYTES
+      : MAX_PER_REPO_SYMBOL_VECTOR_TRACE_BYTES -
+        PER_REPO_SYMBOL_VECTOR_TRACE_TERMINAL_RESERVE_BYTES;
+    if (
+      (terminal &&
+        eventBuffer.length >
+          PER_REPO_SYMBOL_VECTOR_TRACE_TERMINAL_RESERVE_BYTES) ||
+      writtenBytes + eventBuffer.length > writeLimit
+    ) {
+      throw new Error("Repository vector trace byte limit exceeded");
+    }
+
+    writtenBytes = writeAllAt(fd, eventBuffer, writtenBytes);
+    if (terminal) fsyncSync(fd);
   };
 }
 
@@ -115,13 +129,14 @@ export function emitPerRepoSymbolVectorEvent(
   const state = observer.getStore();
   if (!state) return false;
 
-  state.sequence += 1;
+  const sequence = state.sequence + 1;
   state.sink({
     ...event,
     schemaVersion: 1,
-    sequence: state.sequence,
+    sequence,
     monotonicNs: process.hrtime.bigint().toString(),
   });
+  state.sequence = sequence;
   return true;
 }
 

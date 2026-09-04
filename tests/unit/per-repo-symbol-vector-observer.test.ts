@@ -6,6 +6,7 @@ import {
   openSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,8 +15,10 @@ import test from "node:test";
 
 import {
   emitPerRepoSymbolVectorEvent,
+  MAX_PER_REPO_SYMBOL_VECTOR_TRACE_BYTES,
   openPerRepoSymbolVectorTraceSink,
   PER_REPO_SYMBOL_VECTOR_TRACE_MARKER,
+  PER_REPO_SYMBOL_VECTOR_TRACE_TERMINAL_RESERVE_BYTES,
   withPerRepoSymbolVectorObserver,
   withPerRepoSymbolVectorProcessTrace,
   writeAllAt,
@@ -264,6 +267,149 @@ test("instrumented CLI failure flushes one terminal event before nonzero exit", 
       events[0].type === "process-end" ? events[0].success : null,
       false,
     );
+  } finally {
+    if (traceFd !== null) closeSync(traceFd);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("trace limits reserve enough bytes for the terminal event", () => {
+  assert.equal(
+    MAX_PER_REPO_SYMBOL_VECTOR_TRACE_BYTES,
+    16 * 1_024 * 1_024,
+  );
+  assert.equal(
+    PER_REPO_SYMBOL_VECTOR_TRACE_TERMINAL_RESERVE_BYTES,
+    1_024,
+  );
+
+  const terminal: PerRepoSymbolVectorEvent = {
+    type: "process-end",
+    success: false,
+    maxRssBytes: Number.MAX_SAFE_INTEGER,
+    schemaVersion: 1,
+    sequence: Number.MAX_SAFE_INTEGER,
+    monotonicNs: "9".repeat(32),
+  };
+  assert.ok(
+    Buffer.byteLength(`${JSON.stringify(terminal)}\n`, "utf8") <=
+      PER_REPO_SYMBOL_VECTOR_TRACE_TERMINAL_RESERVE_BYTES,
+  );
+});
+
+test("observer sequence advances only after the sink accepts an event", async () => {
+  const accepted: PerRepoSymbolVectorEvent[] = [];
+
+  await assert.rejects(
+    withPerRepoSymbolVectorProcessTrace(
+      (event) => {
+        if (event.type === "progress") throw new Error("sink rejected event");
+        accepted.push(event);
+      },
+      async () => {
+        emitPerRepoSymbolVectorEvent({
+          type: "progress",
+          repoId: "repo-a",
+          progress: { stage: "scanning", current: 0, total: 1 },
+        });
+      },
+    ),
+    /sink rejected event/u,
+  );
+
+  assert.deepEqual(
+    accepted.map((event) => event.sequence),
+    [1],
+  );
+  assert.equal(accepted[0]?.type, "process-end");
+  assert.equal(
+    accepted[0]?.type === "process-end" ? accepted[0].success : null,
+    false,
+  );
+});
+
+test("trace cap rejects nonterminal overflow and preserves the terminal reserve", () => {
+  const maxTraceBytes = MAX_PER_REPO_SYMBOL_VECTOR_TRACE_BYTES;
+  const terminalReserveBytes =
+    PER_REPO_SYMBOL_VECTOR_TRACE_TERMINAL_RESERVE_BYTES;
+  const dir = mkdtempSync(join(tmpdir(), "sdl-vector-trace-cap-"));
+  const tracePath = join(dir, "trace.jsonl");
+  let traceFd: number | null = null;
+
+  try {
+    writeFileSync(tracePath, PER_REPO_SYMBOL_VECTOR_TRACE_MARKER, "utf8");
+    traceFd = openSync(tracePath, "r+");
+    const sink = openPerRepoSymbolVectorTraceSink(traceFd);
+    assert.ok(sink);
+
+    const boundaryEvent: PerRepoSymbolVectorEvent = {
+      type: "progress",
+      repoId: "repo-a",
+      progress: {
+        stage: "scanning",
+        current: 0,
+        total: 1,
+        message: "",
+      },
+      schemaVersion: 1,
+      sequence: 0,
+      monotonicNs: "0",
+    };
+    const emptyLineBytes = Buffer.byteLength(
+      `${JSON.stringify(boundaryEvent)}\n`,
+      "utf8",
+    );
+    const markerBytes = Buffer.byteLength(
+      PER_REPO_SYMBOL_VECTOR_TRACE_MARKER,
+      "utf8",
+    );
+    const fillerBytes =
+      maxTraceBytes -
+      terminalReserveBytes -
+      markerBytes -
+      emptyLineBytes;
+    assert.ok(fillerBytes > 0);
+    if (boundaryEvent.type === "progress") {
+      boundaryEvent.progress.message = "x".repeat(fillerBytes);
+    }
+    assert.equal(
+      markerBytes +
+        Buffer.byteLength(`${JSON.stringify(boundaryEvent)}\n`, "utf8"),
+      maxTraceBytes - terminalReserveBytes,
+    );
+
+    sink(boundaryEvent);
+    assert.equal(
+      statSync(tracePath).size,
+      maxTraceBytes - terminalReserveBytes,
+    );
+    assert.throws(
+      () =>
+        sink({
+          type: "progress",
+          repoId: "repo-a",
+          progress: { stage: "scanning", current: 1, total: 1 },
+          schemaVersion: 1,
+          sequence: 1,
+          monotonicNs: "1",
+        }),
+      /trace byte limit exceeded/u,
+    );
+    assert.equal(
+      statSync(tracePath).size,
+      maxTraceBytes - terminalReserveBytes,
+    );
+
+    sink({
+      type: "process-end",
+      success: false,
+      maxRssBytes: 4_096,
+      schemaVersion: 1,
+      sequence: 1,
+      monotonicNs: "1",
+    });
+    assert.ok(statSync(tracePath).size > maxTraceBytes - terminalReserveBytes);
+    assert.ok(statSync(tracePath).size <= maxTraceBytes);
   } finally {
     if (traceFd !== null) closeSync(traceFd);
     rmSync(dir, { recursive: true, force: true });
