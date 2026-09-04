@@ -305,9 +305,16 @@ describe("query helpers", () => {
   });
 
   it("reports false when draining a stuck connection mutex times out", async () => {
+    let releaseNative!: () => void;
+    const nativeGate = new Promise<void>((resolve) => {
+      releaseNative = resolve;
+    });
     const conn = {
       prepare: async (_statement: string) => "prepared",
-      execute: async () => new Promise(() => {}),
+      execute: async () => {
+        await nativeGate;
+        return makeQueryResult([]).result;
+      },
     };
 
     const pending = queryAll(
@@ -315,16 +322,21 @@ describe("query helpers", () => {
       "RETURN 1",
     ).catch(() => undefined);
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const drained = await drainConnMutex(
-      conn as unknown as import("kuzu").Connection,
-      5,
-      new Error("shutdown"),
-    );
+      const drained = await drainConnMutex(
+        conn as unknown as import("kuzu").Connection,
+        5,
+        new Error("shutdown"),
+      );
 
-    assert.equal(drained, false);
-    void pending;
+      assert.equal(drained, false);
+    } finally {
+      // Settle native work so its shared admission cannot leak into later tests.
+      releaseNative();
+      await pending;
+    }
   });
 
   it("queryAll/querySingle return rows and close the QueryResult", async () => {
