@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Provider-first semantic readiness**: Preserve repository vector-health lifecycle state through result-cache invalidation so completed embedding refreshes can publish ready status.
+
 - **Workflow projection errors**: Preserve typed projection-boundary failures and route low-budget object results through their continuation instead of emitting incomplete child payloads that fail the strict internal `sdl.workflow` output validator.
 
 - **Public tool output contracts**: Redact runtime output paths before inline or persisted exposure, retain slice payloads beside handles, omit volatile slice lease expiries unless diagnostics are requested, keep typed workflow errors accurate, and accept the documented `info` workflow function.

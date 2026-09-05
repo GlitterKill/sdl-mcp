@@ -48,6 +48,11 @@ import {
   setCachedSlice,
 } from "../../dist/graph/sliceCache.js";
 import { indexRepo as runIndexRepo } from "../../dist/indexer/indexer.js";
+import {
+  getEmbeddingProvider,
+  type EmbeddingProvider,
+} from "../../dist/indexer/embeddings.js";
+import { queryRepoSymbolVectorIndex } from "../../dist/retrieval/orchestrator.js";
 import { processWatchedFileChange } from "../../dist/indexer/watcher.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
 import {
@@ -848,6 +853,72 @@ describe("provider-first indexRepo fallback", () => {
         /symbolEmbeddings|semanticEmbeddings|reconcil|hnsw/i.test(phase),
       ),
       [],
+    );
+  });
+
+  it("preserves queryable semantic health after provider-first finalization", async (t) => {
+    const model = "jina-embeddings-v2-base-code";
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      semanticEnabled: true,
+      semanticProvider: "api",
+      semanticRetrieval: true,
+      symbolEmbeddingModels: [model],
+      fileSummaryEmbeddingModels: [],
+      generateSummaries: false,
+    });
+    clearRepositorySymbolVectorHealth(repoId);
+    t.after(() => clearRepositorySymbolVectorHealth(repoId));
+
+    // Replace only inference; indexRepo owns real vector persistence and health publication.
+    const vector = new Array<number>(768).fill(0);
+    vector[0] = 1;
+    const provider = Object.getPrototypeOf(getEmbeddingProvider("api")) as EmbeddingProvider;
+    t.mock.method(provider, "embed", async (texts: string[]) =>
+      texts.map(() => [...vector]),
+    );
+    t.mock.method(provider, "getDimension", () => vector.length);
+    t.mock.method(provider, "isMockFallback", () => false);
+
+    const result = await indexRepo(repoId, "full");
+    assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
+    assert.equal(result.providerFirstExecution?.status, "executed");
+
+    const conn = await getLadybugConn();
+    const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/index.ts");
+    assert.ok(file);
+    const symbol = (await ladybugDb.getSymbolsByFile(conn, file.fileId))
+      .find((row) => row.name === "main");
+    assert.ok(symbol);
+    const persisted = await getRepoSymbolVectorEmbedding(conn, repoId, symbol.symbolId, model);
+    assert.ok(persisted, "indexRepo must persist the configured model's vector");
+
+    const state = await getDerivedState(repoId);
+    const snapshot = getRepositorySymbolVectorHealthSnapshots(repoId)?.get(model);
+    assert.deepEqual(
+      {
+        semanticDeferred: result.semanticDeferred === true,
+        embeddingsDirty: state?.embeddingsDirty,
+        lifecycleState: state?.embeddingLifecycleState,
+        healthMode: snapshot?.mode,
+        healthLifecycleState: snapshot?.lifecycleState,
+      },
+      {
+        semanticDeferred: false,
+        embeddingsDirty: false,
+        lifecycleState: "steady",
+        healthMode: "exact",
+        healthLifecycleState: "steady",
+      },
+    );
+    assert.equal(state?.targetVersionId, result.versionId);
+    assert.equal(snapshot?.versionId, result.versionId);
+    assert.ok(snapshot && snapshot.completeVectorCount > 0);
+    assert.equal(snapshot.completeVectorCount, snapshot.eligibleSymbolCount);
+    const rows = await queryRepoSymbolVectorIndex(conn, repoId, model, vector, 10, 64);
+    assert.ok(
+      rows.some((row) => row.symbolId === symbol.symbolId),
+      "finalization must retain the cached health required to query persisted vectors",
     );
   });
 

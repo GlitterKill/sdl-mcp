@@ -79,7 +79,6 @@ import { clearFingerprintCollisionLog } from "./fingerprints.js";
 import {
   hasRepositorySymbolVectorHealth,
   invalidateRepositorySymbolVectorHealth,
-  invalidateSymbolRetrievalCoverageCache,
 } from "../retrieval/health.js";
 import { withExclusiveLadybugOperation } from "../db/ladybug-operation-gate.js";
 import { inspectRepoSymbolVectorTable } from "../db/ladybug-symbol-embeddings.js";
@@ -721,7 +720,7 @@ function invalidateIndexResultCaches(repoId: string): void {
   clearOverviewCache();
   clearSliceCache();
   clearFingerprintCollisionLog();
-  invalidateSymbolRetrievalCoverageCache(repoId);
+  // Symbol vector health belongs to the pre-write and semantic-finalization lifecycle.
 }
 
 function skippedDerivedStateResult(reason: string): {

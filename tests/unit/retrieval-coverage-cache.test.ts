@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { Connection } from "kuzu";
 
@@ -183,25 +181,5 @@ describe("retrieval Symbol coverage cache", () => {
     await check("repo-a");
     await check("repo-a");
     assert.equal(symbolCalls.length, beforeRetry + 2);
-  });
-
-  it("invalidates Symbol coverage through the shared index-result hook", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src/indexer/indexer.ts"),
-      "utf8",
-    );
-    assert.match(
-      source,
-      /import\s*\{\s*invalidateSymbolRetrievalCoverageCache\s*\}\s*from\s*"\.\.\/retrieval\/health\.js";/,
-    );
-
-    const start = source.indexOf("function invalidateIndexResultCaches(");
-    const end = source.indexOf("\n}", start);
-    assert.notEqual(start, -1);
-    assert.notEqual(end, -1);
-    assert.match(
-      source.slice(start, end),
-      /invalidateSymbolRetrievalCoverageCache\(repoId\)/,
-    );
   });
 });
