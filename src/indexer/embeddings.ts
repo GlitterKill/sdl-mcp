@@ -7,6 +7,7 @@ import {
   withWriteConn,
 } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { withExclusiveLadybugOperation } from "../db/ladybug-operation-gate.js";
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 import {
@@ -603,6 +604,82 @@ export async function refreshSymbolEmbeddings(params: {
     batches.push(uncachedItems.slice(index, index + batchSize));
   }
 
+  const identity = resolveSymbolVectorPhysicalIdentity(
+    params.repoId,
+    modelName,
+    params.semanticConfig,
+  );
+  let embedded = 0;
+  let inferenceFailed = false;
+  const batchErrors: unknown[] = [];
+  let streamFreshTable: boolean | undefined =
+    existingEmbeddings.size > 0 || maxConcurrency === 1 || batches.length < 2
+      ? false
+      : undefined;
+
+  // Only a fresh physical table can stream. Each batch releases admission
+  // before waiting for more inference; existing-table replacements stay buffered.
+  const persistFreshBatch = async (
+    items: SymbolVectorEmbeddingBatchItem[],
+  ): Promise<boolean> => {
+    if (streamFreshTable === false || inferenceFailed) return false;
+    return withExclusiveLadybugOperation(async () => {
+      try {
+        return await withWriteConn(async (writeConn) => {
+          if (streamFreshTable === false || inferenceFailed) return false;
+          if (streamFreshTable === undefined) {
+            streamFreshTable =
+              (await inspectRepoSymbolVectorTable(writeConn, params.repoId))
+                .state === "absent";
+            if (!streamFreshTable) return false;
+          }
+          const indexes = await showIndexesStrict(writeConn);
+          if (
+            indexes.some(
+              (index) =>
+                index.tableName === identity.tableName ||
+                index.name === identity.indexName,
+            )
+          ) {
+            // Another model may finish while this one is inferring. Buffer the
+            // remainder rather than streaming into a table with a live index.
+            streamFreshTable = false;
+            return false;
+          }
+          if (embedded === 0) {
+            await params.onReconciliationStep?.("catalog-classified");
+            await params.onReconciliationStep?.("before-vector-mutation");
+          }
+          await setRepoSymbolVectorEmbeddingBatch(
+            writeConn,
+            params.repoId,
+            modelName,
+            items,
+            {
+              onOperation: (step) =>
+                embedded === 0 && step === "after-vector-delete"
+                  ? params.onReconciliationStep?.(step)
+                  : undefined,
+            },
+          );
+          embedded += items.length;
+          return true;
+        }, params.postIndexSessionTimeoutMs);
+      } catch (error) {
+        inferenceFailed = true;
+        try {
+          await params.onFailureInsideGate?.(error);
+        } catch (finalizationError) {
+          throw new AggregateError(
+            [error, finalizationError],
+            "Symbol vector bootstrap and failure finalization both failed",
+          );
+        }
+        throw error;
+      }
+    }, params.postIndexSessionTimeoutMs);
+  };
+
   const replacementItems: SymbolVectorEmbeddingBatchItem[] = [];
   recordMemorySnapshot("beforeInference");
   try {
@@ -612,51 +689,65 @@ export async function refreshSymbolEmbeddings(params: {
       chunkStart += maxConcurrency
     ) {
       const chunk = batches.slice(chunkStart, chunkStart + maxConcurrency);
-      const chunkItems = await Promise.all(
+      const chunkItems = await Promise.allSettled(
         chunk.map(async (batch) => {
-          let vectors: number[][];
           try {
-            vectors = await measure("inference", () =>
-              provider.embed(batch.map((item) => item.prefixedText)),
-            );
-          } catch (error) {
-            recordEmbeddingFailure();
-            throw new IndexError(
-              `Symbol embedding provider failed: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
-          if (provider.isMockFallback?.()) {
-            throw new IndexError(
-              "Symbol embedding provider degraded to mock during refresh",
-            );
-          }
-          if (vectors.length !== batch.length) {
-            recordEmbeddingFailure();
-            throw new IndexError(
-              `Symbol embedding provider returned ${vectors.length} vectors for ${batch.length} inputs`,
-            );
-          }
-          return batch.map((item, index) => {
-            const vectorArray = vectors[index];
-            if (vectorArray.length !== modelInfo.dimension) {
+            let vectors: number[][];
+            try {
+              vectors = await measure("inference", () =>
+                provider.embed(batch.map((item) => item.prefixedText)),
+              );
+            } catch (error) {
+              recordEmbeddingFailure();
               throw new IndexError(
-                `Symbol embedding dimension ${vectorArray.length} does not match ${modelInfo.dimension} for ${modelName}`,
+                `Symbol embedding provider failed: ${error instanceof Error ? error.message : String(error)}`,
               );
             }
-            return {
-              symbolId: item.symbol.symbolId,
-              vector: toFloat16Blob(vectorArray),
-              cardHash: item.cardHash,
-              vectorArray,
-            };
-          });
+            if (provider.isMockFallback?.()) {
+              throw new IndexError(
+                "Symbol embedding provider degraded to mock during refresh",
+              );
+            }
+            if (vectors.length !== batch.length) {
+              recordEmbeddingFailure();
+              throw new IndexError(
+                `Symbol embedding provider returned ${vectors.length} vectors for ${batch.length} inputs`,
+              );
+            }
+            const items = batch.map((item, index) => {
+              const vectorArray = vectors[index];
+              if (vectorArray.length !== modelInfo.dimension) {
+                throw new IndexError(
+                  `Symbol embedding dimension ${vectorArray.length} does not match ${modelInfo.dimension} for ${modelName}`,
+                );
+              }
+              return {
+                symbolId: item.symbol.symbolId,
+                vector: toFloat16Blob(vectorArray),
+                cardHash: item.cardHash,
+                vectorArray,
+              };
+            });
+            return (await persistFreshBatch(items)) ? [] : items;
+          } catch (error) {
+            inferenceFailed = true;
+            if (batchErrors.length === 0) batchErrors.push(error);
+            throw error;
+          }
         }),
       );
-      for (const items of chunkItems) replacementItems.push(...items);
+      // Every started inference/write settles before failure escapes. In
+      // particular, a delayed sibling must not write after refresh rejects.
+      if (batchErrors.length > 0) throw batchErrors[0];
+      for (const outcome of chunkItems) {
+        if (outcome.status === "fulfilled") {
+          replacementItems.push(...outcome.value);
+        }
+      }
       params.onProgress?.({
         stage: "embeddings",
         current: Math.min(
-          skipped + replacementItems.length,
+          skipped + embedded + replacementItems.length,
           symbols.length,
         ),
         total: symbols.length,
@@ -667,12 +758,6 @@ export async function refreshSymbolEmbeddings(params: {
     recordMemorySnapshot("afterInference");
   }
 
-  const identity = resolveSymbolVectorPhysicalIdentity(
-    params.repoId,
-    modelName,
-    params.semanticConfig,
-  );
-  let embedded = 0;
   let completeCount = 0;
 
   await runHnswRebuildCycle({
@@ -719,7 +804,9 @@ export async function refreshSymbolEmbeddings(params: {
           params.repoId,
           modelName,
         );
-        await params.onReconciliationStep?.("catalog-classified");
+        if (embedded === 0) {
+          await params.onReconciliationStep?.("catalog-classified");
+        }
 
         const preCount = await countCompleteRepoSymbolVectors(
           writeConn,
@@ -757,7 +844,9 @@ export async function refreshSymbolEmbeddings(params: {
         });
         let expectedIndexPresent = expectedIndex !== undefined;
 
-        await params.onReconciliationStep?.("before-vector-mutation");
+        if (embedded === 0) {
+          await params.onReconciliationStep?.("before-vector-mutation");
+        }
         if (plan.dropExpectedBeforeMutation) {
           await dropExpectedRepositoryVectorIndex(
             writeConn,
@@ -784,11 +873,16 @@ export async function refreshSymbolEmbeddings(params: {
             replacementItems,
             {
               liveHnsw: plan.retainExpectedIndex,
-              onOperation: params.onReconciliationStep,
+              onOperation: (step) =>
+                embedded > 0 && step === "after-vector-delete"
+                  ? undefined
+                  : params.onReconciliationStep?.(step),
             },
           );
+        } else if (embedded > 0) {
+          await params.onReconciliationStep?.("after-vector-merge");
         }
-        embedded = replacementItems.length;
+        embedded += replacementItems.length;
         await params.onReconciliationStep?.("after-vector-mutation");
 
         const postCount = await countCompleteRepoSymbolVectors(

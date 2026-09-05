@@ -536,14 +536,15 @@ The `cardHash` is computed from: `name | kind | signature | astFingerprint | pro
 
 #### Embedding Refresh Batching
 
-Embeddings are refreshed in batches of 32 symbols per inference call:
+Embeddings are refreshed in configurable batches of 1–128 symbols per inference call:
 
 1. **Pre-filter**: Skip symbols with valid cached embeddings (matching `cardHash`)
-2. **Batch embed**: Single `provider.embed()` call per batch
-3. **Post-recheck**: Avoid redundant writes from concurrent indexing
-4. **Skip on degradation**: If provider falls back to mock mid-refresh, skip the batch
+2. **Batch embed**: Run one `provider.embed()` call per batch
+3. **Fresh-table streaming**: On first ingestion into a repository with no physical Symbol vector table, validated batches can be stored while other batches are still inferred. Each write is serialized, and inference runs outside that write window.
+4. **Final reconciliation**: Populated-table, replacement, and live-HNSW paths retain batches for final reconciliation. If an index appears during fresh-table ingestion, the remaining batches follow that same path.
+5. **Skip on degradation**: If the provider falls back to mock mid-refresh, the refresh fails without storing mock vectors.
 
-This batching reduces ONNX inference overhead and speeds up re-indexing of large repositories.
+All models remain refreshing and degraded until the existing final coverage, ownership, probe, checkpoint, and readiness validation succeeds.
 
 ### Embedding Storage
 

@@ -23,7 +23,11 @@ import {
   queryStoredProcAll,
   resetPreparedStatementCaches,
 } from "../../dist/db/ladybug-core.js";
-import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
+import {
+  hasCurrentExclusiveLadybugOperation,
+  withExclusiveLadybugOperation,
+  withSharedLadybugOperation,
+} from "../../dist/db/ladybug-operation-gate.js";
 import { createSchema } from "../../dist/db/ladybug-schema.js";
 import { withWindowsFtsRuntime } from "../../dist/db/ladybug-windows-fts-runtime.js";
 import {
@@ -1954,6 +1958,245 @@ describe(
       },
     );
 
+
+    it("finalizes a fresh streamed write failure before shared admission reopens", { timeout: 30_000 }, async () => {
+      const repoId = "vector-stream-write-failure";
+      const { symbols, versionId } = await seedRecoveryRepository(repoId, 2);
+      const semanticConfig = {
+        ...RECOVERY_SEMANTIC_CONFIG,
+        symbolEmbeddingModels: [JINA_MODEL, NOMIC_MODEL],
+      };
+      await exclusiveWrite(async (conn) => {
+        assert.strictEqual(await markEmbeddingLifecycleRefreshingForTarget(
+          conn, repoId, versionId, versionId,
+        ), true);
+      });
+      invalidateRepositorySymbolVectorHealth(repoId, versionId, semanticConfig, "refreshing");
+      const lifecycle = createRepositorySemanticLifecycle({
+        repoId, versionId, appConfig: { semantic: semanticConfig },
+      });
+      const writeStarted = Promise.withResolvers<void>();
+      const releaseFailure = Promise.withResolvers<void>();
+      let finalized = false;
+      let readerEntered = false;
+      const completion = assert.rejects(refreshSymbolEmbeddings({
+        repoId, provider: "local", model: JINA_MODEL, symbols,
+        embeddingProvider: reconciliationProvider(), batchSize: 1, concurrency: 2,
+        onReconciliationStep: async (step) => {
+          if (step !== "after-vector-delete") return;
+          writeStarted.resolve();
+          await releaseFailure.promise;
+          throw new Error("injected streamed write failure");
+        },
+        onFailureInsideGate: async (error) => {
+          await lifecycle.onFailureInsideGate(error);
+          finalized = true;
+        },
+      }), /injected streamed write failure/);
+      await writeStarted.promise;
+      const reader = withSharedLadybugOperation(async () => {
+        readerEntered = true;
+        assert.strictEqual(finalized, true);
+        const conn = getReadPool()[0];
+        assert.strictEqual(await countCompleteRepoSymbolVectors(conn, repoId, JINA_MODEL), 0);
+        const state = await getDerivedStateFromConnection(conn, repoId);
+        assert.strictEqual(state?.embeddingLifecycleState, "refreshing");
+        assert.strictEqual(state?.embeddingsDirty, true);
+        for (const model of semanticConfig.symbolEmbeddingModels) {
+          const snapshot = getRepositorySymbolVectorHealthSnapshot(repoId, model);
+          assert.strictEqual(snapshot?.mode, "degraded");
+          assert.strictEqual(snapshot?.exactFallbackAllowed, false);
+        }
+      });
+      try {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.strictEqual(readerEntered, false);
+      } finally {
+        releaseFailure.resolve();
+        await Promise.all([completion, reader]);
+      }
+    });
+
+    for (const failInference of [false, true]) {
+      it(
+        `streams fresh vectors while sibling inference is pending${failInference ? " and drains provider failure" : ""}`,
+        { timeout: 30_000 },
+        async () => {
+          const repoId = `vector-stream-${failInference ? "failure" : "success"}`;
+          const { symbols, versionId } = await seedRecoveryRepository(
+            repoId,
+            failInference ? 3 : 2,
+          );
+          const semanticConfig = {
+            ...RECOVERY_SEMANTIC_CONFIG,
+            symbolEmbeddingModels: failInference
+              ? [JINA_MODEL, NOMIC_MODEL]
+              : [JINA_MODEL],
+          };
+          await exclusiveWrite(async (conn) => {
+            assert.strictEqual(
+              await markEmbeddingLifecycleRefreshingForTarget(
+                conn,
+                repoId,
+                versionId,
+                versionId,
+              ),
+              true,
+            );
+          });
+          invalidateRepositorySymbolVectorHealth(
+            repoId,
+            versionId,
+            semanticConfig,
+            "refreshing",
+          );
+          const lifecycle = createRepositorySemanticLifecycle({
+            repoId,
+            versionId,
+            appConfig: { semantic: semanticConfig },
+          });
+          const firstWrite = Promise.withResolvers<void>();
+          const releaseSecond = Promise.withResolvers<void>();
+          const releaseThird = Promise.withResolvers<void>();
+          const providerFailed = Promise.withResolvers<void>();
+          const operations: string[] = [];
+          let calls = 0;
+          let settled = false;
+          const refresh = refreshSymbolEmbeddings({
+            repoId,
+            provider: "local",
+            model: JINA_MODEL,
+            symbols,
+            batchSize: 1,
+            concurrency: symbols.length,
+            embeddingProvider: {
+              ...reconciliationProvider(),
+              async embed(texts) {
+                assert.strictEqual(hasCurrentExclusiveLadybugOperation(), false);
+                const call = ++calls;
+                if (call === 2) {
+                  await releaseSecond.promise;
+                  if (failInference) throw new Error("later sibling failure");
+                }
+                if (call === 3) {
+                  await releaseThird.promise;
+                  providerFailed.resolve();
+                  throw new Error("injected streaming provider failure");
+                }
+                return texts.map(reconciliationVector);
+              },
+            },
+            onReconciliationStep: (step) => {
+              operations.push(step);
+              if (step === "after-vector-delete") firstWrite.resolve();
+            },
+            onFailureInsideGate: lifecycle.onFailureInsideGate,
+          })
+            .catch(async (error) => {
+              await lifecycle.onFailureOutsideGate(error);
+              throw error;
+            })
+            .finally(() => {
+              settled = true;
+            });
+          // Attach the rejection assertion immediately; delayed inference must never
+          // turn a native write or provider failure into an unhandled rejection.
+          const completion = failInference
+            ? assert.rejects(refresh, {
+                message: "Symbol embedding provider failed: injected streaming provider failure",
+              })
+            : refresh;
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const overlapped = await Promise.race([
+              firstWrite.promise.then(() => true),
+              new Promise<boolean>((resolve) => {
+                timeout = setTimeout(() => resolve(false), 5_000);
+              }),
+            ]);
+            assert.strictEqual(
+              overlapped,
+              true,
+              "first vector write must precede final inference settlement",
+            );
+            // This is a separately admitted reader, started outside the write's
+            // async context. It can enter while the second inference is held.
+            await withSharedLadybugOperation(async () => {
+              const conn = getReadPool()[0];
+              assert.strictEqual(
+                await countCompleteRepoSymbolVectors(conn, repoId, JINA_MODEL),
+                1,
+              );
+              const state = await getDerivedStateFromConnection(conn, repoId);
+              assert.strictEqual(state?.embeddingLifecycleState, "refreshing");
+              assert.strictEqual(state?.embeddingsDirty, true);
+              for (const model of semanticConfig.symbolEmbeddingModels) {
+                const snapshot = getRepositorySymbolVectorHealthSnapshot(
+                  repoId,
+                  model,
+                );
+                assert.strictEqual(snapshot?.mode, "degraded");
+                assert.strictEqual(snapshot?.exactFallbackAllowed, false);
+              }
+            });
+            assert.strictEqual(settled, false);
+            if (failInference) {
+              // The later input fails first. The earlier held input then fails
+              // during drain, and must not replace the initiating error.
+              releaseThird.resolve();
+              await providerFailed.promise;
+              await new Promise<void>((resolve) => setImmediate(resolve));
+              assert.strictEqual(
+                settled,
+                false,
+                "refresh must drain the remaining inference before rejecting",
+              );
+            } else {
+              releaseSecond.resolve();
+            }
+          } finally {
+            clearTimeout(timeout);
+            releaseSecond.resolve();
+            releaseThird.resolve();
+            await completion;
+          }
+          await withSharedLadybugOperation(async () => {
+            const conn = getReadPool()[0];
+            assert.strictEqual(
+              await countCompleteRepoSymbolVectors(conn, repoId, JINA_MODEL),
+              failInference ? 1 : 2,
+            );
+            assert.strictEqual(
+              (await getDerivedStateFromConnection(conn, repoId))
+                ?.embeddingLifecycleState,
+              "refreshing",
+            );
+          });
+          assert.deepStrictEqual(
+            reconciliationMutationOperations(operations),
+            failInference
+              ? ["after-vector-delete"]
+              : ["after-vector-delete", "after-vector-merge"],
+          );
+          if (failInference) {
+            for (const model of semanticConfig.symbolEmbeddingModels) {
+              const snapshot = getRepositorySymbolVectorHealthSnapshot(
+                repoId,
+                model,
+              );
+              assert.strictEqual(snapshot?.mode, "degraded");
+              assert.strictEqual(snapshot?.exactFallbackAllowed, false);
+            }
+          } else {
+            await lifecycle.commitSuccess();
+            assert.strictEqual(
+              getRepositorySymbolVectorHealthSnapshot(repoId, JINA_MODEL)?.mode,
+              "exact",
+            );
+          }
+        },
+      );
+    }
 
     it("executes durable count thresholds, zero-change, and up/down reconciliation", async () => {
       const repoId = "vector-execution-reconciliation";
