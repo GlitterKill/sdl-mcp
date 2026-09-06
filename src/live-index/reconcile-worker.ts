@@ -1,4 +1,5 @@
 import { lstat } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as db from "../db/ladybug-queries.js";
 import { loadConfig } from "../config/loadConfig.js";
@@ -17,6 +18,7 @@ import { hashContent, hashValue } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import type { DependencyFrontier } from "./dependency-frontier.js";
+import { readReconcileRecovery, writeReconcileRecovery } from "./reconcile-recovery.js";
 import { captureReconcileDependencyInputs } from "./reconcile-planner.js";
 import {
   ReconcileQueue,
@@ -37,7 +39,9 @@ export interface ReconcileWorkerDependencies {
 }
 
 export class ReconcileWorker {
+  private recoveryPath: string | undefined;
   private pendingDrain: Promise<void> | null = null;
+  private readonly shutdownController = new AbortController();
   private readonly queuedEpochs = new Map<string, number>();
   private readonly prepareFiles: typeof prepareReconcileFiles;
   private readonly publish: typeof publishReconcile;
@@ -93,16 +97,48 @@ export class ReconcileWorker {
   }
 
   private ensureDraining(): void {
-    if (this.pendingDrain) return;
+    if (this.shutdownController.signal.aborted || this.pendingDrain) return;
     this.pendingDrain = this.drain().finally(() => {
       this.pendingDrain = null;
       if (this.queue.peekNext(this.canRun)) this.ensureDraining();
     });
   }
 
+  /** Stop claims immediately; cancellation still waits for the provider to settle. */
+  beginShutdown(): void {
+    this.shutdownController.abort();
+  }
+
   /** Lifecycle callers drain actual provider/native settlement, never a timer race. */
   async waitForIdle(): Promise<void> {
     while (this.pendingDrain) await this.pendingDrain;
+  }
+
+  async recoverPending(graphDbPath: string, isWriteReady?: () => boolean): Promise<string[]> {
+    const path = join(dirname(graphDbPath), ".sdl-reconcile-" + basename(graphDbPath) + ".json");
+    const state = await readReconcileRecovery(path);
+    this.recoveryPath = path;
+    // Keep the checkpoint until the next settled shutdown. A second interruption
+    // must not lose inventory force or paths already handed back to the worker.
+    for (const repo of state.repos) {
+      if (isWriteReady) this.setReadiness(repo.repoId, isWriteReady);
+      this.enqueue(repo.repoId, {
+        touchedSymbolIds: repo.touchedSymbolIds,
+        dependentSymbolIds: [],
+        dependentFilePaths: repo.filePaths,
+        importedFilePaths: [],
+        invalidations: repo.invalidations,
+      }, undefined, Object.fromEntries(
+        repo.filePaths.map((path) => [path, { kind: "disk-change" as const }]),
+      ));
+      if (repo.inventoryNeeded) this.requestInventory(repo.repoId, repo.inventoryForce);
+    }
+    return state.repos.map((repo) => repo.repoId);
+  }
+
+  async persistPending(): Promise<void> {
+    if (this.recoveryPath)
+      await writeReconcileRecovery(this.recoveryPath, this.queue.snapshotPending());
   }
 
   clearRepo(repoId: string): void {
@@ -112,6 +148,7 @@ export class ReconcileWorker {
   }
 
   private async inventory(claim: ReconcileClaim, epoch: number): Promise<void> {
+    this.shutdownController.signal.throwIfAborted();
     const sourceGeneration = this.queue.getSourceGeneration(claim.repoId);
     const conn = await getLadybugConn();
     const repo = await db.getRepo(conn, claim.repoId);
@@ -129,6 +166,7 @@ export class ReconcileWorker {
     const latest = await db.getRepo(conn, claim.repoId);
     await this.queue.withPublicationFence(claim.repoId, async () => {
       if (
+        this.shutdownController.signal.aborted ||
         !this.queue.isCurrent(claim) ||
         this.queue.getSourceGeneration(claim.repoId) !== sourceGeneration ||
         captureActiveRepoEpoch(claim.repoId) !== epoch ||
@@ -178,6 +216,7 @@ export class ReconcileWorker {
   }
 
   private async reconcile(claim: ReconcileClaim, epoch: number): Promise<void> {
+    this.shutdownController.signal.throwIfAborted();
     const sourceGeneration = this.queue.getSourceGeneration(claim.repoId);
     const conn = await getLadybugConn();
     const repo = await db.getRepo(conn, claim.repoId);
@@ -187,6 +226,7 @@ export class ReconcileWorker {
     const configurationHash = hashValue({ appConfig, repoConfig });
     const current = () => {
       if (
+        this.shutdownController.signal.aborted ||
         !this.queue.isCurrent(claim) ||
         this.queue.getSourceGeneration(claim.repoId) !== sourceGeneration ||
         captureActiveRepoEpoch(claim.repoId) !== epoch
@@ -289,6 +329,7 @@ export class ReconcileWorker {
             files,
             dependencyInputs,
             assertCurrent,
+            signal: this.shutdownController.signal,
           })
         : undefined;
       // Successful providers can still finish after a newer accepted save.
@@ -349,7 +390,7 @@ export class ReconcileWorker {
   }
 
   private async drain(): Promise<void> {
-    for (;;) {
+    while (!this.shutdownController.signal.aborted) {
       // ponytail: one file bounds replacement; batch if provider startup dominates backlog latency.
       const claim = this.queue.claimNext(1, this.canRun);
       if (!claim) return;
@@ -378,7 +419,8 @@ export class ReconcileWorker {
           { expectedEpoch: epoch },
         );
       } catch (error) {
-        if ((error as { code?: string }).code === "NOT_FOUND")
+        if (this.shutdownController.signal.aborted) this.queue.retry(claim);
+        else if ((error as { code?: string }).code === "NOT_FOUND")
           this.clearRepo(claim.repoId);
         else {
           const message =

@@ -90,3 +90,74 @@ it("captures a binary project input with the same raw SHA256 used by preparation
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("stops claiming queued work while retaining later accepted work", async () => {
+  const queue = new ReconcileQueue();
+  const worker = new ReconcileWorker(queue);
+  worker.setReadiness("shutdown", () => false);
+  worker.enqueue("shutdown", { ...frontier, dependentFilePaths: ["first.ts"] });
+  worker.beginShutdown();
+  worker.setReadiness("shutdown", () => true);
+  worker.wake("shutdown");
+  worker.enqueue("shutdown", { ...frontier, dependentFilePaths: ["second.ts"] });
+  worker.requestInventory("shutdown", true);
+  await worker.waitForIdle();
+  assert.equal(queue.getStatus("shutdown").queueDepth, 3);
+  assert.equal(queue.getStatus("shutdown").inflight, false);
+  assert.equal(queue.getStatus("shutdown").lastError, null);
+});
+
+it("checkpoints exact pending paths and forced inventory across repeated recovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdl-reconcile-recovery-"));
+  try {
+    const path = join(root, "graph.lbug");
+    const firstQueue = new ReconcileQueue();
+    const first = new ReconcileWorker(firstQueue);
+    await first.recoverPending(path);
+    first.beginShutdown();
+    first.enqueue("restart", { ...frontier, dependentFilePaths: ["saved.ts", "removed.ts"] });
+    first.requestInventory("restart", true);
+    await first.persistPending();
+
+    for (let restart = 0; restart < 2; restart++) {
+      const queue = new ReconcileQueue();
+      const worker = new ReconcileWorker(queue);
+      worker.setReadiness("restart", () => false);
+      await worker.recoverPending(path);
+      assert.deepEqual(queue.snapshotPending(), firstQueue.snapshotPending());
+      worker.beginShutdown();
+      await worker.waitForIdle();
+      await worker.persistPending();
+    }
+  } finally {
+    assert.ok(root.startsWith(join(tmpdir(), "sdl-reconcile-recovery-")));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("rejects corrupt recovery paths without overwriting the retained checkpoint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdl-reconcile-invalid-"));
+  try {
+    const path = join(root, "graph.lbug");
+    const marker = join(root, ".sdl-reconcile-graph.lbug.json");
+    for (const filePath of ["../outside.ts", "..\\outside.ts", "C:\\outside.ts", "/outside.ts"]) {
+      const content = JSON.stringify({
+        version: 1,
+        repos: [{
+          repoId: "invalid", filePaths: [filePath], touchedSymbolIds: [],
+          invalidations: [], inventoryNeeded: false, inventoryForce: false,
+        }],
+      });
+      await writeFile(marker, content);
+      const worker = new ReconcileWorker(new ReconcileQueue());
+      await assert.rejects(worker.recoverPending(path), /relative to the repository/);
+      worker.beginShutdown();
+      await worker.persistPending();
+      const { readFile } = await import("node:fs/promises");
+      assert.equal(await readFile(marker, "utf8"), content);
+    }
+  } finally {
+    assert.ok(root.startsWith(join(tmpdir(), "sdl-reconcile-invalid-")));
+    await rm(root, { recursive: true, force: true });
+  }
+});

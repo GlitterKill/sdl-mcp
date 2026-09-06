@@ -1,7 +1,7 @@
 import { closeLadybugDb } from "../db/ladybug.js";
 import { shutdownDerivedRefreshQueue } from "../indexer/derived-refresh-queue.js";
-import { closeDefaultLiveIndexCoordinator } from "../live-index/coordinator.js";
-import { waitForToolDispatchIdle } from "../mcp/dispatch-limiter.js";
+import { beginDefaultLiveIndexShutdown, closeDefaultLiveIndexCoordinator } from "../live-index/coordinator.js";
+import { stopToolDispatchAdmission, waitForToolDispatchIdle } from "../mcp/dispatch-limiter.js";
 import { waitForIndexingIdle } from "../mcp/indexing-gate.js";
 
 const DEFAULT_DISPATCH_DRAIN_TIMEOUT_MS = 50_000;
@@ -11,10 +11,18 @@ export interface GracefulDatabaseShutdownOptions {
   pollMs?: number;
 }
 
+/** This synchronous phase must run before transport cleanup can yield. */
+export function beginLadybugShutdown(): void {
+  stopToolDispatchAdmission();
+  beginDefaultLiveIndexShutdown();
+}
+
 /** Stop deferred writers and wait for accepted foreground work to finish. */
 export async function drainLadybugWork(
   options: GracefulDatabaseShutdownOptions = {},
 ): Promise<void> {
+  // Close admission before waiting on any producer or foreground dispatch.
+  beginLadybugShutdown();
   const dispatchTimeoutMs =
     options.dispatchTimeoutMs ?? DEFAULT_DISPATCH_DRAIN_TIMEOUT_MS;
   await shutdownDerivedRefreshQueue(dispatchTimeoutMs);
@@ -48,5 +56,5 @@ export async function closeLadybugDbAfterDrainingWork(
   options: GracefulDatabaseShutdownOptions = {},
 ): Promise<void> {
   await drainLadybugWork(options);
-  await closeLadybugDb();
+  await closeLadybugDb({ strict: true });
 }

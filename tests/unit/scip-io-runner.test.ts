@@ -1147,3 +1147,45 @@ describe("scip-io-runner: installScipIo single-flight lock", () => {
     );
   });
 });
+
+it("does not spawn SCIP when cancellation arrived before the runner", async () => {
+  const result = await runScipIoIndex({
+    binaryPath: process.execPath,
+    repoRootPath: process.cwd(),
+    timeoutMs: 30_000,
+    signal: AbortSignal.abort(),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.exitCode, null);
+  assert.equal(result.timedOut, false);
+  assert.match(result.stderr!, /cancelled before spawn/);
+});
+
+it("aborts an active SCIP process and awaits its exit", { timeout: 10_000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "scip-io-abort-"));
+  const controller = new AbortController();
+  const logFile = join(root, "started.log");
+  const stub = makeStubBinary(root, { sleepMs: 5_000, logFile });
+  const running = runScipIoIndex({
+    binaryPath: stub,
+    repoRootPath: root,
+    timeoutMs: 8_000,
+    signal: controller.signal,
+  });
+  try {
+    const deadline = Date.now() + 3_000;
+    while (!existsSync(logFile) && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(existsSync(logFile), "provider started before cancellation");
+    controller.abort();
+    const result = await running;
+    assert.equal(result.ok, false);
+    assert.equal(result.timedOut, false);
+    assert.ok(result.durationMs < 5_000, "abort stopped the sleeping provider");
+  } finally {
+    controller.abort();
+    await running;
+    assert.ok(root.startsWith(join(tmpdir(), "scip-io-abort-")));
+    rmSync(root, { recursive: true, force: true });
+  }
+});

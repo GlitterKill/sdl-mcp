@@ -21,6 +21,7 @@ import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import { closeLadybugDb, configurePool, getLadybugConn } from "../../db/ladybug.js";
 import { listAllRepoIds } from "../../db/ladybug-queries.js";
 import {
+  beginLadybugShutdown,
   drainLadybugWork,
 } from "../../startup/graceful-database-shutdown.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
@@ -28,6 +29,8 @@ import { createWalCheckpointMaintenance } from "../../db/wal-maintenance.js";
 import { printBanner } from "../../util/banner.js";
 import { startPrefetchPolicy } from "../../startup/prefetch-startup.js";
 import {
+  closeDefaultLiveIndexCoordinator,
+  recoverDefaultLiveIndexPending,
   configureDefaultLiveIndexCoordinator,
   getDefaultLiveIndexCoordinator,
   getDefaultOverlayStore,
@@ -246,6 +249,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     options.transport === "stdio" ? "stdio" : "http";
   let pidfilePath: string | undefined;
   const watchers: IndexWatchHandle[] = [];
+  let watcherStartPromise: ReturnType<typeof startConfiguredWatchers> | undefined;
   let idleMonitor: IdleMonitor | undefined;
   let walMaintenance:
     | ReturnType<typeof createWalCheckpointMaintenance>
@@ -285,6 +289,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     );
   };
   const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
+  shutdownMgr.addCleanup("workAdmission", beginLadybugShutdown);
   shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
   shutdownMgr.addCleanup("idleMonitor", () => idleMonitor?.stop());
   shutdownMgr.addCleanup("walMaintenance", () => {
@@ -296,6 +301,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   );
   shutdownMgr.addCleanup("httpServer", () => httpHandle?.close());
   shutdownMgr.addCleanup("watchers", async () => {
+    await watcherStartPromise;
     for (const watcher of watchers) {
       try {
         await watcher.close();
@@ -327,7 +333,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       }
     },
     stopObservability,
-    closeDatabase: closeLadybugDb,
+    closeDatabase: () => closeLadybugDb({ strict: true }),
   });
   shutdownMgr.addCleanup("logger", () => shutdownLogger());
   shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
@@ -532,6 +538,26 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     });
   }
 
+  // Watchers capture this coordinator; configure it before any producer starts.
+  await configureDefaultLiveIndexCoordinator({
+    enabled:
+      graphDbAvailable &&
+      storagePreflightPassed &&
+      (config.liveIndex?.enabled ?? true),
+    debounceMs: config.liveIndex?.debounceMs,
+    maxDraftFiles: config.liveIndex?.maxDraftFiles,
+  });
+  if (shutdownMgr.isShuttingDown) {
+    await closeDefaultLiveIndexCoordinator();
+    return;
+  }
+
+  const liveIndex = getDefaultLiveIndexCoordinator();
+  const recoveredRepoIds = graphDbAvailable && storagePreflightPassed
+    ? await recoverDefaultLiveIndexPending(graphDbPath, startupReadiness.isWriteReady)
+    : [];
+  if (shutdownMgr.isShuttingDown) return;
+
   if (
     graphDbAvailable &&
     storagePreflightPassed &&
@@ -541,7 +567,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     writeServeStderrLine(
       `Starting file watchers for ${config.repos.length} repo(s)...`,
     );
-    const startedWatchers = await startConfiguredWatchers({
+    watcherStartPromise = startConfiguredWatchers({
       repoIds: config.repos.map((repo) => repo.repoId),
       readiness: startupReadiness,
       startWatcher: watchRepositoryAfterStoragePreflight,
@@ -550,7 +576,8 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
         writeServeStderrLine(`Failed to start watcher: ${message}`);
       },
     });
-    watchers.push(...startedWatchers);
+    await watcherStartPromise.then((started) => { watchers.push(...started); });
+    if (shutdownMgr.isShuttingDown) return;
     if (!startupReadiness.isWriteReady()) {
       reportDegraded("watcher_start_failed");
     }
@@ -574,14 +601,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     await startPrefetchPolicy(config);
   }
 
-  await configureDefaultLiveIndexCoordinator({
-    enabled:
-      startupReadiness.isWriteReady() &&
-      (config.liveIndex?.enabled ?? true),
-    debounceMs: config.liveIndex?.debounceMs,
-    maxDraftFiles: config.liveIndex?.maxDraftFiles,
-  });
-  const liveIndex = getDefaultLiveIndexCoordinator();
+  for (const repoId of recoveredRepoIds) liveIndex.wakeReconciliation?.(repoId);
   idleMonitor = new IdleMonitor({
     overlayStore: getDefaultOverlayStore(),
     checkpointRepo: (request) => liveIndex.checkpointRepo(request),

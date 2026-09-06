@@ -1,3 +1,4 @@
+import type { ReconcileRecovery } from "./reconcile-recovery.js";
 import { normalizePath } from "../util/paths.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
 import type { DependencyFrontier } from "./dependency-frontier.js";
@@ -367,6 +368,27 @@ export class ReconcileQueue {
     return [...this.repos.entries()].some(
       ([repoId, state]) => canRun(repoId) && this.ready(state),
     );
+  }
+
+  /** Capture retained paths, including blocked work, after active claims settle. */
+  snapshotPending(): ReconcileRecovery {
+    return {
+      version: 1,
+      repos: [...this.repos].flatMap(([repoId, state]) => {
+        if (state.claimed) throw new Error("Cannot checkpoint unsettled reconciliation");
+        const filePaths = [...state.files.keys()];
+        if (!filePaths.length && !state.inventoryNeeded &&
+            !state.touchedSymbolIds.size && !state.invalidations.size) return [];
+        return [{
+          repoId,
+          filePaths,
+          touchedSymbolIds: [...state.touchedSymbolIds],
+          invalidations: [...state.invalidations],
+          inventoryNeeded: state.inventoryNeeded,
+          inventoryForce: state.inventoryForce,
+        }];
+      }),
+    };
   }
 
   clear(): void {

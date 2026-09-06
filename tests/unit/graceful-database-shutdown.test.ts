@@ -372,3 +372,28 @@ describe("graceful database shutdown", () => {
     );
   });
 });
+
+it("closes tool and live-index admission before waiting on active dispatch", async () => {
+  await configureDefaultLiveIndexCoordinator({ sweepIntervalMs: 0 });
+  configureToolDispatchLimiter({ maxConcurrency: 1 });
+  const { runIndexRefreshAdmission } = await import("../../dist/mcp/dispatch-limiter.js");
+  const entered = deferred();
+  const release = deferred();
+  const active = runToolDispatch(async () => { entered.resolve(); await release.promise; });
+  await entered.promise;
+  const queued = assert.rejects(runToolDispatch(async () => assert.fail("queued work ran")), /shutting down/);
+  const draining = drainLadybugWork();
+  try {
+    await queued;
+    await assert.rejects(runToolDispatch(async () => undefined), /shutting down/);
+    await assert.rejects(runIndexRefreshAdmission(async () => undefined), /shutting down/);
+    assert.equal(getDefaultLiveIndexCoordinator().recordDiskChange!({
+      repoId: "shutdown", filePath: "late.ts",
+    }), false);
+    assert.equal(getToolDispatchLimiter().getStats().active, 1);
+  } finally {
+    release.resolve();
+    await active;
+    await draining;
+  }
+});

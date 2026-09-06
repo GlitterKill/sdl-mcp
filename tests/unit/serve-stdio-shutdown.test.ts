@@ -80,3 +80,17 @@ describe("serve command stdio shutdown wiring", () => {
     );
   });
 });
+
+it("configures and restores the shared coordinator before watchers capture it", () => {
+  const source = readFileSync(join(process.cwd(), "src/cli/commands/serve.ts"), "utf8");
+  const configure = source.indexOf("await configureDefaultLiveIndexCoordinator(");
+  const recover = source.indexOf("await recoverDefaultLiveIndexPending(");
+  const watchers = source.indexOf("watcherStartPromise = startConfiguredWatchers(");
+  assert.ok(configure >= 0 && configure < recover && recover < watchers);
+  assert.equal(source.match(/await configureDefaultLiveIndexCoordinator\(/g)?.length, 1);
+  assert.ok(
+    source.indexOf('addCleanup("workAdmission", beginLadybugShutdown)') <
+      source.indexOf('addCleanup("httpServer"'),
+    "admission closes before transport cleanup",
+  );
+});

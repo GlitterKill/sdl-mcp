@@ -112,6 +112,14 @@ Saved-file reconciliation publishes file, symbol, edge, parser-provenance, manif
 
 A separate background verifier validates committed graph integrity and provenance ownership, then publishes the deterministic `complete` or `partial` coverage summary with `graphIntegrityState: "verified"`. Under partial repository coverage, an existing durable file still needs a present, structurally valid, available, and matching parser contract; missing or corrupt per-file state, unavailable engines, contract mismatches, remap ambiguity, stale generations, or phase failures retain the latest queued work without writing stale facts. A targeted reconciliation failure does not trigger incremental indexing or a rebuild. Whole-database safe rebuild remains a separately chosen recovery operation for conditions that require it.
 
+### Shutdown and restart recovery
+
+HTTP and stdio shutdown close tool and live-index admission before transport cleanup. Queued tool calls are rejected, reconciliation stops claiming files, and active SCIP preparation receives cancellation. Shutdown waits for accepted saves, provider exit, and publication settlement before checkpointing pending work and closing the database. Cancellation cannot publish a stale preparation.
+
+Pending paths, blocked work, and forced inventory intent are saved atomically in `.sdl-reconcile-<database-filename>.json` beside the graph database. Startup replays this checkpoint once storage is write-ready, including when file watching is disabled. Replay reads current disk content and revalidates publication; it does not restore unsaved draft buffers or trigger a full index. The checkpoint remains until a later settled shutdown replaces it, so another interruption does not erase the recovered intent.
+
+The existing 60-second forced-exit deadline remains a last resort. Work that never settles can still prevent a graceful close; this checkpoint is not a journal for arbitrary process crashes.
+
 ### What Gets Overlaid
 
 | Tool | Overlay Behavior |

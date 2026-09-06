@@ -172,6 +172,7 @@ it(
         beforeForce + 1,
         "config recovery prepares unchanged source",
       );
+
       await unlink(sourcePath);
       worker.enqueue(
         repoId,
@@ -192,6 +193,78 @@ it(
         "precise missing-path event retires only its file",
       );
       assert.equal(queue.getStatus(repoId).queueDepth, 0);
+      await writeFile(sourcePath, latest);
+      worker.requestInventory(repoId);
+      await worker.waitForIdle();
+
+      // Hold preparation after cancellation to prove the database stays open
+      // until actual settlement; replay the checkpoint without starting a watcher.
+      const lifecycle = await import("../../dist/live-index/coordinator.js");
+      const { closeLadybugDbAfterDrainingWork } =
+        await import("../../dist/startup/graceful-database-shutdown.js");
+      const { getLadybugDbPath } = await import("../../dist/db/ladybug.js");
+      const { resetToolDispatchLimiter } = await import("../../dist/mcp/dispatch-limiter.js");
+      let enteredPreparation!: () => void;
+      let releasePreparation!: () => void;
+      const preparationEntered = new Promise<void>((resolve) => { enteredPreparation = resolve; });
+      const preparationRelease = new Promise<void>((resolve) => { releasePreparation = resolve; });
+      let shutdownSignal: AbortSignal | undefined;
+      let attempts = 0;
+      await lifecycle.configureDefaultLiveIndexCoordinator({
+        sweepIntervalMs: 0,
+        reconcileDependencies: {
+          prepareReconcileFiles: async (input) => {
+            attempts++;
+            shutdownSignal = input.signal;
+            enteredPreparation();
+            await preparationRelease;
+            input.signal?.throwIfAborted();
+            return prepareReconcileFiles(input);
+          },
+        },
+      });
+      const graphPath = join(root, "graph.lbug");
+      await lifecycle.recoverDefaultLiveIndexPending(graphPath);
+      const live = lifecycle.getDefaultLiveIndexCoordinator();
+      await writeFile(join(repoRoot, "b.ts"), "export const pending = 21;\n");
+      live.recordDiskChange!({ repoId, filePath: "b.ts" });
+      await preparationEntered;
+      await unlink(sourcePath);
+      live.recordDiskChange!({ repoId, filePath: "a.ts", removed: true });
+      await writeFile(join(repoRoot, "c.ts"), "export const later = 22;\n");
+      live.recordDiskChange!({ repoId, filePath: "c.ts" });
+      live.requestReconcileInventory!(repoId, { force: true });
+      await cancelAndWaitForGraphIntegrityVerifier(repoId);
+      let closed = false;
+      const closing = closeLadybugDbAfterDrainingWork().then(() => { closed = true; });
+      try {
+        assert.equal(shutdownSignal?.aborted, true);
+        assert.equal(live.recordDiskChange!({ repoId, filePath: "late.ts" }), false);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(closed, false);
+        assert.notEqual(getLadybugDbPath(), null);
+        assert.equal(attempts, 1);
+        assert.ok(await db.getFileByRepoPath(conn, repoId, "a.ts"));
+      } finally {
+        releasePreparation();
+        await closing;
+        resetToolDispatchLimiter();
+      }
+      assert.equal(attempts, 1, "no second provider starts during shutdown");
+      assert.equal(getLadybugDbPath(), null);
+      await initLadybugDb(graphPath);
+      await lifecycle.configureDefaultLiveIndexCoordinator({ sweepIntervalMs: 0 });
+      await lifecycle.recoverDefaultLiveIndexPending(graphPath);
+      await lifecycle.waitForDefaultLiveIndexIdle();
+      const recoveredConn = await getLadybugConn();
+      assert.equal(await db.getFileByRepoPath(recoveredConn, repoId, "a.ts"), null);
+      for (const [path, content] of [
+        ["b.ts", "export const pending = 21;\n"],
+        ["c.ts", "export const later = 22;\n"],
+      ]) {
+        assert.equal((await db.getFileByRepoPath(recoveredConn, repoId, path))?.contentHash, hashContent(content));
+      }
+      await lifecycle.closeDefaultLiveIndexCoordinator();
     } finally {
       release();
       await worker.waitForIdle();

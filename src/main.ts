@@ -3,11 +3,13 @@ import { ConfigError, DatabaseError } from "./domain/errors.js";
 import { loadConfig } from "./config/loadConfig.js";
 import { activateCliConfigPath } from "./config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "./db/initGraphDb.js";
-import { closeLadybugDbAfterDrainingWork } from "./startup/graceful-database-shutdown.js";
+import { beginLadybugShutdown, closeLadybugDbAfterDrainingWork } from "./startup/graceful-database-shutdown.js";
 import { persistUsageSnapshot } from "./db/ladybug-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
 import { CLEANUP_INTERVAL_MS, NODE_MIN_MAJOR_VERSION } from "./config/constants.js";
 import {
+  closeDefaultLiveIndexCoordinator,
+  recoverDefaultLiveIndexPending,
   configureDefaultLiveIndexCoordinator,
   getDefaultLiveIndexCoordinator,
   getDefaultOverlayStore,
@@ -90,9 +92,11 @@ async function main(): Promise<void> {
   const watchers: Array<{ close: () => Promise<void> }> = [];
   let cleanupInterval: NodeJS.Timeout | undefined;
   let watcherStartTimer: NodeJS.Timeout | undefined;
+  let watcherStartPromise: Promise<void> | undefined;
   let idleMonitor: IdleMonitor | undefined;
   const shutdownMgr = new ShutdownManager({ log });
   const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
+  shutdownMgr.addCleanup("workAdmission", beginLadybugShutdown);
   shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
   shutdownMgr.addCleanup("cleanupInterval", () => {
     if (cleanupInterval) clearInterval(cleanupInterval);
@@ -113,6 +117,7 @@ async function main(): Promise<void> {
   });
   shutdownMgr.addCleanup("scorerPool", () => resetScorerPool());
   shutdownMgr.addCleanup("watchers", async () => {
+    await watcherStartPromise;
     for (const watcher of watchers) {
       try {
         await watcher.close();
@@ -167,6 +172,12 @@ async function main(): Promise<void> {
       debounceMs: config.liveIndex?.debounceMs,
       maxDraftFiles: config.liveIndex?.maxDraftFiles,
     });
+    if (shutdownMgr.isShuttingDown) {
+      await closeDefaultLiveIndexCoordinator();
+      return;
+    }
+    await recoverDefaultLiveIndexPending(graphDbPath);
+    if (shutdownMgr.isShuttingDown) return;
     const liveIndex = getDefaultLiveIndexCoordinator();
     idleMonitor = new IdleMonitor({
       overlayStore: getDefaultOverlayStore(),
@@ -184,7 +195,8 @@ async function main(): Promise<void> {
     if (config.indexing?.enableFileWatching) {
       log("Scheduling file watchers after stdio startup...");
       watcherStartTimer = setTimeout(() => {
-        void (async () => {
+        watcherStartPromise = (async () => {
+          if (shutdownMgr.isShuttingDown) return;
           try {
             log("Starting file watchers...");
             const { watchRepository } = await import("./indexer/indexer.js");

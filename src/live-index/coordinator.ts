@@ -737,15 +737,25 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     await this.reconcileWorker.waitForIdle();
   }
 
-  async close(): Promise<void> {
+  beginShutdown(): void {
     this.accepting = false;
+    this.reconcileWorker.beginShutdown();
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;
     }
+  }
+
+  async close(): Promise<void> {
+    this.beginShutdown();
     await this.sweepPromise;
     await Promise.allSettled(this.activeOperations);
     await this.waitForIdle();
+    await this.reconcileWorker.persistPending();
+  }
+
+  async recoverPending(graphDbPath: string, isWriteReady?: () => boolean): Promise<string[]> {
+    return this.trackOperation(this.reconcileWorker.recoverPending(graphDbPath, isWriteReady));
   }
 
   private trackOperation<T>(operation: Promise<T>): Promise<T> {
@@ -868,6 +878,14 @@ export function getDefaultOverlayStore(): OverlayStore {
 
 export async function waitForDefaultLiveIndexIdle(): Promise<void> {
   await defaultLiveIndexCoordinator.waitForIdle();
+}
+
+export function beginDefaultLiveIndexShutdown(): void {
+  defaultLiveIndexCoordinator.beginShutdown();
+}
+
+export async function recoverDefaultLiveIndexPending(graphDbPath: string, isWriteReady?: () => boolean): Promise<string[]> {
+  return defaultLiveIndexCoordinator.recoverPending(graphDbPath, isWriteReady);
 }
 
 export async function closeDefaultLiveIndexCoordinator(): Promise<void> {

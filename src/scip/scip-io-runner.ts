@@ -2397,6 +2397,10 @@ export async function runScipIoIndex(args: {
   signal?: AbortSignal;
 }): Promise<ScipIoRunResult> {
   const startTime = Date.now();
+  if (args.signal?.aborted) {
+    return { ok: false, exitCode: null, durationMs: 0, timedOut: false,
+      stderr: "SCIP indexing cancelled before spawn" };
+  }
   const cwd = isAbsolute(args.repoRootPath)
     ? args.repoRootPath
     : normalizePath(args.repoRootPath);

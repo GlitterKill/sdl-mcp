@@ -29,3 +29,8 @@ Tracks unsaved editor buffers, parses drafts into an in-memory overlay, and reco
 - Overlay is purely in-memory (never persisted until checkpoint)
 - Reconciliation runs in background, does not block tool responses
 - Coordinator is the single entry point for all buffer operations
+
+## SHUTDOWN
+- Both server entry points call synchronous `beginLadybugShutdown()` before transport cleanup: reject new/queued tool envelopes, close live-index admission, stop reconciliation claims, and abort active provider preparation.
+- Accepted saves may still enqueue after admission closes. Await tracked operations, draft parsing, and actual reconciliation settlement before checkpointing; never race provider settlement against DB close.
+- `reconcile-recovery.ts` stores retained paths and forced inventory intent in `.sdl-reconcile-<database-filename>.json` beside the database, outside LadybugDB's reserved family prefix. Replay after coordinator configuration and write readiness, even without watchers. Track asynchronous replay during shutdown and keep the checkpoint until the next settled shutdown replaces it.

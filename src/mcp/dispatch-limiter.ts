@@ -223,12 +223,28 @@ export function getToolDispatchLimiter(): ConcurrencyLimiter {
  * async context as owning a dispatch slot. Indexing uses this marker to avoid
  * deadlocking when an index refresh is itself invoked as an MCP tool.
  */
+let acceptingDispatch = true;
+
+/** Reject queued envelopes while retaining leases for already executing work. */
+export function stopToolDispatchAdmission(): void {
+  acceptingDispatch = false;
+  const error = new DOMException("Server is shutting down", "AbortError");
+  limiter?.clearQueue(error);
+  indexRefreshAdmissionLimiter?.clearQueue(error);
+}
+
+function assertDispatchAdmission(): void {
+  if (!acceptingDispatch)
+    throw new DOMException("Server is shutting down", "AbortError");
+}
+
 export async function runToolDispatch<T>(
   fn: () => Promise<T>,
   timeoutMs?: number,
   label = "tool-dispatch",
   signal?: AbortSignal,
 ): Promise<T> {
+  assertDispatchAdmission();
   const deferredWork = label.startsWith("derived-refresh:")
     ? undefined
     : getActiveDeferredWorkStatus();
@@ -244,6 +260,7 @@ export async function runToolDispatch<T>(
     return await getToolDispatchLimiter().run(
       () =>
         dispatchContext.run(true, async () => {
+          assertDispatchAdmission();
           // This callback runs only after admission, so queued calls are absent.
           const activeDispatchId = nextActiveDispatchId;
           nextActiveDispatchId += 1;
@@ -319,6 +336,7 @@ export async function runIndexRefreshAdmission<T>(
   fn: () => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
+  assertDispatchAdmission();
   const admissionLimiter = getIndexRefreshAdmissionLimiter();
   const admission = admissionLimiter.getStats();
   if (admission.queued >= INDEX_REFRESH_ADMISSION_MAX_QUEUE) {
@@ -339,6 +357,7 @@ export async function runIndexRefreshAdmission<T>(
 
   const admissionLifecycle = admissionLimiter.run(
     async () => {
+      assertDispatchAdmission();
       const context: IndexRefreshAdmissionContext = { retainedPromises: [] };
       try {
         const result = await indexRefreshAdmissionContext.run(context, fn);
@@ -515,6 +534,7 @@ export function configureToolDispatchLimiter(opts: {
  * Reset the limiter (for testing).
  */
 export function resetToolDispatchLimiter(): void {
+  acceptingDispatch = true;
   if (limiter) {
     limiter.clearQueue();
   }
