@@ -50,7 +50,7 @@ export async function captureReconcileDependencyInputs(
   }
   if (paths.size > 256)
     throw new Error("Reconciliation has too many concrete project inputs");
-  const inputs = [];
+  const inputs: { path: string; contentHash: string }[] = [];
   for (const path of [...paths].sort()) {
     const source = await readRepositoryFileBounded(
       repoRoot,

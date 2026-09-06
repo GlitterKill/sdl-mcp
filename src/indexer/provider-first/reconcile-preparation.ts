@@ -200,7 +200,7 @@ export async function prepareReconcileFiles(
     scip: appConfig.scip,
   });
   if (selection.selectedPipeline === "legacy") {
-    const patches = [];
+    const patches: Awaited<ReturnType<typeof prepareSavedFilePatch>>[] = [];
     for (const file of files) {
       patches.push(
         await prepareSavedFilePatch({
