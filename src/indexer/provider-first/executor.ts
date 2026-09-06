@@ -883,6 +883,10 @@ export async function executeProviderFirstLspFull(
         Date.now() + documentSymbolCollectionTimeoutMs;
       for (const [documentIndex, document] of documents.entries()) {
         params.signal?.throwIfAborted();
+        if (!canCollectSymbols) {
+          // Missing collection capability is not a successful empty document.
+          document.symbolError = "documentSymbol unsupported by configured LSP provider";
+        }
         if (Date.now() >= documentCollectionDeadline) {
           markRemainingLspDocumentsSkipped(
             documents,
@@ -1091,6 +1095,8 @@ async function collectLspProviderDocumentWithClient(params: {
         retryDelayMs: params.documentSymbolRetryDelayMs,
         signal: params.signal,
       })) ?? [];
+  } else {
+    params.document.symbolError = "documentSymbol unsupported by configured LSP provider";
   }
   params.document.diagnostics = await collectLspProviderDiagnostics({
     client: params.client,

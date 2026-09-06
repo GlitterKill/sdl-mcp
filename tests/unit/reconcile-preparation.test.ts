@@ -326,3 +326,42 @@ it("reports omitted selected files separately from valid zero-symbol file facts"
     await rm(params.repoRoot, { recursive: true, force: true });
   }
 });
+
+for (const failure of [
+  "documentSymbol",
+  "openDocument",
+  "unsupported",
+] as const) {
+  for (const session of ["workspace", "document"] as const) {
+    it(`rejects ${failure} collection in an LSP ${session} session rather than preparing a clear`, async () => {
+      const params = await fixture("lsp");
+      params.appConfig.semanticEnrichment!.providers.lsp.servers.fixture.documentSessionMode =
+        session;
+      try {
+        await assert.rejects(
+          preparation.prepareReconcileFiles(params, {
+            clientFactory: () => ({
+              start: async () => ({
+                capabilities: {
+                  documentSymbolProvider: failure !== "unsupported",
+                },
+              }),
+              openDocument: async () => {
+                if (failure === "openDocument")
+                  throw new Error("fixture document open failed");
+              },
+              documentSymbol: async () => {
+                throw new Error("fixture symbol collection failed");
+              },
+              diagnostics: () => [],
+              dispose: async () => {},
+            }),
+          }),
+          /symbol collection|provider failed/i,
+        );
+      } finally {
+        await rm(params.repoRoot, { recursive: true, force: true });
+      }
+    });
+  }
+}

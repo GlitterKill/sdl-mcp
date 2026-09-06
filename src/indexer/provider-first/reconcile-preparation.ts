@@ -267,6 +267,21 @@ export async function prepareReconcileFiles(
     if (result.facts.providerRuns.some((run) => run.status === "failed")) {
       throw new IndexError("Configured provider failed during reconciliation");
     }
+    // LSP batches can succeed overall while individual documents failed or
+    // could not collect symbols. A successful [] has no skipped-symbol reason.
+    if (
+      result.facts.coverage.some(
+        (coverage) =>
+          coverage.providerType === "lsp" &&
+          coverage.skippedSymbolReasons?.some(
+            (reason) => reason.reason === "documentSymbol request failed",
+          ),
+      )
+    ) {
+      throw new IndexError(
+        "Configured LSP symbol collection failed during reconciliation",
+      );
+    }
     const selectedPaths = new Set(files.map((file) => file.path));
     if (
       result.facts.files.some(
