@@ -364,3 +364,62 @@ it("keeps metadata blocked for unrelated failed files but wakes it on its owner'
   assert.equal(queue.getStatus("repo").queueDepth, 0);
   assert.equal(queue.getStatus("repo").lastError, null);
 });
+
+it("bounded claims retain siblings and dependency requeues cannot starve older work", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue("repo", frontier("a.ts", "b.ts"), queuedAt);
+  const first = queue.claimNext(1)!;
+  assert.deepEqual(
+    first.files.map((f) => f.filePath),
+    ["a.ts"],
+  );
+  queue.complete(first, queuedAt);
+  queue.enqueue("repo", frontier("a.ts"), queuedAt);
+  assert.deepEqual(
+    queue.claimNext(1)!.files.map((f) => f.filePath),
+    ["b.ts"],
+  );
+});
+
+it("source context generations exclude dependency metadata but include outside-file saves", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue("repo", frontier("a.ts"), queuedAt, { "a.ts": saved("a") });
+  const initial = queue.getSourceGeneration("repo");
+  queue.enqueue("repo", frontier("b.ts"), queuedAt);
+  assert.equal(queue.getSourceGeneration("repo"), initial);
+  queue.enqueue("repo", frontier(), queuedAt, { "c.ts": saved("c") });
+  assert.notEqual(queue.getSourceGeneration("repo"), initial);
+  const source = queue.getSourceGeneration("repo");
+  queue.invalidateSourceContext("repo");
+  assert.notEqual(queue.getSourceGeneration("repo"), source);
+});
+
+it("a stale ownership retry does not wake an unrelated blocked file", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue("repo", frontier("a.ts"), queuedAt);
+  queue.fail(queue.claimNext(1)!, queuedAt, "provider unavailable");
+  queue.enqueue("repo", frontier("b.ts"), queuedAt);
+  queue.retry(queue.claimNext(1)!);
+  const retry = queue.claimNext(1)!;
+  assert.deepEqual(
+    retry.files.map((f) => f.filePath),
+    ["b.ts"],
+  );
+  queue.complete(retry, queuedAt);
+  assert.equal(queue.peekNext(), false);
+});
+
+it("retains a source-context wake arriving while another file is preparing", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue("repo", frontier("blocked.ts"), queuedAt);
+  queue.fail(queue.claimNext(1)!, queuedAt, "provider config unavailable");
+  queue.enqueue("repo", frontier("active.ts"), queuedAt);
+  const active = queue.claimNext(1)!;
+  queue.invalidateSourceContext("repo");
+  queue.retry(active);
+  const awakened = queue.claimNext(1)!;
+  assert.deepEqual(
+    awakened.files.map((file) => file.filePath),
+    ["blocked.ts"],
+  );
+});

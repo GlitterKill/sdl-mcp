@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
@@ -15,19 +15,22 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 import { ReconcileQueue } from "../../dist/live-index/reconcile-queue.js";
 import { ReconcileWorker } from "../../dist/live-index/reconcile-worker.js";
+import { prepareReconcileFiles } from "../../dist/indexer/provider-first/reconcile-preparation.js";
+import { cancelAndWaitForGraphIntegrityVerifier } from "../../dist/indexer/provider-first/background-graph-integrity-verifier.js";
+import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
+import { isIndexingActive } from "../../dist/mcp/indexing-gate.js";
+import { hashContent } from "../../dist/util/hashing.js";
 
 describe("reconcile derived-data refresh", () => {
   const repoId = "reconcile-derived-data-repo";
-  const dbPath = mkdtempSync(join(tmpdir(), "sdl-reconcile-derived-data-test-db-"));
-  const configPath = join(tmpdir(), `sdl-reconcile-derived-data-${Date.now()}.json`);
-  let repoDir = "";
+  const ownedRoot = mkdtempSync(join(tmpdir(), "sdl-reconcile-derived-data-"));
+  const dbPath = join(ownedRoot, "graph.lbug");
+  const configPath = join(ownedRoot, "config.json");
+  const repoDir = join(ownedRoot, "repo");
   const prevConfig = process.env.SDL_CONFIG;
   const prevConfigPath = process.env.SDL_CONFIG_PATH;
 
   before(async () => {
-    rmSync(dbPath + ".sdl-lineage.json", { recursive: true, force: true });
-    if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
-    repoDir = mkdtempSync(join(tmpdir(), "sdl-reconcile-derived-data-repo-"));
     mkdirSync(join(repoDir, "src"), { recursive: true });
     writeFileSync(
       join(repoDir, "src", "app.ts"),
@@ -45,7 +48,12 @@ describe("reconcile derived-data refresh", () => {
     writeFileSync(
       configPath,
       JSON.stringify(
-        { repos: [], policy: {}, indexing: { engine: "typescript", enableFileWatching: false } },
+        {
+          repos: [], policy: {},
+          indexing: { engine: "typescript", enableFileWatching: false },
+          scip: { enabled: false },
+          semanticEnrichment: { providers: { scip: { enabled: false }, lsp: { enabled: false } } },
+        },
         null,
         2,
       ),
@@ -75,24 +83,33 @@ describe("reconcile derived-data refresh", () => {
   });
 
   after(async () => {
+    await cancelAndWaitForGraphIntegrityVerifier(repoId);
     await closeLadybugDb();
-    rmSync(dbPath + ".sdl-lineage.json", { recursive: true, force: true });
-    if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
-    if (existsSync(configPath)) rmSync(configPath, { force: true });
-    if (repoDir && existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
+    const ownedRelative = relative(resolve(tmpdir()), resolve(ownedRoot));
+    assert.ok(ownedRelative.startsWith("sdl-reconcile-derived-data-") && !isAbsolute(ownedRelative) && !ownedRelative.includes(".."));
+    if (existsSync(ownedRoot)) rmSync(ownedRoot, { recursive: true, force: true });
     if (prevConfig === undefined) delete process.env.SDL_CONFIG;
     else process.env.SDL_CONFIG = prevConfig;
     if (prevConfigPath === undefined) delete process.env.SDL_CONFIG_PATH;
     else process.env.SDL_CONFIG_PATH = prevConfigPath;
   });
 
-  it("recomputes clusters and processes when reconciliation invalidations request it", async () => {
+  it("retains explicit derived maintenance instead of automatically rebuilding clusters/processes", async () => {
     const conn = await getLadybugConn();
     await ladybugDb.deleteClustersByRepo(conn, repoId);
     await ladybugDb.deleteProcessesByRepo(conn, repoId);
 
     const queue = new ReconcileQueue();
-    const worker = new ReconcileWorker(queue);
+    let preparationCalls = 0;
+    const worker = new ReconcileWorker(queue, {
+      prepareReconcileFiles: async (request) => {
+        preparationCalls++;
+        assert.equal(isIndexingActive(), false, "provider preparation must not acquire index dispatch ownership");
+        return prepareReconcileFiles(request);
+      },
+    });
+    const content = "export function changedhandler() { return 2; }\n";
+    writeFileSync(join(repoDir, "src", "app.ts"), content);
     worker.enqueue(
       repoId,
       {
@@ -103,12 +120,22 @@ describe("reconcile derived-data refresh", () => {
         invalidations: ["clusters", "processes"],
       },
       "2026-03-07T12:10:00.000Z",
+      { "src/app.ts": { kind: "saved", content, sourceHash: hashContent(content) } },
     );
     await worker.waitForIdle();
+    assert.ok(preparationCalls > 0, "the worker must publish a real source change");
+    assert.equal(queue.getStatus(repoId).queueDepth, 0, JSON.stringify(queue.getStatus(repoId)));
+    assert.equal((await ladybugDb.getFileByRepoPath(conn, repoId, "src/app.ts"))!.contentHash, hashContent(content));
+    const state = await getDerivedState(repoId);
+    assert.equal(state?.clustersDirty, true);
+    assert.equal(state?.processesDirty, true);
+    assert.equal(state?.summariesDirty, true);
+    assert.equal(state?.embeddingsDirty, true);
+    assert.equal(isIndexingActive(), false);
 
     const clusters = await ladybugDb.getClustersForRepo(conn, repoId);
     const processStats = await ladybugDb.getProcessOverviewStats(conn, repoId);
-    assert.ok(clusters.length >= 0);
-    assert.ok(processStats.totalProcesses >= 1);
+    assert.equal(clusters.length, 0);
+    assert.equal(processStats.totalProcesses, 0);
   });
 });

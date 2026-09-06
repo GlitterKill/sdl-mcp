@@ -1331,7 +1331,7 @@ function dirtyPathMatchesScipGeneratorSource(
   );
 }
 
-function dirtyPathMatchesScipGeneratorConfig(relPath: string): boolean {
+export function dirtyPathMatchesScipGeneratorConfig(relPath: string): boolean {
   return SCIP_GENERATOR_CACHE_CONFIG_PATTERNS.some((pattern) =>
     normalizedPathMatchesGlob(relPath, pattern),
   );

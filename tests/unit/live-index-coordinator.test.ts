@@ -177,7 +177,9 @@ describe("InMemoryLiveIndexCoordinator", () => {
   it("drains an admitted sweep and skips a late sweep after removal", async () => {
     resetRepoLifecycleForTests();
     const repoId = "sweep-removal-race";
-    const coordinator = new InMemoryLiveIndexCoordinator({ sweepIntervalMs: 0 });
+    const coordinator = new InMemoryLiveIndexCoordinator({
+      sweepIntervalMs: 0,
+    });
     coordinator.getOverlayStore().upsertDraft({
       repoId,
       eventType: "save",
@@ -257,7 +259,8 @@ describe("InMemoryLiveIndexCoordinator", () => {
       warnings: ["Ignored stale buffer update."],
     });
     assert.strictEqual(
-      coordinator.getOverlayStore().getDraft("demo-repo", "src/example.ts")?.content,
+      coordinator.getOverlayStore().getDraft("demo-repo", "src/example.ts")
+        ?.content,
       "export const value = 1;",
     );
   });
@@ -322,4 +325,37 @@ describe("InMemoryLiveIndexCoordinator", () => {
       "Close event version 1 does not match draft version 2.",
     ]);
   });
+});
+
+it("does not wake retained failed reconciliation after coordinator close", async () => {
+  const coordinator = new InMemoryLiveIndexCoordinator({
+    enabled: false,
+    sweepIntervalMs: 0,
+  });
+  const internals = coordinator as unknown as {
+    reconcileQueue: import("../../dist/live-index/reconcile-queue.js").ReconcileQueue;
+    reconcileWorker: { invalidateSourceContext(repoId: string): void };
+  };
+  const queue = internals.reconcileQueue;
+  queue.enqueue(
+    "closed",
+    {
+      touchedSymbolIds: [],
+      dependentSymbolIds: [],
+      dependentFilePaths: ["a.ts"],
+      importedFilePaths: [],
+      invalidations: [],
+    },
+    "now",
+  );
+  queue.fail(queue.claimNext()!, "now", "provider unavailable");
+  let wakes = 0;
+  internals.reconcileWorker.invalidateSourceContext = () => {
+    wakes++;
+  };
+  await coordinator.close();
+  coordinator.invalidateSourceContext("closed");
+  assert.equal(wakes, 0);
+  assert.equal(queue.getStatus("closed").queueDepth, 1);
+  assert.equal(queue.peekNext(), false);
 });

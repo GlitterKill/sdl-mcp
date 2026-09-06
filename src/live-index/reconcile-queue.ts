@@ -54,6 +54,8 @@ type RepoQueueState = {
   inventoryNeeded: boolean;
   inventoryBlocked: boolean;
   inventoryGeneration: number;
+  sourceGeneration: number;
+  sourceWakePending: boolean;
 };
 const MAX_QUEUE_ENTRIES = 10_000;
 
@@ -109,6 +111,7 @@ export class ReconcileQueue {
         supplied.sourceHash === existing.input.sourceHash
       )
         continue;
+      if (supplied) state.sourceGeneration = ++this.generation;
       if (!existing && state.files.size >= MAX_QUEUE_ENTRIES) {
         if (supplied?.kind === "saved") savedSnapshotsRetained = false;
         this.requireInventory(state);
@@ -144,7 +147,7 @@ export class ReconcileQueue {
     return savedSnapshotsRetained;
   }
 
-  claimNext(): ReconcileClaim | null {
+  claimNext(maxFiles = MAX_QUEUE_ENTRIES): ReconcileClaim | null {
     const next = [...this.repos.entries()]
       .filter(([, state]) => this.ready(state))
       .sort((a, b) =>
@@ -154,7 +157,12 @@ export class ReconcileQueue {
     const [repoId, state] = next;
     const files = [...state.files.values()]
       .filter((file) => file.pending && !file.blocked)
-      .sort((a, b) => a.filePath.localeCompare(b.filePath))
+      .sort((a, b) =>
+        maxFiles < MAX_QUEUE_ENTRIES
+          ? a.generation - b.generation
+          : a.filePath.localeCompare(b.filePath),
+      )
+      .slice(0, maxFiles)
       .map(({ filePath, generation, input }) => ({
         filePath,
         generation,
@@ -191,6 +199,28 @@ export class ReconcileQueue {
       metadataGeneration: state.metadataGeneration,
     };
     return work;
+  }
+
+  /** Opaque provider inputs include source/project events outside the selected file. */
+  invalidateSourceContext(repoId: string): void {
+    const state = this.getRepo(repoId);
+    state.sourceGeneration = ++this.generation;
+    state.sourceWakePending = state.claimed !== null;
+    this.wake(repoId);
+  }
+
+  getSourceGeneration(repoId: string): number {
+    return this.getRepo(repoId).sourceGeneration;
+  }
+
+  retry(claim: ReconcileClaim): void {
+    this.fail(
+      claim,
+      new Date().toISOString(),
+      "Reconciliation inputs changed",
+      "transient",
+    );
+    for (const file of claim.files) this.wake(claim.repoId, file.filePath);
   }
 
   /** Validate every captured dependency immediately before publishing prepared work. */
@@ -335,6 +365,10 @@ export class ReconcileQueue {
         state.lastError = null;
     }
     state.claimed = null;
+    if (state.sourceWakePending) {
+      state.sourceWakePending = false;
+      this.wake(claim.repoId);
+    }
     // Keep source/generation only while pending or while results are outstanding.
     for (const [path, file] of state.files)
       if (!file.pending) state.files.delete(path);
@@ -384,6 +418,7 @@ export class ReconcileQueue {
     state.inventoryNeeded = true;
     state.inventoryBlocked = false;
     state.inventoryGeneration = ++this.generation;
+    state.sourceGeneration = this.generation;
   }
 
   private getRepo(repoId: string): RepoQueueState {
@@ -404,6 +439,8 @@ export class ReconcileQueue {
         inventoryNeeded: false,
         inventoryBlocked: false,
         inventoryGeneration: 0,
+        sourceGeneration: ++this.generation,
+        sourceWakePending: false,
       };
       this.repos.set(repoId, state);
     }

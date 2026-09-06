@@ -1,3 +1,5 @@
+import { realpath } from "node:fs/promises";
+import { relative } from "node:path";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { createDebouncedJobScheduler } from "./debounce.js";
@@ -6,7 +8,17 @@ import { CheckpointService } from "./checkpoint-service.js";
 import { patchSavedFile } from "./file-patcher.js";
 import { OverlayStore } from "./overlay-store.js";
 import { ReconcileQueue } from "./reconcile-queue.js";
-import { ReconcileWorker } from "./reconcile-worker.js";
+import {
+  ReconcileWorker,
+  type ReconcileWorkerDependencies,
+} from "./reconcile-worker.js";
+import { hashContent } from "../util/hashing.js";
+import {
+  normalizePath,
+  getAbsolutePathFromRepoRoot,
+  validatePathWithinRoot,
+} from "../util/paths.js";
+import { RepoConfigSchema } from "../config/types.js";
 import {
   type BufferUpdateInput,
   type BufferUpdateResult,
@@ -32,6 +44,7 @@ export interface InMemoryLiveIndexCoordinatorOptions {
   debounceMs?: number;
   maxDraftFiles?: number;
   sweepIntervalMs?: number;
+  reconcileDependencies?: ReconcileWorkerDependencies;
 }
 
 export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
@@ -40,7 +53,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   private readonly overlayStore = new OverlayStore();
   private readonly checkpointService = new CheckpointService(this.overlayStore);
   private readonly reconcileQueue = new ReconcileQueue();
-  private readonly reconcileWorker = new ReconcileWorker(this.reconcileQueue);
+  private readonly reconcileWorker: ReconcileWorker;
   private readonly parseScheduler;
   private readonly repoRootCache = new Map<string, string>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -52,6 +65,10 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   private static readonly STALE_DIRTY_DRAFT_MS = 120_000;
 
   constructor(options: InMemoryLiveIndexCoordinatorOptions = {}) {
+    this.reconcileWorker = new ReconcileWorker(
+      this.reconcileQueue,
+      options.reconcileDependencies,
+    );
     this.enabled = options.enabled ?? true;
     this.maxDraftFiles = options.maxDraftFiles ?? 200;
     this.parseScheduler = createDebouncedJobScheduler<ScheduledParse>({
@@ -140,6 +157,63 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
       }, sweepMs);
       this.sweepTimer.unref();
     }
+  }
+
+  /** Shared durable-save admission also operates when draft overlays are disabled. */
+  async acceptSavedFile(input: {
+    repoId: string;
+    filePath: string;
+    content: string;
+  }): Promise<boolean> {
+    if (!this.accepting) return false;
+    return this.trackOperation(
+      withRepoMutation(input.repoId, async () => {
+        const repo = await ladybugDb.getRepo(
+          await getLadybugConn(),
+          input.repoId,
+        );
+        if (!repo)
+          throw new NotFoundError(`Repository not found: ${input.repoId}`);
+        const config = RepoConfigSchema.parse(JSON.parse(repo.configJson));
+        if (Buffer.byteLength(input.content) > config.maxFileBytes)
+          throw new IndexError(
+            "Saved reconciliation source exceeds repository file limit",
+          );
+        const root = await realpath(repo.rootPath);
+        const canonical = await realpath(
+          getAbsolutePathFromRepoRoot(root, input.filePath),
+        );
+        validatePathWithinRoot(root, canonical);
+        const path = normalizePath(relative(root, canonical));
+        return this.reconcileQueue.withPublicationFence(
+          input.repoId,
+          async () =>
+            this.reconcileWorker.enqueue(
+              input.repoId,
+              {
+                touchedSymbolIds: [],
+                dependentSymbolIds: [],
+                dependentFilePaths: [],
+                importedFilePaths: [],
+                invalidations: [],
+              },
+              new Date().toISOString(),
+              {
+                [path]: {
+                  kind: "saved",
+                  content: input.content,
+                  sourceHash: hashContent(input.content),
+                },
+              },
+            ),
+        );
+      }),
+    );
+  }
+
+  invalidateSourceContext(repoId: string): void {
+    if (!this.accepting) return;
+    this.reconcileWorker.invalidateSourceContext(repoId);
   }
 
   async pushBufferUpdate(
@@ -440,7 +514,9 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   }
 
   private trackOperation<T>(operation: Promise<T>): Promise<T> {
-    const tracked = operation.finally(() => this.activeOperations.delete(tracked));
+    const tracked = operation.finally(() =>
+      this.activeOperations.delete(tracked),
+    );
     this.activeOperations.add(tracked);
     return tracked;
   }

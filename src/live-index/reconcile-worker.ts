@@ -1,290 +1,288 @@
-import { logger } from "../util/logger.js";
+import { lstat } from "node:fs/promises";
 import { getLadybugConn } from "../db/ladybug.js";
-import * as ladybugDb from "../db/ladybug-queries.js";
-import { computeAndStoreClustersAndProcesses } from "../indexer/cluster-orchestrator.js";
-import { withIndexingGate } from "../mcp/indexing-gate.js";
-import { createDebouncedJobScheduler } from "./debounce.js";
-import type { DependencyFrontier } from "./dependency-frontier.js";
-import { patchSavedFile } from "./file-patcher.js";
-import { planReconcileWork } from "./reconcile-planner.js";
-import { ReconcileQueue } from "./reconcile-queue.js";
+import * as db from "../db/ladybug-queries.js";
+import { loadConfig } from "../config/loadConfig.js";
+import { RepoConfigSchema } from "../config/types.js";
+import { readRepositoryFileBounded } from "../indexer/provider-first/executor.js";
+import {
+  prepareReconcileFiles,
+  type ReconcileSourceSnapshot,
+} from "../indexer/provider-first/reconcile-preparation.js";
 import {
   captureActiveRepoEpoch,
   withRepoMutation,
 } from "../services/repo-lifecycle.js";
+import { hashContent, hashValue } from "../util/hashing.js";
+import { logger } from "../util/logger.js";
+import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
+import type { DependencyFrontier } from "./dependency-frontier.js";
+import { captureReconcileDependencyInputs } from "./reconcile-planner.js";
+import {
+  ReconcileQueue,
+  type ReconcileInput,
+  type ReconcileClaim,
+} from "./reconcile-queue.js";
+import {
+  captureReconcileGraphBaseline,
+  prepareReconcilePublication,
+  publishReconcile,
+  ReconcilePublicationStaleError,
+} from "./reconcile-publisher.js";
 
-const MAX_DRAIN_ITERATIONS = 500;
+export interface ReconcileWorkerDependencies {
+  prepareReconcileFiles?: typeof prepareReconcileFiles;
+  publishReconcile?: typeof publishReconcile;
+}
 
 export class ReconcileWorker {
-  private draining = false;
   private pendingDrain: Promise<void> | null = null;
-  private idleWaiters: Array<() => void> = [];
-  private readonly clusterScheduler: {
-    schedule(repoId: string, delay?: number | undefined): Promise<void> | void;
-    cancel?(repoId: string): void;
-    waitForIdle(): Promise<void>;
-  };
-  private readonly planReconcileWorkFn: typeof planReconcileWork;
-  private readonly patchSavedFileFn: typeof patchSavedFile;
   private readonly queuedEpochs = new Map<string, number>();
-  private readonly clusterEpochs = new Map<string, number>();
+  private readonly prepareFiles: typeof prepareReconcileFiles;
+  private readonly publish: typeof publishReconcile;
 
   constructor(
     private readonly queue: ReconcileQueue,
-    deps: {
-      clusterScheduler?: {
-        schedule(
-          repoId: string,
-          delay?: number | undefined,
-        ): Promise<void> | void;
-        cancel?(repoId: string): void;
-        waitForIdle(): Promise<void>;
-      };
-      planReconcileWork?: typeof planReconcileWork;
-      patchSavedFile?: typeof patchSavedFile;
-    } = {},
+    deps: ReconcileWorkerDependencies = {},
   ) {
-    this.clusterScheduler =
-      deps.clusterScheduler ??
-      createDebouncedJobScheduler({
-        delayMs: 5000,
-        run: async (repoId) => {
-          const repoEpoch = this.clusterEpochs.get(repoId);
-          if (repoEpoch === undefined) return;
-          // Gate cluster/process recomputation through the indexing gate so
-          // tool-dispatch throttles while these writes run, avoiding the
-          // LadybugDB 0.15.2 native-concurrency abort.
-          await withRepoMutation(
-            repoId,
-            () =>
-              withIndexingGate(async () => {
-                const conn = await getLadybugConn();
-                const latestVersion = await ladybugDb.getLatestVersion(
-                  conn,
-                  repoId,
-                );
-                await computeAndStoreClustersAndProcesses({
-                  conn,
-                  repoId,
-                  versionId: latestVersion?.versionId ?? "live-reconcile",
-                });
-              }),
-            { expectedEpoch: repoEpoch },
-          ).finally(() => {
-            if (this.clusterEpochs.get(repoId) === repoEpoch) {
-              this.clusterEpochs.delete(repoId);
-            }
-          });
-        },
-      });
-    this.planReconcileWorkFn = deps.planReconcileWork ?? planReconcileWork;
-    this.patchSavedFileFn = deps.patchSavedFile ?? patchSavedFile;
+    this.prepareFiles = deps.prepareReconcileFiles ?? prepareReconcileFiles;
+    this.publish = deps.publishReconcile ?? publishReconcile;
   }
 
   enqueue(
     repoId: string,
     frontier: DependencyFrontier,
     enqueuedAt = new Date().toISOString(),
-  ): void {
-    const repoEpoch = captureActiveRepoEpoch(repoId);
-    if (repoEpoch === undefined) return;
-    this.queuedEpochs.set(repoId, repoEpoch);
-    this.queue.enqueue(repoId, frontier, enqueuedAt);
+    inputs: Readonly<Record<string, ReconcileInput>> = {},
+  ): boolean {
+    const epoch = captureActiveRepoEpoch(repoId);
+    if (epoch === undefined) return false;
+    this.queuedEpochs.set(repoId, epoch);
+    const retained = this.queue.enqueue(repoId, frontier, enqueuedAt, inputs);
+    this.ensureDraining();
+    return retained;
+  }
+
+  invalidateSourceContext(repoId: string): void {
+    this.queue.invalidateSourceContext(repoId);
+    this.ensureDraining();
+  }
+
+  wake(repoId: string): void {
+    this.queue.wake(repoId);
     this.ensureDraining();
   }
 
   private ensureDraining(): void {
-    if (!this.pendingDrain) {
-      this.pendingDrain = this.drain().finally(() => {
-        this.pendingDrain = null;
-        // Check if new items were enqueued between drain teardown and
-        // pendingDrain being cleared — restart the drain if needed.
-        if (this.queue.peekNext()) {
-          this.ensureDraining();
-        }
-      });
-    }
+    if (this.pendingDrain) return;
+    this.pendingDrain = this.drain().finally(() => {
+      this.pendingDrain = null;
+      if (this.queue.peekNext()) this.ensureDraining();
+    });
   }
 
-  async waitForIdle(timeoutMs = 30_000): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (this.pendingDrain) {
-      if (Date.now() > deadline) {
-        logger.warn("waitForIdle timed out waiting for pendingDrain", {
-          timeoutMs,
-        });
-        return;
-      }
-      await this.pendingDrain;
-    }
-    if (this.draining) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(
-          () => {
-            const idx = this.idleWaiters.indexOf(resolve);
-            if (idx !== -1) this.idleWaiters.splice(idx, 1);
-            logger.warn("waitForIdle timed out waiting for drain completion", {
-              timeoutMs,
-            });
-            resolve();
-          },
-          Math.max(0, deadline - Date.now()),
-        );
-        this.idleWaiters.push(() => {
-          clearTimeout(timer);
-          resolve();
-        });
-      });
-    }
-    await this.clusterScheduler.waitForIdle();
+  /** Lifecycle callers drain actual provider/native settlement, never a timer race. */
+  async waitForIdle(): Promise<void> {
+    while (this.pendingDrain) await this.pendingDrain;
   }
 
   clearRepo(repoId: string): void {
     this.queue.clearRepo(repoId);
     this.queuedEpochs.delete(repoId);
-    this.clusterEpochs.delete(repoId);
-    this.clusterScheduler.cancel?.(repoId);
+  }
+
+  private async reconcile(claim: ReconcileClaim, epoch: number): Promise<void> {
+    const sourceGeneration = this.queue.getSourceGeneration(claim.repoId);
+    const conn = await getLadybugConn();
+    const repo = await db.getRepo(conn, claim.repoId);
+    if (!repo) throw new Error("Reconciliation repository is unavailable");
+    const appConfig = loadConfig();
+    const repoConfig = RepoConfigSchema.parse(JSON.parse(repo.configJson));
+    const configurationHash = hashValue({ appConfig, repoConfig });
+    const current = () => {
+      if (
+        !this.queue.isCurrent(claim) ||
+        this.queue.getSourceGeneration(claim.repoId) !== sourceGeneration ||
+        captureActiveRepoEpoch(claim.repoId) !== epoch
+      )
+        return false;
+      try {
+        return (
+          hashValue({ appConfig: loadConfig(), repoConfig }) ===
+          configurationHash
+        );
+      } catch {
+        // Changed malformed configuration invalidates this result. Fresh preparation
+        // reports and retains the configuration error without masking ownership loss.
+        return false;
+      }
+    };
+    const assertCurrent = () => {
+      if (!current())
+        throw new ReconcilePublicationStaleError(
+          "Reconciliation source/configuration ownership changed",
+        );
+    };
+    let capturedDependencies:
+      | Awaited<ReturnType<typeof captureReconcileDependencyInputs>>
+      | undefined;
+    try {
+      const baseline = await captureReconcileGraphBaseline(claim.repoId);
+      const files: ReconcileSourceSnapshot[] = [];
+      const removedPaths: string[] = [];
+      for (const file of claim.files) {
+        if (file.input.kind === "removed") {
+          const exists = await lstat(
+            getAbsolutePathFromRepoRoot(repo.rootPath, file.filePath),
+          ).then(
+            () => true,
+            (error: NodeJS.ErrnoException) => {
+              if (error.code === "ENOENT") return false;
+              throw error;
+            },
+          );
+          if (exists)
+            throw new Error(
+              `Reconciliation removal was superseded on disk: ${file.filePath}`,
+            );
+          removedPaths.push(file.filePath);
+          continue;
+        }
+        const disk = await readRepositoryFileBounded(
+          repo.rootPath,
+          file.filePath,
+          repoConfig.maxFileBytes,
+        );
+        if (disk.kind !== "ok")
+          throw new Error(
+            `Reconciliation source unavailable (${disk.kind}): ${file.filePath}`,
+          );
+        const content = disk.content.toString("utf8");
+        if (
+          file.input.kind === "saved" &&
+          hashContent(content) !== file.input.sourceHash
+        )
+          throw new Error(
+            `Saved reconciliation source no longer matches disk: ${file.filePath}`,
+          );
+        files.push({
+          path: file.filePath,
+          content,
+          contentHash: hashContent(content),
+          size: disk.content.length,
+        });
+      }
+      assertCurrent();
+      const dependencyInputs = await captureReconcileDependencyInputs(
+        repo.rootPath,
+        repoConfig,
+        files.map((file) => file.path),
+      );
+      capturedDependencies = dependencyInputs;
+      const preparation = files.length
+        ? await this.prepareFiles({
+            repoId: claim.repoId,
+            repoRoot: repo.rootPath,
+            repoConfig,
+            appConfig,
+            files,
+            dependencyInputs,
+            assertCurrent,
+          })
+        : undefined;
+      // Successful providers can still finish after a newer accepted save.
+      assertCurrent();
+      const prepared = await prepareReconcilePublication({
+        repoId: claim.repoId,
+        repoRoot: repo.rootPath,
+        epoch,
+        baseline,
+        queue: this.queue,
+        claim,
+        preparation,
+        removedPaths,
+        assertCurrent: async () => {
+          if (!current()) return false;
+          const latestRepo = await db.getRepo(conn, claim.repoId);
+          const latestInputs = await captureReconcileDependencyInputs(
+            repo.rootPath,
+            repoConfig,
+            files.map((file) => file.path),
+          );
+          return (
+            hashValue(latestInputs) === hashValue(dependencyInputs) &&
+            latestRepo?.rootPath === repo.rootPath &&
+            latestRepo.configJson === repo.configJson &&
+            current()
+          );
+        },
+      });
+      const outcome = await this.publish(prepared);
+      if (outcome.kind === "stale") {
+        this.queue.retry(claim);
+        return;
+      }
+      this.queue.complete(claim, new Date().toISOString());
+      // Canonical no-op has no frontier: dependency cycles converge naturally.
+      if (outcome.kind === "published")
+        this.enqueue(claim.repoId, outcome.frontier);
+    } catch (error) {
+      if (error instanceof ReconcilePublicationStaleError || !current()) {
+        this.queue.retry(claim);
+        return;
+      }
+      const dependenciesChanged =
+        capturedDependencies !== undefined &&
+        hashValue(
+          await captureReconcileDependencyInputs(
+            repo.rootPath,
+            repoConfig,
+            claim.files
+              .filter((file) => file.input.kind !== "removed")
+              .map((file) => file.filePath),
+          ),
+        ) !== hashValue(capturedDependencies);
+      if (dependenciesChanged) this.queue.retry(claim);
+      else throw error;
+    }
   }
 
   private async drain(): Promise<void> {
-    if (this.draining) {
-      return;
-    }
-    this.draining = true;
-
-    try {
-      let iterations = 0;
-
-      while (this.draining) {
-        if (iterations >= MAX_DRAIN_ITERATIONS) {
-          logger.error(
-            `[ReconcileWorker] Reached MAX_DRAIN_ITERATIONS (${MAX_DRAIN_ITERATIONS}). Possible infinite loop in dependency frontier expansion.`,
+    for (;;) {
+      // ponytail: one file bounds replacement; batch if provider startup dominates backlog latency.
+      const claim = this.queue.claimNext(1);
+      if (!claim) return;
+      try {
+        if (claim.inventoryNeeded)
+          throw new Error(
+            "Reconcile queue requires repository inventory recovery",
           );
-          break;
+        const epoch = this.queuedEpochs.get(claim.repoId);
+        if (epoch === undefined) {
+          this.queue.clearRepo(claim.repoId);
+          continue;
         }
-
-        const claimed = this.queue.claimNext();
-        if (!claimed) {
-          break;
+        if (!claim.files.length) {
+          // Publication retains derived dirtiness; broad jobs are explicit maintenance.
+          this.queue.complete(claim, new Date().toISOString());
+          continue;
         }
-
-        try {
-          if (claimed.inventoryNeeded) {
-            throw new Error(
-              "Reconcile queue requires repository inventory recovery",
-            );
-          }
-          const repoEpoch = this.queuedEpochs.get(claimed.repoId);
-          if (repoEpoch === undefined) {
-            this.queue.clearRepo(claimed.repoId);
-            continue;
-          }
-          await withRepoMutation(
-            claimed.repoId,
-            async () => {
-              const plan = this.planReconcileWorkFn({
-                repoId: claimed.repoId,
-                frontier: claimed.frontier,
-              });
-              const seenFiles = new Set<string>();
-
-              for (const filePath of plan.filePaths) {
-                // A preceding patch may invalidate a sibling through its frontier.
-                // Reclaim that sibling before patching it under an obsolete batch.
-                if (!this.queue.isCurrent(claimed)) break;
-                const fileKey = `${claimed.repoId}:${filePath}`;
-                if (seenFiles.has(fileKey)) {
-                  continue;
-                }
-                seenFiles.add(fileKey);
-                iterations++;
-
-                try {
-                  // Gate each file patch through the indexing gate: live-index
-                  // writes mutex against tool dispatch the same way indexRepo
-                  // does, narrowing native-concurrency risk during the WAL
-                  // abort window in LadybugDB 0.15.2.
-                  const patched = await withIndexingGate(() =>
-                    this.patchSavedFileFn({
-                      repoId: claimed.repoId,
-                      filePath,
-                    }),
-                  );
-                  // Record this completed patch before its frontier supersedes
-                  // sibling generations; otherwise batch discard repeats it.
-                  this.queue.settleFile(claimed, filePath, "success");
-                  if (
-                    patched.frontier.dependentFilePaths.length > 0 ||
-                    patched.frontier.importedFilePaths.length > 0 ||
-                    patched.frontier.invalidations.length > 0
-                  ) {
-                    this.queue.enqueue(
-                      claimed.repoId,
-                      patched.frontier,
-                      new Date().toISOString(),
-                    );
-                  }
-                } catch (fileError) {
-                  this.queue.settleFile(
-                    claimed,
-                    filePath,
-                    "blocked",
-                    fileError instanceof Error
-                      ? fileError.message
-                      : String(fileError),
-                  );
-                  logger.warn(
-                    "[ReconcileWorker] Failed to patch file " +
-                      filePath +
-                      " in " +
-                      claimed.repoId +
-                      ": " +
-                      (fileError instanceof Error
-                        ? fileError.message
-                        : String(fileError)),
-                  );
-                }
-              }
-
-              if (plan.recomputeDerivedData) {
-                this.clusterEpochs.set(claimed.repoId, repoEpoch);
-                const scheduled = this.clusterScheduler.schedule(
-                  claimed.repoId,
-                  undefined,
-                );
-                if (scheduled && typeof scheduled.catch === "function") {
-                  void scheduled.catch((error) => {
-                    logger.debug("Skipped stale reconcile cluster job", {
-                      repoId: claimed.repoId,
-                      error:
-                        error instanceof Error ? error.message : String(error),
-                    });
-                  });
-                }
-              }
-
-              this.queue.complete(claimed, new Date().toISOString());
-            },
-            { expectedEpoch: repoEpoch },
-          );
-        } catch (error) {
-          if ((error as { code?: string }).code === "NOT_FOUND") {
-            this.queue.clearRepo(claimed.repoId);
-            this.queuedEpochs.delete(claimed.repoId);
-          } else {
-            this.queue.fail(
-              claimed,
-              new Date().toISOString(),
-              error instanceof Error ? error.message : String(error),
-            );
-          }
+        await withRepoMutation(
+          claim.repoId,
+          () => this.reconcile(claim, epoch),
+          { expectedEpoch: epoch },
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === "NOT_FOUND")
+          this.clearRepo(claim.repoId);
+        else {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.queue.fail(claim, new Date().toISOString(), message);
+          logger.warn("Background reconciliation retained blocked work", {
+            repoId: claim.repoId,
+            error: message,
+          });
         }
-      }
-    } finally {
-      this.draining = false;
-      const waiters = this.idleWaiters.splice(0);
-      for (const resolve of waiters) {
-        resolve();
       }
     }
   }
