@@ -181,7 +181,7 @@ flowchart LR
 
 ### Mode 2: Regex Search
 
-Search for patterns and return matching lines with surrounding context. Automatically merges overlapping context windows. Search scans the file by default, or starts at `offset` when provided. `limit` caps returned match/context lines after search; it does not limit the scanned window.
+Search for patterns and return matching lines with surrounding context. Automatically merges overlapping context windows. Search scans the file by default, or starts at `offset` when provided. `limit` caps returned match/context lines after search; it does not limit the scanned window. The pattern uses JavaScript regex syntax. In a JSON request, use `"search": "README\\.md"` to match a literal period. `searchContext` accepts an integer from 0 through 20.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
@@ -227,8 +227,8 @@ flowchart TD
   "fn": "file.read",
   "args": {
     "filePath": "docs/guide.md",
-    "search": "authentication",
-    "searchContext": 3
+    "search": "^##\\s+(?:Indexing|Configuration)\\s*\\r?$",
+    "searchContext": 0
   }
 }
 ```

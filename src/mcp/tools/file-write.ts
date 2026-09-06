@@ -58,6 +58,16 @@ function formatNumberedLines(
   if (lines.length === 0 || endIndex < startIndex) {
     return "";
   }
+  // Keep both ends visible without letting a distant edit expand the preview.
+  if (endIndex - startIndex + 1 > 80) {
+    const headEnd = startIndex + 38;
+    const tailStart = endIndex - 39;
+    return [
+      formatNumberedLines(lines, startIndex, headEnd),
+      `... ${tailStart - headEnd - 1} lines omitted ...`,
+      formatNumberedLines(lines, tailStart, endIndex),
+    ].join("\n");
+  }
   const out: string[] = [];
   for (let i = startIndex; i <= endIndex; i++) {
     out.push(`${String(i + 1).padStart(4, " ")} | ${lines[i] ?? ""}`);
@@ -76,7 +86,6 @@ function buildDiffPreview(
   const beforeLines = splitLines(beforeContent);
   const afterLines = splitLines(afterContent);
   const contextLines = 2;
-  const maxLines = 80;
   let prefix = 0;
   while (
     prefix < beforeLines.length &&
@@ -102,12 +111,10 @@ function buildDiffPreview(
   const beforeEnd = Math.min(
     beforeLines.length - 1,
     beforeSuffix + contextLines,
-    beforeStart + maxLines - 1,
   );
   const afterEnd = Math.min(
     afterLines.length - 1,
     afterSuffix + contextLines,
-    afterStart + maxLines - 1,
   );
 
   return {
@@ -160,6 +167,17 @@ export async function handleFileWrite(
     existingContent,
     existingBytes,
   });
+  // A no-op must not create a backup or queue a saved-file reconciliation.
+  if (fileExists && mode === "replacePattern" && newContent === existingContent) {
+    return withRawTokenBaseline({
+      filePath: relPath,
+      bytesWritten: 0,
+      linesWritten: 0,
+      mode,
+      replacementCount,
+      hint: "No text changed. Check the pattern and line endings (\\r?\\n), or use replaceLines.",
+    }, existingBytes);
+  }
   const snippets = buildDiffPreview(existingContent, newContent);
 
   // Indexed source must remain parseable before either disk or graph state changes.

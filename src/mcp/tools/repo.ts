@@ -8,7 +8,7 @@ import {
   RepoUnregisterResponse,
   type RepoStatusRequest,
   RepoStatusResponse,
-  RepoStatusResponseSchema,
+  RepoStatusRawResponseSchema,
   type IndexRefreshRequest,
   IndexRefreshResponse,
   type RepoOverviewRequest,
@@ -1277,7 +1277,7 @@ export async function handleRepoStatus(
       }
     }
 
-    return RepoStatusResponseSchema.parse({
+    return RepoStatusRawResponseSchema.parse({
       repoId,
       ...(includeTelemetry ? { rootPath: repo.rootPath } : {}),
       rootAvailability,

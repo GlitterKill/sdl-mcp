@@ -1,7 +1,6 @@
 export const MANUAL_DESCRIPTION =
-  "Returns the SDL-MCP API manual - a compact TypeScript reference listing all " +
-  "available functions, their parameters, and return types. Call once per " +
-  "session to learn the API before using sdl.context or sdl.workflow.";
+  "Load focused API syntax with actions:[\"action.name\"] after sdl.action.search. " +
+  "Reuse the returned schemas/examples; request another action only when needed.";
 
 export const WORKFLOW_DESCRIPTION =
   "Execute a workflow of SDL-MCP operations in a single round-trip. Best for " +

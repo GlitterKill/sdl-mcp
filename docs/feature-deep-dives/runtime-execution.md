@@ -277,6 +277,9 @@ Retrieves and searches stored runtime output artifacts on demand. Use this after
 | `matchCount` | integer | Number of matching lines after the cursor; `0` means no query terms matched |
 | `nextCursor` | object | Cursor for the next page when more matches exist |
 
+Set `stream` to `"stdout"`, `"stderr"`, or `"both"` to control the search scope. When a response includes `nextAction`, replay its action and arguments unchanged.
+
+
 
 ## Example
 

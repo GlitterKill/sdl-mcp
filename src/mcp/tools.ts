@@ -715,7 +715,7 @@ const IndexOperationSchema = z.object({
   error: z.string().optional(),
 });
 
-const RepoStatusRawResponseSchema = z.object({
+export const RepoStatusRawResponseSchema = z.object({
   repoId: z.string().min(1),
   rootPath: z.string().optional(),
   rootAvailability: RepoRootAvailabilitySchema,
@@ -910,8 +910,15 @@ const RepoStatusCompactResponseSchema = z.object({
   retrievalEvidence: z.unknown().optional(),
 }).strict();
 
+// Workflow privacy filtering removes startedAt; handler validation remains raw.
+const RepoStatusProjectedResponseSchema = RepoStatusRawResponseSchema.extend({
+  serverInfo: RepoStatusRawResponseSchema.shape.serverInfo.unwrap()
+    .partial({ startedAt: true })
+    .optional(),
+});
+
 export const RepoStatusResponseSchema = z.union([
-  RepoStatusRawResponseSchema,
+  RepoStatusProjectedResponseSchema,
   RepoStatusCompactResponseSchema,
 ]);
 
@@ -3890,7 +3897,7 @@ export const FileReadRequestSchema = withProjectionRequestOptions(z.object({
     .max(500)
     .optional()
     .describe(
-      "Return only lines matching this regex pattern (case-insensitive). Includes context lines.",
+      "Case-insensitive regex search; escape literal punctuation. Returns matching lines with context.",
     ),
   searchContext: z
     .number()
@@ -3898,7 +3905,7 @@ export const FileReadRequestSchema = withProjectionRequestOptions(z.object({
     .min(0)
     .max(20)
     .default(2)
-    .describe("Lines of context around each search match. Default 2."),
+    .describe("Context lines per search match: 0-20 (default 2)."),
   jsonPath: z
     .string()
     .max(200)
@@ -4260,7 +4267,7 @@ export const FileWriteRequestSchema = withProjectionRequestOptions(z.object({
     "Replace a line range with new content",
   ),
   replacePattern:
-    FileWriteReplacePatternSchema.optional().describe("Regex find/replace"),
+    FileWriteReplacePatternSchema.optional().describe("Regex find/replace; match line endings with \\r?\\n for LF/CRLF files"),
   jsonPath: z
     .string()
     .max(200)
@@ -4303,6 +4310,7 @@ export const FileWriteResponseSchema = z.object({
   mode: FileWriteModeSchema,
   backupPath: z.string().optional(),
   replacementCount: z.number().int().nonnegative().optional(),
+  hint: z.string().max(200).optional(),
   snippets: DiffPreviewSnippetsSchema.optional(),
   indexUpdate: FileWriteIndexUpdateSchema.optional(),
   diagnostics: ToolTimingDiagnosticsSchema.optional(),

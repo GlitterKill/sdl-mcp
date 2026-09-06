@@ -867,6 +867,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "runtime.queryOutput": {
     artifactHandle: "runtime-myrepo-123-abc",
     queryTerms: ["error", "failed"],
+    stream: "both",
   },
   "response.get": {
     handle: "response-myrepo-1770000000000-0123456789abcdef",
@@ -883,11 +884,11 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "memory.remove": { memoryId: "<memoryId>" },
   "memory.surface": { taskText: "fix auth bug", limit: 5 },
   "usage.stats": { scope: "both", since: "2026-03-01T00:00:00Z" },
-  "file.read": { filePath: "config/sdlmcp.config.example.json" },
+  "file.read": { filePath: "src/example.ts", search: "oldName", searchContext: 2 },
   "file.write": {
-    filePath: "config/app.yaml",
-    jsonPath: "server.port",
-    jsonValue: 8080,
+    filePath: "src/example.ts",
+    replacePattern: { pattern: "oldName\\r?\\n", replacement: "newName\n" },
+    createBackup: false,
   },
 
   "search.edit": {
@@ -1009,7 +1010,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "buffer.status": "Get buffer status",
   "runtime.execute":
     'runtime.execute executes repository tooling. Permitted uses include build, test, lint, compiler, named scripts, and targeted edit scripts. Do not use it to inspect, search, or print repository files. Use sdl.context or sdl.retrieve for indexed source and sdl.file with op="read" for other files. Shell runtime requires code; direct args-only shell execution is rejected. Use outputMode:"digest" for tooling failures, then runtime.queryOutput for full logs. Node code runs as ESM (use import/createRequire, not require()). Use stdin for multiline scripts/input; maxResponseLines accepts 5-1000 lines (default 100).',
-  "runtime.queryOutput": "Query stored command output by keywords",
+  'runtime.queryOutput': 'Query stored output; replay the returned nextAction unchanged. stream accepts "stdout", "stderr", or "both".',
   "response.get": "Retrieve a stored large tool response by handle",
   "memory.store": "Store a development memory",
   "memory.query": "Query memories",

@@ -186,6 +186,60 @@ describe("sdl.file.write", () => {
     rmSync(resolve(ownedRoot), { recursive: true, force: true });
   });
 
+
+  it("returns bounded guidance without writing an unchanged pattern replacement", async () => {
+    const filePath = join(configDir, "unchanged.txt");
+    const original = "first\r\nsecond\r\n";
+    writeFileSync(filePath, original);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await handleFileWrite({
+        repoId,
+        filePath: "config/unchanged.txt",
+        replacePattern: { pattern: "first\\nsecond", replacement: "updated" },
+      });
+      assert.equal(response.bytesWritten, 0);
+      assert.equal(response.linesWritten, 0);
+      assert.equal(response.replacementCount, 0);
+      assert.equal(response.indexUpdate, undefined);
+      assert.equal(response.backupPath, undefined);
+      assert.match(response.hint ?? "", /No text changed/);
+      assert.match(response.hint ?? "", /line endings/);
+      assert.ok((response.hint?.length ?? 0) <= 200);
+      assert.equal(readFileSync(filePath, "utf8"), original);
+      assert.equal(existsSync(filePath + ".bak"), false);
+    }
+    const changed = await handleFileWrite({
+      repoId,
+      filePath: "config/unchanged.txt",
+      replacePattern: { pattern: "first\\r?\\nsecond", replacement: "updated" },
+      createBackup: false,
+    });
+    assert.equal(changed.replacementCount, 1);
+    assert.equal(changed.hint, undefined);
+    assert.equal(readFileSync(filePath, "utf8"), "updated\r\n");
+  });
+
+  it("shows both ends of distant edits within the existing preview line budget", async () => {
+    const filePath = join(configDir, "distant.txt");
+    writeFileSync(filePath, Array.from({ length: 240 }, (_, index) =>
+      index === 2 || index === 232 ? "oldName" : `unchanged ${index + 1}`,
+    ).join("\n"));
+    const response = await handleFileWrite({
+      repoId,
+      filePath: "config/distant.txt",
+      replacePattern: { pattern: "oldName", replacement: "newName", global: true },
+      createBackup: false,
+    });
+    assert.equal(response.replacementCount, 2);
+    assert.match(response.snippets?.before ?? "", /233 \| oldName/);
+    assert.match(response.snippets?.after ?? "", /3 \| newName/);
+    assert.match(response.snippets?.after ?? "", /233 \| newName/);
+    assert.match(response.snippets?.after ?? "", /lines omitted/);
+    assert.ok((response.snippets?.before.split("\n").length ?? 0) <= 80);
+    assert.ok((response.snippets?.after.split("\n").length ?? 0) <= 80);
+    assert.equal(response.snippets?.afterEndLine, 235);
+  });
+
   describe("content mode (create/overwrite)", () => {
     it("creates a new file with createIfMissing", async () => {
       const response = await handleFileWrite({

@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -21,6 +22,7 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
 import { getScipIngestionRecord } from "../../dist/db/ladybug-scip.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
+import { getRepositorySymbolVectorHealthGeneration } from "../../dist/retrieval/health.js";
 
 const REPO_ID = "incremental-partial-recovery-repo";
 
@@ -260,5 +262,62 @@ describe("incremental index partial-run recovery", () => {
     assert.equal(preservedAfter?.searchText, sentinelSearchText);
     assert.ok(missingAfter, "no-op recovery should recreate the missing summary");
     assert.notEqual(missingAfter.summary, sentinelSummary);
+  });
+
+  it("preserves pending semantic state during no-change structural recovery", async () => {
+    const full = await indexRepo(REPO_ID, "full", undefined, undefined, {
+      isolatedRebuild: true,
+    });
+    const savedConfig = readFileSync(configPath, "utf8");
+    const config = JSON.parse(savedConfig);
+    config.semantic = {
+      enabled: true,
+      provider: "mock",
+      generateSummaries: false,
+      embeddingProfile: "specialized",
+      symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
+      fileSummaryEmbeddingModels: [],
+    };
+    writeFileSync(configPath, JSON.stringify(config), "utf8");
+    try {
+      for (const lifecycleState of ["steady", "refreshing"]) {
+        // Missing metrics force structural repair while semantic work remains pending.
+        await withWriteConn(async (conn) => {
+          await exec(conn,
+            `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+             MATCH (m:Metrics {symbolId: s.symbolId}) DELETE m`,
+            { repoId: REPO_ID },
+          );
+          await exec(conn,
+            `MATCH (d:DerivedState {repoId: $repoId})
+             SET d.summariesDirty = true, d.embeddingsDirty = true,
+                 d.embeddingLifecycleState = $lifecycleState,
+                 d.lastError = $lastError`,
+            { repoId: REPO_ID, lifecycleState, lastError: "pending semantic repair" },
+          );
+        });
+        const generation = getRepositorySymbolVectorHealthGeneration(REPO_ID);
+        const incremental = await indexRepo(REPO_ID, "incremental");
+        assert.equal(incremental.changedFiles, 0);
+        assert.equal(incremental.versionId, full.versionId);
+        assert.equal((await ladybugDb.getSymbolsMissingMetricsByRepo(
+          await getLadybugConn(), REPO_ID,
+        )).length, 0, "structural recovery must repair missing metrics");
+        const state = await getDerivedState(REPO_ID);
+        assert.equal(state?.summariesDirty, true);
+        assert.equal(state?.embeddingsDirty, true);
+        assert.equal(state?.embeddingLifecycleState, lifecycleState);
+        assert.equal(state?.lastError, "pending semantic repair");
+        assert.equal(getRepositorySymbolVectorHealthGeneration(REPO_ID), generation);
+
+        // Pending semantics alone must not rerun structural finalization.
+        const repeated = await indexRepo(REPO_ID, "incremental");
+        assert.equal(repeated.changedFiles, 0);
+        assert.equal(repeated.algorithmRefresh, undefined);
+        assert.equal(getRepositorySymbolVectorHealthGeneration(REPO_ID), generation);
+      }
+    } finally {
+      writeFileSync(configPath, savedConfig, "utf8");
+    }
   });
 });

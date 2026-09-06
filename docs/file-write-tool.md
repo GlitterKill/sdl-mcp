@@ -19,7 +19,7 @@ The `file.write` tool provides token-efficient file writing with six targeted wr
 
 ---
 
-MCP responses are human-first: visible `content` summarizes the write and includes bounded before/after previews when available. Machine-readable task data remains in `structuredContent`, including `filePath`, `mode`, `etag`, write counts, error details, and `backupPath` when a retained sibling backup is created. For an indexed target, the response also reports whether the saved-file graph update is queued or committed. Precondition snapshots, timings, and other SDL-MCP bookkeeping remain hidden unless diagnostics are explicitly requested.
+MCP responses are human-first: visible `content` summarizes the write and includes bounded before/after previews when available. The before and after sides each retain up to 80 lines; when an affected span is larger, SDL-MCP shows the head and tail with an explicit omitted-middle marker. Machine-readable task data remains in `structuredContent`, including `filePath`, `mode`, `etag`, write counts, error details, and `backupPath` when a retained sibling backup is created. For an indexed target, the response also reports whether the saved-file graph update is queued or committed. Precondition snapshots, timings, and other SDL-MCP bookkeeping remain hidden unless diagnostics are explicitly requested.
 
 
 ## Overview
@@ -153,7 +153,11 @@ By default, `file.write` creates a `.bak` file before modifying an existing file
 | `mode`             | string | Write mode used                              |
 | `backupPath`       | string | Path to backup file (if created)             |
 | `replacementCount` | number | Number of replacements (replacePattern mode) |
+| `hint`             | string | Bounded guidance when a pattern replacement changes nothing |
 | `indexUpdate`      | object | Saved-file graph update state for an indexed target |
+
+A `replacePattern` request that leaves the existing bytes unchanged, including a no-match request, is a successful no-op. It returns `bytesWritten: 0`, `linesWritten: 0`, and a hint, without creating a backup or starting saved-file reconciliation.
+
 
 ---
 

@@ -17,6 +17,8 @@ import {
 
 export interface FinalizeDerivedStateParams {
   mode: "full" | "incremental";
+  /** Preserve semantic flags and pending errors when only repairing graph state. */
+  structuralOnly?: boolean;
   conn: Connection;
   repoId: string;
   versionId: string;
@@ -44,6 +46,7 @@ export async function finalizeDerivedState(
 ): Promise<FinalizeDerivedStateResult> {
   const {
     mode,
+    structuralOnly = false,
     conn,
     repoId,
     versionId,
@@ -114,9 +117,9 @@ export async function finalizeDerivedState(
           clusters: true,
           processes: true,
           algorithms: !algorithmDiagnostics.dirty,
-          summaries: true,
+          summaries: !structuralOnly,
         },
-        { clearError: !algorithmDiagnostics.dirty },
+        { clearError: !structuralOnly && !algorithmDiagnostics.dirty },
       );
     } catch (error) {
       logger.debug("markDerivedStateComputed skipped", {
@@ -142,8 +145,8 @@ export async function finalizeDerivedState(
         clusters: true,
         processes: true,
         algorithms: true,
-        summaries: true,
-        embeddings: true,
+        summaries: !structuralOnly,
+        embeddings: !structuralOnly,
       });
     } catch (dirtyError) {
       logger.debug("markDerivedStateDirty skipped", {

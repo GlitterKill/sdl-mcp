@@ -65,7 +65,7 @@ const FileGatewayReadSchema = z.object({
     .max(500)
     .optional()
     .describe(
-      "Return only lines matching this regex pattern (case-insensitive). Includes context lines.",
+      "Case-insensitive regex search; escape literal punctuation. Returns matching lines with context.",
     ),
   searchContext: z
     .number()
@@ -73,7 +73,7 @@ const FileGatewayReadSchema = z.object({
     .min(0)
     .max(20)
     .default(2)
-    .describe("Lines of context around each search match. Default 2."),
+    .describe("Context lines per search match: 0-20 (default 2)."),
   jsonPath: z
     .string()
     .max(200)
@@ -110,7 +110,7 @@ const FileGatewayWriteSchema = z.object({
     "Replace a line range with new content",
   ),
   replacePattern:
-    FileWriteReplacePatternSchema.optional().describe("Regex find/replace"),
+    FileWriteReplacePatternSchema.optional().describe("Regex find/replace; match line endings with \\r?\\n for LF/CRLF files"),
   jsonPath: z
     .string()
     .max(200)

@@ -136,6 +136,7 @@ Get stable repository and graph status. Set `includeTelemetry: true` only when o
 - Telemetry-off responses include `repoId`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `countNotes`, root availability, compact stable watcher state, and safety-relevant derived-state and graph-integrity fields. `detail` changes only the breadth of that stable status.
 - `includeTelemetry: true` adds `rootPath`, timestamps, expensive health data and components, prefetch statistics, server/runtime information, live-index operational fields, detailed watcher operations, and diagnostics. `rootPath` is never exposed by `detail` alone.
 - `rootAvailability` on every detail level, with `status` set to `available`, `missing`, or `unreadable`. An unavailable root also includes a stable `nextBestAction` for restoring or updating the registration.
+- Workflow responses can omit `serverInfo.startedAt` after timestamp filtering, even with telemetry enabled. Consumers must treat that projected field as optional; raw handler validation still requires it when `serverInfo` is present.
 - With telemetry enabled: `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), and `healthAvailable`; detailed watcher operations; `prefetchStats`; and `liveIndexStatus`. Root availability and graph availability remain independent safety gates.
 - `derivedState` separates `structuralStale` (clusters, processes, and graph algorithms) from `semanticStale` (summaries and embeddings). The legacy `stale` field remains their compatibility aggregate. When only `summariesDirty` or `embeddingsDirty` is set, continue with available retrieval lanes; `nextBestAction` does not recommend incremental indexing. The object also retains stable version, graph-integrity, and recovery fields, including `graphIntegrityState`, `graphIntegrityVersionId`, `graphIntegrityRevision`, `graphIntegrityVerifiedRevision`, `graphIntegrityDigest`, and `nextBestAction` when guidance is useful. Equal current and verified revisions in `verified` state prove the latest revision. `verifying` and `failed` can remain readable when the current Version has a manifest and revisions, but they do not prove the latest revision. A `verifying` state does not require a refresh. An `unknown`, missing-manifest, or permanent failed state directs a populated graph to stopped `index --force --safe-rebuild` recovery rather than repeated full refreshes. Integrity mismatch details stay in operational logs and never appear in the response. Startup and foreground quiescence checks requeue persisted pending revisions.
 - `memories` (when `surfaceMemories: true` and memory is enabled in config) — array of relevant development memories auto-surfaced for the repository
@@ -1135,7 +1136,7 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 | `offset`        | `number` | No       | Start line (0-based)                                                                       |
 | `limit`         | `number` | No       | Max lines to return. In search mode this caps returned match/context lines after scanning. |
 | `search`        | `string` | No       | Regex pattern (case-insensitive)                                                           |
-| `searchContext` | `number` | No       | Context lines around matches (default 2)                                                   |
+| `searchContext` | `number` | No       | Context lines around matches, from 0 to 20 (default 2)                                      |
 | `jsonPath`      | `string` | No       | Dot-separated key path for JSON extraction (YAML accepted only if JSON-compatible)         |
 
 **Blocked extensions:** Indexed source files (.ts, .js, .py, .go, .rs, etc.) are rejected with guidance to use SDL code tools.
@@ -1175,6 +1176,8 @@ For search-edit previews, copy `applyArgs` from the preview when using `sdl.sear
 - `backupPath` when backup creation is enabled
 - `replacementCount` for pattern-replace operations
 - `indexUpdate` when SDL-MCP can live-sync an indexed source file after the write. A write to a source path matching a repository ignore pattern still succeeds, but skips the graph patch and omits `indexUpdate`; this is expected, not a live-sync failure. For other live-sync failures, `file.write` restores the prior file (or unlinks a newly created file) and throws `INDEX_ERROR`.
+- A `replacePattern` request with no matches returns `bytesWritten: 0`, `linesWritten: 0`, and a hint. It creates no backup and starts no live reconciliation.
+
 
 See [file.write Tool Reference](./file-write-tool.md) for the mode-by-mode guide.
 
@@ -1265,9 +1268,12 @@ Each excerpt: `{ lineStart, lineEnd, content, source }`
   "artifactHandle": "runtime-my-repo-1774356909696-fc5aa1f22e33e17c",
   "queryTerms": ["FAIL", "Error"],
   "maxExcerpts": 5,
-  "contextLines": 3
+  "contextLines": 3,
+  "stream": "both"
 }
 ```
+
+Set `stream` to `"stdout"`, `"stderr"`, or `"both"` to control the search scope. When a response includes `nextAction`, replay its action and arguments unchanged.
 
 ---
 

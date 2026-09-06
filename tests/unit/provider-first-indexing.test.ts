@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { logger } from "../../dist/util/logger.js";
 import {
   existsSync,
   mkdirSync,
@@ -881,6 +882,60 @@ describe("provider-first indexing foundation", () => {
           testCase.name,
         );
       }
+    }
+  });
+
+  it("distinguishes semantic assessment failures and logs bounded safe model reasons", async (t) => {
+    const warning = t.mock.method(logger, "warn", () => {});
+    for (const degraded of [true, false]) {
+      warning.mock.resetCalls();
+      const events: string[] = [];
+      const code = degraded ? "SEMANTIC_FINAL_ASSESSMENT_DEGRADED" : "SEMANTIC_SUCCESS_BATCH_REJECTED";
+      const snapshots = Array.from({ length: 10 }, (_, index) => ({
+        ...semanticHealthSnapshot({
+          repoId: "repo-diagnostics", versionId: "v1", generation: 0,
+          model: index === 0 ? "nomic-embed-text-v1.5" : "C:/private/model",
+          mode: degraded ? "degraded" : "exact",
+        }),
+        reason: index === 0 ? "repository vector coverage is not bidirectional" : "C:/private/vector [0.1,0.2]".repeat(100),
+      }));
+      const lifecycle = createRepositorySemanticLifecycle({
+        repoId: "repo-diagnostics", versionId: "v1",
+        appConfig: { semantic: { enabled: false } },
+        deps: {
+          getGeneration: () => 0,
+          getConnection: async () => ({}) as Connection,
+          getDerivedState: async () => semanticDerivedStateRow("repo-diagnostics", "v1"),
+          withExclusiveOperation: async (operation) => operation(),
+          withWriteConnection: async (operation) => operation({} as Connection),
+          assess: async () => snapshots,
+          prepareSuccessBatch: () => { events.push("prepare"); return null; },
+          markSteadyIfCurrent: async () => { events.push("steady"); return true; },
+          markRefreshingIfCurrent: async () => true,
+          recordError: async (_repoId, message) => {
+            assert.equal(warning.mock.callCount(), 1, "log original assessment before failure replacement");
+            events.push(message);
+          },
+          publish: () => true,
+        },
+      });
+      await assert.rejects(lifecycle.commitSuccess(), (error: Error) => {
+        assert.equal(error.name, "IndexError");
+        assert.ok(error.message.startsWith(code + ": "));
+        assert.doesNotMatch(error.message, /repo-diagnostics|private|0\.1/);
+        return true;
+      });
+      assert.equal(events.includes("steady"), false);
+      assert.equal(events.includes("prepare"), !degraded);
+      assert.match(events.at(-1)!, new RegExp(code));
+      assert.equal(warning.mock.callCount(), 1);
+      const logged = warning.mock.calls[0].arguments[1] as { code: string; repoId: string; models: Array<{ model: string; reason: string }> };
+      assert.equal(logged.code, code);
+      assert.equal(logged.models[0].model, "nomic-embed-text-v1.5");
+      assert.equal(logged.repoId, "repo-diagnostics");
+      assert.equal(logged.models.length, 8);
+      assert.equal(logged.models[0].reason, "repository vector coverage is not bidirectional");
+      assert.doesNotMatch(JSON.stringify(logged), /private|0\.1/);
     }
   });
 

@@ -50,7 +50,7 @@ import {
 import { withPostIndexWriteSession } from "../db/write-session.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import {
-  derivedStateIsStale,
+  derivedStateIsStructurallyStale,
   getDerivedState,
   getDerivedStateFromConnection,
   markDerivedStateDirty,
@@ -1562,7 +1562,7 @@ async function assessNoOpIncrementalRecovery(params: {
 
   const needsDerivedState =
     !derivedState ||
-    derivedStateIsStale(derivedState) ||
+    derivedStateIsStructurallyStale(derivedState) ||
     derivedState.computedVersionId !== versionId;
   if (needsDerivedState) {
     reasons.push("derived state missing or stale");
@@ -2139,9 +2139,16 @@ async function indexRepoImpl(
     processesTraced: number;
     algorithmRefresh: AlgorithmRefreshDiagnostics;
   }> => {
-    await ensureSemanticInvalidatedBeforeStructuralWrite(params.versionId);
+    // No-change repairs do not own pending semantic work or its lifecycle.
+    const structuralOnly =
+      params.indexMode === "incremental" &&
+      params.changedFileIdsForFinalize?.size === 0 &&
+      !params.hasIndexMutations;
+    if (!structuralOnly) {
+      await ensureSemanticInvalidatedBeforeStructuralWrite(params.versionId);
+    }
     const semanticLifecycle =
-      appConfig.semantic?.enabled === true && !params.deferSemanticRefresh && !semanticInvalidationWasNoOp
+      !structuralOnly && appConfig.semantic?.enabled === true && !params.deferSemanticRefresh && !semanticInvalidationWasNoOp
         ? createRepositorySemanticLifecycle({
             repoId,
             versionId: params.versionId,
@@ -2211,6 +2218,7 @@ async function indexRepoImpl(
             })
           : await finalizeDerivedState({
               mode: params.indexMode,
+              structuralOnly,
               conn: freshConn,
               repoId,
               versionId: params.versionId,
@@ -2234,8 +2242,8 @@ async function indexRepoImpl(
         if (!semanticLifecycle) {
           await measurePhase("buildDeferredIndexes", () =>
             buildDeferredIndexes({
-              deferSemanticVectorIndexes: finalizeResult.semanticDeferred,
-              deferSemanticTextIndexes: finalizeResult.semanticDeferred,
+              deferSemanticVectorIndexes: structuralOnly || finalizeResult.semanticDeferred,
+              deferSemanticTextIndexes: structuralOnly || finalizeResult.semanticDeferred,
               recordTiming: recordIndexSubphaseTiming,
             }),
           );

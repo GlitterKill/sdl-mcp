@@ -34,6 +34,7 @@ import {
   assertWorkflowProjectionBindings,
 } from "../../dist/mcp/response-projection/registry.js";
 import {
+  RepoStatusRawResponseSchema,
   DeltaGetResponseSchema,
   ResponseGetResponseSchema,
   SliceBuildResponseSchema,
@@ -41,6 +42,7 @@ import {
   withProjectionSuccessOutputSchema,
 } from "../../dist/mcp/tools.js";
 import { registerTools } from "../../dist/mcp/tools/index.js";
+import { buildToolResponseEnvelope } from "../../dist/server.js";
 import {
   AGENT_OUTPUT_CASES,
   AGENT_OUTPUT_TOKEN_BUDGETS,
@@ -592,8 +594,8 @@ describe("response projection inventory", () => {
       ["sdl.file", 1_000],
       // Stored-response continuation, recovery defaults, and diagnostic code metadata total 1,641 nodes.
       ["sdl.retrieve", 1_648],
-      // Saved-write pending and buffer publication phase add four nodes to the prior 5,810 budget.
-      ["sdl.workflow", 5_814],
+      // Optional file-write guidance and the filtered status timestamp add three nodes.
+      ["sdl.workflow", 5_817],
     ]);
 
     for (const [name, maxNodes] of nodeBudgets) {
@@ -802,6 +804,47 @@ describe("response projection inventory", () => {
     );
 
     assert.deepEqual(workflowOutputSchema.parse(projected), projected);
+  });
+
+  it("accepts telemetry status after workflow timestamp filtering", () => {
+    const registration = capturePublicToolRegistrations({ enabled: true, exclusive: true })
+      .find(({ name }) => name === "sdl.workflow");
+    assert.ok(registration);
+    const schema = exhaustiveOutputSchema(registration);
+    assert.ok(schema);
+    const canonical = {
+      repoId: "fixture",
+      rootAvailability: { status: "available" },
+      latestVersionId: "v1",
+      filesIndexed: 1,
+      symbolsIndexed: 1,
+      serverInfo: {
+        version: "0.13.6",
+        node: "v24.14.0",
+        startedAt: "2026-09-06T00:00:00Z",
+        driftWarnings: [],
+      },
+    };
+    for (const detail of ["compact", "standard", "full"] as const) {
+      const request = {
+        repoId: "fixture", detail, includeDiagnostics: true,
+        steps: [{ fn: "repoStatus", args: { includeTelemetry: true, detail } }],
+      };
+      const projected = buildToolResponseEnvelope({
+        results: [{ stepIndex: 0, fn: "repoStatus", result: canonical }],
+      }, null, "", "sdl.workflow", request).structuredContent;
+      assert.doesNotMatch(JSON.stringify(projected), /startedAt/);
+      assert.match(JSON.stringify(projected), /serverInfo/);
+      assert.deepEqual(schema.parse(projected), projected);
+    }
+    assert.deepEqual(RepoStatusRawResponseSchema.parse(canonical), canonical);
+    const { startedAt: _startedAt, ...withoutTimestamp } = canonical.serverInfo;
+    assert.equal(RepoStatusRawResponseSchema.safeParse({
+      ...canonical, serverInfo: withoutTimestamp,
+    }).success, false);
+    assert.equal(RepoStatusRawResponseSchema.safeParse({
+      ...canonical, serverInfo: { ...canonical.serverInfo, startedAt: 123 },
+    }).success, false);
   });
 
   it("accepts every projected workflow child fixture", () => {

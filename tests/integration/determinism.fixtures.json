@@ -1,5 +1,5 @@
 {
-  "$comment": "Determinism fixtures cover every registered action with explicit compact/full projections; diagnostic exclusions require a named reason.",
+  "$comment": "Determinism fixtures cover every registered action with explicit compact/full projections; diagnostic exclusions require a named reason. repo.status telemetry-off compact/full fixtures remain unchanged; opt-in telemetry varies and its filtered serverInfo.startedAt schema is checked by response-projection-inventory.test.ts.",
   "repoId": "determinism-fixtures",
   "fixtureRepo": "../stress/fixtures",
   "toolCatalogExpectations": {
@@ -7,6 +7,26 @@
     "workflowInstructionToolIndex": 0
   },
   "toolCalls": [
+    {
+      "tool": "sdl.action.search",
+      "args": {
+        "query": "file.write",
+        "limit": 1,
+        "includeSchemas": true,
+        "includeExamples": true,
+        "detail": "compact"
+      }
+    },
+    {
+      "tool": "sdl.action.search",
+      "args": {
+        "query": "runtime.queryOutput",
+        "limit": 1,
+        "includeSchemas": true,
+        "includeExamples": true,
+        "detail": "compact"
+      }
+    },
     {
       "tool": "sdl.action.search",
       "args": {
@@ -1286,7 +1306,7 @@
     "sdl.agent.feedback": "Persists feedback records.",
     "sdl.runtime.execute": "Executes an arbitrary child process and is unsafe for a read-only determinism fixture.",
     "sdl.usage.stats": "Opt-in diagnostic session counters intentionally change as handler calls accumulate.",
-    "sdl.file.write": "Mutates repository files and returns pending reconciliation admission; pending projection is covered by synthetic fixtures.",
+    "sdl.file.write": "Mutates repository files and returns pending reconciliation admission; synthetic fixtures cover pending projection, and tests/unit/agent-editing-ergonomics.test.ts covers compact/full no-change hint determinism.",
     "sdl.semantic.enrichment.refresh": "Mutates semantic enrichment state.",
     "sdl.search.edit": "Mutates repository files, including multi-file apply and rollback state; final saved state queues generation-owned reconciliation."
   },

@@ -107,6 +107,35 @@ export function createRepositorySemanticLifecycle(params: {
       ? []
       : resolveSemanticEmbeddingModelPlan(params.appConfig.semantic)
           .symbolEmbeddingModels;
+  // Log bounded repository/model labels and durable reasons, never raw snapshots.
+  const assessmentFailure = (
+    code: string,
+    message: string,
+    snapshots: readonly SymbolVectorHealthSnapshot[],
+  ): IndexError => {
+    const safeReasons = new Set([
+      "repository vector ownership mismatch",
+      "repository vector row identity is incomplete or invalid",
+      "repository vector coverage is not bidirectional",
+      "repository vector deletion is pending",
+      "repository has eligible symbols but no indexed version",
+      "repository vector table is absent",
+      "repository vector refresh is incomplete",
+      "repository vector index identity is missing or ambiguous",
+      "repository vector count changed during assessment",
+    ]);
+    logger.warn("Semantic final assessment rejected", {
+      code,
+      repoId: /^[a-zA-Z0-9_.-]{1,80}$/.test(params.repoId) ? params.repoId : "<redacted>",
+      models: snapshots.slice(0, 8).map((snapshot) => ({
+        model: /^[a-zA-Z0-9_.-]{1,80}$/.test(snapshot.model) ? snapshot.model : "<redacted>",
+        reason: snapshot.reason && safeReasons.has(snapshot.reason)
+          ? snapshot.reason
+          : "assessment reason unavailable",
+      })),
+    });
+    return new IndexError(code + ": " + message);
+  };
   const capturedGeneration = deps.getGeneration(params.repoId);
   let failureStartedInsideGate = false;
   let failureFinalizationPromise: Promise<void> | undefined;
@@ -233,8 +262,10 @@ export function createRepositorySemanticLifecycle(params: {
           semanticConfig: params.appConfig.semantic,
         });
         if (snapshots.some((snapshot) => snapshot.mode === "degraded")) {
-          throw new Error(
-            `Semantic final assessment is incomplete for ${params.repoId}`,
+          throw assessmentFailure(
+            "SEMANTIC_FINAL_ASSESSMENT_DEGRADED",
+            "Semantic final assessment contains degraded model health",
+            snapshots,
           );
         }
         const preparedBatch = deps.prepareSuccessBatch({
@@ -245,8 +276,10 @@ export function createRepositorySemanticLifecycle(params: {
           snapshots,
         });
         if (!preparedBatch) {
-          throw new Error(
-            `Semantic final assessment is incomplete for ${params.repoId}`,
+          throw assessmentFailure(
+            "SEMANTIC_SUCCESS_BATCH_REJECTED",
+            "Semantic success batch failed ownership or model validation",
+            snapshots,
           );
         }
 
