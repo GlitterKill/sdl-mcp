@@ -584,6 +584,26 @@ function projectGenericValueForModel(
       }
       continue;
     }
+    // Save acceptance is actionable state; legacy sync counters remain internal.
+    if (
+      key === "indexUpdate"
+      && isRecord(itemValue)
+      && (
+        ["file.write", "search.edit", "symbol.edit"].includes(
+          toolName.replace(/^sdl\./, ""),
+        )
+        || (["file", "sdl.file"].includes(toolName)
+          && ["write", "searchEditApply", "symbolEditApply", "symbolEditApplyNow"].includes(options.fileOp ?? ""))
+      )
+      && typeof itemValue.applied === "boolean"
+    ) {
+      projected.indexUpdate = {
+        applied: itemValue.applied,
+        ...(typeof itemValue.pending === "boolean"
+          ? { pending: itemValue.pending } : {}),
+      };
+      continue;
+    }
     if (!shouldKeepModelField(toolName, key, options, depth)) {
       continue;
     }

@@ -1254,6 +1254,8 @@ export const DiffPreviewSnippetsSchema = z.object({
 const FileWriteIndexUpdateSchema = z
   .object({
     applied: z.boolean(),
+    pending: z.boolean().optional()
+      .describe("Saved source is queued for background graph reconciliation."),
     symbolsMatched: z
       .number()
       .int()
@@ -1265,7 +1267,7 @@ const FileWriteIndexUpdateSchema = z
     edgesUpserted: z.number().int().nonnegative().optional(),
     error: z.string().optional(),
   })
-  .describe("Live-index sync result when writing an indexed source file.");
+  .describe("Graph update acknowledgement: applied means committed; pending means saved and queued.");
 
 const EditPreviewFileEntrySchema = z.object({
   file: z.string(),

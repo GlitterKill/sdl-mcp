@@ -8,8 +8,42 @@ import {
   projectToolResultForModelContent,
   projectWorkflowChildResultForModel,
 } from "../../dist/mcp/context-response-projection.js";
+import { FileWriteResponseSchema, withProjectionSuccessOutputSchema } from "../../dist/mcp/tools.js";
 
 describe("context-response-projection", () => {
+  it("keeps saved-and-queued acknowledgements across edit projections", () => {
+    const pending = { applied: false, pending: true };
+    const result = { filePath: "src/example.ts", mode: "overwrite", indexUpdate: pending };
+    assert.deepEqual(FileWriteResponseSchema.parse(result), result);
+    const schema = withProjectionSuccessOutputSchema("file.write", FileWriteResponseSchema);
+    for (const detail of ["compact", "standard", "full"]) {
+      for (const tool of ["sdl.file.write", "file.write", "sdl.file", "file"]) {
+        const projected = projectToolResultForModelContent(tool, result, { detail, op: "write" });
+        assert.deepEqual(projected, result, `${tool}/${detail}`);
+        assert.doesNotThrow(() => schema.parse(projected));
+      }
+      for (const tool of ["sdl.search.edit", "search.edit", "sdl.symbol.edit", "symbol.edit"]) {
+        const batch = { results: [{ file: "src/example.ts", status: "written", indexUpdate: pending }] };
+        assert.deepEqual(projectToolResultForModelContent(tool, batch, { detail }), batch, `${tool}/${detail}`);
+      }
+      assert.deepEqual(projectWorkflowChildResultForModel("fileWrite", result, { detail }, {}), result);
+    }
+    const committed = { ...result, indexUpdate: { applied: true, symbolsAdded: 3 } };
+    assert.deepEqual(projectToolResultForModelContent("file.write", committed), {
+      ...result, indexUpdate: { applied: true },
+    });
+    // The exception is scoped to edits, not arbitrary objects sharing a field name.
+    assert.equal(Object.hasOwn(projectToolResultForModelContent("repo.status", result) as object, "indexUpdate"), false);
+    assert.equal(Object.hasOwn(projectToolResultForModelContent("file", result, { op: "read" }) as object, "indexUpdate"), false);
+    for (const op of ["searchEditApply", "symbolEditApply", "symbolEditApplyNow"]) {
+      const batch = { results: [{ file: "src/example.ts", status: "written", indexUpdate: pending }] };
+      assert.deepEqual(projectToolResultForModelContent("file", batch, { op }), batch);
+    }
+    assert.deepEqual(projectToolResultForModelContent("file.write", {
+      ...result, indexUpdate: { ...pending, error: "ENOENT C:/private/project/src/example.ts" },
+    }), result);
+  });
+
   it("projects canonical v2 context without retaining internal accounting fields", () => {
     const rawContext = { rawTokens: 512 };
     const result = {
