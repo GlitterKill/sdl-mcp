@@ -31,8 +31,13 @@ describe("patchSavedFile Symbol FTS lifecycle", () => {
     );
     assert.match(
       source,
-      /await withWriteConn\(async \(wConn\) => \{\s*await ladybugDb\.withTransaction\(wConn, async \(txConn\) => \{/u,
-      "patchSavedFile should call the mutation transaction directly inside the write connection",
+      /const publish = async \(wConn:[\s\S]*?await ladybugDb\.withTransaction\(wConn, async \(txConn\) => \{/u,
+      "prepared publication must retain the mutation transaction",
+    );
+    assert.match(
+      source,
+      /if \(writeConn\) await publish\(writeConn\);\s*else await withWriteConn\(publish\);/u,
+      "publication must reuse an admitted writer or acquire one",
     );
   });
 });

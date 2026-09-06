@@ -39,6 +39,7 @@ import {
   waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
 import { createMCPServer, MCPServer } from "../../dist/server.js";
+import { replaceRegisteredRepoIds } from "../../dist/services/repo-lifecycle.js";
 
 const TEMP_BASE =
   process.platform === "win32" ? join(homedir(), ".codex", "tmp") : tmpdir();
@@ -596,6 +597,11 @@ describe("public graph retrieval admission", { concurrency: 1 }, () => {
     await seedVerifiedEmptyManifestRepo("empty-manifest");
     await seedRepoWithoutVersion("empty");
 
+    // Direct DB fixtures must also supply startup notification membership.
+    replaceRegisteredRepoIds([
+      "verified", "verifying", "failed", "failed-degraded",
+      "unknown", "missing-manifest", "empty-manifest", "empty",
+    ]);
     server = await createMCPServer({
       contextEngine: {
         async buildContext(request) {

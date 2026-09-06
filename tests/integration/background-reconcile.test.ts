@@ -59,6 +59,8 @@ describe("background reconcile worker", () => {
         {
           repos: [],
           policy: {},
+          // Exercise the recorded parser without requiring external SCIP tooling.
+          scip: { enabled: false },
           indexing: { engine: "typescript", enableFileWatching: false },
         },
         null,

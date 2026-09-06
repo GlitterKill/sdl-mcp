@@ -1,0 +1,1 @@
+tests/integration/search-edit-refactor.test.ts

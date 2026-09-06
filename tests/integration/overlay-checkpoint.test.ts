@@ -15,6 +15,7 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 import { handleBufferPush, handleBufferStatus } from "../../dist/mcp/tools/buffer.js";
 import {
+  getDefaultLiveIndexCoordinator,
   getDefaultOverlayStore,
   resetDefaultLiveIndexCoordinator,
   waitForDefaultLiveIndexIdle,
@@ -41,7 +42,13 @@ describe("overlay checkpoint on save", () => {
     writeFileSync(
       configPath,
       JSON.stringify(
-        { repos: [], policy: {}, indexing: { engine: "typescript", enableFileWatching: false } },
+        {
+          repos: [],
+          policy: {},
+          // Exercise the recorded parser without requiring external SCIP tooling.
+          scip: { enabled: false },
+          indexing: { engine: "typescript", enableFileWatching: false },
+        },
         null,
         2,
       ),
@@ -87,17 +94,26 @@ describe("overlay checkpoint on save", () => {
   });
 
   it("compacts clean overlay state after save while keeping durable ladybug updated", async () => {
+    const content = ["export function current() {", "  return 2;", "}"].join("\n");
+    // Save events acknowledge disk writes; checkpointing retires the overlay.
+    writeFileSync(join(repoDir, "src/example.ts"), content, "utf8");
     await handleBufferPush({
       repoId,
       eventType: "save",
       filePath: "src/example.ts",
-      content: ["export function current() {", "  return 2;", "}"].join("\n"),
+      content,
       language: "typescript",
       version: 2,
       dirty: false,
       timestamp: "2026-03-07T12:10:00.000Z",
     });
     await waitForDefaultLiveIndexIdle();
+    const checkpoint = await getDefaultLiveIndexCoordinator().checkpointRepo({
+      repoId,
+      reason: "manual",
+    });
+    assert.strictEqual(checkpoint.checkpointedFiles, 1);
+    assert.strictEqual(checkpoint.failedFiles, 0);
 
     assert.strictEqual(
       getDefaultOverlayStore().getDraft(repoId, "src/example.ts"),

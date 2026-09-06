@@ -279,25 +279,23 @@ describe("release regression guards", () => {
     );
   });
 
-  it("compacts successful save-time live index overlays via checkpoint service", () => {
+  it("retires checkpoint overlays only after confirming saved publication", () => {
     const source = readSource("src/live-index/coordinator.ts");
 
     assert.match(
       source,
-      /await this\.checkpointService\.checkpointRepo\(/,
-      "save flow should invoke checkpoint service after a successful durable patch",
+      /publishSavedFile:\s*\(input\) => this\.publishCheckpoint\(input\)/,
+      "checkpoint cleanup must use the publication-aware callback",
     );
-
     assert.match(
       source,
-      /reason:\s*"save"/,
-      "save flow should tag live index compaction with the save reason",
+      /if \(await this\.checkpointSourceCommitted\(input\)\) return;/,
+      "already-published saves must skip redundant provider work",
     );
-
     assert.match(
       source,
-      /skipDurablePatch:\s*true/,
-      "save flow should compact overlay state without redundantly re-patching the same file",
+      /await this\.reconcileWorker\.waitForIdle\(\);\s*if \(!\(await this\.checkpointSourceCommitted\(input\)\)\)\s*throw new IndexError\(/,
+      "pending or failed publication must reject checkpoint cleanup",
     );
   });
 

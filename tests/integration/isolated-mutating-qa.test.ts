@@ -54,6 +54,8 @@ function makeQaInputs(scenario: unknown[]) {
     JSON.stringify({
       repos: [],
       policy: {},
+      // Exercise the recorded parser without requiring external SCIP tooling.
+      scip: { enabled: false },
       codeMode: { enabled: true, exclusive: false },
       indexing: {
         engine: "typescript",

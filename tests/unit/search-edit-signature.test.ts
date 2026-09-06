@@ -53,7 +53,7 @@ function symbol(overrides: Partial<SymbolRow> & Pick<SymbolRow, "symbolId" | "fi
 
 async function seedRepo(): Promise<void> {
   const conn = await getLadybugConn();
-  await queries.upsertRepo(conn, { repoId, rootPath: repoRoot, configJson: "{}", createdAt: now });
+  await queries.upsertRepo(conn, { repoId, rootPath: repoRoot, configJson: JSON.stringify({ repoId, rootPath: repoRoot }), createdAt: now });
   for (const [fileId, relPath] of [["file-a", "src/a.ts"], ["file-b", "src/b.ts"]] as const) {
     await queries.upsertFile(conn, { fileId, repoId, relPath, contentHash: "hash-" + fileId, language: "typescript", byteSize: 10, lastIndexedAt: now });
   }

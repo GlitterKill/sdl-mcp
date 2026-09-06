@@ -79,7 +79,7 @@ describe("search-edit property: apply+revert identity", () => {
     await ladybugDb.upsertRepo(conn, {
       repoId: "repo-prop",
       rootPath: normalizePath(root),
-      configJson: "{}",
+      configJson: JSON.stringify({ repoId: "repo-prop", rootPath: root }),
       createdAt: new Date().toISOString(),
     });
   });

@@ -76,3 +76,10 @@ Tests run with `--experimental-strip-types`, **not** tsx. Do not use `--import t
 - No test-only DB instances (shared temp dir LadybugDB)
 - No deleting tests to make CI pass
 - No removing "unused" exports without checking test imports from `dist/`
+
+## SAVED-FILE AND ADMISSION FIXTURES
+
+- Seed a valid repository `configJson`, including `repoId` and `rootPath`; managed writes validate the complete configuration.
+- Parser-only reconciliation fixtures must explicitly disable SCIP. Provider tests should supply their configured tooling or controlled provider fixtures.
+- Write saved bytes to disk before sending a clean buffer or save event. Request a checkpoint explicitly when asserting overlay retirement, then verify committed graph content and checkpoint success.
+- Tests that seed repositories directly in the DB must also populate `replaceRegisteredRepoIds` when exercising normal startup admission. Otherwise, first-request notification discovery adds a separate repository lookup before dispatch admission.

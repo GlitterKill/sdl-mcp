@@ -65,7 +65,7 @@ describe("search-edit batch-executor", () => {
     await ladybugDb.upsertRepo(conn, {
       repoId: "repo-a",
       rootPath: normalizePath(root),
-      configJson: "{}",
+      configJson: JSON.stringify({ repoId: "repo-a", rootPath: root }),
       createdAt: new Date().toISOString(),
     });
   });

@@ -103,7 +103,7 @@ async function seedCallerEdge(fromSymbolId: string, toSymbolId: string): Promise
 
 async function seedRenameFixture(): Promise<void> {
   const conn = await getLadybugConn();
-  await queries.upsertRepo(conn, { repoId, rootPath: repoRoot, configJson: "{}", createdAt: now });
+  await queries.upsertRepo(conn, { repoId, rootPath: repoRoot, configJson: JSON.stringify({ repoId, rootPath: repoRoot }), createdAt: now });
   await seedFile("file-lib", "src/lib.ts", "export function greet() {\n  return 1;\n}\n");
   await seedFile("file-user1", "src/user1.ts", "import { greet } from './lib';\nexport const v1 = greet();\n");
   await seedFile("file-user2", "src/user2.ts", "import { greet } from './lib';\nexport const v2 = greet();\n");
@@ -116,7 +116,7 @@ async function seedRenameFixture(): Promise<void> {
 
 async function seedSignatureFixture(): Promise<void> {
   const conn = await getLadybugConn();
-  await queries.upsertRepo(conn, { repoId, rootPath: repoRoot, configJson: "{}", createdAt: now });
+  await queries.upsertRepo(conn, { repoId, rootPath: repoRoot, configJson: JSON.stringify({ repoId, rootPath: repoRoot }), createdAt: now });
   await seedFile("file-lib", "src/lib.ts", "export function handler(a: string, b: number) {\n  return a + b;\n}\n");
   for (const n of [1, 2, 3]) {
     await seedFile(

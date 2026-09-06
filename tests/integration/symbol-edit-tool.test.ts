@@ -53,7 +53,7 @@ async function seedFile(content: string): Promise<void> {
   await ladybugDb.upsertRepo(conn, {
     repoId: REPO_ID,
     rootPath: repoRoot,
-    configJson: "{}",
+    configJson: JSON.stringify({ repoId: REPO_ID, rootPath: repoRoot }),
     createdAt: new Date().toISOString(),
   });
   await ladybugDb.upsertFile(conn, {

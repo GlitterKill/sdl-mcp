@@ -15,6 +15,7 @@ import { indexRepo } from "../../dist/indexer/indexer.js";
 import { handleBufferPush, handleBufferStatus } from "../../dist/mcp/tools/buffer.js";
 import { handleSymbolSearch } from "../../dist/mcp/tools/symbol.js";
 import {
+  getDefaultLiveIndexCoordinator,
   getDefaultOverlayStore,
   resetDefaultLiveIndexCoordinator,
   waitForDefaultLiveIndexIdle,
@@ -50,6 +51,8 @@ describe("live index end-to-end flow", () => {
         {
           repos: [],
           policy: {},
+          // Exercise the recorded parser without requiring external SCIP tooling.
+          scip: { enabled: false },
           indexing: { engine: "typescript", enableFileWatching: false },
           liveIndex: {
             enabled: true,
@@ -128,21 +131,30 @@ describe("live index end-to-end flow", () => {
     });
     assert.ok(draftSearch.results.some((result) => result.name === "renamedName"));
 
+    const savedContent = [
+      "export function renamedName() {",
+      "  return 2;",
+      "}",
+    ].join("\n");
+    // The editor saves these bytes before announcing the save.
+    writeFileSync(join(repoDir, "src/example.ts"), savedContent, "utf8");
     await handleBufferPush({
       repoId,
       eventType: "save",
       filePath: "src/example.ts",
-      content: [
-        "export function renamedName() {",
-        "  return 2;",
-        "}",
-      ].join("\n"),
+      content: savedContent,
       language: "typescript",
       version: 3,
       dirty: false,
       timestamp: "2026-03-07T12:11:00.000Z",
     });
     await waitForDefaultLiveIndexIdle();
+    const checkpoint = await getDefaultLiveIndexCoordinator().checkpointRepo({
+      repoId,
+      reason: "manual",
+    });
+    assert.strictEqual(checkpoint.checkpointedFiles, 1);
+    assert.strictEqual(checkpoint.failedFiles, 0);
 
     assert.strictEqual(
       getDefaultOverlayStore().getDraft(repoId, "src/example.ts"),

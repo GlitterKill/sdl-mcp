@@ -180,7 +180,13 @@ describe("saved file graph patch", () => {
     writeFileSync(
       configPath,
       JSON.stringify(
-        { repos: [], policy: {}, indexing: { engine: "typescript", enableFileWatching: false } },
+        {
+          repos: [],
+          policy: {},
+          // Exercise the recorded parser without requiring external SCIP tooling.
+          scip: { enabled: false },
+          indexing: { engine: "typescript", enableFileWatching: false },
+        },
         null,
         2,
       ),
@@ -1349,19 +1355,22 @@ describe("saved file graph patch", () => {
       parseGraphIntegrityCanonicalSymbol(providerCanonicalJson),
     );
 
+    const savedContent = [
+      "export function alpha() {",
+      "  return gamma();",
+      "}",
+      "",
+      "export function gamma() {",
+      "  return 3;",
+      "}",
+    ].join("\n");
+    // Reconciliation verifies the announced save against canonical disk bytes.
+    writeFileSync(join(repoDir, "src/example.ts"), savedContent, "utf8");
     await handleBufferPush({
       repoId,
       eventType: "save",
       filePath: "src/example.ts",
-      content: [
-        "export function alpha() {",
-        "  return gamma();",
-        "}",
-        "",
-        "export function gamma() {",
-        "  return 3;",
-        "}",
-      ].join("\n"),
+      content: savedContent,
       language: "typescript",
       version: 3,
       dirty: false,

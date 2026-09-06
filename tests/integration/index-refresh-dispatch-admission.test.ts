@@ -36,6 +36,7 @@ import {
 } from "../../dist/mcp/dispatch-limiter.js";
 import { resetIndexingGateForTests } from "../../dist/mcp/indexing-gate.js";
 import { createMCPServer, MCPServer } from "../../dist/server.js";
+import { replaceRegisteredRepoIds } from "../../dist/services/repo-lifecycle.js";
 
 const TEMP_BASE =
   process.platform === "win32" ? join(homedir(), ".codex", "tmp") : tmpdir();
@@ -248,6 +249,8 @@ describe("public index refresh dispatch admission", { concurrency: 1 }, () => {
 
     resetToolDispatchLimiter();
     resetIndexingGateForTests();
+    // Match startup membership so the blocker observes refresh admission, not discovery.
+    replaceRegisteredRepoIds([REPO_A, REPO_B]);
     server = await createMCPServer({
       gatewayConfig: {
         enabled: true,

@@ -50,7 +50,7 @@ async function seedRepo(): Promise<void> {
   await queries.upsertRepo(conn, {
     repoId,
     rootPath: repoRoot,
-    configJson: "{}",
+    configJson: JSON.stringify({ repoId, rootPath: repoRoot }),
     createdAt: now,
   });
   for (const [fileId, relPath] of [

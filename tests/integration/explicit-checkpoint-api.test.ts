@@ -45,7 +45,13 @@ describe("explicit checkpoint API", () => {
     writeFileSync(
       configPath,
       JSON.stringify(
-        { repos: [], policy: {}, indexing: { engine: "typescript", enableFileWatching: false } },
+        {
+          repos: [],
+          policy: {},
+          // Exercise the recorded parser without requiring external SCIP tooling.
+          scip: { enabled: false },
+          indexing: { engine: "typescript", enableFileWatching: false },
+        },
         null,
         2,
       ),
@@ -91,11 +97,14 @@ describe("explicit checkpoint API", () => {
   });
 
   it("flushes clean overlay entries through the checkpoint API", async () => {
+    const content = ["export function renamed() {", "  return 2;", "}"].join("\n");
+    // A clean buffer describes bytes already saved by the editor.
+    writeFileSync(join(repoDir, "src/example.ts"), content, "utf8");
     await handleBufferPush({
       repoId,
       eventType: "open",
       filePath: "src/example.ts",
-      content: ["export function renamed() {", "  return 2;", "}"].join("\n"),
+      content,
       language: "typescript",
       version: 2,
       dirty: false,
