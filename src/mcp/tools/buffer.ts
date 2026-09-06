@@ -17,6 +17,7 @@ import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
+import { isReconcilePublishing } from "../../live-index/reconcile-publisher.js";
 import type { ToolContext } from "../../server.js";
 import { logger } from "../../util/logger.js";
 import { projectBufferStatusForAgent } from "../response-projection/projectors/status.js";
@@ -165,7 +166,16 @@ export async function handleBufferStatus(
   try {
     const request = parseActionHandlerArgs(BufferStatusRequestSchema, args);
     const status = await resolveLiveIndex(liveIndex).getLiveStatus(request.repoId);
-    return status;
+    // Logging notifications can be filtered; this bounded state remains queryable.
+    return {
+      ...status,
+      reconciliationState: isReconcilePublishing(request.repoId)
+        ? "publishing"
+        : status.reconcileInflight ? "preparing"
+          : (status.reconcileQueueDepth ?? 0) > 0
+            ? status.reconcileLastError ? "blocked" : "pending"
+            : "idle",
+    };
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

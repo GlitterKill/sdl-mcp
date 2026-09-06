@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { hash } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -882,6 +883,16 @@ describe("guarded reconciliation publication", { timeout: 30_000 }, () => {
     );
     config.request.assertCurrent = () => false;
     assert.equal((await publisher.publishReconcile(config)).kind, "stale");
+    const binary = symbols("84", [{ path: "a.ts", id: "symbol-a", name: "newneedle" }]);
+    const bytes = Buffer.from([0xff, 0x00, 0xfe]);
+    await writeFile(join(repoRoot, "bun.lockb"), bytes);
+    binary.dependencyInputs.push({ path: "bun.lockb", contentHash: hash("sha256", bytes, "hex") });
+    const unchangedBinary = await prepareRows(binary);
+    assert.equal((await publisher.publishReconcile(unchangedBinary)).kind, unchangedBinary.noOp ? "noop" : "published");
+    const changedBinary = await prepareRows(binary);
+    // Both byte sequences decode to the same replacement characters in UTF-8.
+    await writeFile(join(repoRoot, "bun.lockb"), Buffer.from([0xfd, 0x00, 0xfe]));
+    assert.equal((await publisher.publishReconcile(changedBinary)).kind, "stale");
   });
 
   it("keeps shared-symbol ownership and dependency frontier in the selected repository", async () => {

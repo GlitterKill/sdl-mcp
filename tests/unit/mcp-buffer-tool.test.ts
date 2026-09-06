@@ -10,8 +10,43 @@ import {
   BufferPushResponseSchema,
   BufferStatusResponseSchema,
 } from "../../dist/mcp/tools.js";
+import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
 
 describe("buffer MCP tools", () => {
+  it("exposes bounded reconciliation state even when draft overlays are disabled", async () => {
+    assert.deepEqual(projectToolResultForModelContent("buffer.status", {
+      repoId: "state-fixture", enabled: false, reconciliationState: "publishing",
+      reconcileQueueDepth: 0, reconcileInflight: false,
+    }), {
+      repoId: "state-fixture", enabled: false, state: "active", reconciliationState: "publishing",
+    });
+    for (const [queueDepth, inflight, lastError, expected] of [
+      [0, false, null, "idle"],
+      [1, false, null, "pending"],
+      [1, true, null, "preparing"],
+      [1, false, "provider unavailable", "blocked"],
+    ] as const) {
+      const result = await handleBufferStatus({ repoId: "state-fixture" }, undefined, {
+        async getLiveStatus(repoId) {
+          return {
+            repoId, enabled: false, pendingBuffers: 0, dirtyBuffers: 0,
+            parseQueueDepth: 0, checkpointPending: false,
+            lastBufferEventAt: null, lastCheckpointAt: null,
+            reconcileQueueDepth: queueDepth, reconcileInflight: inflight,
+            reconcileLastError: lastError,
+          };
+        },
+      });
+      assert.equal(result.reconciliationState, expected);
+      assert.equal(BufferStatusResponseSchema.parse(result).reconciliationState, expected);
+      for (const detail of ["compact", "standard", "full"]) {
+        const projected = projectToolResultForModelContent("buffer.status", result, { detail }) as Record<string, unknown>;
+        assert.equal(projected.reconciliationState, expected);
+        if (queueDepth && detail !== "full") assert.equal(projected.state, "active");
+      }
+    }
+  });
+
   it("pushes buffer updates through the live index coordinator", async () => {
     const calls: unknown[] = [];
     const result = await handleBufferPush(

@@ -8,6 +8,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { getLadybugConn } from "./db/ladybug.js";
+import { getRepo } from "./db/ladybug-repos.js";
+import { MAX_REPO_ID_LENGTH } from "./config/constants.js";
+import { captureActiveRepoEpoch, isRegisteredRepoId, isRepoEpochCurrent } from "./services/repo-lifecycle.js";
+import { subscribeReconcilePublication } from "./live-index/reconcile-publisher.js";
 import {
   GraphRetrievalUnavailableError,
   IndexError,
@@ -1000,6 +1004,9 @@ export class MCPServer {
   private _gatewayMode = false;
   private postDispatchHooks: PostDispatchHook[] = [];
   private activeWorkflowFunctions: Set<string> = new Set();
+  private publicationInterests = new Map<string, { epoch: number; sessionId?: string }>();
+  private unsubscribePublication?: () => void;
+  private publicationConnectionActive = false;
 
   constructor(options: MCPServerOptions = {}) {
     this.toolNameFormat = options.toolNameFormat ?? "canonical";
@@ -1030,7 +1037,56 @@ export class MCPServer {
       );
     };
 
+    this.server.oninitialized = () => {
+      if (this.publicationConnectionActive) return;
+      this.publicationConnectionActive = true;
+      // Entrypoints install their shutdown callback before connecting. Preserve it.
+      const onclose = this.server.onclose;
+      this.server.onclose = () => {
+        this.clearPublicationInterest();
+        this.server.onclose = onclose;
+        onclose?.();
+      };
+      this.unsubscribePublication = subscribeReconcilePublication((event) => {
+        const interest = this.publicationInterests.get(event.repoId);
+        if (!interest || interest.epoch !== event.epoch) return;
+        return this.server.sendLoggingMessage({
+          level: event.phase === "failed" ? "error" : "info",
+          logger: "sdl-mcp",
+          data: { type: "graph-update", repoId: event.repoId, phase: event.phase },
+        }, interest.sessionId);
+      });
+    };
+
     this.setupHandlers();
+  }
+
+  private clearPublicationInterest(): void {
+    this.unsubscribePublication?.();
+    this.unsubscribePublication = undefined;
+    this.publicationInterests.clear();
+    this.publicationConnectionActive = false;
+  }
+
+  private async recordPublicationInterest(repoId: unknown, sessionId?: string): Promise<void> {
+    if (!this.publicationConnectionActive || typeof repoId !== "string" || !repoId.length || repoId.length > MAX_REPO_ID_LENGTH) return;
+    const transport = this.server.transport;
+    const existing = this.publicationInterests.get(repoId);
+    if (existing && isRepoEpochCurrent(repoId, existing.epoch)) return;
+    try {
+      // Startup/registration maintains the fast membership set; direct stdio can
+      // discover an existing DB repository on its first request without a scan.
+      if (!isRegisteredRepoId(repoId) && !(await getRepo(await getLadybugConn(), repoId))) return;
+      const epoch = captureActiveRepoEpoch(repoId);
+      if (epoch === undefined || !this.publicationConnectionActive || this.server.transport !== transport) return;
+      this.publicationInterests.delete(repoId);
+      this.publicationInterests.set(repoId, { epoch, sessionId });
+      // ponytail: keep only the latest 64 repository interests per connection.
+      if (this.publicationInterests.size > 64) this.publicationInterests.delete(this.publicationInterests.keys().next().value!);
+    } catch (error) {
+      // Notification interest cannot turn an otherwise valid readiness/status call into a failure.
+      logger.debug("Unable to record reconciliation notification interest", { error });
+    }
   }
 
   get gatewayMode(): boolean {
@@ -1245,6 +1301,8 @@ export class MCPServer {
             ) {
               throw new StorageNotWriteReadyError(startupReadiness);
             }
+
+            await this.recordPublicationInterest(extractStringField(parsedArgs, "repoId"), toolContext.sessionId);
 
             const dispatchTool = async (): Promise<unknown> => {
               const graphAdmission = classifyPublicGraphRetrieval(
@@ -1682,6 +1740,7 @@ export class MCPServer {
   async stop(): Promise<void> {
     // Usage persistence is handled by the ShutdownManager's "persistUsage"
     // cleanup (registered in serve.ts) which runs while the DB is still open.
+    this.clearPublicationInterest();
     await this.server.close();
   }
 

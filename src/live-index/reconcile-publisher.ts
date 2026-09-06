@@ -1,3 +1,4 @@
+import { hash } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import type { Connection } from "kuzu";
 
@@ -51,13 +52,52 @@ import {
   isRepoEpochCurrent,
   withRepoMutation,
 } from "../services/repo-lifecycle.js";
-import { hashContent, hashValue, normalizeValue } from "../util/hashing.js";
+import { hashValue, normalizeValue } from "../util/hashing.js";
+import { logger } from "../util/logger.js";
 import { normalizePath, getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { parserCoverageMatchesCurrentGraph } from "./draft-parser.js";
 import { buildDependencyFrontier } from "./dependency-frontier.js";
 import type { ReconcileClaim, ReconcileQueue } from "./reconcile-queue.js";
 
 type Preparation = Awaited<ReturnType<typeof prepareReconcileFiles>>;
+export interface ReconcilePublicationEvent {
+  repoId: string;
+  epoch: number;
+  phase: "started" | "completed" | "failed";
+}
+const publicationListeners = new Set<
+  (event: Readonly<ReconcilePublicationEvent>) => void | Promise<void>
+>();
+const publishingRepos = new Set<string>();
+
+export function isReconcilePublishing(repoId: string): boolean {
+  return publishingRepos.has(repoId);
+}
+
+/** Each connected MCP server owns its subscription and removes it on disconnect. */
+export function subscribeReconcilePublication(
+  listener: (
+    event: Readonly<ReconcilePublicationEvent>,
+  ) => void | Promise<void>,
+): () => void {
+  publicationListeners.add(listener);
+  return () => {
+    publicationListeners.delete(listener);
+  };
+}
+
+function notifyPublication(event: ReconcilePublicationEvent): void {
+  // Delivery must never extend writer ownership or make a committed graph fail.
+  const failed = (error: unknown) =>
+    logger.debug("Reconciliation notification delivery failed", { error });
+  for (const listener of publicationListeners) {
+    try {
+      void Promise.resolve(listener(Object.freeze(event))).catch(failed);
+    } catch (error) {
+      failed(error);
+    }
+  }
+}
 export interface ReconcileGraphBaseline {
   versionId: string;
   revision: number;
@@ -736,6 +776,13 @@ export async function publishReconcile(
     request.queue.isCurrent(request.claim) &&
     isRepoEpochCurrent(request.repoId, request.epoch);
   if (!current()) return { kind: "stale" };
+  let publicationStarted = false;
+  const finishPublication = (phase: "completed" | "failed") => {
+    if (!publicationStarted) return;
+    publicationStarted = false;
+    publishingRepos.delete(request.repoId);
+    notifyPublication({ repoId: request.repoId, epoch: request.epoch, phase });
+  };
   const outcome = await withRepoMutation(
     request.repoId,
     () =>
@@ -757,8 +804,7 @@ export async function publishReconcile(
                 );
                 if (
                   disk.kind !== "ok" ||
-                  hashContent(disk.content.toString("utf8")) !==
-                    source.contentHash
+                  hash("sha256", disk.content, "hex") !== source.contentHash
                 )
                   return { kind: "stale" };
               }
@@ -779,184 +825,211 @@ export async function publishReconcile(
               }
               if (!current() || !(await request.assertCurrent()))
                 return { kind: "stale" };
-              return withTransaction(conn, async (tx) => {
-                const version = await db.getLatestVersion(tx, request.repoId);
-                const derived = await getDerivedStateFromConnection(
-                  tx,
-                  request.repoId,
-                );
-                const parser = await db.getRepoParserState(tx, request.repoId);
-                if (
-                  version?.versionId !== prepared.versionId ||
-                  derived?.graphIntegrityRevision !== prepared.revision ||
-                  parser?.coverageDigest !== prepared.parser.coverageDigest ||
-                  !parserCoverageMatchesCurrentGraph(
-                    derived,
-                    prepared.versionId,
-                    parser,
-                  )
-                )
-                  return { kind: "stale" };
-                // Another repository can change a global target without advancing our revision.
-                const sharedOwnedNow = await db.getSymbolIdsInOtherRepos(
-                  tx,
-                  request.repoId,
-                  prepared.rows.symbols.map((symbol) => symbol.symbolId),
-                );
-                if (
-                  JSON.stringify([...sharedOwnedNow].sort()) !==
-                  JSON.stringify([...prepared.sharedOwnedIds].sort())
-                )
-                  return { kind: "stale" };
-                const sharedEdgesNow = [
-                  ...(
-                    await db.getEdgesFromSymbols(tx, [
-                      ...prepared.sharedOwnedIds,
-                    ])
-                  ).values(),
-                ]
-                  .flat()
-                  .filter((edge) => edge.repoId === request.repoId);
-                if (
-                  JSON.stringify(sorted(sharedEdgesNow.map(edgeTuple))) !==
-                  JSON.stringify(
-                    sorted(prepared.sharedOwnedEdges.map(edgeTuple)),
-                  )
-                )
-                  return { kind: "stale" };
-                const externalSharingNow = await db.getSymbolIdsInOtherRepos(
-                  tx,
-                  request.repoId,
-                  prepared.rows.externalSymbols.map(
-                    (symbol) => symbol.symbolId,
-                  ),
-                );
-                if (
-                  JSON.stringify([...externalSharingNow].sort()) !==
-                  JSON.stringify([...prepared.sharedExternalIds].sort())
-                )
-                  return { kind: "stale" };
-                const externalFactsNow =
-                  await db.getProviderExternalSymbolsByIds(tx, null, [
-                    ...prepared.sharedExternalIds,
-                  ]);
-                for (const [id, before] of prepared.sharedExternals) {
-                  const actual = externalFactsNow.get(id);
+              return withTransaction<ReconcilePublicationOutcome>(
+                conn,
+                async (tx) => {
+                  const version = await db.getLatestVersion(tx, request.repoId);
+                  const derived = await getDerivedStateFromConnection(
+                    tx,
+                    request.repoId,
+                  );
+                  const parser = await db.getRepoParserState(
+                    tx,
+                    request.repoId,
+                  );
                   if (
-                    !actual ||
-                    JSON.stringify(externalTuple({ ...actual, repoId: "" })) !==
-                      JSON.stringify(externalTuple({ ...before, repoId: "" }))
+                    version?.versionId !== prepared.versionId ||
+                    derived?.graphIntegrityRevision !== prepared.revision ||
+                    parser?.coverageDigest !== prepared.parser.coverageDigest ||
+                    !parserCoverageMatchesCurrentGraph(
+                      derived,
+                      prepared.versionId,
+                      parser,
+                    )
                   )
                     return { kind: "stale" };
-                }
-                const currentShared = await db.getSymbolsByIds(
-                  tx,
-                  prepared.sharedDefinitionBaselines.map(
-                    (symbol) => symbol.symbolId,
-                  ),
-                );
-                if (
-                  prepared.sharedDefinitionBaselines.some((symbol) => {
-                    const current = currentShared.get(symbol.symbolId);
-                    const tuple = (value: db.SymbolRow) =>
-                      symbolTuple({ ...value, repoId: "", fileId: "" });
-                    return (
-                      !current ||
-                      JSON.stringify(tuple(current)) !==
-                        JSON.stringify(tuple(symbol))
+                  // Another repository can change a global target without advancing our revision.
+                  const sharedOwnedNow = await db.getSymbolIdsInOtherRepos(
+                    tx,
+                    request.repoId,
+                    prepared.rows.symbols.map((symbol) => symbol.symbolId),
+                  );
+                  if (
+                    JSON.stringify([...sharedOwnedNow].sort()) !==
+                    JSON.stringify([...prepared.sharedOwnedIds].sort())
+                  )
+                    return { kind: "stale" };
+                  const sharedEdgesNow = [
+                    ...(
+                      await db.getEdgesFromSymbols(tx, [
+                        ...prepared.sharedOwnedIds,
+                      ])
+                    ).values(),
+                  ]
+                    .flat()
+                    .filter((edge) => edge.repoId === request.repoId);
+                  if (
+                    JSON.stringify(sorted(sharedEdgesNow.map(edgeTuple))) !==
+                    JSON.stringify(
+                      sorted(prepared.sharedOwnedEdges.map(edgeTuple)),
+                    )
+                  )
+                    return { kind: "stale" };
+                  const externalSharingNow = await db.getSymbolIdsInOtherRepos(
+                    tx,
+                    request.repoId,
+                    prepared.rows.externalSymbols.map(
+                      (symbol) => symbol.symbolId,
+                    ),
+                  );
+                  if (
+                    JSON.stringify([...externalSharingNow].sort()) !==
+                    JSON.stringify([...prepared.sharedExternalIds].sort())
+                  )
+                    return { kind: "stale" };
+                  const externalFactsNow =
+                    await db.getProviderExternalSymbolsByIds(tx, null, [
+                      ...prepared.sharedExternalIds,
+                    ]);
+                  for (const [id, before] of prepared.sharedExternals) {
+                    const actual = externalFactsNow.get(id);
+                    if (
+                      !actual ||
+                      JSON.stringify(
+                        externalTuple({ ...actual, repoId: "" }),
+                      ) !==
+                        JSON.stringify(externalTuple({ ...before, repoId: "" }))
+                    )
+                      return { kind: "stale" };
+                  }
+                  const currentShared = await db.getSymbolsByIds(
+                    tx,
+                    prepared.sharedDefinitionBaselines.map(
+                      (symbol) => symbol.symbolId,
+                    ),
+                  );
+                  if (
+                    prepared.sharedDefinitionBaselines.some((symbol) => {
+                      const current = currentShared.get(symbol.symbolId);
+                      const tuple = (value: db.SymbolRow) =>
+                        symbolTuple({ ...value, repoId: "", fileId: "" });
+                      return (
+                        !current ||
+                        JSON.stringify(tuple(current)) !==
+                          JSON.stringify(tuple(symbol))
+                      );
+                    })
+                  )
+                    return { kind: "stale" };
+                  if (prepared.noOp) return { kind: "noop" };
+                  const revision =
+                    await advanceGraphIntegrityRevisionInTransaction(
+                      tx,
+                      request.repoId,
+                      prepared.versionId,
+                      prepared.revision,
                     );
-                  })
-                )
-                  return { kind: "stale" };
-                if (prepared.noOp) return { kind: "noop" };
-                const revision =
-                  await advanceGraphIntegrityRevisionInTransaction(
+                  if (revision === null) return { kind: "stale" };
+                  publicationStarted = true;
+                  publishingRepos.add(request.repoId);
+                  notifyPublication({
+                    repoId: request.repoId,
+                    epoch: request.epoch,
+                    phase: "started",
+                  });
+                  await materializeProviderRowsInTransaction(
+                    tx,
+                    request.repoId,
+                    prepared.rows,
+                  );
+                  await db.attachSymbolRepoMembershipsInTransaction(
+                    tx,
+                    request.repoId,
+                    prepared.sharedDefinitions.map((symbol) => symbol.symbolId),
+                  );
+                  await db.deleteFilesByIds(tx, prepared.removedFileIds);
+                  await db.insertSymbolReferences(tx, prepared.nextReferences);
+                  for (const run of prepared.provenance.providerRuns)
+                    await mergeSemanticProviderRun(tx, run);
+                  await mergeSemanticDiagnostics(
+                    tx,
+                    prepared.provenance.diagnostics,
+                  );
+                  await deleteReconcileFileAuthoritiesInTransaction(tx, [
+                    ...prepared.rows.changedFileIds,
+                  ]);
+                  await writeReconcileFileAuthoritiesInTransaction(
+                    tx,
+                    prepared.authorities,
+                  );
+                  await observer?.afterRows?.();
+                  for (const id of prepared.removedFileIds)
+                    await db.deleteGraphIntegrityFileStateInTransaction(
+                      tx,
+                      request.repoId,
+                      id,
+                    );
+                  for (const manifest of prepared.nextManifests)
+                    await db.upsertGraphIntegrityFileStateInTransaction(
+                      tx,
+                      manifest,
+                    );
+                  await applyGraphIntegrityFilelessDeltaInTransaction(
+                    tx,
+                    request.repoId,
+                    prepared.delta,
+                  );
+                  await db.upsertFileParserStatesInTransaction(
+                    tx,
+                    prepared.nextParserStates,
+                  );
+                  const coverage =
+                    prepared.parserChanged || prepared.membershipChanged
+                      ? await db.summarizeParserCoverageInTransaction(
+                          tx,
+                          request.repoId,
+                        )
+                      : {
+                          coverageState: prepared.parser.coverageState,
+                          coverageDigest: prepared.parser.coverageDigest,
+                        };
+                  await db.upsertRepoParserStateInTransaction(tx, {
+                    ...prepared.parser,
+                    ...coverage,
+                    graphRevision: revision,
+                  });
+                  // Preserve any independently outstanding semantic work while dirtying changed inputs.
+                  await markDerivedStateDirtyInTransaction(
                     tx,
                     request.repoId,
                     prepared.versionId,
-                    prepared.revision,
+                    {
+                      clusters: true,
+                      processes: true,
+                      algorithms: true,
+                      summaries: true,
+                      embeddings: true,
+                    },
                   );
-                if (revision === null) return { kind: "stale" };
-                await materializeProviderRowsInTransaction(
-                  tx,
-                  request.repoId,
-                  prepared.rows,
-                );
-                await db.attachSymbolRepoMembershipsInTransaction(
-                  tx,
-                  request.repoId,
-                  prepared.sharedDefinitions.map((symbol) => symbol.symbolId),
-                );
-                await db.deleteFilesByIds(tx, prepared.removedFileIds);
-                await db.insertSymbolReferences(tx, prepared.nextReferences);
-                for (const run of prepared.provenance.providerRuns)
-                  await mergeSemanticProviderRun(tx, run);
-                await mergeSemanticDiagnostics(
-                  tx,
-                  prepared.provenance.diagnostics,
-                );
-                await deleteReconcileFileAuthoritiesInTransaction(tx, [
-                  ...prepared.rows.changedFileIds,
-                ]);
-                await writeReconcileFileAuthoritiesInTransaction(
-                  tx,
-                  prepared.authorities,
-                );
-                await observer?.afterRows?.();
-                for (const id of prepared.removedFileIds)
-                  await db.deleteGraphIntegrityFileStateInTransaction(
-                    tx,
-                    request.repoId,
-                    id,
-                  );
-                for (const manifest of prepared.nextManifests)
-                  await db.upsertGraphIntegrityFileStateInTransaction(
-                    tx,
-                    manifest,
-                  );
-                await applyGraphIntegrityFilelessDeltaInTransaction(
-                  tx,
-                  request.repoId,
-                  prepared.delta,
-                );
-                await db.upsertFileParserStatesInTransaction(
-                  tx,
-                  prepared.nextParserStates,
-                );
-                const coverage =
-                  prepared.parserChanged || prepared.membershipChanged
-                    ? await db.summarizeParserCoverageInTransaction(
-                        tx,
-                        request.repoId,
-                      )
-                    : {
-                        coverageState: prepared.parser.coverageState,
-                        coverageDigest: prepared.parser.coverageDigest,
-                      };
-                await db.upsertRepoParserStateInTransaction(tx, {
-                  ...prepared.parser,
-                  ...coverage,
-                  graphRevision: revision,
+                  return {
+                    kind: "published",
+                    revision,
+                    frontier: prepared.frontier,
+                  };
+                },
+              )
+                .then((result) => {
+                  // Commit/native settlement completed while this owner still holds the fence.
+                  if (result.kind === "published") {
+                    symbolCardCache.invalidateRepo(request.repoId);
+                    finishPublication("completed");
+                  }
+                  return result;
+                })
+                .finally(() => {
+                  // Rollback also settles before the next publisher can acquire this fence.
+                  finishPublication("failed");
                 });
-                // Preserve any independently outstanding semantic work while dirtying changed inputs.
-                await markDerivedStateDirtyInTransaction(
-                  tx,
-                  request.repoId,
-                  prepared.versionId,
-                  {
-                    clusters: true,
-                    processes: true,
-                    algorithms: true,
-                    summaries: true,
-                    embeddings: true,
-                  },
-                );
-                return {
-                  kind: "published",
-                  revision,
-                  frontier: prepared.frontier,
-                };
-              });
             },
           ),
         ),
@@ -964,7 +1037,6 @@ export async function publishReconcile(
     { expectedEpoch: request.epoch },
   );
   if (outcome.kind === "published") {
-    symbolCardCache.invalidateRepo(request.repoId);
     notifyGraphIntegrityVerifier(request.repoId);
   }
   return outcome;

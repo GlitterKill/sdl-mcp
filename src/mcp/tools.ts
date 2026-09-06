@@ -1020,6 +1020,7 @@ export const BufferStatusResponseSchema = z.object({
   repoId: z.string().min(1),
   enabled: z.boolean(),
   state: z.enum(["idle", "active", "unavailable"]).optional(),
+  reconciliationState: z.enum(["idle", "pending", "preparing", "publishing", "blocked"]).optional(),
   pendingBuffers: z.number().int().min(0).optional(),
   dirtyBuffers: z.number().int().min(0).optional(),
   parseQueueDepth: z.number().int().min(0).optional(),

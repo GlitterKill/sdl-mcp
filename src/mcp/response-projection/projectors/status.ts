@@ -130,7 +130,8 @@ function repoStatus(value: ModelRecord, diagnostics: boolean): ModelRecord {
 export function projectBufferStatusForAgent(value: unknown): ModelRecord {
   if (!isRecord(value)) return {};
   const active =
-    positive(value.pendingBuffers) !== undefined
+    (stringValue(value.reconciliationState) !== undefined && value.reconciliationState !== "idle")
+    || positive(value.pendingBuffers) !== undefined
     || positive(value.dirtyBuffers) !== undefined
     || positive(value.parseQueueDepth) !== undefined
     || value.checkpointPending === true
@@ -141,7 +142,12 @@ export function projectBufferStatusForAgent(value: unknown): ModelRecord {
   return {
     ...(stringValue(value.repoId) ? { repoId: value.repoId } : {}),
     ...(typeof value.enabled === "boolean" ? { enabled: value.enabled } : {}),
-    state: value.enabled === false ? "unavailable" : active ? "active" : "idle",
+    state: value.enabled === false
+      && (!value.reconciliationState || value.reconciliationState === "idle")
+      ? "unavailable" : active ? "active" : "idle",
+    ...(stringValue(value.reconciliationState)
+      ? { reconciliationState: value.reconciliationState }
+      : {}),
     ...(positive(value.pendingBuffers) !== undefined
       ? { pendingBuffers: value.pendingBuffers }
       : {}),

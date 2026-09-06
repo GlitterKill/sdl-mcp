@@ -31,7 +31,7 @@ import { runToolDispatch } from "../../dist/mcp/dispatch-limiter.js";
 
 import { withTransaction } from "../../dist/db/ladybug-core.js";
 import { beginRepoRemoval } from "../../dist/services/repo-lifecycle.js";
-import { publishReconcile } from "../../dist/live-index/reconcile-publisher.js";
+import { publishReconcile, subscribeReconcilePublication } from "../../dist/live-index/reconcile-publisher.js";
 
 function deferred() {
   let resolve!: () => void;
@@ -62,6 +62,11 @@ it(
     let contextRuns = 0;
     let configRuns = 0;
     let revisionRuns = 0;
+    let publishingSourceHash: string | undefined;
+    const notifications: Array<{ sourceHash: string | undefined; phase: string }> = [];
+    const unsubscribe = subscribeReconcilePublication((event) => {
+      if (event.repoId === repoId) notifications.push({ sourceHash: publishingSourceHash, phase: event.phase });
+    });
     try {
       await mkdir(repoRoot);
       const configPath = join(root, "config.json");
@@ -242,6 +247,7 @@ it(
           publishReconcile: async (prepared) => {
             const label = prepared.sources[0]?.contentHash ?? "removed";
             publications.push(label);
+            publishingSourceHash = label;
             if (label === hashContent("save21")) writerQueued.resolve();
             const result = await publishReconcile(prepared);
             if (result.kind === "published") commits.push(label);
@@ -311,6 +317,8 @@ it(
         "superseded successful provider never enters publisher",
       );
       assert.equal(commits.includes(hashContent("save12")), false);
+      assert.deepEqual(notifications.filter((notice) => notice.sourceHash === hashContent("save12")), []);
+      assert.deepEqual(notifications.filter((notice) => notice.sourceHash === hashContent("save13")).map((notice) => notice.phase), ["started", "completed"]);
       assert.equal((await getDerivedState(repoId))!.graphIntegrityRevision, 3);
       assert.deepEqual(
         (await db.getSymbolsByRepo(conn, repoId)).map((s) => s.name).sort(),
@@ -390,6 +398,7 @@ it(
       await heldWriter;
       await coordinator.waitForIdle();
       assert.equal(commits.includes(hashContent("save21")), false);
+      assert.deepEqual(notifications.filter((notice) => notice.sourceHash === hashContent("save21")), []);
       assert.equal(
         (await db.getFileByRepoPath(conn, repoId, "a.ts"))!.contentHash,
         hashContent("save22"),
@@ -507,6 +516,7 @@ it(
       contextRelease.resolve();
       removalRelease.resolve();
       await coordinator?.close();
+      unsubscribe();
       await cancelAndWaitForGraphIntegrityVerifier(repoId);
       await closeLadybugDb();
       if (oldConfig === undefined) delete process.env.SDL_CONFIG;
