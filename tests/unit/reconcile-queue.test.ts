@@ -283,3 +283,84 @@ it("retains explicit removal input after the older save settles", () => {
   queue.complete(old, queuedAt);
   assert.deepEqual(queue.claimNext()!.files[0].input, { kind: "removed" });
 });
+
+it("does not block later metadata when a file-only claim fails", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue("repo", frontier("a.ts"), queuedAt);
+  const claim = queue.claimNext()!;
+  queue.enqueue(
+    "repo",
+    { ...frontier(), invalidations: ["clusters"] },
+    queuedAt,
+  );
+  assert.equal(queue.isCurrent(claim), true); // Metadata does not supersede source inputs.
+  queue.fail(claim, queuedAt, "A parser unavailable");
+  const metadata = queue.claimNext();
+  assert.ok(metadata, "metadata enqueued after the claim must remain ready");
+  assert.deepEqual(metadata.frontier.invalidations, ["clusters"]);
+  assert.deepEqual(metadata.files, []);
+  queue.complete(metadata, queuedAt);
+  assert.equal(queue.getStatus("repo").queueDepth, 1);
+});
+
+it("wakes retained metadata with its failed file's qualifying retry", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue(
+    "repo",
+    { ...frontier("a.ts"), invalidations: ["clusters"] },
+    queuedAt,
+  );
+  const claim = queue.claimNext()!;
+  queue.fail(claim, queuedAt, "A parser unavailable");
+  queue.wake("repo", "unrelated.ts");
+  assert.equal(queue.peekNext(), false);
+  queue.wake("repo", "a.ts");
+  const retry = queue.claimNext()!;
+  assert.deepEqual(retry.frontier.invalidations, ["clusters"]);
+  queue.complete(retry, queuedAt);
+  assert.equal(queue.getStatus("repo").queueDepth, 0);
+  assert.equal(queue.getStatus("repo").lastError, null);
+});
+
+it("keeps newer metadata ready even when the failed claim owned older metadata", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue(
+    "repo",
+    { ...frontier("a.ts"), invalidations: ["metrics"] },
+    queuedAt,
+  );
+  const claim = queue.claimNext()!;
+  queue.enqueue(
+    "repo",
+    { ...frontier(), invalidations: ["clusters"] },
+    queuedAt,
+  );
+  assert.equal(queue.isCurrent(claim), true);
+  queue.fail(claim, queuedAt, "A parser unavailable");
+  const metadata = queue.claimNext()!;
+  assert.ok(metadata);
+  assert.deepEqual(metadata.frontier.invalidations, ["clusters", "metrics"]);
+});
+
+it("keeps metadata blocked for unrelated failed files but wakes it on its owner's new input", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue(
+    "repo",
+    { ...frontier("a.ts"), invalidations: ["clusters"] },
+    queuedAt,
+  );
+  queue.fail(queue.claimNext()!, queuedAt, "A parser unavailable");
+  queue.enqueue("repo", frontier("b.ts"), queuedAt);
+  queue.fail(queue.claimNext()!, queuedAt, "B parser unavailable");
+  queue.wake("repo", "b.ts");
+  const sibling = queue.claimNext()!;
+  assert.deepEqual(sibling.frontier.invalidations, []);
+  queue.complete(sibling, queuedAt);
+  assert.equal(queue.peekNext(), false);
+  queue.enqueue("repo", frontier("a.ts"), queuedAt, { "a.ts": saved("new A") });
+  const changed = queue.claimNext()!;
+  assert.deepEqual(changed.frontier.invalidations, ["clusters"]);
+  queue.complete(changed, queuedAt);
+  assert.equal(queue.getStatus("repo").queueDepth, 0);
+  assert.equal(queue.getStatus("repo").lastError, null);
+});

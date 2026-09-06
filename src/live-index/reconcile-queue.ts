@@ -45,8 +45,11 @@ type RepoQueueState = {
     work: ReconcileClaim;
     settled: Set<string>;
     failed: boolean;
+    metadataGeneration: number;
   } | null;
   metadataBlocked: boolean;
+  metadataGeneration: number;
+  metadataBlockedFiles: Set<string>;
   inventoryNeeded: boolean;
   inventoryBlocked: boolean;
   inventoryGeneration: number;
@@ -96,6 +99,10 @@ export class ReconcileQueue {
         this.requireInventory(state);
         continue;
       }
+      if (state.metadataBlockedFiles.has(filePath)) {
+        state.metadataBlocked = false;
+        state.metadataBlockedFiles.clear();
+      }
       // A dependency frontier forces new preparation even when source is unchanged.
       state.files.set(filePath, {
         filePath,
@@ -112,8 +119,11 @@ export class ReconcileQueue {
     }
     for (const invalidation of frontier.invalidations)
       state.invalidations.add(invalidation);
-    if (frontier.touchedSymbolIds.length || frontier.invalidations.length)
+    if (frontier.touchedSymbolIds.length || frontier.invalidations.length) {
+      state.metadataGeneration = ++this.generation;
       state.metadataBlocked = false;
+      state.metadataBlockedFiles.clear();
+    }
     if (!state.enqueuedAt || enqueuedAt < state.enqueuedAt)
       state.enqueuedAt = enqueuedAt;
     return savedSnapshotsRetained;
@@ -159,7 +169,12 @@ export class ReconcileQueue {
       state.invalidations.clear();
     }
     if (work.inventoryNeeded) state.inventoryNeeded = false;
-    state.claimed = { work, settled: new Set(), failed: false };
+    state.claimed = {
+      work,
+      settled: new Set(),
+      failed: false,
+      metadataGeneration: state.metadataGeneration,
+    };
     return work;
   }
 
@@ -210,12 +225,15 @@ export class ReconcileQueue {
     const state = this.repos.get(repoId);
     if (!state || state.claimed) return;
     const path = filePath === undefined ? undefined : normalizePath(filePath);
+    if (path === undefined || state.metadataBlockedFiles.has(path)) {
+      state.metadataBlocked = false;
+      state.metadataBlockedFiles.clear();
+    }
     for (const file of state.files.values()) {
       if (path === undefined || file.filePath === path) file.blocked = null;
     }
     if (path === undefined) {
       state.inventoryBlocked = false;
-      state.metadataBlocked = false;
     }
   }
 
@@ -267,7 +285,22 @@ export class ReconcileQueue {
       }
       for (const invalidation of claim.frontier.invalidations)
         state.invalidations.add(invalidation);
-      state.metadataBlocked = current && failed;
+      // Only the metadata captured by this claim may inherit its failure.
+      // Later metadata is independently ready and does not invalidate source work.
+      if (
+        (claim.frontier.touchedSymbolIds.length ||
+          claim.frontier.invalidations.length) &&
+        state.metadataGeneration === state.claimed.metadataGeneration
+      ) {
+        state.metadataBlocked = current && failed;
+        state.metadataBlockedFiles.clear();
+        if (state.metadataBlocked) {
+          for (const file of claim.files) {
+            if (state.files.get(file.filePath)?.blocked)
+              state.metadataBlockedFiles.add(file.filePath);
+          }
+        }
+      }
       if (claim.inventoryNeeded) {
         state.inventoryNeeded = true;
         state.inventoryBlocked = current && failed;
@@ -351,6 +384,8 @@ export class ReconcileQueue {
         lastError: null,
         claimed: null,
         metadataBlocked: false,
+        metadataGeneration: 0,
+        metadataBlockedFiles: new Set(),
         inventoryNeeded: false,
         inventoryBlocked: false,
         inventoryGeneration: 0,
