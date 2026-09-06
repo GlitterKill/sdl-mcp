@@ -56,7 +56,7 @@ it("derives specialized health from repository coverage and configured physical 
       getFileSummaryRetrievalCoverage: async () => ({ eligible: 4n, covered: 2n }),
     },
   });
-  const { checkRetrievalHealth, invalidateSymbolRetrievalCoverageCache } =
+  const { checkRetrievalHealth, invalidateSymbolRetrievalCoverageCache, getRepositorySymbolVectorHealthSnapshot } =
     await import("../../dist/retrieval/health.js?specialized-health");
   const check = () => checkRetrievalHealth({} as Connection, "repo", config);
   const health = await check();
@@ -77,6 +77,7 @@ it("derives specialized health from repository coverage and configured physical 
   invalidateSymbolRetrievalCoverageCache("repo");
   const partial = await check();
   assert.equal(partial.vectorJinaCode, false);
-  assert.equal(partial.coveragePermille.symbolVector, 800);
-  assert.equal(partial.modelCoveragePermille.symbol[model], 800);
+  assert.equal(partial.coveragePermille.symbolVector, 0);
+  assert.equal(partial.modelCoveragePermille.symbol[model], 0);
+  assert.equal(getRepositorySymbolVectorHealthSnapshot("repo", model)?.completeVectorCount, 1600);
 });

@@ -2457,7 +2457,7 @@ describe("persisted graph integrity", () => {
     );
     const reuseBranch = source.slice(reuseStart, materializeEnd);
 
-    assert.match(reuseBranch, /return Promise\.resolve\(\)/);
+    assert.match(reuseBranch, /return;/);
     assert.doesNotMatch(reuseBranch, /withWriteConn|SET|repair/);
   });
 

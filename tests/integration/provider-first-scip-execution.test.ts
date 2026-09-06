@@ -13,7 +13,10 @@ import {
 import { queryStoredProcAll } from "../../dist/db/ladybug-core.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
-import { resolveSymbolVectorPhysicalIdentity } from "../../dist/db/ladybug-symbol-embeddings.js";
+import {
+  resolveSymbolVectorPhysicalIdentity,
+  setRepoSymbolVectorEmbedding,
+} from "../../dist/db/ladybug-symbol-embeddings.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 import { createVectorIndex } from "../../dist/retrieval/index-lifecycle.js";
 import {
@@ -31,7 +34,11 @@ describe("provider-first SCIP materialization", () => {
 
   afterEach(async () => {
     await closeLadybugDb();
-    if (graphDbPath) rmSync(graphDbPath + ".sdl-lineage.json", { recursive: true, force: true });
+    if (graphDbPath)
+      rmSync(graphDbPath + ".sdl-lineage.json", {
+        recursive: true,
+        force: true,
+      });
     if (graphDbPath && existsSync(graphDbPath)) {
       rmSync(graphDbPath, { recursive: true, force: true });
     }
@@ -225,7 +232,10 @@ describe("provider-first SCIP materialization", () => {
       ],
       externalSymbols: [],
     });
-    const candidates = detectTypeScriptTestCases({ content, filePath: relPath });
+    const candidates = detectTypeScriptTestCases({
+      content,
+      filePath: relPath,
+    });
     await materializeFacts(facts, new Map([[relPath, candidates]]));
 
     const conn = await getLadybugConn();
@@ -294,7 +304,7 @@ describe("provider-first SCIP materialization", () => {
     assert.deepEqual(externalRows, [{ name: "replacement" }]);
   });
 
-  it("prunes stale SCIP external vectors while retaining the live HNSW", async () => {
+  it("prunes stale SCIP external Symbols while deferring live vector cleanup", async () => {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-db-"));
     await initRepo(graphDbPath);
 
@@ -321,7 +331,9 @@ describe("provider-first SCIP materialization", () => {
       { repoId: REPO_ID },
     );
     assert.equal(externalRows.length, 2);
-    const staleSymbolId = externalRows.find((row) => row.name === "api")?.symbolId;
+    const staleSymbolId = externalRows.find(
+      (row) => row.name === "api",
+    )?.symbolId;
     const survivingSymbolId = externalRows.find(
       (row) => row.name === "replacement",
     )?.symbolId;
@@ -330,44 +342,57 @@ describe("provider-first SCIP materialization", () => {
     const staleVector = [1, ...new Array<number>(767).fill(0)];
     const survivingVector = [0, 1, ...new Array<number>(766).fill(0)];
 
-    await withWriteConn(async (writeConn) => {
-      await withExclusiveLadybugOperation(() => ladybugDb.setRepoSymbolVectorEmbedding(
-        writeConn,
-        REPO_ID,
-        staleSymbolId,
-        "jina-embeddings-v2-base-code",
-        "stale-scip-vector",
-        "stale-scip-vector-hash",
-        staleVector,
-      ));
-      await withExclusiveLadybugOperation(() => ladybugDb.setRepoSymbolVectorEmbedding(
-        writeConn,
-        REPO_ID,
-        survivingSymbolId,
-        "jina-embeddings-v2-base-code",
-        "surviving-scip-vector",
-        "surviving-scip-vector-hash",
-        survivingVector,
-      ));
-      assert.equal(
-        await createVectorIndex(
-          writeConn,
-          resolveSymbolVectorPhysicalIdentity(REPO_ID, "jina-embeddings-v2-base-code").tableName,
-          resolveSymbolVectorPhysicalIdentity(REPO_ID, "jina-embeddings-v2-base-code").propertyName,
-          resolveSymbolVectorPhysicalIdentity(REPO_ID, "jina-embeddings-v2-base-code").indexName,
-          768,
-        ),
-        true,
-      );
-      assert.equal(
-        await ladybugDb.pruneStaleScipExternalSymbols(
-          writeConn,
-          REPO_ID,
-          [survivingSymbolId],
-        ),
-        1,
-      );
-    });
+    await withExclusiveLadybugOperation(() =>
+      withWriteConn(async (writeConn) => {
+        await withExclusiveLadybugOperation(() =>
+          setRepoSymbolVectorEmbedding(
+            writeConn,
+            REPO_ID,
+            staleSymbolId,
+            "jina-embeddings-v2-base-code",
+            "stale-scip-vector",
+            "stale-scip-vector-hash",
+            staleVector,
+          ),
+        );
+        await withExclusiveLadybugOperation(() =>
+          setRepoSymbolVectorEmbedding(
+            writeConn,
+            REPO_ID,
+            survivingSymbolId,
+            "jina-embeddings-v2-base-code",
+            "surviving-scip-vector",
+            "surviving-scip-vector-hash",
+            survivingVector,
+          ),
+        );
+        assert.equal(
+          await createVectorIndex(
+            writeConn,
+            resolveSymbolVectorPhysicalIdentity(
+              REPO_ID,
+              "jina-embeddings-v2-base-code",
+            ).tableName,
+            resolveSymbolVectorPhysicalIdentity(
+              REPO_ID,
+              "jina-embeddings-v2-base-code",
+            ).propertyName,
+            resolveSymbolVectorPhysicalIdentity(
+              REPO_ID,
+              "jina-embeddings-v2-base-code",
+            ).indexName,
+            768,
+          ),
+          true,
+        );
+        assert.equal(
+          await ladybugDb.pruneStaleScipExternalSymbols(writeConn, REPO_ID, [
+            survivingSymbolId,
+          ]),
+          1,
+        );
+      }),
+    );
 
     const staleRows = await ladybugDb.queryAll<{ symbolId: string }>(
       conn,
@@ -393,7 +418,9 @@ describe("provider-first SCIP materialization", () => {
     );
     assert.equal(neighbors.length, 1);
     assert.equal(neighbors[0]?.symbolId, survivingSymbolId);
-    assert.ok(Math.abs(neighbors[0]?.distance ?? Number.POSITIVE_INFINITY) <= 1e-6);
+    assert.ok(
+      Math.abs(neighbors[0]?.distance ?? Number.POSITIVE_INFINITY) <= 1e-6,
+    );
   });
 
   it("preserves shared SCIP external Symbols and vectors during repo-local pruning", async () => {
@@ -420,38 +447,50 @@ describe("provider-first SCIP materialization", () => {
       { repoId: REPO_ID },
     );
     assert.ok(shared);
-    await withWriteConn(async (writeConn) => {
-      await ladybugDb.upsertRepo(writeConn, {
-        repoId: otherRepoId,
-        rootPath: join(graphDbPath, "other"),
-        configJson: "{}",
-        createdAt: NOW,
-      });
-      await ladybugDb.exec(
-        writeConn,
-        `MATCH (s:Symbol {symbolId: $symbolId}), (r:Repo {repoId: $otherRepoId})
-         CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
-        { symbolId: shared.symbolId, otherRepoId },
-      );
-      await withExclusiveLadybugOperation(() => ladybugDb.setRepoSymbolVectorEmbedding(
-        writeConn,
-        REPO_ID,
-        shared.symbolId,
-        "jina-embeddings-v2-base-code",
-        "shared-scip-vector",
-        "shared-scip-vector-hash",
-        [1, ...new Array<number>(767).fill(0)],
-      ));
-
-      assert.equal(
-        await ladybugDb.pruneStaleScipExternalSymbols(
+    await withExclusiveLadybugOperation(() =>
+      withWriteConn(async (writeConn) => {
+        await ladybugDb.upsertRepo(writeConn, {
+          repoId: otherRepoId,
+          rootPath: join(graphDbPath, "other"),
+          configJson: "{}",
+          createdAt: NOW,
+        });
+        await ladybugDb.exec(
           writeConn,
-          REPO_ID,
-          [],
-        ),
-        1,
-      );
-    });
+          `MATCH (s:Symbol {symbolId: $symbolId}), (r:Repo {repoId: $otherRepoId})
+         CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+          { symbolId: shared.symbolId, otherRepoId },
+        );
+        await withExclusiveLadybugOperation(() =>
+          setRepoSymbolVectorEmbedding(
+            writeConn,
+            REPO_ID,
+            shared.symbolId,
+            "jina-embeddings-v2-base-code",
+            "shared-scip-vector",
+            "shared-scip-vector-hash",
+            [1, ...new Array<number>(767).fill(0)],
+          ),
+        );
+        // Each repository owns its own vector row, even for a shared Symbol.
+        await withExclusiveLadybugOperation(() =>
+          setRepoSymbolVectorEmbedding(
+            writeConn,
+            otherRepoId,
+            shared.symbolId,
+            "jina-embeddings-v2-base-code",
+            "other-repo-vector",
+            "other-repo-vector-hash",
+            [0, 1, ...new Array<number>(766).fill(0)],
+          ),
+        );
+
+        assert.equal(
+          await ladybugDb.pruneStaleScipExternalSymbols(writeConn, REPO_ID, []),
+          1,
+        );
+      }),
+    );
 
     assert.deepEqual(
       await ladybugDb.querySingle<{
@@ -474,6 +513,14 @@ describe("provider-first SCIP materialization", () => {
         { symbolId: shared.symbolId },
       ),
       { repoId: REPO_ID, cardHash: "shared-scip-vector-hash" },
+    );
+    assert.deepEqual(
+      await ladybugDb.querySingle<{ repoId: string; cardHash: string }>(
+        conn,
+        `MATCH (e:${resolveSymbolVectorPhysicalIdentity(otherRepoId, "jina-embeddings-v2-base-code").tableName})
+         RETURN e.repoId AS repoId, e.cardHash AS cardHash`,
+      ),
+      { repoId: otherRepoId, cardHash: "other-repo-vector-hash" },
     );
   });
 

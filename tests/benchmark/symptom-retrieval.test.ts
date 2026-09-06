@@ -78,22 +78,23 @@ describe("semantic retrieval quality baseline", () => {
     );
   });
 
-  it("vector indexes target DOUBLE[] columns", () => {
-    const lcSrc = readFileSync(
-      join(process.cwd(), "src/retrieval/index-lifecycle.ts"),
-      "utf8",
+  it("repository vector indexes target numeric vector columns", () => {
+    const embeddingSrc = readFileSync(
+      join(process.cwd(), "src/db/ladybug-symbol-embeddings.ts"), "utf8",
     );
-    assert.ok(
-      lcSrc.includes("resolveSymbolVectorPhysicalIdentity"),
-      "Index lifecycle should use Vec property names for vector index creation",
+    const refreshSrc = readFileSync(
+      join(process.cwd(), "src/indexer/embeddings.ts"), "utf8",
     );
-    assert.ok(
-      lcSrc.includes("resolveSymbolVectorPhysicalIdentity"),
-      "Symbol vector indexes should target the repository-specific embedding table",
+    assert.match(embeddingSrc, /embeddingJinaCodeVec DOUBLE\[768\]/);
+    assert.match(embeddingSrc, /embeddingNomicVec DOUBLE\[768\]/);
+    assert.match(
+      refreshSrc,
+      /createVectorIndex\(\s*writeConn,\s*identity\.tableName,\s*identity\.propertyName,\s*identity\.indexName/s,
+      "Symbol vector indexes should use the repository's physical vector identity",
     );
     assert.ok(
       retrievalDbSrc.includes("resolveSymbolVectorPhysicalIdentity"),
-      "Symbol ANN retrieval should target the dedicated embedding table",
+      "Symbol ANN retrieval should resolve the same repository physical identity",
     );
   });
 

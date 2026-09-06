@@ -92,7 +92,7 @@ describe("run-tests script parallel suites", () => {
     );
     assert.match(
       runnerSource,
-      /if \(\s*process\.platform === "win32" &&\s*\(\s*normalizedTestFile === "tests\/integration\/semantic-embedding\.test\.ts" \|\|\s*normalizedTestFile === "tests\/integration\/provider-first-scip-execution\.test\.ts" \|\|\s*normalizedTestFile === "tests\/unit\/ladybug-edge-queries\.test\.ts"\s*\)\s*\) \{\s*delete env\.SDL_MCP_DISABLE_NATIVE_ADDON;\s*\}/,
+      /if \(\s*process\.platform === "win32" &&\s*\(\s*normalizedTestFile === "tests\/integration\/semantic-embedding\.test\.ts" \|\|\s*normalizedTestFile === "tests\/integration\/provider-first-scip-execution\.test\.ts" \|\|\s*normalizedTestFile === "tests\/integration\/repository-vector-exact\.test\.ts" \|\|\s*normalizedTestFile === "tests\/integration\/repository-vector-table-lifecycle\.test\.ts" \|\|\s*normalizedTestFile === "tests\/unit\/ladybug-edge-queries\.test\.ts"\s*\)\s*\) \{\s*delete env\.SDL_MCP_DISABLE_NATIVE_ADDON;\s*\}/,
     );
     assert.doesNotMatch(
       runnerSource,

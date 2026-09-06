@@ -115,7 +115,7 @@ describe("repo.unregister integration", () => {
       "await withGraphIntegrityVerifierQuiesced(repoId",
       begin,
     );
-    const deletion = source.indexOf("await ladybugDb.deleteRepo(writeConn, repoId)", begin);
+    const deletion = source.indexOf("teardownRepositoryDatabase(repoId, appConfig.semantic)", begin);
 
     assert.ok(begin >= 0 && quiesce > begin);
     assert.ok(

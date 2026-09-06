@@ -164,6 +164,8 @@ The public `args` schema publishes one titled variant per operation in the order
 
 Use this for multi-step operations that would otherwise require multiple SDL calls.
 
+Set `dryRun: true` to validate a workflow without executing steps, accessing the database, or subscribing to graph-update publications.
+
 Good fits:
 
 - `runtimeExecute` pipelines

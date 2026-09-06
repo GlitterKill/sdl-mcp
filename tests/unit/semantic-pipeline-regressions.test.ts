@@ -315,7 +315,7 @@ describe("semantic pipeline regressions", () => {
       "provider.getCacheCompatibilityKey?.()",
     );
     const symbolConnection = symbolBody.indexOf("await getLadybugConn()");
-    const symbolCachePrepass = symbolBody.indexOf("getSymbolVectorEmbeddings(");
+    const symbolCachePrepass = symbolBody.indexOf("getRepoSymbolVectorEmbeddings(");
     const symbolHashPrepass = symbolBody.indexOf(
       "buildCardHash(\n      symbol,\n      prefixedText,\n      jinaCacheCompatibilityKey,\n    )",
     );
@@ -339,7 +339,7 @@ describe("semantic pipeline regressions", () => {
     );
     assert.match(
       symbolBody,
-      /storageModel === "jina-embeddings-v2-base-code"[\s\S]*provider\.getCacheCompatibilityKey\?\.\(\)[\s\S]*buildCardHash\([\s\S]*jinaCacheCompatibilityKey/,
+      /modelName === "jina-embeddings-v2-base-code"[\s\S]*provider\.getCacheCompatibilityKey\?\.\(\)[\s\S]*buildCardHash\([\s\S]*jinaCacheCompatibilityKey/,
       "Symbol persistence must pass the settled Jina key into its hash",
     );
     assert.doesNotMatch(
@@ -349,7 +349,7 @@ describe("semantic pipeline regressions", () => {
     );
     assert.match(
       symbolBody,
-      /provider\.embed\(batchTexts\)[\s\S]*provider\.isMockFallback\?\.\(\)/,
+      /provider\.embed\(batch\.map[\s\S]*provider\.isMockFallback\?\.\(\)/,
       "Symbol persistence must retain its post-embed mock guard",
     );
 

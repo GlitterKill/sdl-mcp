@@ -1397,10 +1397,7 @@ describe("code-mode workflow executor", () => {
       (executed.results[0].result as Record<string, unknown>).lastIndexedAt,
       "private-compact-omission",
     );
-    assert.doesNotMatch(
-      JSON.stringify(publicStep.result),
-      /lastIndexedAt|private-compact-omission/,
-    );
+    assert.equal(publicStep.result, undefined);
     assert.doesNotMatch(
       JSON.stringify(stored),
       /lastIndexedAt|private-compact-omission/,
@@ -1473,7 +1470,7 @@ describe("code-mode workflow executor", () => {
     }
   });
 
-  it("returns an explanatory truncation preview when maxResponseTokens is too low", async () => {
+  it("returns a continuation instead of a partial object when maxResponseTokens is too low", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
@@ -1503,13 +1500,11 @@ describe("code-mode workflow executor", () => {
     assert.strictEqual(step.status, "ok");
     assert.equal(canonical.results.length, 12);
     assert.equal(stored.results.length, 12);
-    assert.match(JSON.stringify(publicResult), /truncated/i);
-    assert.ok(
-      JSON.stringify(publicResult).length < JSON.stringify(canonical).length,
-    );
+    assert.equal(publicResult, undefined);
+    assert.ok("nextAction" in projected.results[0]);
   });
 
-  it("preserves real empty fields in truncation previews", async () => {
+  it("preserves real empty fields in continuation data", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
@@ -1547,7 +1542,8 @@ describe("code-mode workflow executor", () => {
     assert.deepStrictEqual(stepResult.emptyList, []);
     assert.deepStrictEqual(stepResult.emptyObject, {});
     assert.equal(stepResult.body, "x".repeat(5_000));
-    assert.match(String(publicResult.body), /truncated/i);
+    assert.equal(publicResult, undefined);
+    assert.ok("nextAction" in projected.results[0]);
     assert.deepStrictEqual(stored, effectiveResult);
     assert.deepStrictEqual(stored.emptyList, []);
   });

@@ -1,12 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
-import {
-  existsSync,
-  mkdtempSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,7 +22,10 @@ import {
   withReadOnlyTransaction,
   withTransaction,
 } from "../../dist/db/ladybug-core.js";
-import { resolveSymbolVectorPhysicalIdentity, setRepoSymbolVectorEmbedding } from "../../dist/db/ladybug-symbol-embeddings.js";
+import {
+  resolveSymbolVectorPhysicalIdentity,
+  setRepoSymbolVectorEmbedding,
+} from "../../dist/db/ladybug-symbol-embeddings.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 import { withPostIndexWriteSession } from "../../dist/db/write-session.js";
 import { verifyPersistedGraphIntegrityRevision } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
@@ -78,36 +76,38 @@ describe("background graph integrity snapshot", () => {
 
   before(async () => {
     await initLadybugDb(dbPath);
-    await withWriteConn(async (conn) => {
-      await execDdl(
-        conn,
-        "CREATE NODE TABLE SnapshotProbe (id INT64 PRIMARY KEY, value STRING)",
-      );
-      await exec(
-        conn,
-        `UNWIND $rows AS row
-         CREATE (n:SnapshotProbe {id: row.id, value: row.value})`,
-        {
-          rows: [
-            { id: 1, value: "one" },
-            { id: 2, value: "two" },
-            { id: 3, value: "three" },
-            { id: 4, value: "four" },
-          ],
-        },
-      );
-      await withExclusiveLadybugOperation(() =>
-        setRepoSymbolVectorEmbedding(
+    await withExclusiveLadybugOperation(() =>
+      withWriteConn(async (conn) => {
+        await execDdl(
           conn,
-          "snapshot-embedding-repo",
-          "snapshot-symbol",
-          "jina-embeddings-v2-base-code",
-          "snapshot-vector",
-          "snapshot-card-hash",
-          new Array<number>(768).fill(0).map((_, index) => index / 768),
-        ),
-      );
-    });
+          "CREATE NODE TABLE SnapshotProbe (id INT64 PRIMARY KEY, value STRING)",
+        );
+        await exec(
+          conn,
+          `UNWIND $rows AS row
+         CREATE (n:SnapshotProbe {id: row.id, value: row.value})`,
+          {
+            rows: [
+              { id: 1, value: "one" },
+              { id: 2, value: "two" },
+              { id: 3, value: "three" },
+              { id: 4, value: "four" },
+            ],
+          },
+        );
+        await withExclusiveLadybugOperation(() =>
+          setRepoSymbolVectorEmbedding(
+            conn,
+            "snapshot-embedding-repo",
+            "snapshot-symbol",
+            "jina-embeddings-v2-base-code",
+            "snapshot-vector",
+            "snapshot-card-hash",
+            new Array<number>(768).fill(0).map((_, index) => index / 768),
+          ),
+        );
+      }),
+    );
   });
 
   after(async () => {
@@ -340,7 +340,10 @@ describe("background graph integrity snapshot", () => {
     const releaseSnapshot = deferred();
     const snapshot = withExclusiveReadConnection((conn) =>
       withReadOnlyTransaction(conn, async () => {
-        await queryAll(conn, "MATCH (n:SnapshotProbe) RETURN count(n) AS count");
+        await queryAll(
+          conn,
+          "MATCH (n:SnapshotProbe) RETURN count(n) AS count",
+        );
         snapshotStarted.resolve();
         await releaseSnapshot.promise;
       }),
@@ -454,7 +457,10 @@ describe("background graph integrity snapshot", () => {
   for (const [label, operation] of [
     [
       "write callback",
-      (entered: ReturnType<typeof deferred>, release: ReturnType<typeof deferred>) =>
+      (
+        entered: ReturnType<typeof deferred>,
+        release: ReturnType<typeof deferred>,
+      ) =>
         withWriteConn(async (conn) => {
           await queryAll(conn, "RETURN 1");
           entered.resolve();
@@ -464,7 +470,10 @@ describe("background graph integrity snapshot", () => {
     ],
     [
       "post-index session",
-      (entered: ReturnType<typeof deferred>, release: ReturnType<typeof deferred>) =>
+      (
+        entered: ReturnType<typeof deferred>,
+        release: ReturnType<typeof deferred>,
+      ) =>
         withPostIndexWriteSession(async () => {
           entered.resolve();
           await release.promise;
@@ -686,11 +695,16 @@ describe("background graph integrity snapshot", () => {
     const walPath = `${dbPath}.wal`;
     assert.strictEqual(existsSync(walPath), true);
     const beforeCheckpoint = statSync(walPath).size;
-    assert.ok(beforeCheckpoint > thresholdBytes, `WAL was ${beforeCheckpoint} bytes`);
+    assert.ok(
+      beforeCheckpoint > thresholdBytes,
+      `WAL was ${beforeCheckpoint} bytes`,
+    );
 
-    assert.strictEqual(await runWalCheckpoint("low-threshold-proof", 5_000), true);
+    assert.strictEqual(
+      await runWalCheckpoint("low-threshold-proof", 5_000),
+      true,
+    );
     const afterCheckpoint = existsSync(walPath) ? statSync(walPath).size : 0;
     assert.ok(afterCheckpoint < beforeCheckpoint);
   });
-
 });

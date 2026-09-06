@@ -35,7 +35,8 @@ describe("HTTP degraded startup", () => {
     "keeps a real serve process diagnostic-only after one failed storage preflight",
     { timeout: 30_000 },
     async () => {
-      const kuzu = await import("kuzu");
+      const { initLadybugDb, getLadybugConn, closeLadybugDb } =
+        await import("../../dist/db/ladybug.js");
       const root = await mkdtemp(join(tmpdir(), "sdl-degraded-startup-"));
       const dbPath = join(root, "incompatible-schema.lbug");
       const fixtureRoot = join(root, "fixture");
@@ -50,17 +51,16 @@ describe("HTTP degraded startup", () => {
           "export const example = true;\n",
         );
 
-        const db = new kuzu.Database(dbPath);
-        const conn = new kuzu.Connection(db);
+        await initLadybugDb(dbPath);
+        const conn = await getLadybugConn();
         const createResult = await conn.query(
-          "CREATE NODE TABLE Symbol(wrongId STRING PRIMARY KEY)",
+          "CREATE (:Symbol {symbolId: ''})",
         );
         (Array.isArray(createResult) ? createResult[0] : createResult).close();
-        await conn.close();
-        await db.close();
+        await closeLadybugDb({ strict: true });
 
-        // This unowned, incompatible database must fail the child's storage
-        // preflight; validating it here would reject it before HTTP can start.
+        // Current schema and lineage allow startup; the empty canonical ID
+        // must fail the physical Symbol projection during storage preflight.
 
         await writeFile(
           configPath,

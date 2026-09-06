@@ -26,8 +26,9 @@ async function seedFtsDatabase() {
     await import("../../../dist/db/ladybug-windows-fts-runtime.js");
   const seedPath = join(dirname(dbPath), ".fts-seed", basename(dbPath));
   mkdirSync(dirname(seedPath), { recursive: true });
-  const db = new kuzu.Database(seedPath);
-  const conn = new kuzu.Connection(db);
+  // Clone validation requires a current SDL schema alongside the FTS index.
+  await initLadybugDb(seedPath);
+  const conn = await getLadybugConn();
   try {
     await execute(conn, "INSTALL fts");
     const loaded = await withWindowsFtsRuntime(() =>
@@ -60,15 +61,11 @@ async function seedFtsDatabase() {
       [1],
     );
   } finally {
-    await conn.close();
-    await db.close();
+    await closeLadybugDb({ strict: true });
   }
 
   const { copyLadybugFamilyForValidatedClone } = await import(
     "../../../dist/db/ladybug-family-files.js"
-  );
-  const { closeLadybugDb, initValidatedLadybugClone } = await import(
-    "../../../dist/db/ladybug.js"
   );
   const capability = copyLadybugFamilyForValidatedClone(seedPath, dbPath);
   await initValidatedLadybugClone(dbPath, capability);
@@ -81,8 +78,12 @@ async function openWithProductionDatabase() {
   await initLadybugDb(dbPath);
   try {
     const conn = await getLadybugConn();
-    const rows = await execute(conn, "RETURN 1 AS value", true);
-    assert.equal(Number(rows[0]?.value), 1);
+    const rows = await execute(
+      conn,
+      "CALL QUERY_FTS_INDEX('FtsReopenProbe', 'fts_reopen_probe_idx', 'reopen') RETURN node.id AS id",
+      true,
+    );
+    assert.deepEqual(rows.map((row) => Number(row.id)), [1]);
   } finally {
     await closeLadybugDb({ strict: true });
   }

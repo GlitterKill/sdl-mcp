@@ -1302,7 +1302,17 @@ export class MCPServer {
               throw new StorageNotWriteReadyError(startupReadiness);
             }
 
-            await this.recordPublicationInterest(extractStringField(parsedArgs, "repoId"), toolContext.sessionId);
+            // Dry runs validate requests without DB access or notification subscriptions.
+            const isWorkflowDryRun =
+              toolName === "sdl.workflow" &&
+              isRecordValue(parsedArgs) &&
+              parsedArgs.dryRun === true;
+            if (!isWorkflowDryRun) {
+              await this.recordPublicationInterest(
+                extractStringField(parsedArgs, "repoId"),
+                toolContext.sessionId,
+              );
+            }
 
             const dispatchTool = async (): Promise<unknown> => {
               const graphAdmission = classifyPublicGraphRetrieval(

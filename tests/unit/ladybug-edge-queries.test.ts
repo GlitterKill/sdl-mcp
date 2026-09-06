@@ -10,7 +10,10 @@ import {
   isWindowsFtsRuntimeUnavailable,
   withWindowsFtsRuntime,
 } from "../../dist/db/ladybug-windows-fts-runtime.js";
-import { resolveSymbolVectorPhysicalIdentity } from "../../dist/db/ladybug-symbol-embeddings.js";
+import {
+  resolveSymbolVectorPhysicalIdentity,
+  setRepoSymbolVectorEmbedding,
+} from "../../dist/db/ladybug-symbol-embeddings.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 import { createVectorIndex } from "../../dist/retrieval/index-lifecycle.js";
 
@@ -799,7 +802,7 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
-    "pruneIsolatedPlaceholderSymbols removes vectors and retains the live HNSW",
+    "pruneIsolatedPlaceholderSymbols defers vector cleanup and retains the live HNSW",
     { skip: !ladybugAvailable },
     async () => {
       await exec(
@@ -830,24 +833,28 @@ describe("LadybugDB Edge Queries", () => {
       const kuzuConn = conn as unknown as import("kuzu").Connection;
       const staleVector = [1, ...new Array<number>(767).fill(0)];
       const survivingVector = [0, 1, ...new Array<number>(766).fill(0)];
-      await withExclusiveLadybugOperation(() => queries.setRepoSymbolVectorEmbedding(
-        kuzuConn,
-        repoId,
-        "unresolved:call:staleClustered",
-        "jina-embeddings-v2-base-code",
-        "stale-placeholder-vector",
-        "stale-placeholder-vector-hash",
-        staleVector,
-      ));
-      await withExclusiveLadybugOperation(() => queries.setRepoSymbolVectorEmbedding(
-        kuzuConn,
-        repoId,
-        "edge-from",
-        "jina-embeddings-v2-base-code",
-        "surviving-symbol-vector",
-        "surviving-symbol-vector-hash",
-        survivingVector,
-      ));
+      await withExclusiveLadybugOperation(() =>
+        setRepoSymbolVectorEmbedding(
+          kuzuConn,
+          repoId,
+          "unresolved:call:staleClustered",
+          "jina-embeddings-v2-base-code",
+          "stale-placeholder-vector",
+          "stale-placeholder-vector-hash",
+          staleVector,
+        ),
+      );
+      await withExclusiveLadybugOperation(() =>
+        setRepoSymbolVectorEmbedding(
+          kuzuConn,
+          repoId,
+          "edge-from",
+          "jina-embeddings-v2-base-code",
+          "surviving-symbol-vector",
+          "surviving-symbol-vector-hash",
+          survivingVector,
+        ),
+      );
       const vectorLoadResult = await withWindowsFtsRuntime(() =>
         exec(conn, "LOAD EXTENSION vector"),
       );
@@ -858,9 +865,18 @@ describe("LadybugDB Edge Queries", () => {
       assert.equal(
         await createVectorIndex(
           kuzuConn,
-          resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").tableName,
-          resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").propertyName,
-          resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").indexName,
+          resolveSymbolVectorPhysicalIdentity(
+            repoId,
+            "jina-embeddings-v2-base-code",
+          ).tableName,
+          resolveSymbolVectorPhysicalIdentity(
+            repoId,
+            "jina-embeddings-v2-base-code",
+          ).propertyName,
+          resolveSymbolVectorPhysicalIdentity(
+            repoId,
+            "jina-embeddings-v2-base-code",
+          ).indexName,
           768,
         ),
         true,
@@ -932,15 +948,29 @@ describe("LadybugDB Edge Queries", () => {
          CREATE (s)-[:SYMBOL_IN_REPO]->(target)
          CREATE (s)-[:SYMBOL_IN_REPO]->(other)`,
       );
-      await withExclusiveLadybugOperation(() => queries.setRepoSymbolVectorEmbedding(
-        kuzuConn,
-        repoId,
-        symbolId,
-        "jina-embeddings-v2-base-code",
-        "shared-stale-vector",
-        "shared-stale-vector-hash",
-        new Array<number>(768).fill(0.25),
-      ));
+      await withExclusiveLadybugOperation(() =>
+        setRepoSymbolVectorEmbedding(
+          kuzuConn,
+          repoId,
+          symbolId,
+          "jina-embeddings-v2-base-code",
+          "shared-stale-vector",
+          "shared-stale-vector-hash",
+          new Array<number>(768).fill(0.25),
+        ),
+      );
+      // Each repository owns its own vector row, even for a shared Symbol.
+      await withExclusiveLadybugOperation(() =>
+        setRepoSymbolVectorEmbedding(
+          kuzuConn,
+          otherRepoId,
+          symbolId,
+          "jina-embeddings-v2-base-code",
+          "other-repo-vector",
+          "other-repo-vector-hash",
+          [0, 1, ...new Array<number>(766).fill(0)],
+        ),
+      );
 
       assert.strictEqual(
         await queries.pruneIsolatedPlaceholderSymbols(kuzuConn, repoId),
@@ -964,6 +994,14 @@ describe("LadybugDB Edge Queries", () => {
           membershipRepoId: otherRepoId,
         },
       ]);
+      assert.deepEqual(
+        await queries.querySingle<{ repoId: string; cardHash: string }>(
+          kuzuConn,
+          `MATCH (e:${resolveSymbolVectorPhysicalIdentity(otherRepoId, "jina-embeddings-v2-base-code").tableName})
+           RETURN e.repoId AS repoId, e.cardHash AS cardHash`,
+        ),
+        { repoId: otherRepoId, cardHash: "other-repo-vector-hash" },
+      );
     },
   );
 
@@ -1037,28 +1075,24 @@ describe("LadybugDB Edge Queries", () => {
         "MATCH (f:File {fileId: 'edge-file'}), (s:Symbol) WHERE s.symbolId IN ['edge-to', 'edge-z'] CREATE (s)-[:SYMBOL_IN_FILE]->(f)",
       );
       for (const toSymbolId of ["edge-z", "edge-to"]) {
-        await queries.insertEdge(
-          conn as unknown as import("kuzu").Connection,
-          {
-            repoId,
-            fromSymbolId: "edge-from",
-            toSymbolId,
-            edgeType: "call",
-            weight: 1,
-            confidence: 1,
-            resolution: "exact",
-            provenance: null,
-            createdAt: "2026-03-04T00:00:00Z",
-          },
-        );
+        await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId,
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: null,
+          createdAt: "2026-03-04T00:00:00Z",
+        });
       }
 
-      const dependencies =
-        await queries.getBoundedDependencySymbolsFromSources(
-          conn as unknown as import("kuzu").Connection,
-          ["edge-from"],
-          1,
-        );
+      const dependencies = await queries.getBoundedDependencySymbolsFromSources(
+        conn as unknown as import("kuzu").Connection,
+        ["edge-from"],
+        1,
+      );
 
       assert.deepStrictEqual([...dependencies.keys()], ["edge-to"]);
       assert.deepStrictEqual(dependencies.get("edge-to"), {
@@ -1443,10 +1477,11 @@ describe("LadybugDB Edge Queries", () => {
         conn as unknown as import("kuzu").Connection,
         repoId,
       );
-      const remainingOtherRepoCalls = await queries.getUnresolvedCallEdgesByRepo(
-        conn as unknown as import("kuzu").Connection,
-        otherRepoId,
-      );
+      const remainingOtherRepoCalls =
+        await queries.getUnresolvedCallEdgesByRepo(
+          conn as unknown as import("kuzu").Connection,
+          otherRepoId,
+        );
       const importRows = await queries.getEdgesFrom(
         conn as unknown as import("kuzu").Connection,
         "edge-from",

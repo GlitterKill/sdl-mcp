@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,7 @@ import {
 import { migrations } from "../../dist/db/migrations/index.js";
 import * as m024 from "../../dist/db/migrations/m024-add-symbol-test-case.js";
 import { runPendingMigrations } from "../../dist/db/migration-runner.js";
+import { withLadybugInitialization } from "../../dist/db/ladybug-operation-gate.js";
 
 async function createVersion22Database(
   dbPath: string,
@@ -150,6 +151,11 @@ describe("migration: graph integrity revisions and manifest", () => {
     await runPendingMigrations(historicalConn, 22, migrations.filter(({ version }) => version <= 26));
     return historicalConn;
   }
+
+  beforeEach(async () => {
+    // Raw historical fixtures still use the shared operation gate.
+    await withLadybugInitialization(async () => {});
+  });
 
   afterEach(async () => {
     await closeLadybugDb().catch(() => {});
