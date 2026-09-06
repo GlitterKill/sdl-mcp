@@ -4,6 +4,7 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath } from "../../util/paths.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import type { ToolContext } from "../../server.js";
+import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import { NotFoundError, ValidationError } from "../errors.js";
 import {
   CodeNeedWindowResponseSchema,
@@ -314,6 +315,7 @@ async function handleFileGatewayPreviewWindow(
 export async function handleFileGateway(
   args: unknown,
   context?: ToolContext,
+  liveIndex?: LiveIndexCoordinator,
 ): Promise<FileGatewayResponse> {
   const timer = new ToolPhaseTimer();
   const parseStartedAt = timer.start();
@@ -351,13 +353,13 @@ export async function handleFileGateway(
     case "write": {
       const { op: _op, ...rest } = request;
       const phaseStartedAt = timer.start();
-      return finish(await handleFileWrite(rest), phaseStartedAt, "file.write");
+      return finish(await handleFileWrite(rest, context, liveIndex), phaseStartedAt, "file.write");
     }
     case "searchEditPreview": {
       const { op: _op, ...rest } = request;
       const phaseStartedAt = timer.start();
       return finish(
-        await handleSearchEdit({ mode: "preview", ...rest }, context),
+        await handleSearchEdit({ mode: "preview", ...rest }, context, liveIndex),
         phaseStartedAt,
         "file.searchEditPreview",
       );
@@ -366,7 +368,7 @@ export async function handleFileGateway(
       const { op: _op, ...rest } = request;
       const phaseStartedAt = timer.start();
       return finish(
-        await handleSearchEdit({ mode: "apply", ...rest }, context),
+        await handleSearchEdit({ mode: "apply", ...rest }, context, liveIndex),
         phaseStartedAt,
         "file.searchEditApply",
       );
@@ -375,7 +377,7 @@ export async function handleFileGateway(
       const { op: _op, ...rest } = request;
       const phaseStartedAt = timer.start();
       return finish(
-        await handleSymbolEdit({ mode: "preview", ...rest }, context),
+        await handleSymbolEdit({ mode: "preview", ...rest }, context, liveIndex),
         phaseStartedAt,
         "file.symbolEditPreview",
       );
@@ -384,7 +386,7 @@ export async function handleFileGateway(
       const { op: _op, ...rest } = request;
       const phaseStartedAt = timer.start();
       return finish(
-        await handleSymbolEdit({ mode: "apply", ...rest }, context),
+        await handleSymbolEdit({ mode: "apply", ...rest }, context, liveIndex),
         phaseStartedAt,
         "file.symbolEditApply",
       );
@@ -393,7 +395,7 @@ export async function handleFileGateway(
       const { op: _op, ...rest } = request;
       const phaseStartedAt = timer.start();
       return finish(
-        await handleSymbolEdit({ mode: "applyNow", ...rest }, context),
+        await handleSymbolEdit({ mode: "applyNow", ...rest }, context, liveIndex),
         phaseStartedAt,
         "file.symbolEditApplyNow",
       );

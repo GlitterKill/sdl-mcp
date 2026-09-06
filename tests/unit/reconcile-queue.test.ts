@@ -91,7 +91,6 @@ it("keeps saved 13 when saved 12 settles after being superseded", () => {
   assert.ok(twelve);
   assert.deepEqual(twelve.files?.[0]?.input, {
     kind: "saved",
-    content: "saved 12",
     sourceHash: "hash12",
   });
   queue.enqueue("repo", frontier, "2026-09-05T00:00:01Z", {
@@ -103,7 +102,6 @@ it("keeps saved 13 when saved 12 settles after being superseded", () => {
   assert.ok(thirteen);
   assert.deepEqual(thirteen.files[0].input, {
     kind: "saved",
-    content: "saved 13",
     sourceHash: "hash13",
   });
   assert.notEqual(thirteen.files[0].generation, twelve.files[0].generation);
@@ -122,8 +120,21 @@ function frontier(...paths: string[]) {
 }
 const saved = (content: string) => ({
   kind: "saved" as const,
-  content,
   sourceHash: content,
+});
+
+it("retains only saved ownership, never a caller's large source snapshot", () => {
+  const queue = new ReconcileQueue();
+  const caller = {
+    kind: "saved" as const,
+    sourceHash: "hash",
+    content: "x".repeat(2_000_000),
+  };
+  queue.enqueue("repo", frontier(), queuedAt, { "a.ts": caller });
+  assert.deepEqual(queue.claimNext()!.files[0].input, {
+    kind: "saved",
+    sourceHash: "hash",
+  });
 });
 
 it("coalesces hash-known duplicate saves but unknown watcher events invalidate immediately", () => {
@@ -154,7 +165,7 @@ it("does not let stale failure or late settlement acknowledge a newer claim", ()
   queue.enqueue("repo", frontier("a.ts"), queuedAt, { "a.ts": saved("13") });
   queue.fail(old, queuedAt, "old failure");
   const latest = queue.claimNext()!;
-  assert.equal(latest.files[0].input.content, "13");
+  assert.equal(latest.files[0].input.sourceHash, "13");
   queue.complete(old, queuedAt);
   queue.fail(old, queuedAt, "late failure");
   assert.equal(queue.isCurrent(latest), true);
@@ -218,7 +229,7 @@ it("invalidates multi-file preparation and preserves unchanged dependency source
   queue.complete(claim, queuedAt);
   const next = queue.claimNext()!;
   assert.deepEqual(
-    next.files.map((file) => file.input.content),
+    next.files.map((file) => file.input.sourceHash),
     ["new a", "b"],
   );
   queue.enqueue("repo", frontier("b.ts"), queuedAt); // Dependency inputs changed, source stayed equal.
@@ -244,6 +255,13 @@ it("coalesces overflow into retained inventory work and invalidates prepared cla
   );
   assert.equal(queue.isCurrent(prepared), false);
   queue.complete(prepared, queuedAt);
+  const retained = queue.claimNext()!;
+  assert.equal(
+    retained.inventoryNeeded,
+    false,
+    "drain retained files before rescanning overflow",
+  );
+  queue.complete(retained, queuedAt);
   const inventory = queue.claimNext()!;
   assert.equal(inventory.inventoryNeeded, true);
   assert.ok(inventory.files.length <= 10_000);
@@ -270,6 +288,83 @@ it("reports overflow admission so callers cannot acknowledge an unretained save 
     }),
     false,
   );
+  const retained = queue.claimNext()!;
+  assert.equal(retained.inventoryNeeded, false);
+  queue.complete(retained, queuedAt);
+  assert.equal(queue.claimNext()!.inventoryNeeded, true);
+});
+
+it("retains inventory across a later save and drains bounded batches before the next scan", () => {
+  const queue = new ReconcileQueue();
+  queue.requestInventory("repo", true);
+  const first = queue.claimNext()!;
+  assert.equal(first.inventoryForce, true);
+  queue.requestInventory("repo");
+  assert.equal(queue.isCurrent(first), false);
+  queue.complete(first, queuedAt);
+  const second = queue.claimNext()!;
+  queue.completeInventory(
+    second,
+    [{ filePath: "a.ts", input: { kind: "disk-change" } }],
+    "a.ts",
+  );
+  const file = queue.claimNext(1)!;
+  assert.deepEqual(
+    file.files.map((item) => item.filePath),
+    ["a.ts"],
+  );
+  assert.equal(file.inventoryNeeded, false);
+  queue.complete(file, queuedAt);
+  const continuation = queue.claimNext()!;
+  assert.equal(continuation.inventoryCursor, "a.ts");
+  assert.equal(continuation.inventoryForce, true);
+  queue.completeInventory(continuation, []);
+  assert.equal(queue.peekNext(), false);
+});
+
+it("restarts inventory before its cursor when a new earlier path overflows", () => {
+  const queue = new ReconcileQueue();
+  queue.requestInventory("repo", true);
+  const scan = queue.claimNext()!;
+  queue.completeInventory(
+    scan,
+    Array.from({ length: 10_000 }, (_, i) => ({
+      filePath: `m${String(i).padStart(5, "0")}.ts`,
+      input: { kind: "disk-change" as const },
+    })),
+    "m09999.ts",
+  );
+  queue.enqueue("repo", frontier(), queuedAt, {
+    "a.ts": { kind: "disk-change" },
+  });
+  const files = queue.claimNext()!;
+  queue.complete(files, queuedAt);
+  const recovery = queue.claimNext()!;
+  assert.equal(recovery.inventoryCursor, null);
+  assert.equal(recovery.inventoryForce, true);
+  queue.completeInventory(recovery, [
+    { filePath: "a.ts", input: { kind: "disk-change" } },
+  ]);
+  assert.equal(queue.claimNext()!.files[0].filePath, "a.ts");
+});
+
+it("wakes capacity-blocked inventory after an owned file succeeds", () => {
+  const queue = new ReconcileQueue();
+  queue.enqueue(
+    "repo",
+    frontier(...Array.from({ length: 10_000 }, (_, i) => `m${i}.ts`)),
+    queuedAt,
+  );
+  queue.requestInventory("repo");
+  queue.fail(queue.claimNext()!, queuedAt, "provider unavailable");
+  const scan = queue.claimNext()!;
+  assert.equal(scan.inventoryNeeded, true);
+  queue.fail(scan, queuedAt, "inventory capacity exhausted");
+  queue.enqueue("repo", frontier(), queuedAt, {
+    "m0.ts": { kind: "disk-change" },
+  });
+  queue.complete(queue.claimNext()!, queuedAt);
+  assert.equal(queue.inventoryCapacity("repo"), 1);
   assert.equal(queue.claimNext()!.inventoryNeeded, true);
 });
 

@@ -26,7 +26,14 @@ import {
   unlink,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import {
+  basename,
+  dirname,
+  join,
+  resolve,
+  relative,
+  isAbsolute,
+} from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { handleSearchEdit } from "../../dist/mcp/tools/search-edit/index.js";
@@ -68,9 +75,17 @@ import {
   resetRegistry,
 } from "../../dist/indexer/adapter/registry.js";
 
+import {
+  configureDefaultLiveIndexCoordinator,
+  waitForDefaultLiveIndexIdle,
+  resetDefaultLiveIndexCoordinator,
+} from "../../dist/live-index/coordinator.js";
+
 const REPO_ID = "search-edit-smoke";
 
 let repoRoot: string;
+let fixtureRoot: string;
+let priorConfig: string | undefined;
 
 function getWindowsShortBasename(filePath: string): string | null {
   const longName = basename(filePath);
@@ -111,7 +126,15 @@ async function ensureRepoRegistered(root: string): Promise<void> {
   await ladybugDb.upsertRepo(conn, {
     repoId: REPO_ID,
     rootPath: root,
-    configJson: "{}",
+    configJson: JSON.stringify({
+      repoId: REPO_ID,
+      rootPath: root,
+      languages: ["ts"],
+      scip: { enabled: false },
+      semanticEnrichment: {
+        providers: { scip: { enabled: false }, lsp: { enabled: false } },
+      },
+    }),
     createdAt: new Date().toISOString(),
   });
 }
@@ -130,10 +153,14 @@ async function establishVerifiedEmptyManifest(): Promise<void> {
         prevVersionHash: null,
         versionHash: null,
       });
-      await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, REPO_ID, {
-        files: [],
-        fileless: [],
-      });
+      await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+        conn,
+        REPO_ID,
+        {
+          files: [],
+          fileless: [],
+        },
+      );
       await beginGraphIntegrityVersion(
         conn,
         REPO_ID,
@@ -157,7 +184,28 @@ async function establishVerifiedEmptyManifest(): Promise<void> {
 
 describe("sdl.search.edit", { concurrency: false }, () => {
   before(async () => {
-    repoRoot = await mkdtemp(join(tmpdir(), "sdl-search-edit-"));
+    fixtureRoot = await mkdtemp(join(tmpdir(), "sdl-search-edit-"));
+    repoRoot = join(fixtureRoot, "repo");
+    await mkdir(repoRoot);
+    priorConfig = process.env.SDL_CONFIG;
+    const configPath = join(fixtureRoot, "sdl-config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        repos: [],
+        policy: {},
+        indexing: { engine: "typescript", enableFileWatching: false },
+        scip: { enabled: false },
+        semanticEnrichment: {
+          providers: { scip: { enabled: false }, lsp: { enabled: false } },
+        },
+      }),
+    );
+    process.env.SDL_CONFIG = configPath;
+    await configureDefaultLiveIndexCoordinator({
+      enabled: false,
+      sweepIntervalMs: 0,
+    });
     await writeFile(
       join(repoRoot, "a.txt"),
       "hello oldName world\nsecond oldName line\n",
@@ -172,9 +220,15 @@ describe("sdl.search.edit", { concurrency: false }, () => {
   });
 
   after(async () => {
+    await waitForDefaultLiveIndexIdle();
+    resetDefaultLiveIndexCoordinator();
     await cancelAndWaitForGraphIntegrityVerifier(REPO_ID);
     await closeLadybugDb();
-    await rm(repoRoot, { recursive: true, force: true });
+    if (priorConfig === undefined) delete process.env.SDL_CONFIG;
+    else process.env.SDL_CONFIG = priorConfig;
+    const child = relative(resolve(fixtureRoot), resolve(repoRoot));
+    assert.ok(child && !child.startsWith("..") && !isAbsolute(child));
+    await rm(resolve(fixtureRoot), { recursive: true, force: true });
   });
 
   it("preview returns planHandle and per-file entries", async () => {
@@ -232,13 +286,10 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     );
   });
 
-
   it("identifier targeting edits AST identifiers without touching strings or comments", async () => {
     await writeFile(
       join(repoRoot, "ident.ts"),
       [
-
-
         "const oldName = 1;",
         'const text = "oldName";',
         "// oldName stays here",
@@ -580,7 +631,10 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     )) as SearchEditPreviewResponse;
 
     assert.equal(preview.filesMatched, 1);
-    assert.equal(preview.fileEntries[0]?.astMatches?.[0]?.target.text, "old_name");
+    assert.equal(
+      preview.fileEntries[0]?.astMatches?.[0]?.target.text,
+      "old_name",
+    );
 
     const apply = (await handleSearchEdit(
       SearchEditRequestSchema.parse({
@@ -591,7 +645,10 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     )) as SearchEditApplyResponse;
 
     assert.equal(apply.filesWritten, 1);
-    assert.equal(await readFile(join(srcDir, "brace.ts"), "utf-8"), "new_name();\n");
+    assert.equal(
+      await readFile(join(srcDir, "brace.ts"), "utf-8"),
+      "new_name();\n",
+    );
   });
 
   it("validates TSX structural queries against TSX grammar during warm-up", async () => {
@@ -631,7 +688,10 @@ describe("sdl.search.edit", { concurrency: false }, () => {
 
     assert.equal(preview.filesMatched, 1);
     assert.equal(preview.fileEntries[0]?.file, "src/view.tsx");
-    assert.equal(preview.fileEntries[0]?.astMatches?.[0]?.target.text, "oldName={value}");
+    assert.equal(
+      preview.fileEntries[0]?.astMatches?.[0]?.target.text,
+      "oldName={value}",
+    );
 
     await assert.rejects(
       () =>
@@ -755,7 +815,11 @@ describe("sdl.search.edit", { concurrency: false }, () => {
   });
 
   it("reports explicit structural language mismatches from extension hints", async () => {
-    await writeFile(join(repoRoot, "extension-mismatch.ts"), "oldName();\n", "utf-8");
+    await writeFile(
+      join(repoRoot, "extension-mismatch.ts"),
+      "oldName();\n",
+      "utf-8",
+    );
     const srcDir = join(repoRoot, "src");
     await mkdir(srcDir, { recursive: true });
     await writeFile(join(srcDir, "glob-mismatch.ts"), "oldName();\n", "utf-8");
@@ -964,7 +1028,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       repoId: REPO_ID,
       rootPath: repoRoot,
       ignore: [] as string[],
-      languages: ["ts", "json", "yaml", "md"],
+      languages: ["ts"],
       maxFileBytes: 2_000_000,
       includeNodeModulesTypes: false,
       packageJsonPath: null,
@@ -1011,22 +1075,23 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       }),
     )) as SearchEditApplyResponse;
 
-    assert.equal(
-      eligibleApply.results[0]?.indexUpdate?.applied,
-      true,
-      eligibleApply.results[0]?.indexUpdate?.error,
-    );
-    const eligibleAfterApply = await getDerivedState(REPO_ID);
-    assert.ok(
-      (eligibleAfterApply?.graphIntegrityRevision ?? 0) >
-        eligibleBefore.graphIntegrityRevision,
-    );
-    await waitForGraphIntegrityVerifier(REPO_ID);
-    const eligibleVerified = await getDerivedState(REPO_ID);
-    assert.equal(
-      eligibleVerified?.graphIntegrityVerifiedRevision,
-      eligibleVerified?.graphIntegrityRevision,
-    );
+      assert.equal(
+        eligibleApply.results[0]?.indexUpdate?.pending,
+        true,
+        eligibleApply.results[0]?.indexUpdate?.error,
+      );
+      await waitForDefaultLiveIndexIdle();
+      const eligibleAfterApply = await getDerivedState(REPO_ID);
+      assert.ok(
+        (eligibleAfterApply?.graphIntegrityRevision ?? 0) >
+          eligibleBefore.graphIntegrityRevision,
+      );
+      await waitForGraphIntegrityVerifier(REPO_ID);
+      const eligibleVerified = await getDerivedState(REPO_ID);
+      assert.equal(
+        eligibleVerified?.graphIntegrityVerifiedRevision,
+        eligibleVerified?.graphIntegrityRevision,
+      );
 
     await ladybugDb.upsertRepo(conn, {
         repoId: REPO_ID,
@@ -1049,11 +1114,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
 
       const ignoredBaseline = {
         derivedState: await getDerivedState(REPO_ID),
-        file: await ladybugDb.getFileByRepoPath(
-          conn,
-          REPO_ID,
-          ignoredRelPath,
-        ),
+        file: await ladybugDb.getFileByRepoPath(conn, REPO_ID, ignoredRelPath),
         symbols: await ladybugDb.getSymbolsByFile(conn, ignoredFileId),
         manifestFiles: await ladybugDb.listGraphIntegrityFileStates(
           conn,
@@ -1182,11 +1243,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     async (t) => {
       const canonicalRelPath = "LongSearchEditSourceFilename.ts";
       const filePath = join(repoRoot, canonicalRelPath);
-      await writeFile(
-        filePath,
-        "export const value = 1;\n",
-        "utf-8",
-      );
+      await writeFile(filePath, "export const value = 1;\n", "utf-8");
       const shortName = getWindowsShortBasename(filePath);
       if (!shortName) {
         t.skip("8.3 filename aliases are unavailable on the test volume");
@@ -1238,10 +1295,11 @@ describe("sdl.search.edit", { concurrency: false }, () => {
 
       assert.equal(apply.filesWritten, 1);
       assert.equal(
-        apply.results[0]?.indexUpdate?.applied,
+        apply.results[0]?.indexUpdate?.pending,
         true,
         apply.results[0]?.indexUpdate?.error,
       );
+      await waitForDefaultLiveIndexIdle();
       assert.ok(
         await ladybugDb.getFileByRepoPath(conn, REPO_ID, canonicalRelPath),
       );

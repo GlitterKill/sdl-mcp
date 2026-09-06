@@ -261,7 +261,7 @@ describe("watcher health", () => {
     );
   });
 
-  it("treats pending work without a successful reindex as stale", () => {
+  it("treats refused admission as stale", () => {
     assert.strictEqual(
       isWatcherStale({
         enabled: true,
@@ -278,21 +278,6 @@ describe("watcher health", () => {
         pendingChanges: 1,
       }),
       true,
-    );
-  });
-
-  it("does not consider actively processing pending work stale", () => {
-    assert.strictEqual(
-      isWatcherStale(
-        {
-          eventsReceived: 1,
-          lastSuccessfulReindexAt: null,
-          pendingChanges: 1,
-        },
-        Date.now(),
-        true,
-      ),
-      false,
     );
   });
 

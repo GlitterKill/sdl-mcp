@@ -592,8 +592,8 @@ describe("response projection inventory", () => {
       ["sdl.file", 1_000],
       // Stored-response continuation, recovery defaults, and diagnostic code metadata total 1,641 nodes.
       ["sdl.retrieve", 1_648],
-      // Workflow info plus projected slice-refresh arms total 5,806 nodes.
-      ["sdl.workflow", 5_810],
+      // Saved-write pending and buffer publication phase add four nodes to the prior 5,810 budget.
+      ["sdl.workflow", 5_814],
     ]);
 
     for (const [name, maxNodes] of nodeBudgets) {

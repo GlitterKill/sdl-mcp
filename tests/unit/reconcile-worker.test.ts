@@ -49,27 +49,16 @@ it("does not start broad derived jobs for metadata-only frontiers", async () => 
   assert.equal(queue.getStatus("metadata").queueDepth, 0);
 });
 
-it("retains inventory recovery rather than acknowledging it", async () => {
+it("retains inventory and source work until explicit write-readiness wake", async () => {
   const queue = new ReconcileQueue();
   const worker = new ReconcileWorker(queue);
-  queue.enqueue(
-    "inventory",
-    {
-      ...frontier,
-      dependentFilePaths: Array.from({ length: 10_001 }, (_, i) => `${i}.ts`),
-    },
-    "now",
-  );
-  // Discard file entries for this unit: the coalesced recovery marker remains.
-  const internal = queue as unknown as {
-    repos: Map<string, { files: Map<string, unknown> }>;
-  };
-  internal.repos.get("inventory")!.files.clear();
-  worker.enqueue("inventory", frontier);
+  worker.setReadiness("inventory", () => false);
+  worker.requestInventory("inventory");
+  worker.enqueue("inventory", { ...frontier, dependentFilePaths: ["a.ts"] });
   await worker.waitForIdle();
-  assert.equal(queue.getStatus("inventory").queueDepth, 1);
-  assert.match(queue.getStatus("inventory").lastError!, /inventory recovery/);
-  assert.equal(queue.peekNext(), false);
+  assert.equal(queue.getStatus("inventory").queueDepth, 2);
+  assert.equal(queue.getStatus("inventory").lastError, null);
+  assert.equal(queue.getStatus("inventory").inflight, false);
 });
 
 it("rejects later work after repository removal", async () => {

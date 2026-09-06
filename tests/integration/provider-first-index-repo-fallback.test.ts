@@ -53,7 +53,6 @@ import {
   type EmbeddingProvider,
 } from "../../dist/indexer/embeddings.js";
 import { queryRepoSymbolVectorIndex } from "../../dist/retrieval/orchestrator.js";
-import { processWatchedFileChange } from "../../dist/indexer/watcher.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
 import {
   clearRepositorySymbolVectorHealth,
@@ -178,7 +177,7 @@ describe("provider-first indexRepo fallback", () => {
     );
   });
 
-  it("commits watcher delete and rename manifests in one incremental revision", async () => {
+  it("commits explicit incremental delete and rename manifests in one revision", async () => {
     const repoId = await initIndexedRepo("auto");
     const deletedPath = join(repoDir, "src", "deleted.ts");
     const renamedPath = join(repoDir, "src", "renamed.ts");
@@ -222,21 +221,7 @@ describe("provider-first indexRepo fallback", () => {
     rmSync(deletedPath);
     renameSync(renamedPath, movedPath);
 
-    let result: Awaited<ReturnType<typeof indexRepo>> | undefined;
-    await processWatchedFileChange({
-      repoId,
-      filePath: deletedPath,
-      async indexRepo(changedRepoId, mode) {
-        result = await indexRepo(changedRepoId, mode);
-        return result;
-      },
-      async patchSavedFileFn() {
-        throw Object.assign(new Error("file was deleted"), {
-          code: "ENOENT",
-          path: deletedPath,
-        });
-      },
-    });
+    const result = await indexRepo(repoId, "incremental");
     assert.ok(result);
     const state = await getDerivedState(repoId);
     const afterConn = await getLadybugConn();

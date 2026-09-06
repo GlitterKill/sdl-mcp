@@ -33,6 +33,7 @@ import { normalizePath, validatePathWithinRoot } from "../../../util/paths.js";
 import { resolveSymbolId } from "../../../util/resolve-symbol-id.js";
 import { resolveSymbolRef } from "../../../util/resolve-symbol-ref.js";
 import type { ToolContext } from "../../../server.js";
+import type { LiveIndexCoordinator } from "../../../live-index/types.js";
 import {
   FILE_WRITE_DENY_EXTENSIONS,
   MAX_FILE_SIZE_BYTES,
@@ -758,6 +759,7 @@ async function applyDraftPlan(
 
 async function handleApply(
   request: Extract<SymbolEditRequest, { mode: "apply" }>,
+  liveIndex?: LiveIndexCoordinator,
 ): Promise<SymbolEditApplyResponse> {
   const store = getSearchEditPlanStore();
   const plan = store.get(request.planHandle);
@@ -793,7 +795,7 @@ async function handleApply(
     const response =
       metadata.writeTarget === "draft"
         ? await applyDraftPlan(plan, metadata)
-        : await applyFilePlan(plan, metadata, request.createBackup);
+        : await applyFilePlan(plan, metadata, request.createBackup, liveIndex);
     store.remove(plan.planHandle);
     return response;
   } catch (error) {
@@ -806,8 +808,9 @@ async function applyFilePlan(
   plan: StoredPlan,
   metadata: SymbolEditStoredMetadata,
   createBackup: boolean | undefined,
+  liveIndex?: LiveIndexCoordinator,
 ): Promise<SymbolEditApplyResponse> {
-  const batch = await applyBatch(plan, createBackup);
+  const batch = await applyBatch(plan, createBackup, liveIndex);
   return {
     mode: "apply",
     planHandle: plan.planHandle,
@@ -829,6 +832,7 @@ async function applyFilePlan(
 export async function handleSymbolEdit(
   args: unknown,
   _context?: ToolContext,
+  liveIndex?: LiveIndexCoordinator,
 ): Promise<SymbolEditResponse> {
   const request = parseActionHandlerArgs(SymbolEditRequestSchema, args);
   if (request.mode === "preview") {
@@ -836,7 +840,7 @@ export async function handleSymbolEdit(
     return response;
   }
   if (request.mode === "apply") {
-    return handleApply(request);
+    return handleApply(request, liveIndex);
   }
   const { response } = await buildPreview(request);
   return handleApply({
@@ -844,5 +848,5 @@ export async function handleSymbolEdit(
     repoId: request.repoId,
     planHandle: response.planHandle,
     createBackup: request.createBackup,
-  });
+  }, liveIndex);
 }

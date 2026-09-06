@@ -237,7 +237,7 @@ export function buildFlatToolDescriptors(
       description:
         "Symbol-scoped edit preview/apply/applyNow with astFingerprint, range, file sha, draft preconditions, and parse-after validation. createBackup uses temporary rollback copies that are removed after full success and does not retain a user backup.",
       outputSchema: SymbolEditResponseSchema,
-      handler: handleSymbolEdit,
+      handler: (args, context) => handleSymbolEdit(args, context, services.liveIndex),
     },
     {
       action: "slice.build",
@@ -394,7 +394,7 @@ export function buildFlatToolDescriptors(
       description:
         "Write to a single file (indexed or non-indexed) with targeted modes; use sdl.search.edit for cross-file batching: full content, line replacement, pattern replacement, JSON path update, insert, or append. createBackup defaults to true, retains a sibling .bak, and successful responses return backupPath when a backup is created.",
       outputSchema: FileWriteResponseSchema,
-      handler: handleFileWrite,
+      handler: (args, context) => handleFileWrite(args, context, services.liveIndex),
     },
     {
       action: "semantic.enrichment.refresh",
@@ -415,7 +415,7 @@ export function buildFlatToolDescriptors(
       description:
         'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Supports text, symbol, identifier, and structural tree-sitter targeting for safer edits across supported structural languages. Also supports targeting:"rename" (graph-scoped symbol rename) and targeting:"signature" (TS/JS signature change with AST-based callsite propagation). Preview responses default to responseMode:"auto". createBackup uses temporary rollback copies that are removed after full success and does not retain a user backup. Prefer this over composing repeated file.write calls.',
       outputSchema: SearchEditResponseSchema,
-      handler: handleSearchEdit,
+      handler: (args, context) => handleSearchEdit(args, context, services.liveIndex),
     },
   ];
   const all = projections.map(projectToolDescriptor);

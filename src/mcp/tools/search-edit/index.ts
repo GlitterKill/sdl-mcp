@@ -16,6 +16,7 @@ import {
 import { ValidationError } from "../../../domain/errors.js";
 import type { RetrievalEvidence } from "../../../retrieval/types.js";
 import type { ToolContext } from "../../../server.js";
+import type { LiveIndexCoordinator } from "../../../live-index/types.js";
 import { maybeCompressToolResponse } from "../../response-compression.js";
 import { applyBatch } from "./batch-executor.js";
 import { getSearchEditPlanStore, type StoredPlan } from "./plan-store.js";
@@ -238,6 +239,7 @@ function getApplyFileEntries(
 
 async function handleApply(
   request: Extract<SearchEditRequest, { mode: "apply" }>,
+  liveIndex?: LiveIndexCoordinator,
 ): Promise<SearchEditApplyResponse> {
   const store = getSearchEditPlanStore();
   const plan = store.get(request.planHandle);
@@ -280,7 +282,7 @@ async function handleApply(
 
   let batch;
   try {
-    batch = await applyBatch(plan, request.createBackup);
+    batch = await applyBatch(plan, request.createBackup, liveIndex);
   } catch (err) {
     // Safe default: remove plan on any error, requiring re-preview.
     store.remove(plan.planHandle);
@@ -316,11 +318,12 @@ async function handleApply(
 export async function handleSearchEdit(
   args: unknown,
   context?: ToolContext,
+  liveIndex?: LiveIndexCoordinator,
 ): Promise<SearchEditResponse> {
   const { includeDiagnostics = false } = extractProjectionRequestOptions(args);
   const request = parseActionHandlerArgs(SearchEditRequestSchema, args);
   if (request.mode === "preview") {
     return handlePreview(request, context, includeDiagnostics);
   }
-  return handleApply(request);
+  return handleApply(request, liveIndex);
 }

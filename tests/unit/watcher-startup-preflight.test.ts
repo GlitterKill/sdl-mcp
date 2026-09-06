@@ -54,12 +54,18 @@ describe("watcher startup storage readiness", () => {
     }
   });
 
-  it("blocks watcher patching and reindexing until readiness is ready", async () => {
+  it("retains watcher changes while startup readiness is false", async () => {
     const calls: string[] = [];
     await processWatchedFileChange({
       repoId: "demo",
       filePath: "src/demo.ts",
       isWriteReady: () => false,
+      coordinator: {
+        recordDiskChange() {
+          calls.push("admitted");
+          return true;
+        },
+      },
       async indexRepo() {
         calls.push("index");
       },
@@ -68,7 +74,7 @@ describe("watcher startup storage readiness", () => {
       },
     });
 
-    assert.deepEqual(calls, []);
+    assert.deepEqual(calls, ["admitted"]);
   });
 
   it("closes started watchers and stops verifier work before degrading", async () => {

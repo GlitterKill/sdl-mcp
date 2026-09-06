@@ -8,13 +8,8 @@ import { join } from "node:path";
 import {
   _buildWatchmanSubscriptionForTesting,
   _buildWatchmanStartupResyncForTesting,
-  _decrementPendingChangeForGenerationForTesting,
-  _drainPendingWatcherChangesForTesting,
-  _finishWatcherReindexForTesting,
-  _startWatcherReindexForTesting,
   _normalizeWatchmanFileNameForTesting,
   _probeWatchmanClientAvailabilityForTesting,
-  _rotateAbortControllerForTesting,
   _selectWatcherProviderForTesting,
   _watchmanAvailabilityForTesting,
   _watchmanCommandWithTimeoutForTesting,
@@ -160,7 +155,7 @@ describe("watcher provider selection", () => {
 });
 
 describe("watchman provider helpers", () => {
-  it("builds a suffix-filtered subscription from SDL source extensions", () => {
+  it("retains config and directory events regardless of source extensions", () => {
     const subscription = _buildWatchmanSubscriptionForTesting({
       clock: "c:1700000000:1:1",
       relativePath: "packages/app",
@@ -176,12 +171,7 @@ describe("watchman provider helpers", () => {
       "mtime_ms",
       "size",
     ]);
-    assert.deepEqual(subscription.expression, [
-      "anyof",
-      ["suffix", "ts"],
-      ["suffix", "tsx"],
-      ["suffix", "go"],
-    ]);
+    assert.deepEqual(subscription.expression, ["true"]);
   });
 
   it("normalizes watchman names to repo-relative paths inside the subscribed root", () => {
@@ -263,63 +253,6 @@ describe("watchman provider helpers", () => {
     assert.equal(availability.available, false);
     assert.match(availability.reason ?? "", /failed to load libglog/);
     assert.equal(client.ended, true);
-  });
-
-  it("drains queued precise watcher work before a resync refresh", async () => {
-    const fired: string[] = [];
-    const timer = setTimeout(() => {
-      fired.push("precise");
-    }, 10);
-    const pending = new Map<string, { timer: NodeJS.Timeout }>([
-      ["src/index.ts", { timer }],
-    ]);
-    const health = { pendingChanges: 1, queueDepth: 1 };
-
-    _drainPendingWatcherChangesForTesting(pending, health);
-
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    assert.deepEqual(fired, []);
-    assert.equal(pending.size, 0);
-    assert.equal(health.pendingChanges, 0);
-    assert.equal(health.queueDepth, 0);
-  });
-
-  it("ignores stale-generation precise completions after resync", () => {
-    const health = { pendingChanges: 1 };
-
-    assert.equal(
-      _decrementPendingChangeForGenerationForTesting(health, 2, 1),
-      false,
-    );
-    assert.equal(health.pendingChanges, 1);
-
-    assert.equal(
-      _decrementPendingChangeForGenerationForTesting(health, 2, 2),
-      true,
-    );
-    assert.equal(health.pendingChanges, 0);
-  });
-
-  it("rotates abort controllers when watcher generations advance", () => {
-    const original = new AbortController();
-
-    const next = _rotateAbortControllerForTesting(original);
-
-    assert.equal(original.signal.aborted, true);
-    assert.equal(next.signal.aborted, false);
-    assert.notEqual(next, original);
-  });
-
-  it("coalesces watcher reindex requests while one is active", () => {
-    const state = { active: false, dirty: false };
-
-    assert.equal(_startWatcherReindexForTesting(state), true);
-    assert.equal(_startWatcherReindexForTesting(state), false);
-    assert.deepEqual(state, { active: true, dirty: true });
-
-    assert.equal(_finishWatcherReindexForTesting(state), true);
-    assert.deepEqual(state, { active: false, dirty: false });
-    assert.equal(_finishWatcherReindexForTesting(state), false);
   });
 
   it(

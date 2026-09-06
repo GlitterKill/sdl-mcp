@@ -16,6 +16,61 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("InMemoryLiveIndexCoordinator", () => {
+  it("does not replace a newer unsaved parse when saved admission settles late", async () => {
+    const coordinator = new InMemoryLiveIndexCoordinator({
+      debounceMs: 60_000,
+      sweepIntervalMs: 0,
+    });
+    const entered = deferred();
+    const release = deferred();
+    coordinator.acceptSavedFile = async () => {
+      entered.resolve();
+      await release.promise;
+      return true;
+    };
+    const scheduled: number[] = [];
+    const internals = coordinator as unknown as {
+      parseScheduler: {
+        schedule: (
+          key: string,
+          value: { input: { version: number } },
+        ) => Promise<void>;
+      };
+    };
+    internals.parseScheduler.schedule = async (_key, value) => {
+      scheduled.push(value.input.version);
+    };
+    const input = {
+      repoId: "save-parse-race",
+      filePath: "a.ts",
+      content: "export const value = 12;",
+      language: "typescript",
+      version: 12,
+      dirty: false,
+      timestamp: "2026-09-06T00:00:00Z",
+      eventType: "save" as const,
+    };
+    const saving = coordinator.pushBufferUpdate(input);
+    await entered.promise;
+    await coordinator.pushBufferUpdate({
+      ...input,
+      version: 13,
+      content: "export const draft = 13;",
+      dirty: true,
+      eventType: "change",
+    });
+    release.resolve();
+    const saved = await saving;
+    assert.equal(saved.accepted, true);
+    assert.equal(saved.parseScheduled, false);
+    assert.deepEqual(scheduled, [13]);
+    assert.equal(
+      coordinator.getOverlayStore().getDraft(input.repoId, input.filePath)
+        ?.version,
+      13,
+    );
+    await coordinator.close();
+  });
   it("closes admission and drains an accepted debounced parse", async () => {
     const coordinator = new InMemoryLiveIndexCoordinator({
       debounceMs: 0,

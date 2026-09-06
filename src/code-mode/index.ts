@@ -808,7 +808,7 @@ export function registerCodeModeTools(
     async (rawArgs: unknown, context?: ToolContext) =>
       withExclusiveCodeModeRecoveryProjection(
         config.exclusive,
-        () => handleFileGateway(rawArgs, context),
+        () => handleFileGateway(rawArgs, context, services.liveIndex),
         rawArgs,
       ),
     withProjectionRequestOptionsJsonSchema({

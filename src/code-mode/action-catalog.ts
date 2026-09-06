@@ -1020,7 +1020,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "file.read":
     "Read non-indexed file content (templates, configs, docs); large untargeted reads include a targeted-mode hint",
   "file.write":
-    "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); indexed source is syntax-validated before commit and synchronously reconciled; use search.edit for cross-file batching",
+    "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); indexed source is syntax-validated before saving and queued for background graph reconciliation; pending means saved, applied means graph committed; use search.edit for cross-file batching",
   "search.edit":
     'Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, rollback, and ignored/dot-directory refusal; use targeting:"identifier" for exact AST identifier edits in supported structural languages, targeting:"structural" for tree-sitter capture edits, targeting:"rename" for graph-scoped symbol renames, targeting:"signature" for TS/JS signature changes with AST-based callsite propagation, operations[] for heterogeneous batches, and file.write for explicit single-file writes where allowed. Previews default to responseMode:"auto".',
   "semantic.enrichment.refresh":

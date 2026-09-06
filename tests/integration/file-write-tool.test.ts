@@ -12,8 +12,20 @@ import {
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  basename,
+  dirname,
+  join,
+  resolve,
+  relative,
+  isAbsolute,
+} from "node:path";
+import {
+  configureDefaultLiveIndexCoordinator,
+  getDefaultLiveIndexCoordinator,
+  waitForDefaultLiveIndexIdle,
+  resetDefaultLiveIndexCoordinator,
+} from "../../dist/live-index/coordinator.js";
 
 import {
   closeLadybugDb,
@@ -35,13 +47,8 @@ import {
   getDerivedState,
   markGraphIntegrityVerified,
 } from "../../dist/db/ladybug-derived-state.js";
-import {
-  cancelAndWaitForGraphIntegrityVerifier,
-} from "../../dist/indexer/provider-first/background-graph-integrity-verifier.js";
+import { cancelAndWaitForGraphIntegrityVerifier } from "../../dist/indexer/provider-first/background-graph-integrity-verifier.js";
 import { BUILTIN_TYPESCRIPT_PARSER_CONTRACT } from "../../dist/indexer/parser-provenance.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 function getWindowsShortBasename(filePath: string): string | null {
   const longName = basename(filePath);
@@ -79,8 +86,10 @@ async function establishCompleteParserProvenance(
       ...BUILTIN_TYPESCRIPT_PARSER_CONTRACT,
     })),
   );
-  const coverageDigest =
-    await ladybugDb.verifyExactParserCoverageInTransaction(conn, repoId);
+  const coverageDigest = await ladybugDb.verifyExactParserCoverageInTransaction(
+    conn,
+    repoId,
+  );
   await ladybugDb.upsertRepoParserStateInTransaction(conn, {
     repoId,
     coverageState: "complete",
@@ -109,16 +118,38 @@ async function waitForVerifiedRevision(
 }
 
 describe("sdl.file.write", () => {
-  const testDir = join(__dirname, "test-file-write-tool");
-  const graphDbPath = join(testDir, "graph");
+  let ownedRoot: string;
+  let testDir: string;
+  let graphDbPath: string;
+  let priorConfig: string | undefined;
   const repoId = "test-file-write-repo";
-  const configDir = join(testDir, "config");
+  let configDir: string;
 
   beforeEach(async () => {
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
+    ownedRoot = mkdtempSync(join(tmpdir(), "sdl-file-write-"));
+    testDir = join(ownedRoot, "repo");
+    graphDbPath = join(ownedRoot, "graph");
+    configDir = join(testDir, "config");
     mkdirSync(configDir, { recursive: true });
+    priorConfig = process.env.SDL_CONFIG;
+    const configPath = join(ownedRoot, "sdl-config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        repos: [],
+        policy: {},
+        indexing: { engine: "typescript", enableFileWatching: false },
+        scip: { enabled: false },
+        semanticEnrichment: {
+          providers: { scip: { enabled: false }, lsp: { enabled: false } },
+        },
+      }),
+    );
+    process.env.SDL_CONFIG = configPath;
+    await configureDefaultLiveIndexCoordinator({
+      enabled: false,
+      sweepIntervalMs: 0,
+    });
 
     await closeLadybugDb();
     await initLadybugDb(graphDbPath);
@@ -132,7 +163,7 @@ describe("sdl.file.write", () => {
         repoId,
         rootPath: testDir,
         ignore: [],
-        languages: ["ts", "json", "yaml", "md"],
+        languages: ["ts"],
         maxFileBytes: 2_000_000,
         includeNodeModulesTypes: false,
         packageJsonPath: null,
@@ -144,11 +175,15 @@ describe("sdl.file.write", () => {
   });
 
   afterEach(async () => {
+    await waitForDefaultLiveIndexIdle();
+    resetDefaultLiveIndexCoordinator();
     await cancelAndWaitForGraphIntegrityVerifier(repoId);
     await closeLadybugDb();
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
+    if (priorConfig === undefined) delete process.env.SDL_CONFIG;
+    else process.env.SDL_CONFIG = priorConfig;
+    const child = relative(resolve(ownedRoot), resolve(testDir));
+    assert.ok(child && !child.startsWith("..") && !isAbsolute(child));
+    rmSync(resolve(ownedRoot), { recursive: true, force: true });
   });
 
   describe("content mode (create/overwrite)", () => {
@@ -254,7 +289,10 @@ describe("sdl.file.write", () => {
         );
 
         assert.equal(backupPath, canonicalBackupPath);
-        assert.equal(readFileSync(canonicalBackupPath, "utf-8"), canonicalContent);
+        assert.equal(
+          readFileSync(canonicalBackupPath, "utf-8"),
+          canonicalContent,
+        );
         assert.equal(readFileSync(canonicalPath, "utf-8"), '{"updated": true}');
         assert.equal(readFileSync(outsidePath, "utf-8"), outsideContent);
         assert.equal(existsSync(outsideBackupPath), false);
@@ -419,10 +457,11 @@ describe("sdl.file.write", () => {
             createBackup: false,
           });
           assert.equal(
-            response.indexUpdate?.applied,
+            response.indexUpdate?.pending,
             true,
             response.indexUpdate?.error,
           );
+          await waitForDefaultLiveIndexIdle();
           assert.ok(
             await ladybugDb.getFileByRepoPath(conn, repoId, sourceName),
           );
@@ -438,7 +477,7 @@ describe("sdl.file.write", () => {
       },
     );
 
-    it("updates an indexed TypeScript graph through the shared saved-file patch", async () => {
+    it("queues an indexed TypeScript graph update through shared reconciliation", async () => {
       const relPath = "src/indexed.ts";
       const filePath = join(testDir, relPath);
       const fileId = generateFileId(repoId, relPath);
@@ -514,15 +553,19 @@ describe("sdl.file.write", () => {
       });
 
       assert.deepStrictEqual(response.indexUpdate, {
-        applied: true,
-        symbolsMatched: 1,
-        symbolsAdded: 0,
-        symbolsRemoved: 0,
-        edgesUpserted: 0,
+        applied: false,
+        pending: true,
       });
+      await waitForDefaultLiveIndexIdle();
       const committedState = await getDerivedState(repoId);
       assert.equal(committedState?.graphIntegrityVersionId, "v-indexed");
-      assert.equal(committedState?.graphIntegrityRevision, 1);
+      assert.equal(
+        committedState?.graphIntegrityRevision,
+        1,
+        JSON.stringify(
+          await getDefaultLiveIndexCoordinator().getLiveStatus(repoId),
+        ),
+      );
       const manifest = createGraphIntegrityExpectationFromManifest(
         await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
         await ladybugDb.listGraphIntegrityFilelessStates(conn, repoId),
@@ -556,7 +599,7 @@ describe("sdl.file.write", () => {
           repoId,
           rootPath: testDir,
           ignore: ["ignored"],
-          languages: ["ts", "json", "yaml", "md"],
+          languages: ["ts"],
           maxFileBytes: 2_000_000,
           includeNodeModulesTypes: false,
           packageJsonPath: null,
@@ -587,7 +630,10 @@ describe("sdl.file.write", () => {
         derivedState: await getDerivedState(repoId),
         file: await ladybugDb.getFileByRepoPath(conn, repoId, relPath),
         symbols: await ladybugDb.getSymbolsByFile(conn, fileId),
-        manifestFiles: await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
+        manifestFiles: await ladybugDb.listGraphIntegrityFileStates(
+          conn,
+          repoId,
+        ),
         manifestFileless: await ladybugDb.listGraphIntegrityFilelessStates(
           conn,
           repoId,
@@ -646,7 +692,7 @@ describe("sdl.file.write", () => {
             repoId,
             rootPath: testDir,
             ignore: ["Ignored"],
-            languages: ["ts", "json", "yaml", "md"],
+            languages: ["ts"],
             maxFileBytes: 2_000_000,
             includeNodeModulesTypes: false,
             packageJsonPath: null,
@@ -663,11 +709,18 @@ describe("sdl.file.write", () => {
           prevVersionHash: null,
           versionHash: null,
         });
-        const baselineGraph = await capturePersistedGraphIntegrity(conn, repoId);
-        await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
-          files: [],
-          fileless: [],
-        });
+        const baselineGraph = await capturePersistedGraphIntegrity(
+          conn,
+          repoId,
+        );
+        await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+          conn,
+          repoId,
+          {
+            files: [],
+            fileless: [],
+          },
+        );
         await markGraphIntegrityVerified(
           repoId,
           "v-ignored-windows-casing",
@@ -677,7 +730,10 @@ describe("sdl.file.write", () => {
           derivedState: await getDerivedState(repoId),
           file: await ladybugDb.getFileByRepoPath(conn, repoId, requestRelPath),
           symbols: await ladybugDb.getSymbolsByFile(conn, fileId),
-          manifestFiles: await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
+          manifestFiles: await ladybugDb.listGraphIntegrityFileStates(
+            conn,
+            repoId,
+          ),
           manifestFileless: await ladybugDb.listGraphIntegrityFilelessStates(
             conn,
             repoId,
@@ -742,7 +798,7 @@ describe("sdl.file.write", () => {
             repoId,
             rootPath: junctionRoot,
             ignore: [],
-            languages: ["ts", "json", "yaml", "md"],
+            languages: ["ts"],
             maxFileBytes: 2_000_000,
             includeNodeModulesTypes: false,
             packageJsonPath: null,
@@ -760,10 +816,14 @@ describe("sdl.file.write", () => {
           versionHash: null,
         });
         const baseline = await capturePersistedGraphIntegrity(conn, repoId);
-        await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
-          files: [],
-          fileless: [],
-        });
+        await ladybugDb.replaceGraphIntegrityManifestInTransaction(
+          conn,
+          repoId,
+          {
+            files: [],
+            fileless: [],
+          },
+        );
         await establishCompleteParserProvenance(repoId, "v-junction-root");
         await markGraphIntegrityVerified(
           repoId,
@@ -789,10 +849,11 @@ describe("sdl.file.write", () => {
 
         assert.equal(readFileSync(join(realRoot, relPath), "utf-8"), content);
         assert.equal(
-          response.indexUpdate?.applied,
+          response.indexUpdate?.pending,
           true,
           response.indexUpdate?.error,
         );
+        await waitForDefaultLiveIndexIdle();
         const persistedFile = await ladybugDb.getFileByRepoPath(
           conn,
           repoId,
@@ -813,8 +874,17 @@ describe("sdl.file.write", () => {
           null,
         );
         const committedState = await getDerivedState(repoId);
-        assert.equal(committedState?.graphIntegrityVersionId, "v-junction-root");
-        assert.equal(committedState?.graphIntegrityRevision, 1);
+        assert.equal(
+          committedState?.graphIntegrityVersionId,
+          "v-junction-root",
+        );
+        assert.equal(
+          committedState?.graphIntegrityRevision,
+          1,
+          JSON.stringify(
+            await getDefaultLiveIndexCoordinator().getLiveStatus(repoId),
+          ),
+        );
         const manifest = createGraphIntegrityExpectationFromManifest(
           await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
           await ladybugDb.listGraphIntegrityFilelessStates(conn, repoId),
@@ -850,10 +920,11 @@ describe("sdl.file.write", () => {
           content,
         );
         assert.equal(
-          overwriteResponse.indexUpdate?.applied,
+          overwriteResponse.indexUpdate?.pending,
           true,
           overwriteResponse.indexUpdate?.error,
         );
+        await waitForDefaultLiveIndexIdle();
         assert.equal(
           readFileSync(join(realRoot, relPath), "utf-8"),
           overwriteContent,
@@ -884,11 +955,7 @@ describe("sdl.file.write", () => {
       "rejects missing writes through an escaping Windows junction",
       { skip: process.platform !== "win32" },
       async () => {
-        const outsideRoot = join(
-          testDir,
-          "..",
-          "test-file-write-tool-outside",
-        );
+        const outsideRoot = join(testDir, "..", "test-file-write-tool-outside");
         const outsideFile = join(outsideRoot, "nested", "new.ts");
         rmSync(outsideRoot, { recursive: true, force: true });
         mkdirSync(outsideRoot, { recursive: true });
@@ -939,7 +1006,11 @@ describe("sdl.file.write", () => {
         fileless: [],
       });
       await establishCompleteParserProvenance(repoId, "v-new-indexed");
-      await markGraphIntegrityVerified(repoId, "v-new-indexed", baseline.digest);
+      await markGraphIntegrityVerified(
+        repoId,
+        "v-new-indexed",
+        baseline.digest,
+      );
 
       const response = await handleFileWrite({
         repoId,
@@ -950,10 +1021,17 @@ describe("sdl.file.write", () => {
       });
 
       assert.equal(response.mode, "create");
-      assert.equal(response.indexUpdate?.applied, true);
+      assert.equal(response.indexUpdate?.pending, true);
+      await waitForDefaultLiveIndexIdle();
       const committedState = await getDerivedState(repoId);
       assert.equal(committedState?.graphIntegrityVersionId, "v-new-indexed");
-      assert.equal(committedState?.graphIntegrityRevision, 1);
+      assert.equal(
+        committedState?.graphIntegrityRevision,
+        1,
+        JSON.stringify(
+          await getDefaultLiveIndexCoordinator().getLiveStatus(repoId),
+        ),
+      );
       assert.equal(committedState?.graphIntegrityManifestEstablished, true);
       const manifest = createGraphIntegrityExpectationFromManifest(
         await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
@@ -1001,11 +1079,17 @@ describe("sdl.file.write", () => {
       });
       const baseline = await capturePersistedGraphIntegrity(conn, repoId);
       await ladybugDb.replaceGraphIntegrityManifestInTransaction(conn, repoId, {
-        files: [],
+        files: [createGraphIntegrityFileState(repoId, fileId, relPath, [], [])],
         fileless: [],
       });
-      await establishCompleteParserProvenance(repoId, "v-symbol-free", [fileId]);
-      await markGraphIntegrityVerified(repoId, "v-symbol-free", baseline.digest);
+      await establishCompleteParserProvenance(repoId, "v-symbol-free", [
+        fileId,
+      ]);
+      await markGraphIntegrityVerified(
+        repoId,
+        "v-symbol-free",
+        baseline.digest,
+      );
 
       const response = await handleFileWrite({
         repoId,
@@ -1015,10 +1099,17 @@ describe("sdl.file.write", () => {
       });
 
       assert.equal(response.mode, "overwrite");
-      assert.equal(response.indexUpdate?.applied, true);
+      assert.equal(response.indexUpdate?.pending, true);
+      await waitForDefaultLiveIndexIdle();
       const committedState = await getDerivedState(repoId);
       assert.equal(committedState?.graphIntegrityVersionId, "v-symbol-free");
-      assert.equal(committedState?.graphIntegrityRevision, 1);
+      assert.equal(
+        committedState?.graphIntegrityRevision,
+        1,
+        JSON.stringify(
+          await getDefaultLiveIndexCoordinator().getLiveStatus(repoId),
+        ),
+      );
       assert.equal(committedState?.graphIntegrityManifestEstablished, true);
       const manifest = createGraphIntegrityExpectationFromManifest(
         await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
@@ -1033,7 +1124,7 @@ describe("sdl.file.write", () => {
       await waitForVerifiedRevision(repoId, 1);
     });
 
-    it("restores indexed source when graph reconciliation fails", async () => {
+    it("rejects invalid reconciliation configuration before changing indexed source", async () => {
       const relPath = "src/reconcile-failure.ts";
       const filePath = join(testDir, relPath);
       const original = "export const stable = 1;";
@@ -1117,7 +1208,9 @@ describe("sdl.file.write", () => {
       );
       assert.equal(readFileSync(filePath, "utf-8"), content);
       assert.deepEqual(
-        (await ladybugDb.getSymbolsByFile(conn, fileId)).map((symbol) => symbol.name),
+        (await ladybugDb.getSymbolsByFile(conn, fileId)).map(
+          (symbol) => symbol.name,
+        ),
         ["stable"],
       );
     });

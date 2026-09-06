@@ -1,11 +1,12 @@
-import { realpath } from "node:fs/promises";
-import { relative } from "node:path";
+import { realpath, lstat } from "node:fs/promises";
+import { relative, dirname, resolve, isAbsolute } from "node:path";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { createDebouncedJobScheduler } from "./debounce.js";
 import { parseDraftFile } from "./draft-parser.js";
 import { CheckpointService } from "./checkpoint-service.js";
-import { patchSavedFile } from "./file-patcher.js";
+import { readRepositoryFileBounded } from "../indexer/provider-first/executor.js";
+import { dirtyPathMatchesScipGeneratorConfig } from "../scip/scip-io-runner.js";
 import { OverlayStore } from "./overlay-store.js";
 import { ReconcileQueue } from "./reconcile-queue.js";
 import {
@@ -26,13 +27,16 @@ import {
   type CheckpointResult,
   type LiveIndexCoordinator,
   type LiveStatus,
+  type SavedFileMutationInput,
 } from "./types.js";
 import { IndexError, NotFoundError } from "../domain/errors.js";
-import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
 
 import { logger } from "../util/logger.js";
-import { withRepoMutation } from "../services/repo-lifecycle.js";
+import {
+  withRepoMutation,
+  captureActiveRepoEpoch,
+} from "../services/repo-lifecycle.js";
 
 interface ScheduledParse {
   input: BufferUpdateInput;
@@ -51,7 +55,12 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   private readonly enabled: boolean;
   private readonly maxDraftFiles: number;
   private readonly overlayStore = new OverlayStore();
-  private readonly checkpointService = new CheckpointService(this.overlayStore);
+  private readonly checkpointService = new CheckpointService(
+    this.overlayStore,
+    {
+      publishSavedFile: (input) => this.publishCheckpoint(input),
+    },
+  );
   private readonly reconcileQueue = new ReconcileQueue();
   private readonly reconcileWorker: ReconcileWorker;
   private readonly parseScheduler;
@@ -60,6 +69,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   private sweepPromise: Promise<void> | null = null;
   private accepting = true;
   private readonly activeOperations = new Set<Promise<unknown>>();
+  private readonly savedMutationOwners = new Map<string, object>();
 
   private static readonly DEFAULT_SWEEP_INTERVAL_MS = 30_000;
   private static readonly STALE_DIRTY_DRAFT_MS = 120_000;
@@ -159,13 +169,12 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     }
   }
 
-  /** Shared durable-save admission also operates when draft overlays are disabled. */
-  async acceptSavedFile(input: {
-    repoId: string;
-    filePath: string;
-    content: string;
-  }): Promise<boolean> {
-    if (!this.accepting) return false;
+  /** Disk mutation and final saved-input admission share the publisher's short fence. */
+  async runSavedFileMutation<T>(
+    input: SavedFileMutationInput,
+    operation: (canonicalPath: string) => Promise<T>,
+  ): Promise<{ value: T; pending: boolean }> {
+    if (!this.accepting) throw new IndexError("Live indexing stopped");
     return this.trackOperation(
       withRepoMutation(input.repoId, async () => {
         const repo = await ladybugDb.getRepo(
@@ -175,45 +184,289 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
         if (!repo)
           throw new NotFoundError(`Repository not found: ${input.repoId}`);
         const config = RepoConfigSchema.parse(JSON.parse(repo.configJson));
-        if (Buffer.byteLength(input.content) > config.maxFileBytes)
+        if (
+          input.content !== undefined &&
+          Buffer.byteLength(input.content) > config.maxFileBytes
+        )
           throw new IndexError(
             "Saved reconciliation source exceeds repository file limit",
           );
         const root = await realpath(repo.rootPath);
-        const canonical = await realpath(
-          getAbsolutePathFromRepoRoot(root, input.filePath),
-        );
-        validatePathWithinRoot(root, canonical);
+        const lexical = getAbsolutePathFromRepoRoot(root, input.filePath);
+        const canonical = await this.resolveSavedTarget(root, lexical);
         const path = normalizePath(relative(root, canonical));
+        const projectInput =
+          dirtyPathMatchesScipGeneratorConfig(path) ||
+          [
+            config.packageJsonPath,
+            config.tsconfigPath,
+            config.sourceFileListPath,
+          ].some(
+            (configured) =>
+              configured &&
+              normalizePath(relative(root, resolve(root, configured))) === path,
+          );
         return this.reconcileQueue.withPublicationFence(
           input.repoId,
-          async () =>
-            this.reconcileWorker.enqueue(
-              input.repoId,
-              {
-                touchedSymbolIds: [],
-                dependentSymbolIds: [],
-                dependentFilePaths: [],
-                importedFilePaths: [],
-                invalidations: [],
-              },
-              new Date().toISOString(),
-              {
-                [path]: {
-                  kind: "saved",
-                  content: input.content,
-                  sourceHash: hashContent(input.content),
+          async () => {
+            if ((await this.resolveSavedTarget(root, lexical)) !== canonical)
+              throw new IndexError(
+                "Saved target identity changed before mutation",
+              );
+            if (input.expectedOwnership && !input.expectedOwnership.isCurrent())
+              throw new IndexError(
+                "Cannot rollback: a newer save owns the file",
+              );
+            const ownerKey = JSON.stringify([input.repoId, path]);
+            this.savedMutationOwners.delete(ownerKey);
+            if (input.captureOwnership) {
+              const token = {};
+              const epoch = captureActiveRepoEpoch(input.repoId);
+              this.savedMutationOwners.set(ownerKey, token);
+              input.captureOwnership({
+                isCurrent: () =>
+                  this.savedMutationOwners.get(ownerKey) === token &&
+                  captureActiveRepoEpoch(input.repoId) === epoch,
+                release: () => {
+                  if (this.savedMutationOwners.get(ownerKey) === token)
+                    this.savedMutationOwners.delete(ownerKey);
                 },
-              },
-            ),
+              });
+            }
+            let value!: T;
+            let failed = false;
+            let failure: unknown;
+            try {
+              value = await operation(canonical);
+            } catch (error) {
+              failed = true;
+              failure = error;
+            }
+            let pending = false;
+            try {
+              // Always reconcile final disk state, including partial failure and rollback.
+              if (input.reconcile !== false) {
+                const source = await readRepositoryFileBounded(
+                  root,
+                  path,
+                  config.maxFileBytes,
+                );
+                if (source.kind === "ok") {
+                  const content = source.content.toString("utf8");
+                  pending = this.enqueueSavedInput(input.repoId, path, {
+                    kind: "saved",
+                    sourceHash: hashContent(content),
+                  });
+                  if (!pending) {
+                    // The saved bytes remain durable; overflow inventory can recover them.
+                    pending = this.enqueueSavedInput(input.repoId, path, {
+                      kind: "disk-change",
+                    });
+                  }
+                  if (input.content !== undefined && content !== input.content)
+                    throw new IndexError(
+                      "Saved buffer content does not match disk",
+                    );
+                } else {
+                  const missing = await realpath(lexical).then(
+                    () => false,
+                    (error: NodeJS.ErrnoException) => {
+                      if (error.code === "ENOENT") return true;
+                      throw error;
+                    },
+                  );
+                  pending = this.enqueueSavedInput(input.repoId, path, {
+                    kind: missing ? "removed" : "disk-change",
+                  });
+                  if (!missing || input.content !== undefined)
+                    throw new IndexError(
+                      `Saved reconciliation source unavailable (${source.kind})`,
+                    );
+                }
+              }
+              if (projectInput)
+                // This known managed save already invalidated its previous owner above.
+                this.reconcileWorker.requestInventory(input.repoId, true);
+            } catch (error) {
+              // An unreadable/retargeted final source must invalidate already prepared work.
+              this.invalidateSourceContext(input.repoId);
+              this.enqueueSavedInput(input.repoId, path, {
+                kind: "disk-change",
+              });
+              if (!failed) throw error;
+              logger.warn(
+                "Failed to capture disk state after managed write failure",
+                {
+                  repoId: input.repoId,
+                  filePath: path,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              );
+            }
+            if (failed) throw failure;
+            return { value, pending };
+          },
         );
       }),
     );
   }
 
+  private async resolveSavedTarget(
+    root: string,
+    path: string,
+  ): Promise<string> {
+    try {
+      const canonical = await realpath(path);
+      validatePathWithinRoot(root, canonical);
+      return canonical;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const entry = await lstat(path).catch(
+        (statError: NodeJS.ErrnoException) => {
+          if (statError.code === "ENOENT") return null;
+          throw statError;
+        },
+      );
+      if (entry?.isSymbolicLink())
+        throw new IndexError("Dangling symlink at saved target or ancestor");
+      const parent = dirname(path);
+      if (parent === path) throw error;
+      const canonicalParent = await this.resolveSavedTarget(root, parent);
+      const canonical = resolve(canonicalParent, relative(parent, path));
+      validatePathWithinRoot(root, canonical);
+      return canonical;
+    }
+  }
+
+  private enqueueSavedInput(
+    repoId: string,
+    path: string,
+    input: import("./reconcile-queue.js").ReconcileInput,
+  ): boolean {
+    return this.reconcileWorker.enqueue(
+      repoId,
+      {
+        touchedSymbolIds: [],
+        dependentSymbolIds: [],
+        dependentFilePaths: [],
+        importedFilePaths: [],
+        invalidations: [],
+      },
+      new Date().toISOString(),
+      { [path]: input },
+    );
+  }
+
+  /** Shared admission also operates when draft overlays are disabled. */
+  async acceptSavedFile(input: {
+    repoId: string;
+    filePath: string;
+    content: string;
+  }): Promise<boolean> {
+    if (!this.accepting) return false;
+    return (await this.runSavedFileMutation(input, async () => undefined))
+      .pending;
+  }
+
+  private async publishCheckpoint(input: {
+    repoId: string;
+    filePath: string;
+    content: string;
+  }): Promise<void> {
+    await this.reconcileWorker.waitForIdle();
+    // A completed ordinary save already published these bytes. Checkpoint cleanup
+    // must not start the configured providers a second time merely to evict its overlay.
+    if (await this.checkpointSourceCommitted(input)) return;
+    if (!(await this.acceptSavedFile(input)))
+      throw new IndexError("Checkpoint source was not queued");
+    await this.reconcileWorker.waitForIdle();
+    if (!(await this.checkpointSourceCommitted(input)))
+      throw new IndexError(
+        "Checkpoint reconciliation remains pending, blocked, or superseded",
+      );
+  }
+
+  private async checkpointSourceCommitted(input: {
+    repoId: string;
+    filePath: string;
+    content: string;
+  }): Promise<boolean> {
+    const repoRoot = await realpath(await this.loadRepoRoot(input.repoId));
+    const canonical = await realpath(
+      getAbsolutePathFromRepoRoot(repoRoot, input.filePath),
+    );
+    validatePathWithinRoot(repoRoot, canonical);
+    const path = normalizePath(relative(repoRoot, canonical));
+    const generation = this.reconcileQueue.getSourceGeneration(input.repoId);
+    // Pool admission and DB reads occur before the save fence, just like writer admission.
+    const file = await ladybugDb.getFileByRepoPath(
+      await getLadybugConn(),
+      input.repoId,
+      path,
+    );
+    return this.reconcileQueue.withPublicationFence(input.repoId, async () => {
+      if (this.reconcileQueue.hasFileWork(input.repoId, path)) return false;
+      const disk = await readRepositoryFileBounded(
+        repoRoot,
+        path,
+        Buffer.byteLength(input.content) + 1,
+      );
+      return (
+        this.reconcileQueue.getSourceGeneration(input.repoId) === generation &&
+        disk.kind === "ok" &&
+        disk.content.toString("utf8") === input.content &&
+        file?.contentHash === hashContent(input.content)
+      );
+    });
+  }
+
   invalidateSourceContext(repoId: string): void {
     if (!this.accepting) return;
     this.reconcileWorker.invalidateSourceContext(repoId);
+  }
+
+  /** Watcher admission invalidates preparation immediately; disk capture stays in the worker. */
+  recordDiskChange(input: {
+    repoId: string;
+    filePath: string;
+    removed?: boolean;
+  }): boolean {
+    if (!this.accepting) return false;
+    const path = normalizePath(input.filePath);
+    if (
+      !path ||
+      isAbsolute(path) ||
+      path.includes("\0") ||
+      path.split("/").includes("..")
+    )
+      throw new IndexError("Watcher source must be a repository-relative path");
+    this.savedMutationOwners.delete(JSON.stringify([input.repoId, path]));
+    return this.enqueueSavedInput(input.repoId, path, {
+      kind: input.removed ? "removed" : "disk-change",
+    });
+  }
+
+  requestReconcileInventory(
+    repoId: string,
+    options: { force?: boolean } = {},
+  ): boolean {
+    if (!this.accepting) return false;
+    // Ambiguous external events may hide a newer save on any active rollback target.
+    const ownerPrefix = `[${JSON.stringify(repoId)},`;
+    for (const key of this.savedMutationOwners.keys())
+      if (key.startsWith(ownerPrefix)) this.savedMutationOwners.delete(key);
+    return this.reconcileWorker.requestInventory(repoId, options.force);
+  }
+
+  setReconciliationReadiness(
+    repoId: string,
+    isWriteReady: () => boolean,
+  ): void {
+    if (this.accepting) this.reconcileWorker.setReadiness(repoId, isWriteReady);
+  }
+
+  wakeReconciliation(repoId: string): void {
+    if (this.accepting) this.reconcileWorker.wake(repoId);
   }
 
   async pushBufferUpdate(
@@ -263,28 +516,21 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
       }
       this.overlayStore.removeDraft(input.repoId, input.filePath);
 
-      // Re-index from the actual disk file to restore canonical index state.
-      // Without this, a previous partial/garbage buffer push that was
-      // checkpointed would leave the index permanently corrupted because
-      // incremental refresh sees no disk change.
+      // Closing drops the draft overlay and queues canonical disk reconciliation.
+      // Recovery prepares in the background; acceptance does not claim a graph commit.
       let diskRecoveryScheduled = false;
       try {
-        // Pass the raw filePath — patchSavedFile normalizes internally
-        await withIndexingGate(() =>
-          patchSavedFile({
-            repoId: input.repoId,
-            filePath: input.filePath,
-            language: input.language,
-            version: input.version,
-          }),
+        await this.runSavedFileMutation(
+          { repoId: input.repoId, filePath: input.filePath },
+          async () => undefined,
         );
         diskRecoveryScheduled = true;
-        logger.debug("Restored canonical index from disk on close event", {
+        logger.debug("Queued canonical disk reconciliation on close event", {
           repoId: input.repoId,
           filePath: input.filePath,
         });
       } catch (error) {
-        logger.warn("Failed to restore index from disk on close event", {
+        logger.warn("Failed to queue disk reconciliation on close event", {
           repoId: input.repoId,
           filePath: input.filePath,
           error: error instanceof Error ? error.message : String(error),
@@ -301,7 +547,12 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
       };
     }
 
-    if (existing && input.version <= existing.version) {
+    const matchingSave =
+      input.eventType === "save" &&
+      !input.dirty &&
+      existing?.version === input.version &&
+      existing.content === input.content;
+    if (existing && input.version <= existing.version && !matchingSave) {
       warnings.push("Ignored stale buffer update.");
       return {
         accepted: false,
@@ -341,57 +592,42 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
         getOverlayEmbeddingCache().invalidateMany(staleIds);
       }
     }
-    this.overlayStore.upsertDraft(input);
     if (input.eventType === "save" && !input.dirty) {
-      const patched = await withIndexingGate(() =>
-        patchSavedFile({
-          repoId: input.repoId,
-          filePath: input.filePath,
-          content: input.content,
-          language: input.language,
-          version: input.version,
-          parseResult:
-            existing?.version === input.version ? existing.parseResult : null,
-        }),
-      ).catch((error) => {
-        warnings.push(
-          `Durable patch failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return null;
-      });
-      if (patched) {
-        this.overlayStore.setParseResult(
+      try {
+        if (!(await this.acceptSavedFile(input)))
+          throw new IndexError("Saved source was not queued");
+        this.overlayStore.upsertDraft(input);
+        this.overlayStore.markSaved(
           input.repoId,
           input.filePath,
+          input.timestamp,
           input.version,
-          patched.parseResult,
-          input.timestamp,
         );
-        this.reconcileWorker.enqueue(
-          input.repoId,
-          patched.frontier,
-          input.timestamp,
+      } catch (error) {
+        warnings.push(
+          `Saved reconciliation admission failed: ${error instanceof Error ? error.message : String(error)}`,
         );
-      }
-      this.overlayStore.markSaved(
-        input.repoId,
-        input.filePath,
-        input.timestamp,
-        input.version,
-      );
-      if (patched) {
-        await this.checkpointService.checkpointRepo(
-          {
-            repoId: input.repoId,
-            reason: "save",
-          },
-          {
-            filePaths: [input.filePath],
-            skipDurablePatch: true,
-          },
-        );
+        return {
+          accepted: false,
+          repoId: input.repoId,
+          overlayVersion: input.version,
+          parseScheduled: false,
+          checkpointScheduled: false,
+          warnings,
+        };
       }
     }
+    const draft = this.overlayStore.upsertDraft(input);
+    // Saved admission can await the publisher fence while a newer unsaved draft arrives.
+    if (draft.version !== input.version || draft.content !== input.content)
+      return {
+        accepted: true,
+        repoId: input.repoId,
+        overlayVersion: draft.version,
+        parseScheduled: false,
+        checkpointScheduled: false,
+        warnings,
+      };
     void this.parseScheduler
       .schedule(`${input.repoId}:${input.filePath}`, { input, repoEpoch })
       .catch((error) => {
@@ -407,7 +643,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
       repoId: input.repoId,
       overlayVersion: input.version,
       parseScheduled: true,
-      checkpointScheduled: input.eventType === "save" && !input.dirty,
+      checkpointScheduled: false,
       warnings,
     };
   }
@@ -445,7 +681,6 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     }
 
     await this.parseScheduler.waitForIdle();
-    await this.reconcileWorker.waitForIdle();
     return this.checkpointService.checkpointRepo(input);
   }
 
@@ -556,8 +791,9 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
               ageMs: age,
             });
             try {
-              await withIndexingGate(() =>
-                patchSavedFile({ repoId, filePath: draft.filePath }),
+              await this.runSavedFileMutation(
+                { repoId, filePath: draft.filePath },
+                async () => undefined,
               );
               const current = this.overlayStore.getDraft(
                 repoId,
@@ -586,6 +822,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   }
 
   reset(): void {
+    this.savedMutationOwners.clear();
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;

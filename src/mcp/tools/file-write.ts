@@ -1,5 +1,10 @@
 import { relative } from "path";
-import { realpathSync } from "fs";
+import { hashContent } from "../../util/hashing.js";
+import type { ToolContext } from "../../server.js";
+import type {
+  LiveIndexCoordinator,
+  SavedFileOwnership,
+} from "../../live-index/types.js";
 import { unlink } from "fs/promises";
 
 import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
@@ -26,7 +31,8 @@ import {
   preparePath,
   prepareNewContent,
   readExistingContent,
-  syncLiveIndex,
+  runLiveIndexMutation,
+  hashFileIfExists,
   validateExactlyOneMode,
   writeWithBackup,
 } from "./file-write-internals.js";
@@ -39,7 +45,6 @@ function withRawTokenBaseline(
     rawTokens: Math.ceil(rawBytes / BYTES_PER_TOKEN),
   });
 }
-
 
 function splitLines(content: string): string[] {
   return content.length === 0 ? [] : content.split(/\r?\n/);
@@ -74,9 +79,9 @@ function buildDiffPreview(
   const maxLines = 80;
   let prefix = 0;
   while (
-    prefix < beforeLines.length
-    && prefix < afterLines.length
-    && beforeLines[prefix] === afterLines[prefix]
+    prefix < beforeLines.length &&
+    prefix < afterLines.length &&
+    beforeLines[prefix] === afterLines[prefix]
   ) {
     prefix++;
   }
@@ -84,9 +89,9 @@ function buildDiffPreview(
   let beforeSuffix = beforeLines.length - 1;
   let afterSuffix = afterLines.length - 1;
   while (
-    beforeSuffix >= prefix
-    && afterSuffix >= prefix
-    && beforeLines[beforeSuffix] === afterLines[afterSuffix]
+    beforeSuffix >= prefix &&
+    afterSuffix >= prefix &&
+    beforeLines[beforeSuffix] === afterLines[afterSuffix]
   ) {
     beforeSuffix--;
     afterSuffix--;
@@ -117,6 +122,8 @@ function buildDiffPreview(
 
 export async function handleFileWrite(
   args: unknown,
+  _context?: ToolContext,
+  liveIndex?: LiveIndexCoordinator,
 ): Promise<FileWriteResponse> {
   const request = parseActionHandlerArgs(FileWriteRequestSchema, args);
   const prepared = await preparePath(request.repoId, request.filePath);
@@ -158,60 +165,89 @@ export async function handleFileWrite(
   // Indexed source must remain parseable before either disk or graph state changes.
   const syntaxTree = parseTreeForPath(canonicalRelPath, newContent);
   if (
-    getStructuralLanguageForPath(canonicalRelPath) !== null
-    && (!syntaxTree || syntaxTree.rootNode.hasError)
+    getStructuralLanguageForPath(canonicalRelPath) !== null &&
+    (!syntaxTree || syntaxTree.rootNode.hasError)
   ) {
     throw new ValidationError(
       `Parse validation failed for indexed source: ${canonicalRelPath}`,
     );
   }
 
-  // Re-verify the prepared canonical target immediately before writing.
-  let writePath = canonicalAbsPath;
-  if (fileExists) {
-    writePath = realpathSync.native(absPath);
-    validatePathWithinRoot(canonicalRootPath, writePath);
-    assertStableCanonicalIdentity(canonicalAbsPath, writePath);
+  let backupPath: string | undefined;
+  let indexUpdate: FileWriteResponse["indexUpdate"];
+  let written = false;
+  let ownership: SavedFileOwnership | undefined;
+  try {
+    const mutation = await runLiveIndexMutation(
+      request.repoId,
+      canonicalRelPath,
+      async (writePath) => {
+        assertStableCanonicalIdentity(canonicalAbsPath, writePath);
+        validatePathWithinRoot(canonicalRootPath, writePath);
+        const currentHash = await hashFileIfExists(writePath);
+        if (currentHash !== (fileExists ? hashContent(existingContent) : null))
+          throw new ValidationError(
+            "File changed after validation; refusing write",
+          );
+        backupPath = await writeWithBackup(
+          absPath,
+          newContent,
+          request.createBackup ?? true,
+          fileExists,
+          undefined,
+          writePath,
+        );
+        written = true;
+        return backupPath;
+      },
+      liveIndex,
+      {
+        captureOwnership: (receipt) => {
+          ownership = receipt;
+        },
+      },
+    );
+    indexUpdate = mutation.indexUpdate;
+    if (indexUpdate?.applied === false && indexUpdate.pending !== true)
+      throw new IndexError(
+        `Indexed source reconciliation failed for ${relPath}: ${indexUpdate.error}`,
+      );
+  } catch (error) {
+    if (written) {
+      // Restoration is another accepted save. Never overwrite a later successful save.
+      await runLiveIndexMutation(
+        request.repoId,
+        canonicalRelPath,
+        async (writePath) => {
+          assertStableCanonicalIdentity(canonicalAbsPath, writePath);
+          if ((await hashFileIfExists(writePath)) !== hashContent(newContent))
+            throw new IndexError(
+              "Cannot restore write: a newer save owns the file",
+            );
+          if (fileExists)
+            await writeWithBackup(
+              absPath,
+              existingContent,
+              false,
+              true,
+              undefined,
+              writePath,
+            );
+          else await unlink(writePath);
+        },
+        liveIndex,
+        { expectedOwnership: ownership },
+      );
+    }
+    throw error;
+  } finally {
+    ownership?.release();
   }
-
-  const backupPath = await writeWithBackup(
-    absPath,
-    newContent,
-    request.createBackup ?? true,
-    fileExists,
-    undefined,
-    writePath,
-  );
-
   const bytesWritten = Buffer.byteLength(newContent, "utf-8");
   const linesWritten = newContent.split("\n").length;
-
   logger.debug(
     `file.write completed: ${relPath} (${mode}, ${bytesWritten} bytes)`,
   );
-
-  const indexUpdate = await syncLiveIndex(
-    request.repoId,
-    canonicalRelPath,
-    newContent,
-  );
-  if (indexUpdate?.applied === false) {
-    if (fileExists) {
-      await writeWithBackup(
-        absPath,
-        existingContent,
-        false,
-        true,
-        undefined,
-        writePath,
-      );
-    } else {
-      await unlink(absPath);
-    }
-    throw new IndexError(
-      `Indexed source reconciliation failed for ${relPath}: ${indexUpdate.error}`,
-    );
-  }
 
   const rawBytes =
     mode === "create" || mode === "overwrite"

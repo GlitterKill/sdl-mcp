@@ -86,7 +86,7 @@ flowchart TD
 3. ensureConfiguredReposRegistered()     Bootstrap repos into graph
 4. getDefaultLiveIndexCoordinator()      Singleton overlay service
 5. registerTools(server, services)       Wire discovery/info tools plus flat, gateway, and/or code-mode tools
-6. setupFileWatchers()                   Watchman -> Chokidar -> fs.watch incremental re-index
+6. setupFileWatchers()                   Watchman -> Chokidar -> fs.watch saved-file reconciliation
 7. ShutdownManager.register(callbacks)   Graceful cleanup handlers
 8. server.start()                        Begin accepting MCP requests
 ```
@@ -369,32 +369,42 @@ Each module owns a specific domain of queries:
 
 ### Persisted graph integrity ownership
 
-Fresh full indexing and ordinary incremental indexing build file and fileless manifest rows from independent index output and verify them synchronously. A populated active graph rejects destructive full refreshes; whole-database recovery builds all configured repositories in a fresh candidate and validates it after reopen. `DerivedState.graphIntegrityManifestEstablished` records successful manifest replacement, including a valid empty manifest, so a saved-file edit can distinguish an omitted symbol-free file from missing legacy manifest state. A saved-file edit validates graph integrity and a version/revision-bound repository parser summary; an existing durable file must also have a valid, available, matching `FileParserState`. It then atomically commits file, symbol, edge, parser-provenance, manifest, and revision changes in one foreground transaction. Each phase retains exact Version/revision ownership, and any failure marks the revision failed.
+Fresh full indexing and explicit incremental indexing build file and fileless manifest rows from independent index output and verify them synchronously. A populated active graph rejects destructive full refreshes; whole-database recovery builds all configured repositories in a fresh candidate and validates it after reopen. `DerivedState.graphIntegrityManifestEstablished` records successful manifest replacement, including a valid empty manifest, so a saved-file update can distinguish an omitted symbol-free file from missing legacy manifest state.
 
-Each repository owns at most one running background verifier and one coalesced latest wake. The verifier leases an exclusive read connection, opens one read-only transaction, and reads both manifest tables plus canonical Symbol rows in deterministic pages from the same stable snapshot. The verifier closes the snapshot and connection before it publishes a result.
+An accepted disk save enters the shared per-file reconciliation queue. The worker prepares configured SCIP/LSP facts or parser facts outside index gates, dispatch slots, and database writer ownership. Only the final publisher takes write ownership: it checks lifecycle epoch, accepted source generation, configuration and dependency inputs, graph baseline, and shared-fact ownership, then commits file, symbol, edge, parser-provenance, manifest, and revision changes in one short transaction. A later accepted save invalidates older work before it can publish. Per-repository publication preserves compatible shared facts and memberships; incompatible changes to a fact or edge owned by another repository stop as blocked work rather than changing global state.
+
+Each repository owns at most one running background verifier and one coalesced latest wake. The verifier leases an exclusive read connection, opens one read-only transaction, and reads both manifest tables plus canonical Symbol rows in deterministic pages from the same stable snapshot. It verifies the committed graph only; it never produces provider or parser facts. The verifier closes the snapshot and connection before it publishes a result.
 
 The publication compare-and-set requires the captured Version and revision to remain current. A successful check publishes the deterministic `complete` or `partial` `RepoParserState` summary and `verified` graph state in one transaction, then advances `graphIntegrityVerifiedRevision`; a failed check publishes `failed` and preserves the last verified revision. If a newer Version or revision owns the repository, the compare-and-set performs no write, and the coalesced wake leaves the newer owner responsible for verification.
 
 Startup recovery scans persisted `verifying` rows after migrations and repository bootstrap, then requeues each exact Version and revision. Foreground no-op checks also recover a durable pending revision when its in-process wakeup was lost. Full-index candidate finalization, unregister, database close, and shutdown first block new verifier admission, then cancel active work between page queries and wait for the snapshot connection to close before they swap, delete, or close graph state.
 
-`sdl.repo.status` reports the current ownership through `graphIntegrityVersionId` and `graphIntegrityRevision`, and it reports successful verification history through `graphIntegrityVerifiedRevision`. The graph remains readable during `verifying` and after `failed` when the current Version still owns a valid manifest, revision, and pruning-support marker; a null or older verified revision does not remove that availability. Only `verified` with equal current and verified revisions proves the latest revision. An `unknown` or missing-manifest state fails graph admission closed and directs a populated graph to stopped whole-database safe rebuild instead of a refresh loop.
+`sdl.repo.status` reports the current ownership through `graphIntegrityVersionId` and `graphIntegrityRevision`, and it reports successful verification history through `graphIntegrityVerifiedRevision`. The graph remains readable during `verifying` and after `failed` when the current Version still owns a valid manifest, revision, and pruning-support marker; a null or older verified revision does not remove that availability. Only `verified` with equal current and verified revisions proves the latest revision. An `unknown` or missing-manifest state fails graph admission closed. Targeted reconciliation does not turn that condition into an automatic refresh or rebuild.
 
 ```mermaid
 sequenceDiagram
-    accTitle: Saved-file graph integrity verification lifecycle
-    accDescr: A foreground edit atomically commits graph, parser provenance, manifests, and one owned revision. A separate background transaction publishes parser coverage and graph verification together only for that Version and revision. A background verifier checks one exclusive snapshot, publishes parser coverage and graph verification together only for the exact Version and revision, recovers pending work at startup, reports current and verified state, and closes its snapshot before destructive lifecycle work.
+    accTitle: Saved-file reconciliation and graph-integrity lifecycle
+    accDescr: An accepted save queues the latest file generation. Background preparation runs before the database writer is acquired. The final publisher validates ownership and commits graph facts atomically. A verifier checks only the committed graph and never regenerates provider facts.
     participant C as Caller
-    participant F as Foreground edit
+    participant Q as Reconciliation queue
+    participant P as Background preparation
+    participant W as Publisher
     participant D as LadybugDB
     participant V as Background verifier
     participant L as Lifecycle coordinator
     participant S as repo.status
 
-    C->>F: Apply saved-file edit
-    F->>D: Commit graph, provenance, manifests, revision N, state verifying
-    D-->>F: Atomic foreground transaction succeeds
-    F-->>C: Return after commit
-    F->>V: Coalesce wake for Version V and revision N
+    C->>Q: Accept save generation N
+    Q-->>C: Return queued acknowledgement
+    Q->>P: Prepare current source facts
+    alt Save N+1 arrives while N prepares
+        C->>Q: Replace N with generation N+1
+        P-->>Q: Discard obsolete N result
+    end
+    P->>W: Submit current prepared result
+    W->>D: Validate ownership; commit graph, provenance, manifests, revision N+1
+    D-->>W: Atomic publication succeeds
+    W->>V: Coalesce wake for Version V and revision N+1
     V->>D: Lease exclusive connection and begin read-only snapshot
     D-->>V: Stable manifests and canonical graph pages
     V->>D: Close snapshot and release connection
@@ -420,7 +430,7 @@ sequenceDiagram
     end
 ```
 
-Saved-file verification does not recompute PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state. Their existing refresh and recovery rules still apply.
+Saved-file reconciliation and verification do not recompute PageRank, K-core, clusters, processes, summaries, embeddings, or other derived state. Their existing refresh and recovery rules still apply. Incremental indexing remains an explicit operation.
 
 ---
 
@@ -556,17 +566,23 @@ flowchart TD
 
 ## Live Indexing
 
-The live index system (`src/live-index/`) provides draft-aware code intelligence for unsaved editor buffers.
+The live index system (`src/live-index/`) provides draft-aware code intelligence for unsaved editor buffers and targeted reconciliation for accepted disk saves.
 
-Existing files parse with their durable `FileParserState` contract. New files select a contract only after the repository's `RepoParserState` matches the verified graph. Typed provenance, engine, contract, and symbol-remap errors fail before mutation and direct pre-provenance graphs to stopped safe rebuild recovery.
+Existing files parse with their durable `FileParserState` contract. New files select a contract only after the repository's `RepoParserState` matches the verified graph. Typed provenance, engine, contract, and symbol-remap errors stop the affected publication before mutation. A save failure remains targeted queued work; it does not invoke incremental indexing or a safe rebuild.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Editor["Editor<br/>VSCode, etc."] e1@--> Push["buffer.push<br/>on each keystroke or save"]
+    accTitle: Draft overlays and targeted saved-file reconciliation
+    accDescr: Unsaved drafts affect only the overlay. Accepted disk saves or watcher events queue current file work, prepare facts outside the writer, and publish the committed graph through a short guarded transaction.
+    Editor["Editor<br/>VSCode, etc."] e1@--> Push["buffer.push<br/>unsaved draft content"]
     Push e2@--> Overlay["Overlay store<br/>content, version, parseResult, dirty flag"]
-    Overlay e3@--> Coordinator["Live index coordinator<br/>parse queue, reconcile queue,<br/>checkpoint service, idle monitor"]
-    Coordinator e4@--> Reads["Merged into reads<br/>search, getCard, slice.build, getSkeleton"]
+    Overlay e3@--> Reads["Merged into reads<br/>search, getCard, slice.build, getSkeleton"]
+    Save["Accepted disk save or watcher event"] e4@--> Queue["Shared saved-file queue<br/>latest generation wins"]
+    Queue e5@--> Prepare["SCIP/LSP/parser preparation<br/>outside writer ownership"]
+    Prepare e6@--> Publish["Guarded publication"]
+    Publish e7@--> DB["Committed graph"]
+    DB e8@--> Reads
 
     classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
     classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
@@ -575,10 +591,14 @@ flowchart TD
     classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
     classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
     classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4 animate;
+    class e1,e2,e3,e4,e5,e6,e7,e8 animate;
 ```
 
 **Version conflict:** `upsertDraft()` rejects updates where `update.version < existing.version` — prevents out-of-order edits from overwriting newer content.
+
+Draft updates remain overlay-only. A save accepts a durable source generation through the same invalidation path used by managed edits and watchers, so a newer save removes older queued publication work. Reads continue during preparation and, where the native engine permits, during publication. The short writer window retains exclusive ownership only for the transaction that changes the committed graph.
+
+Interested connected MCP sessions can receive SDK-filtered logging notifications with `logger: "sdl-mcp"` and `data: { type: "graph-update", repoId, phase }`, where `phase` is `started`, `completed`, or `failed`. SDL-MCP emits no notification for stale or canonical no-op work. `sdl.buffer.status` exposes `reconciliationState` (`idle`, `pending`, `preparing`, `publishing`, or `blocked`) as the bounded fallback; operational metrics remain diagnostics.
 
 ---
 

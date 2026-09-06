@@ -6,7 +6,7 @@
  * path validation, backup, mode dispatch, and live-index sync.
  */
 
-import { resolve, dirname } from "path";
+import { resolve, dirname, relative } from "path";
 import {
   readFile,
   stat,
@@ -23,10 +23,7 @@ import { createHash, randomBytes } from "crypto";
 import { RepoConfigSchema } from "../../config/types.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import {
-  compilePatterns,
-  shouldIgnorePath,
-} from "../../indexer/fileWalker.js";
+import { compilePatterns, shouldIgnorePath } from "../../indexer/fileWalker.js";
 import {
   getRelativePath,
   normalizePath,
@@ -38,8 +35,16 @@ import {
   restoreEol,
 } from "../../util/eol.js";
 import { logger } from "../../util/logger.js";
-import { NotFoundError, ValidationError } from "../../domain/errors.js";
-import { patchSavedFile } from "../../live-index/file-patcher.js";
+import {
+  IndexError,
+  NotFoundError,
+  ValidationError,
+} from "../../domain/errors.js";
+import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
+import type {
+  LiveIndexCoordinator,
+  SavedFileMutationInput,
+} from "../../live-index/types.js";
 import type { FileWriteRequest, FileWriteResponse } from "../tools.js";
 import { SDL_SOURCE_EXTENSIONS } from "./file-read.js";
 
@@ -64,9 +69,22 @@ const BLOCKED_PATH_SEGMENTS = new Set([
  */
 export const FILE_WRITE_DENY_EXTENSIONS = new Set([
   // Script formats that some shells/file-managers auto-execute
-  ".lnk", ".url", ".scf", ".desktop", ".command", ".app",
-  ".bat", ".cmd", ".ps1", ".psm1", ".psd1",
-  ".vbs", ".vbe", ".wsh", ".wsf", ".jse",
+  ".lnk",
+  ".url",
+  ".scf",
+  ".desktop",
+  ".command",
+  ".app",
+  ".bat",
+  ".cmd",
+  ".ps1",
+  ".psm1",
+  ".psd1",
+  ".vbs",
+  ".vbe",
+  ".wsh",
+  ".wsf",
+  ".jse",
   ".htaccess",
   ".ipynb",
   ".zip",
@@ -158,6 +176,11 @@ export async function preparePath(
     }
     const canonicalAncestor = realpathSync.native(existingAncestor);
     validatePathWithinRoot(canonicalRootPath, canonicalAncestor);
+    canonicalAbsPath = resolve(
+      canonicalAncestor,
+      relative(existingAncestor, absPath),
+    );
+    canonicalRelPath = getRelativePath(canonicalRootPath, canonicalAbsPath);
   }
 
   const basename = canonicalRelPath.includes("/")
@@ -252,7 +275,9 @@ export function prepareNewContent(
   // === Mode: Replace lines ===
   if (request.replaceLines !== undefined) {
     const { start, end, content } = request.replaceLines;
-    const normalizedContent = hasBom ? existingContent.slice(1) : existingContent;
+    const normalizedContent = hasBom
+      ? existingContent.slice(1)
+      : existingContent;
     const lines = normalizeToLf(normalizedContent).split("\n");
     if (start > lines.length) {
       throw new ValidationError(
@@ -375,7 +400,9 @@ export function prepareNewContent(
   // === Mode: Insert at ===
   if (request.insertAt !== undefined) {
     const { line, content } = request.insertAt;
-    const normalizedInsert = hasBom ? existingContent.slice(1) : existingContent;
+    const normalizedInsert = hasBom
+      ? existingContent.slice(1)
+      : existingContent;
     const lines = normalizeToLf(normalizedInsert).split("\n");
     if (line > lines.length) {
       throw new ValidationError(
@@ -397,7 +424,8 @@ export function prepareNewContent(
     const needsNewline =
       existingContent.length > 0 && !existingContent.endsWith("\n");
     return {
-      newContent: existingContent + (needsNewline ? targetEol : "") + request.append,
+      newContent:
+        existingContent + (needsNewline ? targetEol : "") + request.append,
       mode: "append",
     };
   }
@@ -519,7 +547,9 @@ export async function writeWithBackup(
   if (fileExists) {
     const lstats = await lstat(absPath);
     if (lstats.isSymbolicLink()) {
-      throw new ValidationError("Symlink detected at write target; refusing write");
+      throw new ValidationError(
+        "Symlink detected at write target; refusing write",
+      );
     }
   }
   if (fileExists && createBackup) {
@@ -577,86 +607,92 @@ export async function removeBackup(backupPath: string): Promise<void> {
   }
 }
 
-/**
- * If the file extension is an indexed-source extension, push the new
- * content through `patchSavedFile` so the symbol graph reflects the
- * change. Returns the `indexUpdate` shape surfaced by file.write /
- * search.edit responses. Never throws — live-index failures are best
- * effort.
- */
+/** Prepare eligibility before the shared disk-save/publication fence. */
+export async function runLiveIndexMutation<T>(
+  repoId: string,
+  relPath: string,
+  operation: (canonicalPath: string) => Promise<T>,
+  liveIndex: LiveIndexCoordinator = getDefaultLiveIndexCoordinator(),
+  ownership: Pick<
+    SavedFileMutationInput,
+    "captureOwnership" | "expectedOwnership"
+  > = {},
+): Promise<{ value: T; indexUpdate: FileWriteResponse["indexUpdate"] }> {
+  const prepared = await preparePath(repoId, relPath);
+  const repo = await ladybugDb.getRepo(await getLadybugConn(), repoId);
+  if (!repo) throw new NotFoundError(`Repository ${repoId} not found`);
+  let ignore: string[];
+  try {
+    ({ ignore } = RepoConfigSchema.pick({ ignore: true }).parse(
+      JSON.parse(repo.configJson),
+    ));
+  } catch (error) {
+    throw new IndexError(
+      `Repository configuration invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const pathSegments = prepared.canonicalRelPath.split("/");
+  const ignorePatterns = compilePatterns(ignore);
+  const ignored = pathSegments.some((_segment, i) =>
+    shouldIgnorePath(
+      pathSegments.slice(0, i + 1).join("/"),
+      ignorePatterns,
+      i + 1 < pathSegments.length,
+    ),
+  );
+  // Canonical identity also expands Windows 8.3 extensions before eligibility checks.
+  const indexed = isIndexedSource(prepared.canonicalRelPath) && !ignored;
+  const result = await liveIndex.runSavedFileMutation(
+    {
+      repoId,
+      filePath: prepared.canonicalRelPath,
+      reconcile: indexed,
+      ...ownership,
+    },
+    operation,
+  );
+  return {
+    value: result.value,
+    indexUpdate: indexed
+      ? result.pending
+        ? { applied: false, pending: true }
+        : { applied: false, error: "Saved source was not queued" }
+      : undefined,
+  };
+}
+
+/** Compatibility admission for callers whose disk write has already completed. */
 export async function syncLiveIndex(
   repoId: string,
   relPath: string,
   newContent: string,
+  liveIndex: LiveIndexCoordinator = getDefaultLiveIndexCoordinator(),
 ): Promise<FileWriteResponse["indexUpdate"] | undefined> {
-  // Windows 8.3 aliases can truncate long source extensions (.java -> .JAV).
-  const normalizedRelPath = relPath.toLowerCase();
-  const couldBeTruncatedWindowsSource =
+  const windowsAlias =
     process.platform === "win32" &&
     [...SDL_SOURCE_EXTENSIONS].some(
-      (sourceExtension) =>
-        sourceExtension.length > 4 &&
-        normalizedRelPath.endsWith(sourceExtension.slice(0, 4)),
+      (extension) =>
+        extension.length > 4 &&
+        relPath.toLowerCase().endsWith(extension.slice(0, 4)),
     );
-  if (!isIndexedSource(relPath) && !couldBeTruncatedWindowsSource) {
-    return undefined;
-  }
-
+  if (!isIndexedSource(relPath) && !windowsAlias) return undefined;
   try {
-    const conn = await getLadybugConn();
-    const repo = await ladybugDb.getRepo(conn, repoId);
-    if (!repo) {
-      throw new NotFoundError(`Repository ${repoId} not found`);
-    }
-    const canonicalRootPath = realpathSync.native(repo.rootPath);
-    const canonicalFilePath = realpathSync.native(
-      resolve(repo.rootPath, relPath),
-    );
-    validatePathWithinRoot(canonicalRootPath, canonicalFilePath);
-    const canonicalRelPath = getRelativePath(
-      canonicalRootPath,
-      canonicalFilePath,
-    );
-    if (!isIndexedSource(canonicalRelPath)) {
-      return undefined;
-    }
-    const { ignore } = RepoConfigSchema.pick({ ignore: true }).parse(
-      JSON.parse(repo.configJson),
-    );
-    const pathSegments = canonicalRelPath.split("/");
-    const ignorePatterns = compilePatterns(ignore);
-    for (let end = 1; end <= pathSegments.length; end += 1) {
-      if (
-        shouldIgnorePath(
-          pathSegments.slice(0, end).join("/"),
-          ignorePatterns,
-          end < pathSegments.length,
-        )
-      ) {
-        return undefined;
-      }
-    }
-
-    const patchResult = await patchSavedFile({
-      repoId,
-      filePath: canonicalRelPath,
-      content: newContent,
-    });
-    const symbolsMatched =
-      patchResult.symbolsUpserted - patchResult.symbolsAdded;
-    logger.debug(
-      `live-index synced ${relPath}: +${patchResult.symbolsAdded} -${patchResult.symbolsRemoved} ~${symbolsMatched} symbols`,
-    );
-    return {
-      applied: true,
-      symbolsMatched,
-      symbolsAdded: patchResult.symbolsAdded,
-      symbolsRemoved: patchResult.symbolsRemoved,
-      edgesUpserted: patchResult.edgesUpserted,
-    };
+    return (
+      await runLiveIndexMutation(
+        repoId,
+        relPath,
+        async (path) => {
+          if ((await readExistingContent(path)).content !== newContent)
+            throw new ValidationError(
+              "Saved content changed before reconciliation admission",
+            );
+        },
+        liveIndex,
+      )
+    ).indexUpdate;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.warn(`live-index sync failed for ${relPath}: ${message}`);
+    logger.warn(`live-index admission failed for ${relPath}: ${message}`);
     return { applied: false, error: message };
   }
 }
@@ -666,4 +702,3 @@ export function isIndexedSource(relPath: string): boolean {
   const fileExt = dotIdx >= 0 ? relPath.slice(dotIdx).toLowerCase() : "";
   return SDL_SOURCE_EXTENSIONS.has(fileExt);
 }
-

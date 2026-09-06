@@ -3,6 +3,7 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as db from "../db/ladybug-queries.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { RepoConfigSchema } from "../config/types.js";
+import { scanRepoForIndex, isScannedFileChanged } from "../indexer/scanner.js";
 import { readRepositoryFileBounded } from "../indexer/provider-first/executor.js";
 import {
   prepareReconcileFiles,
@@ -32,6 +33,7 @@ import {
 export interface ReconcileWorkerDependencies {
   prepareReconcileFiles?: typeof prepareReconcileFiles;
   publishReconcile?: typeof publishReconcile;
+  scanRepoForIndex?: typeof scanRepoForIndex;
 }
 
 export class ReconcileWorker {
@@ -39,6 +41,10 @@ export class ReconcileWorker {
   private readonly queuedEpochs = new Map<string, number>();
   private readonly prepareFiles: typeof prepareReconcileFiles;
   private readonly publish: typeof publishReconcile;
+  private readonly scan: typeof scanRepoForIndex;
+  private readonly readiness = new Map<string, () => boolean>();
+  private readonly canRun = (repoId: string): boolean =>
+    this.readiness.get(repoId)?.() !== false;
 
   constructor(
     private readonly queue: ReconcileQueue,
@@ -46,6 +52,7 @@ export class ReconcileWorker {
   ) {
     this.prepareFiles = deps.prepareReconcileFiles ?? prepareReconcileFiles;
     this.publish = deps.publishReconcile ?? publishReconcile;
+    this.scan = deps.scanRepoForIndex ?? scanRepoForIndex;
   }
 
   enqueue(
@@ -67,6 +74,19 @@ export class ReconcileWorker {
     this.ensureDraining();
   }
 
+  requestInventory(repoId: string, force = false): boolean {
+    const epoch = captureActiveRepoEpoch(repoId);
+    if (epoch === undefined) return false;
+    this.queuedEpochs.set(repoId, epoch);
+    this.queue.requestInventory(repoId, force);
+    this.ensureDraining();
+    return true;
+  }
+
+  setReadiness(repoId: string, isReady: () => boolean): void {
+    this.readiness.set(repoId, isReady);
+  }
+
   wake(repoId: string): void {
     this.queue.wake(repoId);
     this.ensureDraining();
@@ -76,7 +96,7 @@ export class ReconcileWorker {
     if (this.pendingDrain) return;
     this.pendingDrain = this.drain().finally(() => {
       this.pendingDrain = null;
-      if (this.queue.peekNext()) this.ensureDraining();
+      if (this.queue.peekNext(this.canRun)) this.ensureDraining();
     });
   }
 
@@ -88,6 +108,73 @@ export class ReconcileWorker {
   clearRepo(repoId: string): void {
     this.queue.clearRepo(repoId);
     this.queuedEpochs.delete(repoId);
+    this.readiness.delete(repoId);
+  }
+
+  private async inventory(claim: ReconcileClaim, epoch: number): Promise<void> {
+    const sourceGeneration = this.queue.getSourceGeneration(claim.repoId);
+    const conn = await getLadybugConn();
+    const repo = await db.getRepo(conn, claim.repoId);
+    if (!repo)
+      throw new Error("Reconciliation inventory repository is unavailable");
+    const config = RepoConfigSchema.parse(JSON.parse(repo.configJson));
+    const configurationHash = hashValue(loadConfig());
+    const result = await this.scan({
+      repoId: claim.repoId,
+      repoRoot: repo.rootPath,
+      config,
+      deleteRemovedFiles: false,
+      requireComplete: true,
+    });
+    const latest = await db.getRepo(conn, claim.repoId);
+    await this.queue.withPublicationFence(claim.repoId, async () => {
+      if (
+        !this.queue.isCurrent(claim) ||
+        this.queue.getSourceGeneration(claim.repoId) !== sourceGeneration ||
+        captureActiveRepoEpoch(claim.repoId) !== epoch ||
+        latest?.configJson !== repo.configJson ||
+        latest.rootPath !== repo.rootPath ||
+        hashValue(loadConfig()) !== configurationHash
+      ) {
+        this.queue.retry(claim);
+        return;
+      }
+      const scanned = new Set(result.files.map((file) => file.path));
+      const candidates: { filePath: string; input: ReconcileInput }[] =
+        result.files
+          .filter(
+            (file) =>
+              claim.inventoryForce ||
+              isScannedFileChanged(file, result.existingByPath.get(file.path)),
+          )
+          .map((file) => ({
+            filePath: file.path,
+            input: { kind: "disk-change" },
+          }));
+      for (const path of result.existingByPath.keys())
+        if (!scanned.has(path))
+          candidates.push({ filePath: path, input: { kind: "removed" } });
+      const remaining = candidates
+        .filter(
+          (file) =>
+            (!claim.inventoryCursor || file.filePath > claim.inventoryCursor) &&
+            !this.queue.hasFileWork(claim.repoId, file.filePath),
+        )
+        .sort((a, b) =>
+          a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0,
+        );
+      const capacity = this.queue.inventoryCapacity(claim.repoId);
+      if (remaining.length && capacity === 0)
+        throw new Error(
+          "Reconciliation inventory retained until blocked file capacity is available",
+        );
+      const batch = remaining.slice(0, capacity);
+      this.queue.completeInventory(
+        claim,
+        batch,
+        remaining.length > batch.length ? batch.at(-1)!.filePath : undefined,
+      );
+    });
   }
 
   private async reconcile(claim: ReconcileClaim, epoch: number): Promise<void> {
@@ -152,6 +239,21 @@ export class ReconcileWorker {
           file.filePath,
           repoConfig.maxFileBytes,
         );
+        if (disk.kind === "readFailed" && file.input.kind === "disk-change") {
+          const missing = await lstat(
+            getAbsolutePathFromRepoRoot(repo.rootPath, file.filePath),
+          ).then(
+            () => false,
+            (error: NodeJS.ErrnoException) => {
+              if (error.code === "ENOENT") return true;
+              throw error;
+            },
+          );
+          if (missing) {
+            removedPaths.push(file.filePath);
+            continue;
+          }
+        }
         if (disk.kind !== "ok")
           throw new Error(
             `Reconciliation source unavailable (${disk.kind}): ${file.filePath}`,
@@ -249,16 +351,20 @@ export class ReconcileWorker {
   private async drain(): Promise<void> {
     for (;;) {
       // ponytail: one file bounds replacement; batch if provider startup dominates backlog latency.
-      const claim = this.queue.claimNext(1);
+      const claim = this.queue.claimNext(1, this.canRun);
       if (!claim) return;
       try {
-        if (claim.inventoryNeeded)
-          throw new Error(
-            "Reconcile queue requires repository inventory recovery",
-          );
         const epoch = this.queuedEpochs.get(claim.repoId);
         if (epoch === undefined) {
           this.queue.clearRepo(claim.repoId);
+          continue;
+        }
+        if (claim.inventoryNeeded) {
+          await withRepoMutation(
+            claim.repoId,
+            () => this.inventory(claim, epoch),
+            { expectedEpoch: epoch },
+          );
           continue;
         }
         if (!claim.files.length) {

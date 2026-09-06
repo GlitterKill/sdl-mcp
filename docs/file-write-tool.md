@@ -19,7 +19,7 @@ The `file.write` tool provides token-efficient file writing with six targeted wr
 
 ---
 
-MCP responses are human-first: visible `content` summarizes the write and includes bounded before/after previews when available. Machine-readable task data remains in `structuredContent`, including `filePath`, `mode`, `etag`, write counts, error details, and `backupPath` when a retained sibling backup is created. Precondition snapshots, index-update internals, timings, and other SDL-MCP bookkeeping are hidden from normal visible/model-facing output unless diagnostics are explicitly requested.
+MCP responses are human-first: visible `content` summarizes the write and includes bounded before/after previews when available. Machine-readable task data remains in `structuredContent`, including `filePath`, `mode`, `etag`, write counts, error details, and `backupPath` when a retained sibling backup is created. For an indexed target, the response also reports whether the saved-file graph update is queued or committed. Precondition snapshots, timings, and other SDL-MCP bookkeeping remain hidden unless diagnostics are explicitly requested.
 
 
 ## Overview
@@ -153,6 +153,17 @@ By default, `file.write` creates a `.bak` file before modifying an existing file
 | `mode`             | string | Write mode used                              |
 | `backupPath`       | string | Path to backup file (if created)             |
 | `replacementCount` | number | Number of replacements (replacePattern mode) |
+| `indexUpdate`      | object | Saved-file graph update state for an indexed target |
+
+---
+
+## Saved-file reconciliation
+
+`file.write` accepts the disk save before graph preparation begins. For an indexed target, `indexUpdate: { "applied": false, "pending": true }` means the file is saved and the latest source generation is queued for background reconciliation. It does not include estimated symbol or edge counts.
+
+`indexUpdate: { "applied": true }` means the targeted graph publication committed. The worker prepares configured SCIP or LSP facts, or parser facts, before it acquires the database writer, then validates the latest save at the publication boundary. If another save supersedes the queued source, the older preparation cannot publish.
+
+An asynchronous provider or parser failure keeps the saved file on disk and retains the current reconciliation work. An immediate write or admission failure attempts restoration only if the target identity, content, and saved-write ownership still match. A newer accepted save prevents an older rollback even if it restores identical bytes. SDL-MCP does not start an incremental index refresh for either outcome.
 
 ---
 

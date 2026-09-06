@@ -28,7 +28,7 @@ Any failed apply consumes its plan, so rerun preview before retrying after a dri
 
 ## When to use `search.edit` vs `file.write`
 
-MCP responses are human-first. Preview and apply results show concise visible summaries with bounded diff snippets, while `structuredContent` carries task data such as `planHandle`, file entries, status, `etag`, and error details. Internal precondition snapshots, rollback bookkeeping, timings, and packed/debug stats stay out of normal visible/model-facing output unless diagnostics are explicitly requested.
+MCP responses are human-first. Preview and apply results show concise visible summaries with bounded diff snippets, while `structuredContent` carries task data such as `planHandle`, file entries, status, `etag`, error details, and each indexed file's queued or committed graph-update state. Internal precondition snapshots, rollback bookkeeping, timings, and packed/debug stats stay out of normal visible/model-facing output unless diagnostics are explicitly requested.
 
 | Tool              | Use when                                                                                                         |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -331,11 +331,8 @@ metadata so callers can reason about narrowing quality:
       "status": "written",
       "bytes": 4128,
       "indexUpdate": {
-        "applied": true,
-        "symbolsMatched": 12,
-        "symbolsAdded": 0,
-        "symbolsRemoved": 0,
-        "edgesUpserted": 45
+        "applied": false,
+        "pending": true
       }
     }
   ],
@@ -362,18 +359,23 @@ When `createBackup` is enabled, `search.edit` creates temporary rollback copies 
 
 ## Rollback semantics
 
-- Sequential writes — serialized to respect the LadybugDB write pool
-  (`writePoolSize = 1`) and the native-addon per-connection mutex.
-- On write failure mid-batch: previously-written files are restored
-  from their backups (where created), `rollback.triggered = true`,
-  and the failing file is reported with `status: "failed"`.
+- On write failure mid-batch: restoration uses backups where created and
+  requires the original target identity, content, and saved-write ownership.
+  A newer accepted save prevents an older rollback even with identical bytes.
+  `rollback.triggered = true`; failed or unrestored files report `status: "failed"`.
 - A write to a source path matching a repository ignore pattern still succeeds,
   but skips the graph patch and omits `indexUpdate`; this is expected, not a
   live-sync failure.
-- Other live-index sync failures do **not** trigger rollback. `search.edit`
-  keeps the file edit and reports `indexUpdate.applied = false` with an error
-  message. Unlike `file.write`, it does not restore the file or throw
-  `INDEX_ERROR`.
+- Each successful disk write immediately enters the shared
+  reconciliation queue. `indexUpdate: { applied: false, pending: true }`
+  means the source save succeeded and its graph update has not committed; it
+  never fabricates symbol or edge counts. `applied: true` means that file's
+  targeted publication committed.
+- A provider or parser failure after a successful disk batch does not roll the
+  batch back. SDL-MCP keeps the saved files and retains their latest queued
+  work. If batch restoration changes a file after a partial write failure, the
+  reconciliation queue receives that final restored file state instead of the
+  discarded intermediate content.
 - Backups are cleaned up after a fully successful batch.
 
 ## Limits and deny-list

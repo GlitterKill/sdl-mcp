@@ -1,148 +1,56 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
-import { StorageIntegrityError } from "../../dist/domain/errors.js";
-import {
-  classifyWatcherReindexFailure,
-  processWatchedFileChange,
-} from "../../dist/indexer/watcher.js";
+import { processWatchedFileChange } from "../../dist/indexer/watcher.js";
 
-function missingPathError(path: string): NodeJS.ErrnoException {
-  return Object.assign(new Error(`ENOENT: no such file, open '${path}'`), {
-    code: "ENOENT",
-    path,
+describe("watcher shared admission", () => {
+  it("accepts overlapping saves synchronously before readiness without patching or indexing", () => {
+    const admitted: unknown[] = [];
+    const coordinator = {
+      recordDiskChange(input: unknown) {
+        admitted.push(input);
+        return true;
+      },
+    };
+    for (const filePath of ["src/a.ts", "src/b.ts", "src/a.ts"]) {
+      assert.equal(
+        processWatchedFileChange({
+          repoId: "repo",
+          filePath,
+          coordinator,
+          isWriteReady: () => false,
+          indexRepo: async () => assert.fail("automatic index"),
+          patchSavedFileFn: async () => assert.fail("direct patch"),
+        }),
+        true,
+      );
+    }
+    assert.deepEqual(
+      admitted,
+      ["src/a.ts", "src/b.ts", "src/a.ts"].map((filePath) => ({
+        repoId: "repo",
+        filePath,
+      })),
+    );
   });
-}
-
-describe("processWatchedFileChange", () => {
-  it("prefers file patching over repo-wide incremental reindex", async () => {
-    const calls: string[] = [];
-
-    await processWatchedFileChange({
-      repoId: "demo-repo",
-      filePath: "src/example.ts",
-      async indexRepo() {
-        calls.push("index");
-      },
-      async patchSavedFileFn() {
-        calls.push("patch");
-      },
-    });
-
-    assert.deepStrictEqual(calls, ["patch"]);
-  });
-
-  it("routes delete and rename patch failures through one incremental reindex", async () => {
-    const calls: string[] = [];
-
-    await processWatchedFileChange({
-      repoId: "demo-repo",
-      filePath: "src/deleted.ts",
-      async indexRepo(repoId, mode) {
-        calls.push(`index:${repoId}:${mode}`);
-      },
-      async patchSavedFileFn({ filePath }) {
-        calls.push(`patch:${filePath}`);
-        throw missingPathError("C:/repo/src/deleted.ts");
-      },
-    });
-
-    assert.deepStrictEqual(calls, [
-      "patch:src/deleted.ts",
-      "index:demo-repo:incremental",
+  it("retains removals and reports refused admission honestly", () => {
+    const admitted: unknown[] = [];
+    assert.equal(
+      processWatchedFileChange({
+        repoId: "repo",
+        filePath: "gone.ts",
+        removed: true,
+        coordinator: {
+          recordDiskChange(input: unknown) {
+            admitted.push(input);
+            return false;
+          },
+        },
+        indexRepo: async () => assert.fail("automatic index"),
+      }),
+      false,
+    );
+    assert.deepEqual(admitted, [
+      { repoId: "repo", filePath: "gone.ts", removed: true },
     ]);
-  });
-
-  it("routes root-level deletes through one incremental reindex", async () => {
-    const calls: string[] = [];
-    const repoRoot = resolve("watcher-root");
-
-    await processWatchedFileChange({
-      repoId: "demo-repo",
-      repoRoot,
-      filePath: "deleted.ts",
-      async indexRepo(repoId, mode) {
-        calls.push(`index:${repoId}:${mode}`);
-      },
-      async patchSavedFileFn({ filePath }) {
-        calls.push(`patch:${filePath}`);
-        throw missingPathError(resolve(repoRoot, "deleted.ts"));
-      },
-    });
-
-    assert.deepStrictEqual(calls, [
-      "patch:deleted.ts",
-      "index:demo-repo:incremental",
-    ]);
-  });
-
-  it("does not mistake a nested missing file with the same basename for a root-level delete", async () => {
-    const calls: string[] = [];
-    const repoRoot = resolve("watcher-root");
-    const nested = missingPathError(
-      resolve(repoRoot, "nested", "deleted.ts"),
-    );
-
-    await assert.rejects(
-      processWatchedFileChange({
-        repoId: "demo-repo",
-        repoRoot,
-        filePath: "deleted.ts",
-        async indexRepo() {
-          calls.push("index");
-        },
-        async patchSavedFileFn() {
-          calls.push("patch");
-          throw nested;
-        },
-      }),
-      (error: unknown) => error === nested,
-    );
-    assert.deepStrictEqual(calls, ["patch"]);
-  });
-
-  it("does not fallback for a permanent graph storage failure", async () => {
-    const calls: string[] = [];
-    const failure = new StorageIntegrityError("duplicate physical symbols");
-
-    await assert.rejects(
-      processWatchedFileChange({
-        repoId: "demo-repo",
-        filePath: "src/example.ts",
-        async indexRepo() {
-          calls.push("index");
-        },
-        async patchSavedFileFn() {
-          calls.push("patch");
-          throw failure;
-        },
-      }),
-      (error: unknown) => error === failure,
-    );
-    assert.deepStrictEqual(calls, ["patch"]);
-    assert.equal(classifyWatcherReindexFailure(failure), "permanent");
-  });
-
-  it("does not treat an unrelated nested missing path as the watched file", async () => {
-    const calls: string[] = [];
-    const nested = missingPathError("C:/repo/config/generated.json");
-    const failure = new Error("parser setup failed", { cause: nested });
-
-    await assert.rejects(
-      processWatchedFileChange({
-        repoId: "demo-repo",
-        filePath: "src/example.ts",
-        async indexRepo() {
-          calls.push("index");
-        },
-        async patchSavedFileFn() {
-          calls.push("patch");
-          throw failure;
-        },
-      }),
-      (error: unknown) => error === failure,
-    );
-    assert.deepStrictEqual(calls, ["patch"]);
-    assert.equal(classifyWatcherReindexFailure(failure), "unknown");
   });
 });

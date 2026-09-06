@@ -93,7 +93,7 @@ SDL-MCP can compare indexed versions, identify changed symbols, and trace affect
 
 ### Live indexing
 
-Draft-buffer updates can appear in a live overlay before the underlying file is saved. That lets retrieval work from the code an agent is editing instead of only the last durable index.
+Draft-buffer updates can appear in a live overlay before the underlying file is saved. An accepted save then queues targeted reconciliation; configured SCIP, LSP, or parser preparation runs in the background and publishes only the latest saved generation. Retrieval continues from the committed graph and, when present, the overlay while that work prepares.
 
 [Read about delta packs](./docs/feature-deep-dives/delta-blast-radius.md) · [Read about live indexing](./docs/feature-deep-dives/live-indexing.md)
 

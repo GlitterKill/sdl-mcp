@@ -32,7 +32,7 @@ describe("CheckpointService", () => {
     const patched: string[] = [];
     const checkpointService = new CheckpointService(store, {
       now: () => "2026-03-07T12:05:00.000Z",
-      patchSavedFile: async ({ filePath }) => {
+      publishSavedFile: async ({ filePath }) => {
         patched.push(filePath);
         return undefined as never;
       },
@@ -72,7 +72,7 @@ describe("CheckpointService", () => {
 
     const checkpointService = new CheckpointService(store, {
       now: () => "2026-03-07T12:10:00.000Z",
-      patchSavedFile: async () => {
+      publishSavedFile: async () => {
         throw new Error("disk write failed");
       },
     });
@@ -108,7 +108,7 @@ describe("CheckpointService", () => {
 
     const checkpointService = new CheckpointService(store, {
       now: () => "2026-03-07T12:15:00.000Z",
-      patchSavedFile: async () => undefined as never,
+      publishSavedFile: async () => undefined as never,
     });
 
     const result = await checkpointService.checkpointRepo({
@@ -124,24 +124,21 @@ describe("CheckpointService", () => {
       message:
         "No checkpoint-eligible clean buffers were available; dirty buffers remain pending.",
     });
-    assert.deepStrictEqual(
-      checkpointService.getStatus("demo-repo"),
-      {
-        repoId: "demo-repo",
-        lastCheckpointAt: null,
-        lastCheckpointAttemptAt: null,
-        lastCheckpointResult: null,
-        lastCheckpointError: null,
-        lastCheckpointReason: null,
-      },
-    );
+    assert.deepStrictEqual(checkpointService.getStatus("demo-repo"), {
+      repoId: "demo-repo",
+      lastCheckpointAt: null,
+      lastCheckpointAttemptAt: null,
+      lastCheckpointResult: null,
+      lastCheckpointError: null,
+      lastCheckpointReason: null,
+    });
   });
 
   it("explains checkpoints when no buffers are pending", async () => {
     const store = new OverlayStore();
     const checkpointService = new CheckpointService(store, {
       now: () => "2026-03-07T12:20:00.000Z",
-      patchSavedFile: async () => undefined as never,
+      publishSavedFile: async () => undefined as never,
     });
 
     const request = {
@@ -161,7 +158,10 @@ describe("CheckpointService", () => {
 
     assert.deepStrictEqual(first, expected);
     assert.deepStrictEqual(second, expected);
-    assert.deepStrictEqual(checkpointService.getStatus("demo-repo"), initialStatus);
+    assert.deepStrictEqual(
+      checkpointService.getStatus("demo-repo"),
+      initialStatus,
+    );
 
     store.upsertDraft({
       repoId: "demo-repo",
@@ -173,9 +173,7 @@ describe("CheckpointService", () => {
       dirty: false,
       timestamp: "2026-03-07T12:20:00.000Z",
     });
-    const work = await checkpointService.checkpointRepo(request, {
-      skipDurablePatch: true,
-    });
+    const work = await checkpointService.checkpointRepo(request);
     assert.match(work.checkpointId ?? "", /-0$/);
   });
 
@@ -191,7 +189,10 @@ describe("CheckpointService", () => {
     const result = await Promise.race([
       coordinator.checkpointRepo({ repoId: "demo-repo", reason: "manual" }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("checkpoint waited for parse jobs")), 100),
+        setTimeout(
+          () => reject(new Error("checkpoint waited for parse jobs")),
+          100,
+        ),
       ),
     ]);
 
@@ -200,4 +201,26 @@ describe("CheckpointService", () => {
     coordinator.reset();
   });
 
+  it("does not acknowledge or remove a newer clean draft during publication", async () => {
+    const store = new OverlayStore();
+    const input = {
+      repoId: "race",
+      filePath: "a.ts",
+      content: "save12",
+      version: 12,
+      eventType: "save" as const,
+      dirty: false,
+      timestamp: "fixture",
+    };
+    store.upsertDraft(input);
+    const service = new CheckpointService(store, {
+      publishSavedFile: async () => {
+        store.upsertDraft({ ...input, version: 13, content: "save13" });
+        return undefined as never;
+      },
+    });
+    const result = await service.checkpointRepo({ repoId: "race" });
+    assert.equal(result.checkpointedFiles, 0);
+    assert.equal(store.getDraft("race", "a.ts")?.version, 13);
+  });
 });

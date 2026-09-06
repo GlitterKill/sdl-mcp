@@ -8,9 +8,14 @@
  * are surfaced as warnings but never cause rollback.
  */
 
+import type {
+  LiveIndexCoordinator,
+  SavedFileOwnership,
+} from "../../../live-index/types.js";
 import { stat, unlink } from "fs/promises";
 import { realpathSync } from "fs";
 import { randomBytes } from "crypto";
+import { hashContent } from "../../../util/hashing.js";
 
 import { logger } from "../../../util/logger.js";
 import { ValidationError } from "../../../domain/errors.js";
@@ -22,7 +27,7 @@ import {
   hashFileIfExists,
   removeBackup,
   restoreBackup,
-  syncLiveIndex,
+  runLiveIndexMutation,
   writeWithBackup,
 } from "../file-write-internals.js";
 import type { FileWriteResponse } from "../../tools.js";
@@ -129,6 +134,7 @@ function sortedEdits(edits: PlannedFileEdit[]): PlannedFileEdit[] {
 export async function applyBatch(
   plan: StoredPlan,
   overrideCreateBackup: boolean | undefined,
+  liveIndex?: LiveIndexCoordinator,
 ): Promise<BatchApplyResult> {
   // 1. prevalidate
   const preflight = await preflightPreconditions(plan);
@@ -151,7 +157,9 @@ export async function applyBatch(
     edit: PlannedFileEdit;
     backupPath: string | undefined;
     writePath: string;
+    ownership?: SavedFileOwnership;
   }> = [];
+  const owners: SavedFileOwnership[] = [];
   const restoredFiles: string[] = [];
   let rollbackTriggered = false;
 
@@ -163,54 +171,72 @@ export async function applyBatch(
   for (let editIdx = 0; editIdx < edits.length; editIdx++) {
     const edit = edits[editIdx];
     const backupSuffix = `.se-${randomBytes(6).toString("hex")}.bak`;
-    const useBackup = edits.length > 1
-      ? true
-      : overrideCreateBackup !== undefined
-        ? overrideCreateBackup
-        : edit.createBackup;
+    const useBackup =
+      edits.length > 1
+        ? true
+        : overrideCreateBackup !== undefined
+          ? overrideCreateBackup
+          : edit.createBackup;
     try {
       let writePath = edit.absPath;
-      const pc = preconditionByPath.get(edit.relPath);
-      if (pc) {
-        const currentSha = await hashFileIfExists(pc.absPath);
-        if (currentSha !== pc.sha256) {
-          throw new Error(
-            `drift-during-apply: ${edit.relPath} sha256 changed between preflight and write`,
+      let ownership: SavedFileOwnership | undefined;
+      const mutation = await runLiveIndexMutation(
+        plan.repoId,
+        edit.relPath,
+        async (canonicalPath) => {
+          writePath = canonicalPath;
+          const pc = preconditionByPath.get(edit.relPath);
+          if (pc) {
+            const currentSha = await hashFileIfExists(pc.absPath);
+            if (currentSha !== pc.sha256) {
+              throw new Error(
+                `drift-during-apply: ${edit.relPath} sha256 changed between preflight and write`,
+              );
+            }
+          }
+          // TOCTOU: re-verify path hasn't been swapped for a symlink escape.
+          // Skip for new files (fileExists=false): realpathSync throws
+          // ENOENT legitimately until the file is created.
+          if (edit.fileExists) {
+            try {
+              writePath = realpathSync.native(edit.absPath);
+              validatePathWithinRoot(canonicalRootPath, writePath);
+            } catch (symErr) {
+              throw new Error(
+                `symlink-escape-at-write: ${edit.relPath}: ${symErr instanceof Error ? symErr.message : String(symErr)}`,
+              );
+            }
+            if (!pc) {
+              throw new ValidationError(
+                "Write target identity changed after validation; refusing write",
+              );
+            }
+            assertStableCanonicalIdentity(pc.canonicalAbsPath, writePath);
+          }
+          const backupPath = await writeWithBackup(
+            edit.absPath,
+            edit.newContent,
+            useBackup,
+            edit.fileExists,
+            backupSuffix,
+            writePath,
           );
-        }
-      }
-      // TOCTOU: re-verify path hasn't been swapped for a symlink escape.
-      // Skip for new files (fileExists=false): realpathSync throws
-      // ENOENT legitimately until the file is created.
-      if (edit.fileExists) {
-        try {
-          writePath = realpathSync.native(edit.absPath);
-          validatePathWithinRoot(canonicalRootPath, writePath);
-        } catch (symErr) {
-          throw new Error(
-            `symlink-escape-at-write: ${edit.relPath}: ${symErr instanceof Error ? symErr.message : String(symErr)}`,
-          );
-        }
-        if (!pc) {
-          throw new ValidationError(
-            "Write target identity changed after validation; refusing write",
-          );
-        }
-        assertStableCanonicalIdentity(pc.canonicalAbsPath, writePath);
-      }
-      const backupPath = await writeWithBackup(
-        edit.absPath,
-        edit.newContent,
-        useBackup,
-        edit.fileExists,
-        backupSuffix,
-        writePath,
+          writtenSoFar.push({ edit, backupPath, writePath, ownership });
+          return backupPath;
+        },
+        liveIndex,
+        {
+          captureOwnership: (receipt) => {
+            ownership = receipt;
+            owners.push(receipt);
+          },
+        },
       );
-      writtenSoFar.push({ edit, backupPath, writePath });
       results.push({
         file: edit.relPath,
         status: "written",
         bytes: Buffer.byteLength(edit.newContent, "utf-8"),
+        ...(mutation.indexUpdate ? { indexUpdate: mutation.indexUpdate } : {}),
       });
     } catch (err) {
       rollbackTriggered = true;
@@ -229,7 +255,23 @@ export async function applyBatch(
             continue;
           }
           try {
-            await unlink(prev.edit.absPath);
+            await runLiveIndexMutation(
+              plan.repoId,
+              prev.edit.relPath,
+              async (path) => {
+                assertStableCanonicalIdentity(prev.writePath, path);
+                if (
+                  (await hashFileIfExists(path)) !==
+                  hashContent(prev.edit.newContent)
+                )
+                  throw new ValidationError(
+                    "Cannot rollback: a newer save owns the file",
+                  );
+                await unlink(path);
+              },
+              liveIndex,
+              { expectedOwnership: prev.ownership },
+            );
             restoredFiles.push(prev.edit.relPath);
           } catch (unlinkErr) {
             logger.error(
@@ -243,7 +285,23 @@ export async function applyBatch(
           continue;
         }
         try {
-          await restoreBackup(prev.writePath, prev.backupPath);
+          await runLiveIndexMutation(
+            plan.repoId,
+            prev.edit.relPath,
+            async (path) => {
+              assertStableCanonicalIdentity(prev.writePath, path);
+              if (
+                (await hashFileIfExists(path)) !==
+                hashContent(prev.edit.newContent)
+              )
+                throw new ValidationError(
+                  "Cannot rollback: a newer save owns the file",
+                );
+              await restoreBackup(path, prev.backupPath!);
+            },
+            liveIndex,
+            { expectedOwnership: prev.ownership },
+          );
           restoredFiles.push(prev.edit.relPath);
         } catch (restoreErr) {
           logger.error(
@@ -272,20 +330,8 @@ export async function applyBatch(
     }
   }
 
-  // 3. live-index sync (best-effort, no rollback on failure)
+  for (const ownership of owners) ownership.release();
   if (!rollbackTriggered) {
-    for (const entry of writtenSoFar) {
-      const indexUpdate = await syncLiveIndex(
-        plan.repoId,
-        entry.edit.relPath,
-        entry.edit.newContent,
-      );
-      const matching = results.find((r) => r.file === entry.edit.relPath);
-      if (matching && indexUpdate) {
-        matching.indexUpdate = indexUpdate;
-      }
-    }
-
     // 4. cleanup backups on full success
     for (const entry of writtenSoFar) {
       if (entry.backupPath) {
@@ -313,7 +359,8 @@ export async function applyBatch(
         // failed or no backup existed). Surface as failed so callers
         // see the file is in a broken state instead of "written".
         r.status = "failed";
-        r.reason = r.reason ?? "rollback-failed: file modified but not restored";
+        r.reason =
+          r.reason ?? "rollback-failed: file modified but not restored";
       }
     }
   }

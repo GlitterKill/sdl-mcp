@@ -1,24 +1,19 @@
 import { watch } from "fs";
-import { isAbsolute, relative } from "path";
+import { isAbsolute, relative, resolve, basename } from "path";
 
 import type { RepoConfig } from "../config/types.js";
 import {
-  WATCH_DEBOUNCE_MS,
-  WATCH_STABILITY_THRESHOLD_MS,
-  WATCH_POLL_INTERVAL_MS,
   WATCHER_ERROR_MAX_COUNT,
   WATCHER_STALE_THRESHOLD_MS,
-  WATCHER_REINDEX_RETRY_BASE_MS,
-  WATCHER_REINDEX_RETRY_MAX_MS,
-  WATCHER_REINDEX_MAX_ATTEMPTS,
-  WATCHER_REINDEX_OPERATION_TIMEOUT_MS,
   WATCHER_DEFAULT_MAX_WATCHED_FILES,
 } from "../config/constants.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { getLadybugConn, getReadPoolHealth } from "../db/ladybug.js";
+import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath } from "../util/paths.js";
-import { patchSavedFile } from "../live-index/file-patcher.js";
+import { getDefaultLiveIndexCoordinator } from "../live-index/coordinator.js";
+import type { LiveIndexCoordinator } from "../live-index/types.js";
+import { dirtyPathMatchesScipGeneratorConfig } from "../scip/scip-io-runner.js";
 import { logWatcherHealthTelemetry } from "../mcp/telemetry.js";
 import { logger } from "../util/logger.js";
 import { globToSafeRegex } from "../util/safeRegex.js";
@@ -27,7 +22,6 @@ import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
 import { getLanguageExtensions } from "./fileScanner.js";
 import {
   PROVIDER_ORDER,
-  WATCHER_RESYNC_KEY,
   WATCHMAN_WARNING_MAX_COUNT,
   cacheAutoWatchmanFailure,
   getCachedAutoWatchmanFailure,
@@ -38,13 +32,9 @@ import {
   type WatcherProviderName,
 } from "./watchman-provider.js";
 import {
-  classifyWatcherReindexFailure,
   processWatchedFileChange,
-  WatcherReadPoolUnhealthyError,
   type IndexRepoFn,
 } from "./watcher-change-processor.js";
-import { waitForGraphIntegrityVerifier } from "./provider-first/background-graph-integrity-verifier.js";
-import { verifyNoOpIncrementalGraphIntegrity } from "./provider-first/persisted-graph-integrity.js";
 
 export {
   classifyWatcherReindexFailure,
@@ -100,129 +90,9 @@ export {
   _watchmanResponseHasResyncSignalForTesting,
 } from "./watchman-provider.js";
 
-/**
- * @internal
- */
-export function _drainPendingWatcherChangesForTesting(
-  pending: Map<string, { timer: NodeJS.Timeout }>,
-  health: PendingWatcherHealthCounters,
-): void {
-  drainPendingWatcherChanges(pending, health);
-}
-
-/**
- * @internal
- */
-export function _decrementPendingChangeForGenerationForTesting(
-  health: Pick<PendingWatcherHealthCounters, "pendingChanges">,
-  currentGeneration: number,
-  attemptGeneration: number,
-): boolean {
-  return decrementPendingChangeForGeneration(
-    health,
-    currentGeneration,
-    attemptGeneration,
-  );
-}
-
-/**
- * @internal
- */
-export function _rotateAbortControllerForTesting(
-  controller: AbortController,
-): AbortController {
-  return rotateAbortController(controller);
-}
-
-/**
- * @internal
- */
-export function _startWatcherReindexForTesting(
-  state: WatcherReindexCoalescer,
-): boolean {
-  return startWatcherReindex(state);
-}
-
-/**
- * @internal
- */
-export function _finishWatcherReindexForTesting(
-  state: WatcherReindexCoalescer,
-): boolean {
-  return finishWatcherReindex(state);
-}
-
 const watcherErrors: string[] = [];
 type MutableWatcherHealth = WatcherHealth & { pendingChanges: number };
-type PendingWatcherChange = {
-  timer: NodeJS.Timeout;
-  filePath: string;
-  forceIncremental: boolean;
-  generation: number;
-};
-type PendingWatcherHealthCounters = {
-  pendingChanges: number;
-  queueDepth: number;
-};
-type WatcherReindexCoalescer = {
-  active: boolean;
-  dirty: boolean;
-};
-
 const watcherHealthByRepo = new Map<string, MutableWatcherHealth>();
-
-function drainPendingWatcherChanges<T extends Pick<PendingWatcherChange, "timer">>(
-  pending: Map<string, T>,
-  health: PendingWatcherHealthCounters,
-): void {
-  for (const change of pending.values()) {
-    clearTimeout(change.timer);
-  }
-  pending.clear();
-  health.pendingChanges = 0;
-  health.queueDepth = 0;
-}
-
-function decrementPendingChangeForGeneration(
-  health: Pick<PendingWatcherHealthCounters, "pendingChanges">,
-  currentGeneration: number,
-  attemptGeneration: number,
-): boolean {
-  if (currentGeneration !== attemptGeneration) {
-    return false;
-  }
-  health.pendingChanges = Math.max(0, health.pendingChanges - 1);
-  return true;
-}
-
-function startWatcherReindex(state: WatcherReindexCoalescer): boolean {
-  if (state.active) {
-    state.dirty = true;
-    return false;
-  }
-  state.active = true;
-  return true;
-}
-
-function finishWatcherReindex(state: WatcherReindexCoalescer): boolean {
-  if (!state.active) {
-    return false;
-  }
-  state.active = false;
-  const shouldRunFollowUp = state.dirty;
-  state.dirty = false;
-  return shouldRunFollowUp;
-}
-
-function resetWatcherReindex(state: WatcherReindexCoalescer): void {
-  state.active = false;
-  state.dirty = false;
-}
-
-function rotateAbortController(controller: AbortController): AbortController {
-  controller.abort();
-  return new AbortController();
-}
 
 function cloneWatcherHealth(state: MutableWatcherHealth): WatcherHealth {
   return {
@@ -307,46 +177,107 @@ export function _clearWatcherHealthForTesting(repoId: string): void {
   watcherHealthByRepo.delete(repoId);
 }
 
-export function isWatcherStale(
-  health: Pick<
-    MutableWatcherHealth,
-    "pendingChanges" | "eventsReceived" | "lastSuccessfulReindexAt"
-  >,
-  nowMs = Date.now(),
-  activeReindex = false,
-): boolean {
-  // An active attempt is bounded; restarting here races valid work before completion.
-  if (activeReindex) {
-    return false;
-  }
-  if (health.pendingChanges <= 0) {
-    return false;
-  }
-  if (health.eventsReceived <= 0) {
-    return false;
-  }
+/** Only unaccepted watcher events are stale; queued reconciliation has its own status. */
+export function isWatcherStale(health: { pendingChanges: number }): boolean {
+  return health.pendingChanges > 0;
+}
 
-  const lastSuccessMs = health.lastSuccessfulReindexAt
-    ? Date.parse(health.lastSuccessfulReindexAt)
-    : 0;
+/** Classify once, then synchronously invalidate shared work before any asynchronous recovery. */
+export function admitWatcherEvent(params: {
+  repoId: string;
+  repoRoot: string;
+  repoConfig: RepoConfig;
+  extensions: readonly string[];
+  compiledIgnorePatterns: readonly RegExp[];
+  coordinator: Pick<
+    LiveIndexCoordinator,
+    "recordDiskChange" | "requestReconcileInventory" | "invalidateSourceContext"
+  >;
+  event: ProviderEvent;
+}): boolean | null {
+  const { repoId, coordinator, event } = params;
+  if (event.type === "resync") {
+    if (event.relativePath) {
+      const path = toRepoRelativeWatchPath(params.repoRoot, event.relativePath);
+      if (path && shouldIgnorePath(path, params.compiledIgnorePatterns, true))
+        return null;
+    }
+    return coordinator.requestReconcileInventory?.(repoId) ?? false;
+  }
+  const filePath = toRepoRelativeWatchPath(params.repoRoot, event.relativePath);
+  if (!filePath)
+    return coordinator.requestReconcileInventory?.(repoId) ?? false;
+  if (shouldIgnorePath(filePath, params.compiledIgnorePatterns)) return null;
+  const projectInput =
+    dirtyPathMatchesScipGeneratorConfig(filePath) ||
+    [
+      params.repoConfig.packageJsonPath,
+      params.repoConfig.tsconfigPath,
+      params.repoConfig.sourceFileListPath,
+    ].some(
+      (path) =>
+        path && toRepoRelativeWatchPath(params.repoRoot, path) === filePath,
+    );
+  if (projectInput) {
+    coordinator.invalidateSourceContext?.(repoId);
+    return (
+      coordinator.requestReconcileInventory?.(repoId, { force: true }) ?? false
+    );
+  }
+  if (!matchesExtensions(filePath, params.extensions)) return null;
+  return processWatchedFileChange({
+    repoId,
+    filePath,
+    removed: event.removed,
+    coordinator,
+  });
+}
 
-  return (
-    lastSuccessMs === 0 || nowMs - lastSuccessMs > WATCHER_STALE_THRESHOLD_MS
-  );
+/** Raw events bypass Chokidar's 50ms normalized-change throttle. */
+export function chokidarRawEvent(
+  event: string,
+  path: unknown,
+  details: unknown,
+  watchedDirectories: ReadonlySet<string>,
+): ProviderEvent {
+  if (typeof path !== "string" || !path)
+    return { type: "resync", reason: "chokidar missing raw filename" };
+  let absolutePath: string;
+  if (isAbsolute(path)) absolutePath = path;
+  else {
+    const watchedPath =
+      details && typeof details === "object" && "watchedPath" in details
+        ? details.watchedPath
+        : undefined;
+    if (typeof watchedPath !== "string" || !isAbsolute(watchedPath))
+      return { type: "resync", reason: "chokidar ambiguous raw filename" };
+    if (watchedDirectories.has(normalizePath(watchedPath)))
+      absolutePath = resolve(watchedPath, path);
+    else if (basename(watchedPath) === path) absolutePath = watchedPath;
+    else return { type: "resync", reason: "chokidar ambiguous raw watch root" };
+  }
+  if (event !== "change" || watchedDirectories.has(normalizePath(absolutePath)))
+    return {
+      type: "resync",
+      reason: "chokidar raw structural event",
+      relativePath: absolutePath,
+    };
+  return { type: "path", relativePath: absolutePath };
 }
 
 export async function watchRepositoryWithIndexer(
   repoId: string,
-  indexRepo: IndexRepoFn,
+  _indexRepo: IndexRepoFn,
   isWriteReady: () => boolean = () => true,
+  options: { coordinator?: LiveIndexCoordinator } = {},
 ): Promise<IndexWatchHandle> {
   const conn = await getLadybugConn();
   const repoRow = await ladybugDb.getRepo(conn, repoId);
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
-  await waitForGraphIntegrityVerifier(repoId);
-  await verifyNoOpIncrementalGraphIntegrity(repoId);
+  const coordinator = options.coordinator ?? getDefaultLiveIndexCoordinator();
+  coordinator.setReconciliationReadiness?.(repoId, isWriteReady);
 
   let repoConfig: RepoConfig;
   try {
@@ -395,37 +326,15 @@ export async function watchRepositoryWithIndexer(
   };
   watcherHealthByRepo.set(repoId, health);
 
-  const pending = new Map<string, PendingWatcherChange>();
   let activeWatcher: RuntimeWatcher | null = null;
   let closed = false;
   let restarting = false;
   let lastRestartMs = 0;
   let providerFailureActive = false;
-  let watcherGeneration = 0;
-  // AbortController for in-flight reindex operations. close() and
-  // restartWatcher() abort it so a late-completing reindex doesn't decrement
-  // pendingChanges twice or schedule retries against a stale watcher state.
-  let abortController = new AbortController();
-  const reindexCoalescer: WatcherReindexCoalescer = {
-    active: false,
-    dirty: false,
-  };
-  let scheduleFollowUpReindex: (() => void) | null = null;
   const staleCheckIntervalMs = Math.max(
     5_000,
     Math.floor(WATCHER_STALE_THRESHOLD_MS / 4),
   );
-
-  const updateQueueDepth = (): void => {
-    health.queueDepth = pending.size;
-  };
-
-  const clearPendingChanges = (): void => {
-    watcherGeneration += 1;
-    abortController = rotateAbortController(abortController);
-    resetWatcherReindex(reindexCoalescer);
-    drainPendingWatcherChanges(pending, health);
-  };
 
   const recordWatcherError = (message: string): void => {
     health.errors += 1;
@@ -440,8 +349,7 @@ export async function watchRepositoryWithIndexer(
         repoId,
         hint:
           "Inspect the bounded watcher errors and graph-integrity status. " +
-          "Retry one incremental refresh only after a transient cause clears; " +
-          "use a stopped safe rebuild for permanent storage failures.",
+          "Check retained reconciliation work and provider readiness before retrying.",
       });
     }
   };
@@ -451,235 +359,31 @@ export async function watchRepositoryWithIndexer(
     health.lastEventAt = new Date().toISOString();
   };
 
-  const reindexWithRetry = async (
-    filePath: string,
-    attempt = 0,
-    options: { forceIncremental?: boolean; generation?: number } = {},
-  ): Promise<void> => {
-    // Snapshot the abort signal at entry. If restartWatcher() or close()
-    // swaps abortController out from under us during the await, the snapshot
-    // still tracks the cancellation we care about for THIS reindex.
-    const abortSignal = abortController.signal;
-    const generation = options.generation ?? watcherGeneration;
-    const ownsReindex =
-      attempt === 0 ? startWatcherReindex(reindexCoalescer) : true;
-    let scheduledRetry = false;
-    let attemptTimedOut = false;
-    try {
-      if (!isWriteReady() || (attempt === 0 && !ownsReindex)) return;
-
-      // Health gate: bail before touching the DB if the read pool is
-      // already wedged. Avoids piling on more 60s reindex timeouts when
-      // a native call is hung. The catch block below schedules a
-      // backoff retry; pool typically recovers within seconds once the
-      // hung writer settles or the watchdog flips the conn.
-      const poolHealth = getReadPoolHealth();
-      if (!poolHealth.healthy) {
-        throw new WatcherReadPoolUnhealthyError(
-          `read pool unhealthy (stuck=${poolHealth.stuck}/${poolHealth.total}); deferring reindex`,
-        );
-      }
-      logger.debug(
-        options.forceIncremental
-          ? "Watcher resync requested"
-          : "File change detected",
-        { filePath },
-      );
-      // Bound the operation: the underlying patchSavedFile / indexRepo path
-      // routes through `withWriteConn`, whose limiter has a 30s queue
-      // timeout — but if the in-flight write itself stalls inside Ladybug,
-      // the call hangs indefinitely, freezing pendingChanges and turning
-      // watcher stale-restart into a no-op. The timeout treats the attempt
-      // as a failure without spawning retries behind uncancelled work.
-      let timeoutTimer: NodeJS.Timeout | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutTimer = setTimeout(() => {
-          attemptTimedOut = true;
-          reject(
-            new Error(
-              `reindex attempt timed out after ${WATCHER_REINDEX_OPERATION_TIMEOUT_MS}ms`,
-            ),
-          );
-        }, WATCHER_REINDEX_OPERATION_TIMEOUT_MS);
-        timeoutTimer.unref();
-      });
-      try {
-        const work = options.forceIncremental
-          ? indexRepo(repoId, "incremental")
-          : processWatchedFileChange({
-              repoId,
-              repoRoot: repoRow.rootPath,
-              filePath,
-              indexRepo,
-              isWriteReady,
-              patchSavedFileFn: ({
-                repoId: changedRepoId,
-                filePath: changedFilePath,
-              }) =>
-                patchSavedFile({
-                  repoId: changedRepoId,
-                  filePath: changedFilePath,
-                }),
-            });
-        await Promise.race([work, timeoutPromise]);
-      } finally {
-        if (timeoutTimer) clearTimeout(timeoutTimer);
-      }
-      if (closed || abortSignal.aborted || generation !== watcherGeneration) {
-        return;
-      }
+  const handleProviderEvent = (event: ProviderEvent): void => {
+    if (closed) return;
+    const accepted = admitWatcherEvent({
+      repoId,
+      repoRoot: repoRow.rootPath,
+      repoConfig,
+      extensions,
+      compiledIgnorePatterns,
+      coordinator,
+      event,
+    });
+    if (accepted === null) return;
+    markEventReceived();
+    if (accepted) {
+      // This counts accepted events, never completed graph publications.
       health.eventsProcessed += 1;
-      health.lastSuccessfulReindexAt = new Date().toISOString();
-      if (!providerFailureActive) {
-        health.stale = false;
-      }
-    } catch (error) {
-      if (closed || abortSignal.aborted || generation !== watcherGeneration) {
-        return;
-      }
-      const msg = error instanceof Error ? error.message : String(error);
-      const disposition = classifyWatcherReindexFailure(error);
-      recordWatcherError(
-        `[sdl-mcp] Failed incremental index for ${filePath}: ${msg}`,
-      );
-      if (disposition !== "transient") {
-        health.stale = true;
-      }
-      if (
-        !attemptTimedOut &&
-        disposition === "transient" &&
-        attempt + 1 < WATCHER_REINDEX_MAX_ATTEMPTS &&
-        !closed &&
-        !abortSignal.aborted &&
-        generation === watcherGeneration
-      ) {
-        const delay = Math.min(
-          WATCHER_REINDEX_RETRY_MAX_MS,
-          WATCHER_REINDEX_RETRY_BASE_MS * 2 ** attempt,
-        );
-        scheduledRetry = true;
-        setTimeout(() => {
-          // Re-check abort/closed at retry firing time so a watcher restart
-          // between schedule and fire doesn't reindex against stale state.
-          if (
-            closed ||
-            abortSignal.aborted ||
-            generation !== watcherGeneration
-          ) {
-            decrementPendingChangeForGeneration(
-              health,
-              watcherGeneration,
-              generation,
-            );
-            return;
-          }
-          void reindexWithRetry(filePath, attempt + 1, {
-            ...options,
-            generation,
-          }).catch((err: unknown) => {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
-          });
-        }, delay).unref();
-      }
-      // exhausted retries fall through to finally for decrement
-    } finally {
-      if (ownsReindex && !scheduledRetry) {
-        const shouldRunFollowUp = finishWatcherReindex(reindexCoalescer);
-        if (
-          shouldRunFollowUp &&
-          !closed &&
-          !abortSignal.aborted &&
-          generation === watcherGeneration
-        ) {
-          scheduleFollowUpReindex?.();
-        }
-      }
-      if (!scheduledRetry) {
-        decrementPendingChangeForGeneration(
-          health,
-          watcherGeneration,
-          generation,
-        );
-      }
-    }
-  };
-
-  const debounceMs = appConfig.indexing?.watchDebounceMs ?? WATCH_DEBOUNCE_MS;
-
-  const schedule = (
-    filePath: string,
-    options: { forceIncremental?: boolean } = {},
-  ): void => {
-    const key = options.forceIncremental ? WATCHER_RESYNC_KEY : filePath;
-    const existing = pending.get(key);
-    if (existing) {
-      clearTimeout(existing.timer);
+      if (event.type === "resync") health.pendingChanges = 0;
     } else {
       health.pendingChanges += 1;
+      recordWatcherError(
+        `[sdl-mcp] Reconciliation admission refused for ${repoId}`,
+      );
     }
-    const generation = existing?.generation ?? watcherGeneration;
-    const debounceTimer = setTimeout(() => {
-      pending.delete(key);
-      updateQueueDepth();
-      void reindexWithRetry(filePath, 0, {
-        forceIncremental:
-          options.forceIncremental === true ||
-          existing?.forceIncremental === true,
-        generation,
-      }).catch((err: unknown) => {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
-      });
-    }, debounceMs);
-    debounceTimer.unref();
-    pending.set(key, {
-      timer: debounceTimer,
-      filePath,
-      forceIncremental:
-        options.forceIncremental === true || existing?.forceIncremental === true,
-      generation,
-    });
-    updateQueueDepth();
-  };
-
-  scheduleFollowUpReindex = () => {
-    // Coalesced changes may combine path events and provider resyncs from an
-    // active run, so one incremental pass catches the final repository state.
-    schedule(repoRow.rootPath, { forceIncremental: true });
-  };
-
-  const handler = (relativeFilePath: string): void => {
-    const normalizedFilePath = normalizePath(relativeFilePath);
-    if (shouldIgnorePath(normalizedFilePath, compiledIgnorePatterns)) {
-      return;
-    }
-    if (!matchesExtensions(normalizedFilePath, extensions)) {
-      return;
-    }
-    markEventReceived();
-    schedule(normalizedFilePath);
-  };
-
-  const handleProviderEvent = (event: ProviderEvent): void => {
-    if (event.type === "path") {
-      handler(event.relativePath);
-      return;
-    }
-
-    markEventReceived();
-    health.stale = true;
-    logger.warn("Watcher resync requested", {
-      repoId,
-      provider: health.provider,
-      reason: event.reason,
-      warning: event.warning,
-    });
-    // Watchman recrawl/fresh-instance notifications invalidate any queued
-    // precise path events, so collapse all pending work into one full
-    // incremental pass instead of mixing stale patches with the resync.
-    clearPendingChanges();
-    schedule(repoRow.rootPath, { forceIncremental: true });
+    health.queueDepth = health.pendingChanges;
+    health.stale = providerFailureActive || isWatcherStale(health);
   };
 
   const disabledAutoProviders = new Map<WatcherProviderName, string>();
@@ -747,12 +451,17 @@ export async function watchRepositoryWithIndexer(
         compiledIgnorePatterns,
       ),
       ignoreInitial: true,
-      awaitWriteFinish: {
-        stabilityThreshold: WATCH_STABILITY_THRESHOLD_MS,
-        pollInterval: WATCH_POLL_INTERVAL_MS,
-      },
+      // Queue invalidation must observe the first event, before worker debounce.
+      awaitWriteFinish: false,
+      atomic: false,
     });
     const typedWatcher = watcher as ChokidarWatcher;
+    const watchedDirectories = new Set<string>();
+    typedWatcher.on("raw", (event: string, path: unknown, details: unknown) => {
+      handleProviderEvent(
+        chokidarRawEvent(event, path, details, watchedDirectories),
+      );
+    });
 
     const readyPromise = new Promise<void>((resolveReady) => {
       typedWatcher.on("ready", () => {
@@ -763,6 +472,8 @@ export async function watchRepositoryWithIndexer(
           // including .git, build artifacts, lockfiles, and other noise.
           // The user-meaningful number is "how many indexable source
           // files are we tracking", not "how many fs entries".
+          for (const directory of Object.keys(watched))
+            watchedDirectories.add(normalizePath(directory));
           let count = 0;
           for (const entries of Object.values(watched) as string[][]) {
             for (const entry of entries) {
@@ -775,14 +486,32 @@ export async function watchRepositoryWithIndexer(
       });
     });
 
-    const chokidarHandler = (filePath: string): void => {
+    const chokidarHandler = (filePath: string, removed = false): void => {
       const relPath = normalizePath(relative(repoRow.rootPath, filePath));
-      handleProviderEvent({ type: "path", relativePath: relPath });
+      handleProviderEvent({ type: "path", relativePath: relPath, removed });
     };
 
-    typedWatcher.on("add", chokidarHandler);
-    typedWatcher.on("change", chokidarHandler);
-    typedWatcher.on("unlink", chokidarHandler);
+    typedWatcher.on("add", (filePath: string) => chokidarHandler(filePath));
+    typedWatcher.on("change", (filePath: string) => chokidarHandler(filePath));
+    typedWatcher.on("unlink", (filePath: string) =>
+      chokidarHandler(filePath, true),
+    );
+    typedWatcher.on("addDir", (filePath: string) => {
+      watchedDirectories.add(normalizePath(filePath));
+      handleProviderEvent({
+        type: "resync",
+        reason: "directory added",
+        relativePath: filePath,
+      });
+    });
+    typedWatcher.on("unlinkDir", (filePath: string) => {
+      watchedDirectories.delete(normalizePath(filePath));
+      handleProviderEvent({
+        type: "resync",
+        reason: "directory removed",
+        relativePath: filePath,
+      });
+    });
 
     typedWatcher.on("error", (error: Error) => {
       recordWatcherError(`[sdl-mcp] File watcher error: ${error}`);
@@ -802,7 +531,15 @@ export async function watchRepositoryWithIndexer(
       repoRow.rootPath,
       { recursive: true },
       (_eventType, filename) => {
-        if (!filename) return;
+        if (!filename || _eventType === "rename") {
+          handleProviderEvent({
+            type: "resync",
+            reason: "ambiguous filesystem event",
+            relativePath: filename?.toString(),
+          });
+          // A named source still invalidates immediately, even during inventory.
+          if (!filename) return;
+        }
         handleProviderEvent({
           type: "path",
           relativePath: normalizePath(filename.toString()),
@@ -847,12 +584,16 @@ export async function watchRepositoryWithIndexer(
       }
 
       try {
-        const watcher = await startProvider(provider);
+        let watcher = await startProvider(provider);
         health.provider = watcher.provider;
         health.fallbackReason =
           fallbackReasons.length > 0 ? fallbackReasons.join("; ") : null;
         health.running = true;
         providerFailureActive = false;
+        const ready = watcher.ready.then(() => {
+          handleProviderEvent({ type: "resync", reason: "watcher ready" });
+        });
+        watcher = { ...watcher, ready };
         if (watcher.startupResync) {
           handleProviderEvent(watcher.startupResync);
         }
@@ -918,14 +659,10 @@ export async function watchRepositoryWithIndexer(
     logger.info("Restarting watcher", {
       repoId,
       reason,
-      abandonedPending: pending.size,
+      unacceptedEvents: health.pendingChanges,
     });
-    // Drain stale debounce timers and reset pending counters. Without this,
-    // a wedged write conn leaves `pending`/`pendingChanges` frozen for the
-    // life of the process — every subsequent stale check restarts the
-    // watcher again with the same numbers, so the recovery loop never
-    // converges. New file events will re-populate pending naturally.
-    clearPendingChanges();
+    // Accepted work belongs to the coordinator and survives provider replacement.
+    handleProviderEvent({ type: "resync", reason: "watcher restarting" });
     try {
       if (activeWatcher) {
         await activeWatcher.close();
@@ -937,8 +674,6 @@ export async function watchRepositoryWithIndexer(
           type: "resync",
           reason: options.resyncReason ?? reason,
         });
-      } else {
-        health.stale = false;
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -959,9 +694,7 @@ export async function watchRepositoryWithIndexer(
     if (closed) {
       return;
     }
-    const stale =
-      providerFailureActive ||
-      isWatcherStale(health, Date.now(), reindexCoalescer.active);
+    const stale = providerFailureActive || isWatcherStale(health);
     health.stale = stale;
     try {
       logWatcherHealthTelemetry({
@@ -1005,7 +738,7 @@ export async function watchRepositoryWithIndexer(
     close: async () => {
       closed = true;
       clearInterval(staleTimer);
-      clearPendingChanges();
+
       health.running = false;
       health.stale = false;
       if (activeWatcher) {
@@ -1016,7 +749,10 @@ export async function watchRepositoryWithIndexer(
   };
 }
 
-function matchesExtensions(path: string, extensions: string[]): boolean {
+function matchesExtensions(
+  path: string,
+  extensions: readonly string[],
+): boolean {
   return extensions.some((ext) => path.endsWith(ext));
 }
 

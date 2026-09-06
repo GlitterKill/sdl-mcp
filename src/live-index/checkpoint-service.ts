@@ -1,11 +1,9 @@
 import { stat } from "node:fs/promises";
-import { patchSavedFile } from "./file-patcher.js";
 import { OverlayStore, type DraftOverlayEntry } from "./overlay-store.js";
 import type { CheckpointRequest, CheckpointResult } from "./types.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { logger } from "../util/logger.js";
 
 export interface CheckpointStatus {
@@ -19,12 +17,15 @@ export interface CheckpointStatus {
 
 interface CheckpointServiceOptions {
   now?: () => string;
-  patchSavedFile?: typeof patchSavedFile;
+  publishSavedFile: (input: {
+    repoId: string;
+    filePath: string;
+    content: string;
+  }) => Promise<void>;
 }
 
 interface CheckpointExecutionOptions {
   filePaths?: string[];
-  skipDurablePatch?: boolean;
 }
 
 function createEmptyStatus(repoId: string): CheckpointStatus {
@@ -40,7 +41,7 @@ function createEmptyStatus(repoId: string): CheckpointStatus {
 
 export class CheckpointService {
   private readonly now: () => string;
-  private readonly patchSavedFileImpl: typeof patchSavedFile;
+  private readonly publishSavedFile: CheckpointServiceOptions["publishSavedFile"];
   private readonly statuses = new Map<string, CheckpointStatus>();
   private readonly checkpointInProgress = new Set<string>();
   private readonly repoRootCache = new Map<string, string>();
@@ -53,10 +54,10 @@ export class CheckpointService {
 
   constructor(
     private readonly overlayStore: OverlayStore,
-    options: CheckpointServiceOptions = {},
+    options: CheckpointServiceOptions,
   ) {
     this.now = options.now ?? (() => new Date().toISOString());
-    this.patchSavedFileImpl = options.patchSavedFile ?? patchSavedFile;
+    this.publishSavedFile = options.publishSavedFile;
   }
 
   async checkpointRepo(
@@ -79,9 +80,12 @@ export class CheckpointService {
     }
 
     // Resolve no-work outcomes before allocating an ID or mutating checkpoint status.
-    const candidates = this.overlayStore.listCheckpointCandidates(input.repoId, {
-      filePaths: options.filePaths,
-    });
+    const candidates = this.overlayStore.listCheckpointCandidates(
+      input.repoId,
+      {
+        filePaths: options.filePaths,
+      },
+    );
     const drafts = this.overlayStore.listDrafts(input.repoId);
     if (candidates.length === 0) {
       if (drafts.length === 0) {
@@ -119,7 +123,7 @@ export class CheckpointService {
           // Safety check: skip drafts whose content is suspiciously small
           // compared to the actual disk file. This prevents partial/garbage
           // buffer pushes from corrupting the index during idle checkpoint.
-          if (!options.skipDurablePatch) {
+          {
             const skip = await this.isDraftSuspiciouslySmall(
               input.repoId,
               draft,
@@ -142,7 +146,13 @@ export class CheckpointService {
             input.repoId,
             draft.filePath,
           );
-          if (currentDraft?.dirty) {
+          if (
+            !currentDraft ||
+            currentDraft.dirty ||
+            currentDraft.version !== draft.version ||
+            currentDraft.content !== draft.content ||
+            currentDraft.lastSaveAt !== draft.lastSaveAt
+          ) {
             skippedDirty += 1;
             continue; // Skip — a newer version arrived; do not remove
           }
@@ -219,16 +229,11 @@ export class CheckpointService {
     repoId: string,
     draft: DraftOverlayEntry,
   ): Promise<void> {
-    await withIndexingGate(() =>
-      this.patchSavedFileImpl({
-        repoId,
-        filePath: draft.filePath,
-        content: draft.content,
-        language: draft.language,
-        version: draft.version,
-        parseResult: draft.parseError ? null : draft.parseResult,
-      }),
-    );
+    await this.publishSavedFile({
+      repoId,
+      filePath: draft.filePath,
+      content: draft.content,
+    });
   }
 
   /**

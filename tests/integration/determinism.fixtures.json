@@ -1277,8 +1277,8 @@
     "sdl.repo.register": "Mutates persistent repository registration; exercised only by fixture setup, not as a read-only determinism call.",
     "sdl.repo.unregister": "Destructively removes persistent repository registration.",
     "sdl.index.refresh": "Mutates the graph index; fixture setup performs the single bounded initial index only.",
-    "sdl.buffer.push": "Mutates the live draft buffer.",
-    "sdl.buffer.checkpoint": "Mutates and reconciles the live draft buffer.",
+    "sdl.buffer.push": "Mutates the live draft buffer; accepted disk saves also queue generation-owned reconciliation.",
+    "sdl.buffer.checkpoint": "Awaits committed saved-file reconciliation and conditionally retires the matching live draft.",
     "sdl.symbol.edit": "Mutates indexed source code.",
     "sdl.slice.refresh": "Requires a prior generated slice handle and mutates the slice cache.",
     "sdl.slice.spillover.get": "Requires a spillover handle generated only by a truncated slice.",
@@ -1286,9 +1286,9 @@
     "sdl.agent.feedback": "Persists feedback records.",
     "sdl.runtime.execute": "Executes an arbitrary child process and is unsafe for a read-only determinism fixture.",
     "sdl.usage.stats": "Opt-in diagnostic session counters intentionally change as handler calls accumulate.",
-    "sdl.file.write": "Mutates repository files.",
+    "sdl.file.write": "Mutates repository files and returns pending reconciliation admission; pending projection is covered by synthetic fixtures.",
     "sdl.semantic.enrichment.refresh": "Mutates semantic enrichment state.",
-    "sdl.search.edit": "Mutates repository files, including multi-file apply and rollback state."
+    "sdl.search.edit": "Mutates repository files, including multi-file apply and rollback state; final saved state queues generation-owned reconciliation."
   },
   "agentSliceProjectionDetails": [
     "compact",

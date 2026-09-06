@@ -192,6 +192,8 @@ export async function startConfiguredWatchers(params: {
 
   if (handles.length === params.repoIds.length) {
     params.readiness.markReady(params.repoIds.length, handles.length);
+    for (const repoId of params.repoIds)
+      getDefaultLiveIndexCoordinator().wakeReconciliation?.(repoId);
     return handles;
   }
 

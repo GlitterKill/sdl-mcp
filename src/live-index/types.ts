@@ -79,7 +79,50 @@ export interface LiveStatus {
   reconcileLastError?: string | null;
 }
 
+export interface SavedFileOwnership {
+  isCurrent(): boolean;
+  release(): void;
+}
+
+export interface SavedFileMutationInput {
+  repoId: string;
+  filePath: string;
+  /** False for nonindexed files; relevant project inputs still invalidate preparation. */
+  reconcile?: boolean;
+  /** A buffer save must describe the bytes actually saved on disk. */
+  content?: string;
+  /** Rollback receipts exist only for the lifetime of the owning edit/batch. */
+  captureOwnership?: (ownership: SavedFileOwnership) => void;
+  expectedOwnership?: SavedFileOwnership;
+}
+
 export interface LiveIndexCoordinator {
+  runSavedFileMutation<T>(
+    input: SavedFileMutationInput,
+    operation: (canonicalPath: string) => Promise<T>,
+  ): Promise<{ value: T; pending: boolean }>;
+  acceptSavedFile(input: {
+    repoId: string;
+    filePath: string;
+    content: string;
+  }): Promise<boolean>;
+
+  recordDiskChange?(input: {
+    repoId: string;
+    filePath: string;
+    removed?: boolean;
+  }): boolean;
+  requestReconcileInventory?(
+    repoId: string,
+    options?: { force?: boolean },
+  ): boolean;
+  invalidateSourceContext?(repoId: string): void;
+  setReconciliationReadiness?(
+    repoId: string,
+    isWriteReady: () => boolean,
+  ): void;
+  wakeReconciliation?(repoId: string): void;
+
   pushBufferUpdate(input: BufferUpdateInput): Promise<BufferUpdateResult>;
   checkpointRepo(input: CheckpointRequest): Promise<CheckpointResult>;
   getLiveStatus(repoId: string): Promise<LiveStatus>;

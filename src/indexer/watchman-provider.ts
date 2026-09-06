@@ -9,7 +9,10 @@ import { resolveWatchmanBinary } from "./watchman-binary.js";
 // Watchman-specific helpers are isolated from the generic watcher loop so the
 // runtime provider code can stay focused on health state and restart policy.
 export type WatcherProviderName = Exclude<WatchProvider, "auto">;
-export type ProviderAvailabilityStatus = { available: boolean; reason?: string };
+export type ProviderAvailabilityStatus = {
+  available: boolean;
+  reason?: string;
+};
 export type ProviderAvailability = Record<
   WatcherProviderName,
   ProviderAvailabilityStatus
@@ -22,7 +25,8 @@ export type ProviderSelection = {
 const cachedAutoWatchmanFailure = {
   reason: null as string | null,
 };
-let pendingWatchmanAvailabilityProbe: Promise<ProviderAvailabilityStatus> | null = null;
+let pendingWatchmanAvailabilityProbe: Promise<ProviderAvailabilityStatus> | null =
+  null;
 
 export function getCachedAutoWatchmanFailure(
   configuredProvider: WatchProvider,
@@ -98,8 +102,23 @@ export async function checkWatchmanAvailabilityWithCache(
   return pendingWatchmanAvailabilityProbe;
 }
 export type ProviderEvent =
-  | { type: "path"; relativePath: string }
-  | { type: "resync"; reason: string; warning?: string };
+  | { type: "path"; relativePath: string; removed?: boolean }
+  | { type: "resync"; reason: string; warning?: string; relativePath?: string };
+/** Preserve directory identity so the common classifier can reject ignored trees. */
+export function watchmanFileChangeEvent(
+  file: WatchmanFileChange,
+  context: { watchRoot: string; relativePath?: string | null },
+): ProviderEvent {
+  const relativePath = file.name
+    ? normalizeWatchmanFileName(file.name, context)
+    : "";
+  if (!relativePath)
+    return { type: "resync", reason: "watchman missing or invalid filename" };
+  if (file.type === "d")
+    return { type: "resync", reason: "watchman directory event", relativePath };
+  return { type: "path", relativePath, removed: file.exists === false };
+}
+
 export type RuntimeWatcher = {
   provider: WatcherProviderName;
   close: () => Promise<void>;
@@ -237,20 +256,9 @@ export function buildWatchmanSubscription(params: {
   relativePath?: string | null;
   extensions: readonly string[];
 }): WatchmanSubscriptionConfig {
-  const suffixes = Array.from(
-    new Set(
-      params.extensions
-        .map((extension) => extension.replace(/^\./, ""))
-        .filter((extension) => extension.length > 0),
-    ),
-  );
-  const expression =
-    suffixes.length > 0
-      ? ([
-          "anyof",
-          ...suffixes.map((suffix) => ["suffix", suffix] as const),
-        ] as const)
-      : (["true"] as const);
+  // Config-only and directory events also invalidate provider authority. SDL's
+  // shared classifier applies configured source and ignore rules after delivery.
+  const expression = ["true"] as const;
   const subscription: WatchmanSubscriptionConfig = {
     expression,
     fields: [...WATCHMAN_FIELDS],
@@ -287,10 +295,7 @@ export function normalizeWatchmanFileName(
 }
 
 export function watchmanResponseHasResyncSignal(
-  response: Pick<
-    WatchmanSubscriptionResponse,
-    "is_fresh_instance" | "warning"
-  >,
+  response: Pick<WatchmanSubscriptionResponse, "is_fresh_instance" | "warning">,
 ): boolean {
   return (
     response.is_fresh_instance === true ||
@@ -464,10 +469,7 @@ export function _normalizeWatchmanFileNameForTesting(
  * @internal
  */
 export function _watchmanResponseHasResyncSignalForTesting(
-  response: Pick<
-    WatchmanSubscriptionResponse,
-    "is_fresh_instance" | "warning"
-  >,
+  response: Pick<WatchmanSubscriptionResponse, "is_fresh_instance" | "warning">,
 ): boolean {
   return watchmanResponseHasResyncSignal(response);
 }
@@ -501,8 +503,6 @@ export function _probeWatchmanClientAvailabilityForTesting(
   return probeWatchmanClientAvailability(createClient);
 }
 
-
-
 export type StartWatchmanRuntimeWatcherParams = {
   repoId: string;
   repoRoot: string;
@@ -534,7 +534,8 @@ export async function startWatchmanRuntimeWatcher({
   const watchmanBinary = resolveWatchmanBinary();
   if (!watchmanBinary.binaryPath) {
     throw new Error(
-      watchmanBinary.reason ?? "SDL-managed Watchman binary could not be resolved",
+      watchmanBinary.reason ??
+        "SDL-managed Watchman binary could not be resolved",
     );
   }
   const watchmanBinaryPath = watchmanBinary.binaryPath;
@@ -571,9 +572,8 @@ export async function startWatchmanRuntimeWatcher({
   };
   const withStartupFailure = <T>(promise: Promise<T>): Promise<T> =>
     Promise.race([promise, startupFailure]);
-  let handleRuntimeFailure:
-    | ((reason: string, error?: Error) => void)
-    | null = null;
+  let handleRuntimeFailure: ((reason: string, error?: Error) => void) | null =
+    null;
 
   const closeClient = (): void => {
     try {
@@ -636,14 +636,13 @@ export async function startWatchmanRuntimeWatcher({
       });
     }
 
-    const watchProject =
-      await withStartupFailure(
-        watchmanCommandWithTimeout<WatchmanWatchProjectResponse>(
-          client,
-          ["watch-project", repoRoot],
-          WATCHMAN_STARTUP_COMMAND_TIMEOUT_MS,
-        ),
-      );
+    const watchProject = await withStartupFailure(
+      watchmanCommandWithTimeout<WatchmanWatchProjectResponse>(
+        client,
+        ["watch-project", repoRoot],
+        WATCHMAN_STARTUP_COMMAND_TIMEOUT_MS,
+      ),
+    );
     if (!watchProject.watch) {
       throw new Error("watch-project response did not include a watch root");
     }
@@ -722,17 +721,12 @@ export async function startWatchmanRuntimeWatcher({
     }
 
     for (const file of response.files ?? []) {
-      if (!file.name) {
-        continue;
-      }
-      const relativePath = normalizeWatchmanFileName(file.name, {
-        watchRoot,
-        relativePath: watchmanRelativePath,
-      });
-      if (!relativePath) {
-        continue;
-      }
-      handleProviderEvent({ type: "path", relativePath });
+      handleProviderEvent(
+        watchmanFileChangeEvent(file, {
+          watchRoot,
+          relativePath: watchmanRelativePath,
+        }),
+      );
     }
   });
 

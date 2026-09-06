@@ -166,9 +166,9 @@ After graph finalization and deferred semantic refresh finish, SDL-MCP streams t
 
 Publishing either the verified digest or a verifier-owned failure is a conditional state transition: it succeeds only while `DerivedState` is still `verifying` for the same version. A concurrent durable mutation can reset that state, or a newer verification can replace its version, without a stale verifier overwriting the resulting `unknown` or newer `verified` state. The stale caller still receives the generic integrity error. This keeps the O(symbols) final scan on a read connection; only the constant-time compare-and-set uses the single writer.
 
-Incremental indexing starts from the previous verified digest, re-reads the active graph before any deletion, and replaces only changed or removed per-file digests with current authoritative results. When a scan finds no changed files, SDL-MCP waits for useful background verification and validates the current persisted graph before recovery or versioning work. A clean result reuses the existing latest version. A lost verifier wakeup is recovered from the durable revision, while an unknown, failed, or mismatched baseline raises a typed permanent error without starting a refresh loop. A populated active graph rejects destructive full refreshes before provider generation or graph writes. After an upgrade or integrity failure, stop SDL-MCP and use `index --force --safe-rebuild <absolute-new-path>` to build every configured repository in a fresh database and validate it after reopen.
+Explicit incremental indexing starts from the previous verified digest, re-reads the active graph before any deletion, and replaces only changed or removed per-file digests with current authoritative results. It is a manual operation; watchers and saved-file reconciliation do not invoke it. When a scan finds no changed files, SDL-MCP validates the current persisted graph before recovery or versioning work. A clean result reuses the existing latest version. A lost verifier wakeup is recovered from the durable revision, while an unknown, failed, or mismatched baseline raises a typed permanent error without starting a refresh loop. A populated active graph rejects destructive full refreshes before provider generation or graph writes. Whole-database safe rebuild is a separately chosen recovery operation, not an automatic response to a targeted update failure.
 
-Durable saved-file patches advance the current versioned manifest instead of resetting integrity to `unknown`. Saved-file reconciliation atomically commits file, symbol, edge, parser-provenance, manifest, and revision changes in one foreground transaction. The revision remains `verifying` until the coalescing worker verifies the exact graph and parser-provenance structure, then publishes the `complete` or `partial` coverage summary with the verified graph state in a separate transaction. A phase failure marks the revision failed and blocks the next mutation. This envelope covers saved edits, watcher reconciliation, checkpoint recovery, and indexed write tools.
+Durable saved-file reconciliation advances the current versioned manifest without resetting integrity to `unknown`. The shared save queue prepares changed file facts through configured SCIP or LSP collection, or the recorded parser contract, before it takes database write ownership. The final short transaction validates that the accepted source generation, configuration and dependency inputs, lifecycle epoch, and graph baseline still belong to the work, then commits file, symbol, edge, parser-provenance, manifest, and revision changes together. The verifier subsequently checks that committed graph and publishes the `complete` or `partial` coverage summary; it does not regenerate provider facts. A phase failure retains the newest queued save and does not start an incremental refresh. This envelope covers saved edits, watcher reconciliation, checkpoint recovery, and indexed write tools.
 
 Sync artifact import and pull also reset integrity before their first canonical graph write, including same-version re-imports. If an import fails after partially writing its artifact, the repository remains unverified rather than retaining the previous digest.
 
@@ -192,14 +192,14 @@ Provider runs are persisted to `SemanticProviderRun`. Provider diagnostics and g
 
 ### Incremental Refreshes
 
-Provider-first incremental refreshes start with the normal repository scan so removed files and unchanged files are still detected against LadybugDB metadata. Only changed files enter provider collection:
+Manual provider-first incremental refreshes start with the normal repository scan so removed files and unchanged files are still detected against LadybugDB metadata. Only changed files enter provider collection:
 
 - SCIP incremental writes a temporary newline manifest of changed repo-relative paths and runs `scip-io index --files-from <manifest> --output <temp.scip>`. Only that generated temp index is decoded for the current run; configured root SCIP indexes are ignored so stale provider ranges cannot re-enter changed-file materialization. The temp output does not update the full `index.scip` generator cache.
 - LSP incremental passes only changed scanned files into document-symbol collection. Unchanged files keep their existing graph rows.
 - Provider-covered changed files are materialized into the active graph with existing symbols for those files deleted first, known-fresh writers enabled, provider edges written, and repo-wide external-symbol pruning disabled.
 - Changed files that are uncovered or provider-unusable route through the same legacy incremental fallback path. Users with `indexing.pipeline: "legacy"` keep the legacy incremental process.
 
-Provider-first incremental runs skip shadow staging/finalization because the provider output is intentionally scoped to changed files and cannot represent a complete shadow graph. Post-index finalization receives the changed provider file ids so metrics, memory invalidation, and derived-state work stay scoped to the incremental change set.
+Provider-first incremental runs skip shadow staging/finalization because the provider output is intentionally scoped to changed files and cannot represent a complete shadow graph. Post-index finalization receives the changed provider file ids so metrics, memory invalidation, and derived-state work stay scoped to the explicit incremental change set. Targeted saved-file reconciliation publishes graph facts only; clusters, processes, summaries, and embedding work keep their existing explicit or derived-state workflows.
 
 ### Scan Scope And Coverage
 
@@ -512,9 +512,15 @@ These runs report `provider active rows reused for existing large symbol set`, r
 
 ## Incremental Builds
 
-Provider-first incremental refreshes require a prior provider-first bootstrap in the active graph. Repos without real SCIP or LSP provider symbols use the legacy incremental lane until a full provider-first run establishes the provider baseline.
+Provider-first incremental refreshes require a prior provider-first bootstrap in the active graph and explicit operator or agent approval. Repos without real SCIP or LSP provider symbols use the legacy incremental lane until a full provider-first run establishes the provider baseline. Watchers do not request this path.
 
 For bootstrapped repos, only changed scanned files enter SCIP/LSP provider collection. Provider-covered changed files are replaced in place, deleted files are removed through the normal `File` deletion path, unchanged files keep their existing graph rows, and uncovered or provider-unusable changed files route to legacy incremental fallback. Scoped incremental provider output skips repo-wide external pruning and shadow staging because it is not a complete provider truth set.
+
+### Targeted Saved-file Reconciliation
+
+An accepted save or watcher event uses a smaller path than incremental indexing. The worker queues the current file generation, prepares configured SCIP/LSP facts for the affected file or reuses its parser contract, and validates ownership again before a guarded one-transaction publication. A new save replaces older queued work for that file, so obsolete provider output cannot overwrite the later source.
+
+The reconciliation worker does not run semantic summaries, derived graph algorithms, or embeddings. Optional background Jina or Nomic embedding support is not enabled by this path. If provider preparation cannot produce a valid current result, SDL-MCP keeps the latest saved work queued and reports the blocked state instead of expanding it into a repository index.
 
 ## Current Implementation Status
 

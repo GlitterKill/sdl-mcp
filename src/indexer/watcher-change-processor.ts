@@ -1,14 +1,11 @@
-import { resolve } from "node:path";
+import { getDefaultLiveIndexCoordinator } from "../live-index/coordinator.js";
 
 import {
   GraphIntegrityBaselineError,
   SafeRebuildRequiredError,
   StorageIntegrityError,
 } from "../domain/errors.js";
-import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { ConcurrencyQueueTimeoutError } from "../util/concurrency.js";
-import { logger } from "../util/logger.js";
-import { normalizePath } from "../util/paths.js";
 
 import { ProviderFirstIncrementalReplacementError } from "./indexer-pass1-policy.js";
 import { GraphIntegrityVerificationError } from "./provider-first/persisted-graph-integrity.js";
@@ -63,7 +60,9 @@ export function classifyWatcherReindexFailure(
     }
     if (
       cause instanceof Error &&
-      cause.message.includes("Cannot start a new write transaction in the system")
+      cause.message.includes(
+        "Cannot start a new write transaction in the system",
+      )
     ) {
       return "transient";
     }
@@ -87,97 +86,34 @@ export function classifyWatcherReindexFailure(
   return "unknown";
 }
 
-function pathsIdentifySameWatchedFile(
-  errorPath: string,
-  watchedPath: string,
-  repoRoot?: string,
-): boolean {
-  const normalizedError = normalizePath(errorPath);
-  const normalizedWatched = normalizePath(watchedPath);
-  const normalizedResolvedWatched = repoRoot
-    ? normalizePath(resolve(repoRoot, watchedPath))
-    : undefined;
-  const comparableError =
-    process.platform === "win32"
-      ? normalizedError.toLowerCase()
-      : normalizedError;
-  const comparableWatched =
-    process.platform === "win32"
-      ? normalizedWatched.toLowerCase()
-      : normalizedWatched;
-  const comparableResolvedWatched =
-    process.platform === "win32"
-      ? normalizedResolvedWatched?.toLowerCase()
-      : normalizedResolvedWatched;
-  if (comparableError === comparableWatched) return true;
-  if (
-    comparableResolvedWatched &&
-    comparableError === comparableResolvedWatched
-  ) {
-    return true;
-  }
-  return (
-    !repoRoot &&
-    comparableWatched.includes("/") &&
-    comparableError.endsWith(`/${comparableWatched}`)
-  );
-}
-
-function isMissingWatchedPathError(
-  error: unknown,
-  watchedPath: string,
-  repoRoot?: string,
-): boolean {
-  return boundedCauseChain(error).some((cause) => {
-    if (typeof cause !== "object" || cause === null) return false;
-    const candidate = cause as { code?: unknown; path?: unknown };
-    return (
-      (candidate.code === "ENOENT" || candidate.code === "ENOTDIR") &&
-      typeof candidate.path === "string" &&
-      pathsIdentifySameWatchedFile(candidate.path, watchedPath, repoRoot)
-    );
-  });
-}
-
-export async function processWatchedFileChange(params: {
+/** Admission is synchronous: readiness and provider preparation belong to the worker. */
+export function processWatchedFileChange(params: {
   repoId: string;
   repoRoot?: string;
   filePath: string;
-  indexRepo: IndexRepoFn;
+  removed?: boolean;
+  coordinator?: {
+    recordDiskChange?(input: {
+      repoId: string;
+      filePath: string;
+      removed?: boolean;
+    }): boolean;
+  };
+  // Kept for existing callers; watchers never invoke index or patch callbacks.
+  indexRepo?: IndexRepoFn;
   isWriteReady?: () => boolean;
   patchSavedFileFn?: (input: {
     repoId: string;
     filePath: string;
   }) => Promise<unknown>;
-}): Promise<void> {
-  const {
-    repoId,
-    repoRoot,
-    filePath,
-    indexRepo,
-    isWriteReady,
-    patchSavedFileFn,
-  } = params;
-  if (isWriteReady?.() === false) return;
-
-  if (patchSavedFileFn) {
-    try {
-      await withIndexingGate(() => patchSavedFileFn({ repoId, filePath }));
-      return;
-    } catch (patchError: unknown) {
-      if (!isMissingWatchedPathError(patchError, filePath, repoRoot)) {
-        throw patchError;
-      }
-      // A delete/rename can invalidate more than one file identity, so let the
-      // incremental index reconcile repository scope exactly once.
-      logger.debug("patchSavedFile failed, falling back to incremental index", {
-        repoId,
-        filePath,
-        error:
-          patchError instanceof Error ? patchError.message : String(patchError),
-      });
-    }
-  }
-
-  await indexRepo(repoId, "incremental");
+}): boolean {
+  return (
+    (params.coordinator ?? getDefaultLiveIndexCoordinator()).recordDiskChange?.(
+      {
+        repoId: params.repoId,
+        filePath: params.filePath,
+        ...(params.removed === undefined ? {} : { removed: params.removed }),
+      },
+    ) ?? false
+  );
 }

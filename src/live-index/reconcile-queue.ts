@@ -13,7 +13,7 @@ export interface ReconcileQueueStatus {
 }
 
 export type ReconcileInput =
-  | { kind: "saved"; content: string; sourceHash: string }
+  | { kind: "saved"; sourceHash: string }
   | { kind: "disk-change" }
   | { kind: "removed" };
 export type ReconcileOutcome = "success" | "blocked" | "transient";
@@ -29,6 +29,8 @@ export interface ReconcileClaim {
   readonly enqueuedAt: string | null;
   readonly inventoryNeeded: boolean;
   readonly inventoryGeneration: number;
+  readonly inventoryForce: boolean;
+  readonly inventoryCursor: string | null;
 }
 type FileState = ReconcileFile & {
   pending: boolean;
@@ -54,6 +56,8 @@ type RepoQueueState = {
   inventoryNeeded: boolean;
   inventoryBlocked: boolean;
   inventoryGeneration: number;
+  inventoryForce: boolean;
+  inventoryCursor: string | null;
   sourceGeneration: number;
   sourceWakePending: boolean;
 };
@@ -79,7 +83,7 @@ export class ReconcileQueue {
   private generation = 0;
 
   /**
-   * Returns false if an overflowing saved snapshot was not retained: callers
+   * Returns false if an overflowing saved identity was not retained: callers
    * must not acknowledge that save as pending unless its content is durable.
    * Disk events remain recoverable through the coalesced inventory marker.
    */
@@ -90,7 +94,7 @@ export class ReconcileQueue {
     inputs: Readonly<Record<string, ReconcileInput>> = {},
   ): boolean {
     const state = this.getRepo(repoId);
-    let savedSnapshotsRetained = true;
+    let savedIdentitiesRetained = true;
     const normalizedInputs = new Map(
       Object.entries(inputs).map(([filePath, input]) => [
         normalizePath(filePath),
@@ -113,7 +117,7 @@ export class ReconcileQueue {
         continue;
       if (supplied) state.sourceGeneration = ++this.generation;
       if (!existing && state.files.size >= MAX_QUEUE_ENTRIES) {
-        if (supplied?.kind === "saved") savedSnapshotsRetained = false;
+        if (supplied?.kind === "saved") savedIdentitiesRetained = false;
         this.requireInventory(state);
         continue;
       }
@@ -122,10 +126,15 @@ export class ReconcileQueue {
         state.metadataBlockedFiles.clear();
       }
       // A dependency frontier forces new preparation even when source is unchanged.
+      const input = supplied ?? existing?.input ?? { kind: "disk-change" };
       state.files.set(filePath, {
         filePath,
         generation: ++this.generation,
-        input: { ...(supplied ?? existing?.input ?? { kind: "disk-change" }) },
+        // Saved bytes are durable and read bounded during preparation; never retain caller source strings.
+        input:
+          input.kind === "saved"
+            ? { kind: "saved", sourceHash: input.sourceHash }
+            : { kind: input.kind },
         pending: true,
         blocked: null,
       });
@@ -144,12 +153,15 @@ export class ReconcileQueue {
     }
     if (!state.enqueuedAt || enqueuedAt < state.enqueuedAt)
       state.enqueuedAt = enqueuedAt;
-    return savedSnapshotsRetained;
+    return savedIdentitiesRetained;
   }
 
-  claimNext(maxFiles = MAX_QUEUE_ENTRIES): ReconcileClaim | null {
+  claimNext(
+    maxFiles = MAX_QUEUE_ENTRIES,
+    canRun: (repoId: string) => boolean = () => true,
+  ): ReconcileClaim | null {
     const next = [...this.repos.entries()]
-      .filter(([, state]) => this.ready(state))
+      .filter(([repoId, state]) => canRun(repoId) && this.ready(state))
       .sort((a, b) =>
         (a[1].enqueuedAt ?? "").localeCompare(b[1].enqueuedAt ?? ""),
       )[0];
@@ -183,8 +195,12 @@ export class ReconcileQueue {
           : [...state.invalidations].sort(),
       },
       enqueuedAt: state.enqueuedAt,
-      inventoryNeeded: state.inventoryNeeded && !state.inventoryBlocked,
+      // Overflow must not repeatedly supersede the files that free queue capacity.
+      inventoryNeeded:
+        files.length === 0 && state.inventoryNeeded && !state.inventoryBlocked,
       inventoryGeneration: state.inventoryGeneration,
+      inventoryForce: state.inventoryForce,
+      inventoryCursor: state.inventoryCursor,
     };
     for (const file of files) state.files.get(file.filePath)!.pending = false;
     if (!state.metadataBlocked) {
@@ -199,6 +215,45 @@ export class ReconcileQueue {
       metadataGeneration: state.metadataGeneration,
     };
     return work;
+  }
+
+  requestInventory(repoId: string, force = false): void {
+    const state = this.getRepo(repoId);
+    state.inventoryForce ||= force;
+    state.inventoryCursor = null;
+    this.requireInventory(state);
+    state.sourceWakePending = state.claimed !== null;
+    this.wake(repoId);
+  }
+
+  inventoryCapacity(repoId: string): number {
+    return MAX_QUEUE_ENTRIES - this.getRepo(repoId).files.size;
+  }
+
+  /** Called under the save fence after a complete, still-current inventory. */
+  completeInventory(
+    claim: ReconcileClaim,
+    inputs: readonly { filePath: string; input: ReconcileInput }[],
+    cursor?: string,
+  ): void {
+    if (!claim.inventoryNeeded || !this.isCurrent(claim)) return;
+    this.complete(claim, new Date().toISOString());
+    const state = this.getRepo(claim.repoId);
+    state.inventoryForce = cursor !== undefined && claim.inventoryForce;
+    if (cursor !== undefined) this.requireInventory(state);
+    state.inventoryCursor = cursor ?? null;
+    this.enqueue(
+      claim.repoId,
+      {
+        touchedSymbolIds: [],
+        dependentSymbolIds: [],
+        dependentFilePaths: [],
+        importedFilePaths: [],
+        invalidations: [],
+      },
+      new Date().toISOString(),
+      Object.fromEntries(inputs.map((item) => [item.filePath, item.input])),
+    );
   }
 
   /** Opaque provider inputs include source/project events outside the selected file. */
@@ -221,6 +276,10 @@ export class ReconcileQueue {
       "transient",
     );
     for (const file of claim.files) this.wake(claim.repoId, file.filePath);
+    if (claim.inventoryNeeded) {
+      const state = this.repos.get(claim.repoId);
+      if (state) state.inventoryBlocked = false;
+    }
   }
 
   /** Validate every captured dependency immediately before publishing prepared work. */
@@ -282,6 +341,11 @@ export class ReconcileQueue {
     }
   }
 
+  /** Includes claimed, pending, and retained blocked source ownership. */
+  hasFileWork(repoId: string, filePath: string): boolean {
+    return this.repos.get(repoId)?.files.has(normalizePath(filePath)) ?? false;
+  }
+
   getStatus(repoId: string): ReconcileQueueStatus {
     const state = this.getRepo(repoId);
     return {
@@ -299,8 +363,10 @@ export class ReconcileQueue {
     };
   }
 
-  peekNext(): boolean {
-    return [...this.repos.values()].some((state) => this.ready(state));
+  peekNext(canRun: (repoId: string) => boolean = () => true): boolean {
+    return [...this.repos.entries()].some(
+      ([repoId, state]) => canRun(repoId) && this.ready(state),
+    );
   }
 
   clear(): void {
@@ -372,6 +438,9 @@ export class ReconcileQueue {
     // Keep source/generation only while pending or while results are outstanding.
     for (const [path, file] of state.files)
       if (!file.pending) state.files.delete(path);
+    // A successful retry can free capacity needed by a retained overflow inventory.
+    if (current && !failed && claim.files.length && state.inventoryNeeded)
+      state.inventoryBlocked = false;
     if (
       !state.files.size &&
       !state.touchedSymbolIds.size &&
@@ -415,6 +484,8 @@ export class ReconcileQueue {
   }
 
   private requireInventory(state: RepoQueueState): void {
+    // A new overflow may sort before a prior bounded scan's continuation cursor.
+    state.inventoryCursor = null;
     state.inventoryNeeded = true;
     state.inventoryBlocked = false;
     state.inventoryGeneration = ++this.generation;
@@ -439,6 +510,8 @@ export class ReconcileQueue {
         inventoryNeeded: false,
         inventoryBlocked: false,
         inventoryGeneration: 0,
+        inventoryForce: false,
+        inventoryCursor: null,
         sourceGeneration: ++this.generation,
         sourceWakePending: false,
       };
