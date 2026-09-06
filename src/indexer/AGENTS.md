@@ -55,3 +55,8 @@ Plugin system: `adapter/plugin/` (external adapter loading via manifest)
 - `refreshSymbolEmbeddings` accepts `concurrency` (1-8) and `batchSize` (1-128) from `semantic.embeddingConcurrency` / `semantic.embeddingBatchSize`.
 - Symbol embeddings use model-scoped `SymbolVectorEmbedding` rows. Bootstrap creates the exact model HNSW after the first complete row. Incremental and background repair buffer up to 50 changed rows into one delete/reinsert write while retaining a healthy index; larger refreshes checkpoint, drop, rebuild, and checkpoint the HNSW once. FileSummary embeddings keep their separate thresholded HNSW rebuild path.
 - Omitted/`default` Jina uses FP16 only for Windows DirectML-first throughput sessions; non-Windows automatic, CPU, and deterministic sessions use quantized. Only configured adjacent `dml,cpu` on Windows adds the quantized CPU fallback candidate; explicit variants stay authoritative on every platform. Unsupported-provider filtering and CPU appending happen later in the ONNX session layer.
+
+## SCIP CALL PROOF
+
+- Named import aliases are scoped to the SCIP target symbol and source document. The shared normalizer helper recognizes JS/TS named imports and Rust `use` statements, including grouped imports and `pub` visibility.
+- A Rust alias such as `write_sdl_mcp_config as write_sdl_mcp_config_file` must preserve the call edge and complete call-proof coverage. Do not relax arbitrary symbol-text mismatches or treat `as` casts as imports. Regression: `tests/unit/scip-rust-import-alias.test.ts`.

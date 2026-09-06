@@ -1608,7 +1608,7 @@ function namedImportAliasForImportedToken(
   const block = collectNamedImportBlock(sourceLines, lineNumber);
   if (!block) return "";
   const match = new RegExp(
-    `(?:^|[\\s,{])(?:type\\s+)?${escapeRegExp(importedToken)}\\s+as\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b`,
+    `(?:^|[\\s,{:])(?:type\\s+)?${escapeRegExp(importedToken)}\\s+as\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b`,
   ).exec(block.text);
   return match?.[1] ?? "";
 }
@@ -1639,8 +1639,11 @@ function findNamedImportBlockStart(
   for (let currentLine = lineNumber; currentLine >= lowerBound; currentLine--) {
     const line = sourceLines.get(currentLine);
     if (line === undefined) return undefined;
-    if (/^\s*import\s+(?:type\s+)?\{/.test(line)) return currentLine;
+    // A preceding completed import must not lend aliases to a later cast.
     if (currentLine !== lineNumber && /;\s*$/.test(line)) break;
+    if (/^\s*(?:import\s+(?:type\s+)?\{|(?:pub(?:\([^)]*\))?\s+)?use\s+)/.test(line)) {
+      return currentLine;
+    }
   }
   return undefined;
 }
@@ -1649,11 +1652,16 @@ function findNamedImportBlockEnd(
   sourceLines: ReadonlyMap<number, string>,
   lineNumber: number,
 ): number | undefined {
+  const startLine = findNamedImportBlockStart(sourceLines, lineNumber);
+  const isRustUse = /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+/.test(
+    sourceLines.get(startLine ?? -1) ?? "",
+  );
   const upperBound = lineNumber + IMPORT_ALIAS_BLOCK_SCAN_LIMIT;
   for (let currentLine = lineNumber; currentLine <= upperBound; currentLine++) {
     const line = sourceLines.get(currentLine);
     if (line === undefined) return undefined;
-    if (/}\s*from\s*["'][^"']+["']\s*;?\s*$/.test(line)) {
+    // Rust use statements end at a semicolon, including grouped imports.
+    if (isRustUse ? /;\s*$/.test(line) : /}\s*from\s*["'][^"']+["']\s*;?\s*$/.test(line)) {
       return currentLine;
     }
     if (currentLine !== lineNumber && /^\s*import\s+/.test(line)) break;
