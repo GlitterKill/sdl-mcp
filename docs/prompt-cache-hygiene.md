@@ -35,6 +35,8 @@ the same rule so a repeated invalid call is as cache-stable as a successful one.
 Traversal and realpath checks therefore keep resolved host paths in operational
 logs only; model-facing errors use stable, path-free descriptions.
 
+Agent-format slices retain their required wire-format fields and empty dependency arrays at every response detail level. Generic slice compaction must not remove fields required by the agent wire schema.
+
 Workflow continuation data receives the same deterministic model projection as the first page. Zero-identifier-match hot-path fallbacks are omitted because adjacent source text does not prove identifier relevance. Internal `$N` result piping continues to use raw step data, so response shaping never changes workflow semantics. Persisted runtime artifacts remain byte-faithful after configured redaction; only default model-facing excerpts remove leading command-prompt echoes and recognized Node test-duration suffixes.
 
 Graph-integrity status follows the same contract. `repo.status` exposes only deterministic state, graph Version, current revision, verified revision, content digest, and recovery action; worker timing, queue state, mismatch diagnostics, and internal error text stay in operational logs or benchmark artifacts. The worker publishes through an exact Version-and-revision compare-and-set, so repeated status calls against unchanged state preserve byte-identical fields and key order even when verification runs asynchronously. A `verifying` or `failed` state can remain graph-readable without claiming that the latest revision is verified.

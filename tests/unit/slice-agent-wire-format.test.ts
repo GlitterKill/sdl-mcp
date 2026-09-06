@@ -8,6 +8,7 @@ import {
 import { buildToolResponseEnvelope } from "../../dist/server.js";
 import { SliceBuildResponseSchema } from "../../dist/mcp/tools.js";
 import type { GraphSlice } from "../../dist/domain/types.js";
+import determinismFixtures from "../integration/determinism.fixtures.json" with { type: "json" };
 import {
   installObservabilityTap,
   resetObservabilityTap,
@@ -314,6 +315,28 @@ describe("toAgentGraphSlice", () => {
       ),
     );
     assert.deepStrictEqual(SliceBuildResponseSchema.parse(errorPayload), errorPayload);
+  });
+
+  it("preserves agent slice bytes and schema across detail levels and gateways", async () => {
+    const { RetrieveOutputSchema } = await import("../../dist/code-mode/retrieve.js");
+    const slice = makeMockSlice();
+    const agentSlice = toAgentGraphSlice(slice);
+    const canonical = { sliceHandle: "slice-handle", slice: agentSlice };
+    const before = JSON.stringify(canonical);
+
+    for (const detail of determinismFixtures.agentSliceProjectionDetails) {
+      for (const tool of ["sdl.slice.build", "sdl.retrieve"]) {
+        const args = tool === "sdl.retrieve"
+          ? { repoId: slice.repoId, op: "sliceBuild", args: { wireFormat: "agent" }, detail }
+          : { repoId: slice.repoId, wireFormat: "agent", detail };
+        const payload = toStructuredContent(tool, canonical, args);
+        const schema = tool === "sdl.retrieve" ? RetrieveOutputSchema : SliceBuildResponseSchema;
+        assert.deepStrictEqual(schema.parse(payload), payload);
+        assert.deepStrictEqual(payload.slice, agentSlice);
+        assert.equal(JSON.stringify(toStructuredContent(tool, canonical, args)), JSON.stringify(payload));
+      }
+    }
+    assert.equal(JSON.stringify(canonical), before);
   });
 
   it("validates full sdl.retrieve slice projections for every wire format", async () => {

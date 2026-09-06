@@ -373,6 +373,11 @@ function compactSlice(value: Record<string, unknown>): unknown {
     result.sliceHandle = value.sliceHandle;
   }
   const source = isRecord(value.slice) ? value.slice : value;
+  // Agent slices already have a wire schema; generic compaction removes required fields.
+  if (source.wireFormat === "agent") {
+    result.slice = source;
+    return result;
+  }
   const slice: Record<string, unknown> = {};
   if (Array.isArray(source.startSymbols)) {
     slice.startSymbols = source.startSymbols;

@@ -1289,5 +1289,10 @@
     "sdl.file.write": "Mutates repository files.",
     "sdl.semantic.enrichment.refresh": "Mutates semantic enrichment state.",
     "sdl.search.edit": "Mutates repository files, including multi-file apply and rollback state."
-  }
+  },
+  "agentSliceProjectionDetails": [
+    "compact",
+    "standard",
+    "full"
+  ]
 }
