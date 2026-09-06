@@ -40,6 +40,20 @@ const initRuntimeGuidanceSections = [
 }));
 
 const syncSurfaces = [
+  ...[
+    "templates/SDL.md",
+    "templates/sdl-mcp-agent-workflow/SKILL.md",
+    "docs/agent-workflows.md",
+    "src/mcp/server-instructions.ts",
+  ].map((path) => ({
+    path,
+    required: [
+      "Omit `detail` and `includeDiagnostics` by default",
+      "only for specific fields missing from compact output",
+      "then remove it after that probe",
+      "do not enable diagnostics to reveal stdout",
+    ],
+  })),
   {
     path: "templates/SDL.md",
     required: ["slice.build", "structured retrieval is unavailable", "symbol.edit", "symbolEditPreview", "search.edit", "previewWindow", "explicit user approval in the current turn"],

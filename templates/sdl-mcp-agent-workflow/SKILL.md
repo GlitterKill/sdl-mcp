@@ -11,6 +11,8 @@ When a client bridge returns the raw MCP result, prefer `structuredContent`; use
 text `content` only as a fallback for older servers. Do not emit both or return
 the whole MCP response envelope to the agent.
 
+Omit `detail` and `includeDiagnostics` by default at workflow and step level. Use `detail: "full"` only for specific fields missing from compact output; enable `includeDiagnostics: true` only to investigate operational data, then remove it after that probe. For command evidence, select `outputMode` (`minimal` for success/failure, `summary` for captured command output, `digest` for noisy checks) or follow the returned output continuation; do not enable diagnostics to reveal stdout.
+
 1. Start with `repo.status`.
 2. Use `sdl.context` for task-shaped explain, debug, review, and implement work.
    Its request is flat and requires `budget.maxTokens`; never send `options`,

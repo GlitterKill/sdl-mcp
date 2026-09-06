@@ -2,6 +2,7 @@ export const SDL_MCP_SERVER_INSTRUCTIONS = [
   "At session start, load and follow `sdl-mcp-agent-workflow` when skills are available; otherwise use these instructions. The index-refresh authorization rules below govern if other guidance conflicts.",
   "",
   "Required SDL-MCP workflow:",
+  "Omit `detail` and `includeDiagnostics` by default at workflow and step level. Use `detail: \"full\"` only for specific fields missing from compact output; enable `includeDiagnostics: true` only to investigate operational data, then remove it after that probe. For command evidence, select `outputMode` (`minimal` for success/failure, `summary` for captured command output, `digest` for noisy checks) or follow the returned output continuation; do not enable diagnostics to reveal stdout.",
   "Raw MCP result handling: When a client bridge returns the raw MCP result, prefer `structuredContent`; use text `content` only as a fallback for older servers. Do not emit both or return the whole MCP response envelope to the agent.",
   '1. Confirm `repo.status` through `sdl.workflow` with `fn: "repoStatus"` and `args: {}`.',
   "2. If the correct action is unclear, use `sdl.action.search`; load `sdl.manual` only for the focused schema needed to compose a non-obvious request.",

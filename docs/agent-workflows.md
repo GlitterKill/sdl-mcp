@@ -48,6 +48,8 @@ flowchart LR
     class e1,e2,e3,e4,e5,e6 animate;
 ```
 
+Omit `detail` and `includeDiagnostics` by default at workflow and step level. Use `detail: "full"` only for specific fields missing from compact output; enable `includeDiagnostics: true` only to investigate operational data, then remove it after that probe. For command evidence, select `outputMode` (`minimal` for success/failure, `summary` for captured command output, `digest` for noisy checks) or follow the returned output continuation; do not enable diagnostics to reveal stdout.
+
 ## Complete Tool Reference
 
 SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts move with the generated inventory, so use `npm run docs:tools:check` for current schema coverage. All seven tools registered in Code Mode advertise object-root MCP `outputSchema` metadata, including the universal `sdl.info` tool and the six Code Mode-specific tools. The multi-operation `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file` schemas expose compact stable outer result keys; operation and action schemas remain authoritative for nested payloads. Agents should prefer `responseMode: "auto"` for large responses and run repo-local commands through `runtimeExecute`. Call `usageStats` only when the user asks for token savings, when debugging telemetry, or when persisting/reporting a usage snapshot; when explicitly needed, include the returned `formattedSummary` verbatim in a fenced `text` block.

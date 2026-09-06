@@ -3,9 +3,52 @@ import assert from "node:assert/strict";
 import { buildCatalog } from "../../dist/code-mode/action-catalog.js";
 import { MANUAL_DESCRIPTION } from "../../dist/code-mode/descriptions.js";
 import { FileReadRequestSchema, FileWriteRequestSchema, FileWriteResponseSchema } from "../../dist/mcp/tools.js";
+import { buildToolResponseEnvelope } from "../../dist/server.js";
 import { projectToolResultForModelContent } from "../../dist/mcp/context-response-projection.js";
 
 describe("agent editing and discovery ergonomics", () => {
+
+  it("keeps routine workflow command evidence useful without diagnostic flags", () => {
+    for (const outputMode of ["summary", "digest", "minimal"]) {
+      const args = { repoId: "fixture", outputMode };
+      const canonical = {
+        status: "success", exitCode: 0, durationMs: 99,
+        stdoutSummary: "## main...origin/main",
+        stderrSummary: "",
+        digest: { summary: "checks passed" },
+        artifactHandle: "runtime-fixture-output",
+        truncation: { totalStdoutBytes: 24, totalStderrBytes: 0 },
+      };
+      const runtime = projectToolResultForModelContent("sdl.runtime.execute", canonical, args);
+      const envelope = buildToolResponseEnvelope({
+        results: [{ fn: "runtimeExecute", result: runtime }],
+        diagnostics: { timings: { totalMs: 99 } },
+      }, null, "", "sdl.workflow", {
+        repoId: "fixture", steps: [{ fn: "runtimeExecute", args: { outputMode } }],
+      });
+      const text = JSON.stringify(envelope.structuredContent);
+      assert.doesNotMatch(text, /durationMs|totalMs|diagnostics/);
+      if (outputMode === "summary") assert.match(text, /main\.\.\.origin\/main/);
+      if (outputMode === "digest") assert.match(text, /checks passed/);
+      if (outputMode === "minimal") {
+        assert.match(text, /artifactHandle/);
+        assert.match(text, /runtimeQueryOutput/);
+      }
+      assert.equal(canonical.durationMs, 99);
+    }
+    const failure = buildToolResponseEnvelope({
+      results: [{
+        fn: "runtimeExecute", status: "error",
+        error: "runtime.execute failed: exit code 1",
+        result: { exitCode: 1, stderrSummary: "check failed" },
+      }],
+    }, null, "", "sdl.workflow", {
+      repoId: "fixture", steps: [{ fn: "runtimeExecute", args: { outputMode: "summary" } }],
+    });
+    assert.match(JSON.stringify(failure.structuredContent), /check failed/);
+    assert.match(JSON.stringify(failure.structuredContent), /"status":"error"/);
+  });
+
   it("exposes regex semantics, context bounds and newline-safe examples in focused discovery", () => {
     assert.match(MANUAL_DESCRIPTION, /actions/);
     assert.match(MANUAL_DESCRIPTION, /reuse/i);

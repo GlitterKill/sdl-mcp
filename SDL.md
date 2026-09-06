@@ -357,6 +357,8 @@ Use this after `sdl.context` or `slice.build` identifies the affected files or s
 
 ## 4. Runtime Output Control
 
+Omit `detail` and `includeDiagnostics` by default at workflow and step level. Use `detail: "full"` only for specific fields missing from compact output; enable `includeDiagnostics: true` only to investigate operational data, then remove it after that probe. For command evidence, select `outputMode` (`minimal` for success/failure, `summary` for captured command output, `digest` for noisy checks) or follow the returned output continuation; do not enable diagnostics to reveal stdout.
+
 runtimeExecute executes repository tooling. Permitted uses include build, test, lint, compiler, named scripts, and targeted edit scripts. Do not use it to inspect, search, or print repository files. Use sdl.context or sdl.retrieve for indexed source and sdl.file with op="read" for other files.
 
 Run permitted repo-local tooling through `runtimeExecute` inside `sdl.workflow`.
