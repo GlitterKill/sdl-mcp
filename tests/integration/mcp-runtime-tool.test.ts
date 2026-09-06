@@ -1,12 +1,14 @@
 import { beforeEach, afterEach, describe, it } from "node:test";
 import assert from "node:assert";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import {
   existsSync,
   rmSync,
   mkdirSync,
+  mkdtempSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import {
@@ -38,13 +40,11 @@ import {
  * execution for allowlisted runtimes before more specific policy checks apply.
  */
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 describe("sdl.runtime.execute - MCP Tool Handler", () => {
-  const testDir = join(__dirname, "test-mcp-runtime-tool");
-  const graphDbPath = join(testDir, "graph");
-  const configPath = join(testDir, "sdlmcp.config.json");
+  let testRoot: string;
+  let testDir: string;
+  let graphDbPath: string;
+  let configPath: string;
   const repoId = "test-runtime-repo";
   const originalConfigPath = process.env.SDL_CONFIG;
 
@@ -82,10 +82,12 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
   }
 
   beforeEach(async () => {
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
-    mkdirSync(testDir, { recursive: true });
+    // Keep the repo and its outside-root aliases out of watched source trees.
+    testRoot = mkdtempSync(join(resolve(tmpdir()), "sdl-mcp-runtime-tool-"));
+    testDir = join(testRoot, "repo");
+    graphDbPath = join(testDir, "graph");
+    configPath = join(testDir, "sdlmcp.config.json");
+    mkdirSync(testDir);
 
     // Write a default config with NO runtime section so that
     // RuntimeConfigSchema.parse({}) supplies the built-in defaults.
@@ -143,8 +145,10 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     } else {
       delete process.env.SDL_CONFIG;
     }
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
+    if (existsSync(testRoot)) {
+      assert.equal(dirname(resolve(testDir)), testRoot);
+      assert.equal(dirname(testRoot), resolve(tmpdir()));
+      rmSync(testRoot, { recursive: true, force: true });
     }
   });
 
@@ -1001,7 +1005,6 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     it("classifies absolute reads through the registered root alias", async () => {
       const aliasRoot = `${testDir}-registered-root-alias`;
       const sentinel = join(testDir, "blocked-root-alias-sentinel.txt");
-      if (existsSync(aliasRoot)) rmSync(aliasRoot, { recursive: true, force: true });
       symlinkSync(
         testDir,
         aliasRoot,
@@ -1049,7 +1052,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
         assert.equal(existsSync(sentinel), false);
       } finally {
         if (existsSync(aliasRoot)) {
-          rmSync(aliasRoot, { recursive: true, force: true });
+          unlinkSync(aliasRoot);
         }
       }
     });
@@ -1430,7 +1433,6 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     it("blocks an outside-root filesystem alias that resolves into the repository", async () => {
       const aliasRoot = `${testDir}-outside-target-alias`;
       const sentinel = join(testDir, "blocked-outside-target-alias.txt");
-      if (existsSync(aliasRoot)) rmSync(aliasRoot, { recursive: true, force: true });
       symlinkSync(
         testDir,
         aliasRoot,
@@ -1461,7 +1463,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
         );
         assert.equal(existsSync(sentinel), false);
       } finally {
-        if (existsSync(aliasRoot)) rmSync(aliasRoot, { recursive: true, force: true });
+        if (existsSync(aliasRoot)) unlinkSync(aliasRoot);
       }
     });
 

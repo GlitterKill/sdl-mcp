@@ -1,8 +1,8 @@
 import { beforeEach, afterEach, describe, it } from "node:test";
 import assert from "node:assert";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { existsSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { existsSync, rmSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { SemanticConfigSchema } from "../../dist/config/types.js";
@@ -71,9 +71,6 @@ import {
   type PostIndexSessionTapEvent,
 } from "../../dist/observability/event-tap.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 async function queryFromPublishedVectorHealth<T>(
   snapshot: SymbolVectorHealthSnapshot | null | undefined,
   lanes: {
@@ -89,8 +86,8 @@ async function queryFromPublishedVectorHealth<T>(
 }
 
 describe("Semantic Embedding Pipeline", () => {
-  const testDir = join(__dirname, "test-semantic-embedding");
-  const graphDbPath = join(testDir, "graph");
+  let testDir: string;
+  let graphDbPath: string;
   const repoId = "embed-test-repo";
   const jinaModel = "jina-embeddings-v2-base-code";
   const replacementRaceRepoId = "semantic-replacement-race";
@@ -179,10 +176,9 @@ describe("Semantic Embedding Pipeline", () => {
   ];
 
   beforeEach(async () => {
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
-    mkdirSync(testDir, { recursive: true });
+    // Nested replacement-race source must never enter the checkout's watcher.
+    testDir = mkdtempSync(join(resolve(tmpdir()), "sdl-semantic-embedding-"));
+    graphDbPath = join(testDir, "graph");
 
     await closeLadybugDb();
     await initLadybugDb(graphDbPath);
@@ -241,6 +237,7 @@ describe("Semantic Embedding Pipeline", () => {
     else process.env.SDL_CONFIG_PATH = previousConfigPath;
     await closeLadybugDb();
     if (existsSync(testDir)) {
+      assert.equal(dirname(resolve(testDir)), resolve(tmpdir()));
       rmSync(testDir, { recursive: true, force: true });
     }
   });
