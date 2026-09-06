@@ -221,3 +221,58 @@ describe("ReconcileWorker", () => {
     assert.match(result.stdout, /done/);
   });
 });
+
+it("retains a failed patch while successful siblings finish without automatic retry", async () => {
+  const queue = new ReconcileQueue();
+  const calls: string[] = [];
+  const worker = new ReconcileWorker(queue, {
+    clusterScheduler: { schedule() {}, async waitForIdle() {} },
+    planReconcileWork: () => ({
+      filePaths: ["a.ts", "b.ts"],
+      recomputeDerivedData: false,
+    }),
+    patchSavedFile: async ({ filePath }) => {
+      calls.push(filePath);
+      if (filePath === "a.ts") throw new Error("missing parser");
+      return {
+        frontier: {
+          touchedSymbolIds: [],
+          dependentSymbolIds: [],
+          dependentFilePaths: [],
+          importedFilePaths: [],
+          invalidations: [],
+        },
+      };
+    },
+  });
+  worker.enqueue("failure-siblings", {
+    touchedSymbolIds: [],
+    dependentSymbolIds: [],
+    dependentFilePaths: ["a.ts", "b.ts"],
+    importedFilePaths: [],
+    invalidations: [],
+  });
+  await worker.waitForIdle();
+  assert.deepEqual(calls, ["a.ts", "b.ts"]);
+  assert.equal(queue.getStatus("failure-siblings").queueDepth, 1);
+  assert.equal(queue.getStatus("failure-siblings").lastError, "missing parser");
+  assert.equal(queue.peekNext(), false);
+});
+
+it("does not acknowledge inventory recovery through the legacy worker", async () => {
+  const queue = new ReconcileQueue();
+  const worker = new ReconcileWorker(queue, {
+    clusterScheduler: { schedule() {}, async waitForIdle() {} },
+    planReconcileWork: () => ({ filePaths: [], recomputeDerivedData: false }),
+  });
+  worker.enqueue("overflow", {
+    touchedSymbolIds: [],
+    dependentSymbolIds: [],
+    dependentFilePaths: Array.from({ length: 10_001 }, (_, i) => `file${i}.ts`),
+    importedFilePaths: [],
+    invalidations: [],
+  });
+  await worker.waitForIdle();
+  assert.ok(queue.getStatus("overflow").queueDepth > 0);
+  assert.equal(queue.peekNext(), false);
+});

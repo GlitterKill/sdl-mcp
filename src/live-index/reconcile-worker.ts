@@ -169,6 +169,11 @@ export class ReconcileWorker {
         }
 
         try {
+          if (claimed.inventoryNeeded) {
+            throw new Error(
+              "Reconcile queue requires repository inventory recovery",
+            );
+          }
           const repoEpoch = this.queuedEpochs.get(claimed.repoId);
           if (repoEpoch === undefined) {
             this.queue.clearRepo(claimed.repoId);
@@ -214,6 +219,14 @@ export class ReconcileWorker {
                     );
                   }
                 } catch (fileError) {
+                  this.queue.settleFile(
+                    claimed,
+                    filePath,
+                    "blocked",
+                    fileError instanceof Error
+                      ? fileError.message
+                      : String(fileError),
+                  );
                   logger.warn(
                     "[ReconcileWorker] Failed to patch file " +
                       filePath +
@@ -244,7 +257,7 @@ export class ReconcileWorker {
                 }
               }
 
-              this.queue.complete(claimed.repoId, new Date().toISOString());
+              this.queue.complete(claimed, new Date().toISOString());
             },
             { expectedEpoch: repoEpoch },
           );
@@ -254,7 +267,7 @@ export class ReconcileWorker {
             this.queuedEpochs.delete(claimed.repoId);
           } else {
             this.queue.fail(
-              claimed.repoId,
+              claimed,
               new Date().toISOString(),
               error instanceof Error ? error.message : String(error),
             );
