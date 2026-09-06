@@ -1,185 +1,131 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { it } from "node:test";
 import type { Connection } from "kuzu";
 
-interface CoverageRow {
-  eligible: unknown;
-  covered: unknown;
-}
-
-const JINA_PROPERTY = "embeddingJinaCodeVec";
-const NOMIC_PROPERTY = "embeddingNomicVec";
-const fullCoverage = { eligible: 10n, covered: 10n };
-
-describe("retrieval Symbol coverage cache", () => {
-  it("scopes reuse and invalidation without caching live capability checks", async (t) => {
-    const coverageDb = await import(
-      "../../dist/db/ladybug-retrieval-health.js"
-    );
-    const extensionCaps = await import("../../dist/db/extension-caps.js");
-    const indexLifecycle = await import(
-      "../../dist/retrieval/index-lifecycle.js"
-    );
-    const ladybugDb = await import("../../dist/db/ladybug-queries.js");
-
-    const versions = new Map<string, string | null>([
-      ["repo-a", "v1"],
-      ["repo-b", "v1"],
-    ]);
-    const symbolCalls: string[] = [];
-    let latestVersionCalls = 0;
-    let fileSummaryCalls = 0;
-    let extensionCalls = 0;
-    let showIndexesCalls = 0;
-    let symbolLoader = async (
-      _repoId: string,
-      _property: string,
-    ): Promise<CoverageRow> => fullCoverage;
-
-    t.mock.module("../../dist/db/ladybug-retrieval-health.js", {
-      namedExports: {
-        ...coverageDb,
-        getSymbolRetrievalCoverage: async (
-          _conn: Connection,
-          repoId: string,
-          property: string,
-        ) => {
-          symbolCalls.push(`${repoId}\0${property}`);
-          return symbolLoader(repoId, property);
-        },
-        getFileSummaryRetrievalCoverage: async () => {
-          fileSummaryCalls += 1;
-          return fullCoverage;
-        },
-      },
-    });
-    t.mock.module("../../dist/db/extension-caps.js", {
-      namedExports: {
-        ...extensionCaps,
-        getExtensionCapabilities: () => {
-          extensionCalls += 1;
-          return { fts: true, vector: true };
-        },
-      },
-    });
-    t.mock.module("../../dist/retrieval/index-lifecycle.js", {
-      namedExports: {
-        ...indexLifecycle,
-        showIndexesStrict: async () => {
-          showIndexesCalls += 1;
-          return [];
-        },
-      },
-    });
-    t.mock.module("../../dist/db/ladybug-queries.js", {
-      namedExports: {
-        ...ladybugDb,
-        getLatestVersion: async (_conn: Connection, repoId: string) => {
-          latestVersionCalls += 1;
-          const versionId = versions.get(repoId) ?? null;
-          return versionId ? ({ repoId, versionId } as never) : null;
-        },
-      },
-    });
-
-    const health = await import(
-      "../../dist/retrieval/health.js?symbol-coverage-cache-contract"
-    );
-    const invalidate = Reflect.get(
-      health,
-      "invalidateSymbolRetrievalCoverageCache",
-    );
-    assert.equal(typeof invalidate, "function");
-
-    const conn = {} as Connection;
-    const check = (
-      repoId: string,
-      config: Parameters<typeof health.checkRetrievalHealth>[2] = undefined,
-    ) => health.checkRetrievalHealth(conn, repoId, config);
-
-    await check("repo-a");
-    await check("repo-a");
-    assert.deepEqual(symbolCalls, [`repo-a\0${JINA_PROPERTY}`]);
-    assert.equal(latestVersionCalls, 2);
-    assert.equal(fileSummaryCalls, 2);
-    assert.equal(extensionCalls, 2);
-    assert.equal(showIndexesCalls, 2);
-
-    await check("repo-a", {
-      symbolEmbeddingModels: [
-        "jina-embeddings-v2-base-code",
-        "nomic-embed-text-v1.5",
-      ],
-      fileSummaryEmbeddingModels: [],
-    } as never);
-    assert.deepEqual(symbolCalls.slice(-1), [`repo-a\0${NOMIC_PROPERTY}`]);
-
-    await check("repo-b");
-    const beforeInvalidation = symbolCalls.length;
-    invalidate("repo-a");
-    await check("repo-a");
-    await check("repo-b");
-    assert.equal(symbolCalls.length, beforeInvalidation + 1);
-    assert.deepEqual(symbolCalls.slice(-1), [`repo-a\0${JINA_PROPERTY}`]);
-
-    versions.set("repo-a", "v2");
-    const beforeVersionChange = symbolCalls.length;
-    await check("repo-a");
-    assert.equal(symbolCalls.length, beforeVersionChange + 1);
-
-    versions.set("repo-a", null);
-    const beforeUnversioned = symbolCalls.length;
-    await check("repo-a");
-    await check("repo-a");
-    assert.equal(symbolCalls.length, beforeUnversioned + 2);
-
-    versions.set("repo-a", "v3");
-    invalidate("repo-a");
-    let releaseConcurrent: ((row: CoverageRow) => void) | undefined;
-    symbolLoader = async () =>
-      new Promise<CoverageRow>((resolve) => {
-        releaseConcurrent = resolve;
-      });
-    const beforeConcurrent = symbolCalls.length;
-    const concurrentA = check("repo-a");
-    while (!releaseConcurrent) await Promise.resolve();
-    const concurrentB = check("repo-a");
-    releaseConcurrent(fullCoverage);
-    await Promise.all([concurrentA, concurrentB]);
-    assert.equal(symbolCalls.length, beforeConcurrent + 1);
-
-    versions.set("repo-a", "v4");
-    invalidate("repo-a");
-    let rejectOld: ((error: Error) => void) | undefined;
-    symbolLoader = async () =>
-      new Promise<CoverageRow>((_resolve, reject) => {
-        rejectOld = reject;
-      });
-    const oldVersion = check("repo-a");
-    while (!rejectOld) await Promise.resolve();
-
-    versions.set("repo-a", "v5");
-    symbolLoader = async () => fullCoverage;
-    const beforeRace = symbolCalls.length;
-    await check("repo-a");
-    rejectOld(new Error("old version failed"));
-    await oldVersion;
-    await check("repo-a");
-    assert.equal(symbolCalls.length, beforeRace + 1);
-
-    versions.set("repo-a", "v6");
-    invalidate("repo-a");
-    let failOnce = true;
-    symbolLoader = async () => {
-      if (failOnce) {
-        failOnce = false;
-        throw new Error("transient coverage failure");
-      }
-      return fullCoverage;
-    };
-    const beforeRetry = symbolCalls.length;
-    await check("repo-a");
-    await check("repo-a");
-    assert.equal(symbolCalls.length, beforeRetry + 2);
+it("scopes repository health snapshots by version, model plan, and generation", async (t) => {
+  const coverageDb = await import("../../dist/db/ladybug-retrieval-health.js");
+  const extensionCaps = await import("../../dist/db/extension-caps.js");
+  const lifecycle = await import("../../dist/retrieval/index-lifecycle.js");
+  const ladybugDb = await import("../../dist/db/ladybug-queries.js");
+  const derivedState = await import("../../dist/db/ladybug-derived-state.js");
+  const jina = "jina-embeddings-v2-base-code";
+  const nomic = "nomic-embed-text-v1.5";
+  const versions = new Map<string, string | null>([["repo-a", "v1"], ["repo-b", "v1"]]);
+  const assessmentCalls: string[] = [];
+  let latestVersionCalls = 0;
+  let fileSummaryCalls = 0;
+  let extensionCalls = 0;
+  let showIndexesCalls = 0;
+  let vectorEnabled = true;
+  const rows = (repoId: string) => ({
+    tableState: "present",
+    rows: [jina, nomic].map((model) => ({
+      repoId, model, symbolId: "symbol",
+      embeddingId: `${model}:symbol`,
+      embeddingVectorPresent: true, cardHashPresent: true,
+      embeddingJinaCodeVecPresent: model === jina,
+      embeddingNomicVecPresent: model === nomic,
+    })),
   });
+  let loadRows = async (repoId: string) => rows(repoId);
+  t.mock.module("../../dist/db/ladybug-retrieval-health.js", {
+    namedExports: {
+      ...coverageDb,
+      validateRepoSymbolVectorOwnership: async () => {},
+      countCompleteRepoSymbolVectors: async () => 1,
+      getEligibleRepoSymbolIds: async () => ["symbol"],
+      getRepoSymbolVectorHealthRows: async (_conn: Connection, repoId: string) => {
+        assessmentCalls.push(repoId);
+        return loadRows(repoId);
+      },
+      getFileSummaryRetrievalCoverage: async () => {
+        fileSummaryCalls += 1;
+        return { eligible: 1n, covered: 1n };
+      },
+    },
+  });
+  t.mock.module("../../dist/db/extension-caps.js", {
+    namedExports: { ...extensionCaps, getExtensionCapabilities: () => {
+      extensionCalls += 1;
+      return { fts: true, vector: vectorEnabled };
+    } },
+  });
+  t.mock.module("../../dist/retrieval/index-lifecycle.js", {
+    namedExports: { ...lifecycle, showIndexesStrict: async () => {
+      showIndexesCalls += 1;
+      return [];
+    } },
+  });
+  t.mock.module("../../dist/db/ladybug-queries.js", {
+    namedExports: { ...ladybugDb, getLatestVersion: async (_conn: Connection, repoId: string) => {
+      latestVersionCalls += 1;
+      const versionId = versions.get(repoId);
+      return versionId ? { repoId, versionId } : null;
+    } },
+  });
+  t.mock.module("../../dist/db/ladybug-derived-state.js", {
+    namedExports: { ...derivedState, getDerivedStateFromConnection: async () => ({
+      embeddingLifecycleState: "steady",
+    }) },
+  });
+  const health = await import("../../dist/retrieval/health.js?repository-coverage-cache");
+  const check = (repoId: string, config?: Parameters<typeof health.checkRetrievalHealth>[2]) =>
+    health.checkRetrievalHealth({} as Connection, repoId, config);
+  const invalidate = health.invalidateSymbolRetrievalCoverageCache;
+
+  assert.equal((await check("repo-a")).vectorJinaCode, true);
+  vectorEnabled = false;
+  assert.equal((await check("repo-a")).vectorJinaCode, false);
+  vectorEnabled = true;
+  assert.deepEqual(assessmentCalls, ["repo-a"]);
+  assert.equal(latestVersionCalls, 2);
+  assert.equal(fileSummaryCalls, 2);
+  assert.equal(extensionCalls, 2);
+  assert.equal(showIndexesCalls, 2);
+
+  await check("repo-a", { symbolEmbeddingModels: [jina, nomic], fileSummaryEmbeddingModels: [] } as never);
+  assert.equal(assessmentCalls.length, 2);
+  assert.equal(health.getRepositorySymbolVectorHealthSnapshots("repo-a")?.size, 2);
+  await check("repo-a");
+  await check("repo-b");
+  const beforeInvalidation = assessmentCalls.length;
+  invalidate("repo-a");
+  await check("repo-a");
+  await check("repo-b");
+  assert.equal(assessmentCalls.length, beforeInvalidation + 1);
+
+  versions.set("repo-a", "v2");
+  const beforeVersion = assessmentCalls.length;
+  await check("repo-a");
+  assert.equal(assessmentCalls.length, beforeVersion + 1);
+  versions.set("repo-a", null);
+  assert.equal((await check("repo-a")).vectorJinaCode, false);
+  const beforeUnversioned = assessmentCalls.length;
+  await check("repo-a");
+  assert.equal(assessmentCalls.length, beforeUnversioned);
+
+  // A stale in-flight assessment must not replace a newer generation.
+  versions.set("repo-a", "v3");
+  let release: ((value: ReturnType<typeof rows>) => void) | undefined;
+  loadRows = async () => new Promise<ReturnType<typeof rows>>((resolve) => { release = resolve; });
+  const oldAssessment = check("repo-a");
+  while (!release) await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal((await check("repo-a")).vectorJinaCode, false);
+  versions.set("repo-a", "v4");
+  loadRows = async (repoId) => rows(repoId);
+  assert.equal((await check("repo-a")).vectorJinaCode, true);
+  const generation = health.getRepositorySymbolVectorHealthGeneration("repo-a");
+  release(rows("repo-a"));
+  await oldAssessment;
+  assert.equal(health.getRepositorySymbolVectorHealthGeneration("repo-a"), generation);
+  assert.equal(health.getRepositorySymbolVectorHealthSnapshot("repo-a", jina)?.versionId, "v4");
+
+  // Failed inspection stays unavailable until an explicit invalidation retries it.
+  invalidate("repo-a");
+  loadRows = async () => { throw new Error("transient coverage failure"); };
+  assert.equal((await check("repo-a")).vectorJinaCode, false);
+  loadRows = async (repoId) => rows(repoId);
+  assert.equal((await check("repo-a")).vectorJinaCode, false);
+  invalidate("repo-a");
+  assert.equal((await check("repo-a")).vectorJinaCode, true);
 });

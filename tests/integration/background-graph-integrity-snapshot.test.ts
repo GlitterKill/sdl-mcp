@@ -27,6 +27,7 @@ import {
   withReadOnlyTransaction,
   withTransaction,
 } from "../../dist/db/ladybug-core.js";
+import { resolveSymbolVectorPhysicalIdentity, setRepoSymbolVectorEmbedding } from "../../dist/db/ladybug-symbol-embeddings.js";
 import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 import { withPostIndexWriteSession } from "../../dist/db/write-session.js";
 import { verifyPersistedGraphIntegrityRevision } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
@@ -95,28 +96,16 @@ describe("background graph integrity snapshot", () => {
           ],
         },
       );
-      await exec(
-        conn,
-        `CREATE (e:SymbolVectorEmbedding {
-           embeddingId: $embeddingId,
-           repoId: $repoId,
-           symbolId: $symbolId,
-           model: $model,
-           embeddingVector: $embeddingVector,
-           cardHash: $cardHash,
-           updatedAt: $updatedAt,
-           embeddingJinaCodeVec: $vector
-         })`,
-        {
-          embeddingId: "jina-embeddings-v2-base-code:snapshot-symbol",
-          repoId: "snapshot-embedding-repo",
-          symbolId: "snapshot-symbol",
-          model: "jina-embeddings-v2-base-code",
-          embeddingVector: "snapshot-vector",
-          cardHash: "snapshot-card-hash",
-          updatedAt: "2026-08-26T00:00:00.000Z",
-          vector: new Array<number>(768).fill(0).map((_, index) => index / 768),
-        },
+      await withExclusiveLadybugOperation(() =>
+        setRepoSymbolVectorEmbedding(
+          conn,
+          "snapshot-embedding-repo",
+          "snapshot-symbol",
+          "jina-embeddings-v2-base-code",
+          "snapshot-vector",
+          "snapshot-card-hash",
+          new Array<number>(768).fill(0).map((_, index) => index / 768),
+        ),
       );
     });
   });
@@ -132,7 +121,7 @@ describe("background graph integrity snapshot", () => {
         JSON.stringify(
           await queryAll(
             conn,
-            `MATCH (e:SymbolVectorEmbedding)
+            `MATCH (e:${resolveSymbolVectorPhysicalIdentity("snapshot-embedding-repo", "jina-embeddings-v2-base-code").tableName})
             WHERE e.embeddingId = $embeddingId
             RETURN e.embeddingId AS embeddingId,
                    e.repoId AS repoId,

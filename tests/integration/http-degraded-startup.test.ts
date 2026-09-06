@@ -6,8 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { initValidatedTestLadybugClone } from "../helpers/ladybug-validated-clone.ts";
-
 async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === "win32" && child.pid !== undefined) {
@@ -61,11 +59,8 @@ describe("HTTP degraded startup", () => {
         await conn.close();
         await db.close();
 
-        // Move the raw fixture through the explicit clone capability and a
-        // strict close so the child reaches the incompatible-schema preflight.
-        const { closeLadybugDb } = await import("../../dist/db/ladybug.js");
-        const validatedDbPath = await initValidatedTestLadybugClone(dbPath);
-        await closeLadybugDb({ strict: true });
+        // This unowned, incompatible database must fail the child's storage
+        // preflight; validating it here would reject it before HTTP can start.
 
         await writeFile(
           configPath,
@@ -77,7 +72,7 @@ describe("HTTP degraded startup", () => {
                 languages: ["ts"],
               },
             ],
-            graphDatabase: { path: validatedDbPath },
+            graphDatabase: { path: dbPath },
             indexing: { enableFileWatching: true },
             httpAuth: { enabled: false },
             policy: {},
@@ -97,7 +92,7 @@ describe("HTTP degraded startup", () => {
         });
 
         const childEnv = { ...process.env };
-        childEnv.SDL_GRAPH_DB_PATH = validatedDbPath;
+        childEnv.SDL_GRAPH_DB_PATH = dbPath;
         childEnv.SDL_LOG_LEVEL = "error";
         childEnv.SDL_MCP_DISABLE_NATIVE_ADDON = "1";
         delete childEnv.SDL_GRAPH_DB_DIR;

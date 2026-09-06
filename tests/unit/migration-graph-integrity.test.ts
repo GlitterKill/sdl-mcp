@@ -4,11 +4,8 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { initValidatedTestLadybugClone } from "../helpers/ladybug-validated-clone.ts";
-
 import {
   closeLadybugDb,
-  getLadybugConn,
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
@@ -19,10 +16,9 @@ import {
 } from "../../dist/db/ladybug-core.js";
 import {
   getDerivedState,
-  getDerivedStateSummary,
   markGraphIntegrityVerifiedInTransactionIfVerifying,
 } from "../../dist/db/ladybug-derived-state.js";
-import { LADYBUG_SCHEMA_VERSION } from "../../dist/db/migrations/index.js";
+import { migrations } from "../../dist/db/migrations/index.js";
 import * as m024 from "../../dist/db/migrations/m024-add-symbol-test-case.js";
 import { runPendingMigrations } from "../../dist/db/migration-runner.js";
 
@@ -143,9 +139,24 @@ async function createVersion22Database(
 
 describe("migration: graph integrity revisions and manifest", () => {
   let root = "";
+  let historicalDb: import("kuzu").Database | undefined;
+  let historicalConn: import("kuzu").Connection | undefined;
+
+  async function migrateHistoricalDatabase(dbPath: string) {
+    const kuzu = await import("kuzu");
+    historicalDb = new kuzu.Database(dbPath);
+    historicalConn = new kuzu.Connection(historicalDb);
+    // Exercise the historical chain without crossing the fresh-database boundary.
+    await runPendingMigrations(historicalConn, 22, migrations.filter(({ version }) => version <= 26));
+    return historicalConn;
+  }
 
   afterEach(async () => {
     await closeLadybugDb().catch(() => {});
+    await historicalConn?.close();
+    await historicalDb?.close();
+    historicalConn = undefined;
+    historicalDb = undefined;
     if (root && existsSync(root)) {
       rmSync(root, { recursive: true, force: true });
     }
@@ -211,15 +222,20 @@ describe("migration: graph integrity revisions and manifest", () => {
     const dbPath = join(root, "v22.lbug");
     await createVersion22Database(dbPath);
 
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
-    const rows = await Promise.all([
-      getDerivedState("repo"),
-      getDerivedState("repo-b"),
-    ]);
-    const summary = await getDerivedStateSummary("repo");
-
-    assert.equal(LADYBUG_SCHEMA_VERSION, 26);
+    const conn = await migrateHistoricalDatabase(dbPath);
+    const rows = await queryAll<Record<string, unknown>>(
+      conn,
+      `MATCH (d:DerivedState) RETURN
+       d.graphIntegrityState AS graphIntegrityState,
+       d.graphIntegrityRevision AS graphIntegrityRevision,
+       d.graphIntegrityVerifiedRevision AS graphIntegrityVerifiedRevision,
+       d.graphIntegrityFilelessPruningSupported AS graphIntegrityFilelessPruningSupported,
+       d.graphIntegrityManifestEstablished AS graphIntegrityManifestEstablished,
+       d.graphIntegrityVersionId AS graphIntegrityVersionId,
+       d.graphIntegrityDigest AS graphIntegrityDigest,
+       d.graphIntegrityError AS graphIntegrityError
+       ORDER BY d.repoId`,
+    );
     assert.deepEqual(
       rows.map((row) => ({
         state: row?.graphIntegrityState,
@@ -254,7 +270,6 @@ describe("migration: graph integrity revisions and manifest", () => {
         },
       ],
     );
-    assert.equal(summary?.graphIntegrityRevision, null);
 
     const schemaVersion = await querySingle<{ schemaVersion: unknown }>(
       conn,
@@ -282,8 +297,7 @@ describe("migration: graph integrity revisions and manifest", () => {
     const dbPath = join(root, "partial.lbug");
     await createVersion22Database(dbPath, true);
 
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
+    const conn = await migrateHistoricalDatabase(dbPath);
     await exec(
       conn,
       `CREATE (f:GraphIntegrityFileState {
@@ -333,8 +347,7 @@ describe("migration: graph integrity revisions and manifest", () => {
     const dbPath = join(root, "indexes.lbug");
     await createVersion22Database(dbPath);
 
-    await initValidatedTestLadybugClone(dbPath);
-    const conn = await getLadybugConn();
+    const conn = await migrateHistoricalDatabase(dbPath);
     const indexes = await queryAll<Record<string, unknown>>(
       conn,
       "CALL show_indexes() RETURN *",

@@ -10,6 +10,8 @@ import {
   isWindowsFtsRuntimeUnavailable,
   withWindowsFtsRuntime,
 } from "../../dist/db/ladybug-windows-fts-runtime.js";
+import { resolveSymbolVectorPhysicalIdentity } from "../../dist/db/ladybug-symbol-embeddings.js";
+import { withExclusiveLadybugOperation } from "../../dist/db/ladybug-operation-gate.js";
 import { createVectorIndex } from "../../dist/retrieval/index-lifecycle.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -828,7 +830,7 @@ describe("LadybugDB Edge Queries", () => {
       const kuzuConn = conn as unknown as import("kuzu").Connection;
       const staleVector = [1, ...new Array<number>(767).fill(0)];
       const survivingVector = [0, 1, ...new Array<number>(766).fill(0)];
-      await queries.setSymbolVectorEmbedding(
+      await withExclusiveLadybugOperation(() => queries.setRepoSymbolVectorEmbedding(
         kuzuConn,
         repoId,
         "unresolved:call:staleClustered",
@@ -836,8 +838,8 @@ describe("LadybugDB Edge Queries", () => {
         "stale-placeholder-vector",
         "stale-placeholder-vector-hash",
         staleVector,
-      );
-      await queries.setSymbolVectorEmbedding(
+      ));
+      await withExclusiveLadybugOperation(() => queries.setRepoSymbolVectorEmbedding(
         kuzuConn,
         repoId,
         "edge-from",
@@ -845,7 +847,7 @@ describe("LadybugDB Edge Queries", () => {
         "surviving-symbol-vector",
         "surviving-symbol-vector-hash",
         survivingVector,
-      );
+      ));
       const vectorLoadResult = await withWindowsFtsRuntime(() =>
         exec(conn, "LOAD EXTENSION vector"),
       );
@@ -856,9 +858,9 @@ describe("LadybugDB Edge Queries", () => {
       assert.equal(
         await createVectorIndex(
           kuzuConn,
-          "SymbolVectorEmbedding",
-          "embeddingJinaCodeVec",
-          "symbol_vec_jina_code_v2",
+          resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").tableName,
+          resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").propertyName,
+          resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").indexName,
           768,
         ),
         true,
@@ -879,19 +881,20 @@ describe("LadybugDB Edge Queries", () => {
       assert.strictEqual(Number(row.count), 0);
 
       const embeddingResult = await conn.query(
-        `MATCH (e:SymbolVectorEmbedding {symbolId: 'unresolved:call:staleClustered'})
+        `MATCH (e:${resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").tableName} {symbolId: 'unresolved:call:staleClustered'})
          RETURN count(e) AS count`,
       );
       const embeddingRow = await embeddingResult.getNext();
       embeddingResult.close();
-      assert.strictEqual(Number(embeddingRow.count), 0);
+      // Structural pruning leaves live vectors for exclusive reconciliation.
+      assert.strictEqual(Number(embeddingRow.count), 1);
 
       const neighbors = await queryStoredProcAll<{
         symbolId: string;
         distance: number;
       }>(
         kuzuConn,
-        `CALL QUERY_VECTOR_INDEX('SymbolVectorEmbedding', 'symbol_vec_jina_code_v2', ${JSON.stringify(survivingVector)}, 1, efs := 200) RETURN node.symbolId AS symbolId, distance`,
+        `CALL QUERY_VECTOR_INDEX('${resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").tableName}', '${resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").indexName}', ${JSON.stringify(survivingVector)}, 1, efs := 200) RETURN node.symbolId AS symbolId, distance`,
       );
       assert.strictEqual(neighbors.length, 1);
       assert.strictEqual(neighbors[0]?.symbolId, "edge-from");
@@ -929,7 +932,7 @@ describe("LadybugDB Edge Queries", () => {
          CREATE (s)-[:SYMBOL_IN_REPO]->(target)
          CREATE (s)-[:SYMBOL_IN_REPO]->(other)`,
       );
-      await queries.setSymbolVectorEmbedding(
+      await withExclusiveLadybugOperation(() => queries.setRepoSymbolVectorEmbedding(
         kuzuConn,
         repoId,
         symbolId,
@@ -937,7 +940,7 @@ describe("LadybugDB Edge Queries", () => {
         "shared-stale-vector",
         "shared-stale-vector-hash",
         new Array<number>(768).fill(0.25),
-      );
+      ));
 
       assert.strictEqual(
         await queries.pruneIsolatedPlaceholderSymbols(kuzuConn, repoId),
@@ -946,7 +949,7 @@ describe("LadybugDB Edge Queries", () => {
 
       const result = await conn.query(
         `MATCH (s:Symbol {symbolId: '${symbolId}'})
-         MATCH (e:SymbolVectorEmbedding {symbolId: '${symbolId}'})
+         MATCH (e:${resolveSymbolVectorPhysicalIdentity(repoId, "jina-embeddings-v2-base-code").tableName} {symbolId: '${symbolId}'})
          MATCH (s)-[:SYMBOL_IN_REPO]->(r:Repo)
          RETURN s.repoId AS repoId,
                 e.repoId AS embeddingRepoId,
@@ -957,7 +960,7 @@ describe("LadybugDB Edge Queries", () => {
       assert.deepStrictEqual(rows, [
         {
           repoId: otherRepoId,
-          embeddingRepoId: otherRepoId,
+          embeddingRepoId: repoId,
           membershipRepoId: otherRepoId,
         },
       ]);

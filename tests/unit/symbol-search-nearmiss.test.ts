@@ -1,6 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -17,18 +17,13 @@ import { handleSymbolSearch } from "../../dist/mcp/tools/symbol.js";
 
 describe("symbol.search identifier near misses", () => {
   const repoId = "symbol-search-nearmiss-repo";
-  const dbPath = join(tmpdir(), ".lbug-symbol-search-nearmiss-test-db.lbug");
-  const configPath = join(
-    tmpdir(),
-    `sdl-symbol-search-nearmiss-${Date.now()}.json`,
-  );
+  const tempDir = mkdtempSync(join(tmpdir(), "sdl-symbol-search-nearmiss-"));
+  const dbPath = join(tempDir, "db.lbug");
+  const configPath = join(tempDir, "config.json");
   const previousConfig = process.env.SDL_CONFIG;
   const previousConfigPath = process.env.SDL_CONFIG_PATH;
 
   before(async () => {
-    rmSync(dbPath + ".sdl-lineage.json", { recursive: true, force: true });
-    if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
-    mkdirSync(tmpdir(), { recursive: true });
     writeFileSync(
       configPath,
       JSON.stringify(
@@ -144,9 +139,7 @@ describe("symbol.search identifier near misses", () => {
 
   after(async () => {
     await closeLadybugDb();
-    rmSync(dbPath + ".sdl-lineage.json", { recursive: true, force: true });
-    if (existsSync(dbPath)) rmSync(dbPath, { recursive: true, force: true });
-    if (existsSync(configPath)) rmSync(configPath, { force: true });
+    rmSync(tempDir, { recursive: true, force: true });
     if (previousConfig === undefined) delete process.env.SDL_CONFIG;
     else process.env.SDL_CONFIG = previousConfig;
     if (previousConfigPath === undefined) delete process.env.SDL_CONFIG_PATH;

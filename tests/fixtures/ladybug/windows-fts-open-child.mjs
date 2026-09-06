@@ -20,7 +20,8 @@ async function execute(conn, query, rows = false) {
 }
 
 async function seedFtsDatabase() {
-  const kuzu = await import("kuzu");
+  const { initLadybugDb, getLadybugConn, closeLadybugDb, initValidatedLadybugClone } =
+    await import("../../../dist/db/ladybug.js");
   const { isWindowsFtsRuntimeUnavailable, withWindowsFtsRuntime } =
     await import("../../../dist/db/ladybug-windows-fts-runtime.js");
   const seedPath = join(dirname(dbPath), ".fts-seed", basename(dbPath));

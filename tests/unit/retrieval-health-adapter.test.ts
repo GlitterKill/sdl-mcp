@@ -2,120 +2,81 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import type { Connection } from "kuzu";
 
-it("derives specialized entity/model health from configured exact indexes", async (t) => {
+it("derives specialized health from repository coverage and configured physical indexes", async (t) => {
   const lifecycle = await import("../../dist/retrieval/index-lifecycle.js");
   const extensionCaps = await import("../../dist/db/extension-caps.js");
-  const retrievalHealthDb = await import(
-    "../../dist/db/ladybug-retrieval-health.js"
-  );
-
+  const retrievalHealthDb = await import("../../dist/db/ladybug-retrieval-health.js");
+  const ladybugDb = await import("../../dist/db/ladybug-queries.js");
+  const derivedState = await import("../../dist/db/ladybug-derived-state.js");
+  const { resolveSymbolVectorPhysicalIdentity } = await import("../../dist/db/ladybug-symbol-embeddings.js");
+  const model = "jina-embeddings-v2-base-code";
+  const config = {
+    enabled: true, embeddingProfile: "specialized",
+    symbolEmbeddingModels: [model], fileSummaryEmbeddingModels: ["nomic-embed-text-v1.5"],
+    retrieval: {
+      fts: { indexName: "custom_symbol_fts" },
+      vector: { indexes: { [model]: { indexName: "custom_symbol_jina" } } },
+    },
+  } as never;
+  const identity = resolveSymbolVectorPhysicalIdentity("repo", model, config);
   const indexes = [
-    {
-      name: "custom_symbol_fts",
-      tableName: "Symbol",
-      type: "fts" as const,
-      property: "searchText",
-      extensionLoaded: true,
-      status: "healthy" as const,
-    },
-    {
-      name: lifecycle.ENTITY_FTS_INDEX_NAMES.fileSummary,
-      tableName: "FileSummary",
-      type: "fts" as const,
-      property: "searchText",
-      extensionLoaded: true,
-      status: "healthy" as const,
-    },
-    {
-      name: "custom_symbol_jina",
-      tableName: "SymbolVectorEmbedding",
-      type: "vector" as const,
-      property: "embeddingJinaCodeVec",
-      extensionLoaded: true,
-      status: "healthy" as const,
-    },
-    {
-      name: lifecycle.FILESUMMARY_VECTOR_INDEX_NAMES.nomic,
-      tableName: "FileSummary",
-      type: "vector" as const,
-      property: lifecycle.FILESUMMARY_EMBEDDING_PROPERTIES.nomic.property,
-      extensionLoaded: true,
-      status: "healthy" as const,
-    },
+    { name: "custom_symbol_fts", tableName: "Symbol", type: "fts", property: "searchText", extensionLoaded: true, status: "healthy" },
+    { name: lifecycle.ENTITY_FTS_INDEX_NAMES.fileSummary, tableName: "FileSummary", type: "fts", property: "searchText", extensionLoaded: true, status: "healthy" },
+    { name: identity.indexName, tableName: identity.tableName, type: "vector", property: identity.propertyName, extensionLoaded: true, status: "healthy" },
+    { name: lifecycle.FILESUMMARY_VECTOR_INDEX_NAMES.nomic, tableName: "FileSummary", type: "vector", property: lifecycle.FILESUMMARY_EMBEDDING_PROPERTIES.nomic.property, extensionLoaded: true, status: "healthy" },
   ];
-
+  const symbolIds = Array.from({ length: 2000 }, (_, i) => `symbol-${i}`);
+  let completeCount = symbolIds.length;
   t.mock.module("../../dist/retrieval/index-lifecycle.js", {
-    namedExports: {
-      ...lifecycle,
-      showIndexesStrict: async () => indexes,
-    },
+    namedExports: { ...lifecycle, showIndexesStrict: async () => indexes },
   });
   t.mock.module("../../dist/db/extension-caps.js", {
-    namedExports: {
-      ...extensionCaps,
-      getExtensionCapabilities: () => ({ fts: true, vector: true }),
-    },
+    namedExports: { ...extensionCaps, getExtensionCapabilities: () => ({ fts: true, vector: true }) },
+  });
+  t.mock.module("../../dist/db/ladybug-queries.js", {
+    namedExports: { ...ladybugDb, getLatestVersion: async () => ({ repoId: "repo", versionId: "v1" }) },
+  });
+  t.mock.module("../../dist/db/ladybug-derived-state.js", {
+    namedExports: { ...derivedState, getDerivedStateFromConnection: async () => ({ embeddingLifecycleState: "steady" }) },
   });
   t.mock.module("../../dist/db/ladybug-retrieval-health.js", {
     namedExports: {
       ...retrievalHealthDb,
-      getSymbolRetrievalCoverage: async () => ({
-        eligible: 10n,
-        covered: 8n,
+      validateRepoSymbolVectorOwnership: async () => {},
+      countCompleteRepoSymbolVectors: async () => completeCount,
+      getEligibleRepoSymbolIds: async () => symbolIds,
+      getRepoSymbolVectorHealthRows: async () => ({
+        tableState: "present",
+        rows: symbolIds.slice(0, completeCount).map((symbolId) => ({
+          repoId: "repo", model, symbolId, embeddingId: `${model}:${symbolId}`,
+          embeddingVectorPresent: true, cardHashPresent: true,
+          embeddingJinaCodeVecPresent: true, embeddingNomicVecPresent: false,
+        })),
       }),
-      getFileSummaryRetrievalCoverage: async () => ({
-        eligible: 4n,
-        covered: 2n,
-      }),
+      getFileSummaryRetrievalCoverage: async () => ({ eligible: 4n, covered: 2n }),
     },
   });
-
-  const { checkRetrievalHealth } = await import(
-    "../../dist/retrieval/health.js?specialized-health"
-  );
-  const health = await checkRetrievalHealth(
-    {} as Connection,
-    "repo",
-    {
-      enabled: true,
-      embeddingProfile: "specialized",
-      symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
-      fileSummaryEmbeddingModels: ["nomic-embed-text-v1.5"],
-      retrieval: {
-        fts: { indexName: "custom_symbol_fts" },
-        vector: {
-          indexes: {
-            "jina-embeddings-v2-base-code": {
-              indexName: "custom_symbol_jina",
-            },
-          },
-        },
-      },
-    } as never,
-  );
-
+  const { checkRetrievalHealth, invalidateSymbolRetrievalCoverageCache } =
+    await import("../../dist/retrieval/health.js?specialized-health");
+  const check = () => checkRetrievalHealth({} as Connection, "repo", config);
+  const health = await check();
   assert.equal(health.fts, true);
   assert.equal(health.fileSummaryFts, true);
   assert.equal(health.vectorJinaCode, true);
   assert.equal(health.vectorNomic, false);
   assert.deepEqual(health.vectorByEntityModel, {
-    symbol: {
-      "jina-embeddings-v2-base-code": true,
-    },
-    fileSummary: {
-      "nomic-embed-text-v1.5": true,
-    },
+    symbol: { [model]: true }, fileSummary: { "nomic-embed-text-v1.5": true },
   });
-  assert.deepEqual(health.coveragePermille, {
-    symbolVector: 800,
-    fileSummaryVector: 500,
-  });
+  assert.deepEqual(health.coveragePermille, { symbolVector: 1000, fileSummaryVector: 500 });
   assert.deepEqual(health.modelCoveragePermille, {
-    symbol: {
-      "jina-embeddings-v2-base-code": 800,
-    },
-    fileSummary: {
-      "nomic-embed-text-v1.5": 500,
-    },
+    symbol: { [model]: 1000 }, fileSummary: { "nomic-embed-text-v1.5": 500 },
   });
+
+  // A healthy catalog index cannot make incomplete repository vectors queryable.
+  completeCount = 1600;
+  invalidateSymbolRetrievalCoverageCache("repo");
+  const partial = await check();
+  assert.equal(partial.vectorJinaCode, false);
+  assert.equal(partial.coveragePermille.symbolVector, 800);
+  assert.equal(partial.modelCoveragePermille.symbol[model], 800);
 });

@@ -354,28 +354,26 @@ describe("m007 safe SymbolEmbedding remediation", () => {
 
 describe("SymbolEmbedding migration registry and initializer paths", () => {
   it("keeps m021 before the graph-integrity migration", () => {
-    assert.equal(LADYBUG_SCHEMA_VERSION, 26);
+    assert.equal(migrations.find(({ version }) => version === 27)?.requiresFreshDatabase, true);
     assert.deepEqual(
       computePendingMigrations(migrations, 20).map(({ version }) => version),
-      [21, 22, 23, 24, 25, 26],
+      Array.from({ length: LADYBUG_SCHEMA_VERSION - 20 }, (_, index) => index + 21),
     );
     assert.deepEqual(
       computePendingMigrations(migrations, 7).map(({ version }) => version),
-      Array.from({ length: 19 }, (_, index) => index + 8),
+      Array.from({ length: LADYBUG_SCHEMA_VERSION - 7 }, (_, index) => index + 8),
     );
   });
 
-  it("remediates residual rows when reopening a version-20 database", async () => {
+  it("remediates residual rows through the historical version-20 migration chain", async () => {
     const dbPath = join(testRoot, "version-20.lbug");
     mkdirSync(testRoot, { recursive: true });
     await initLadybugDb(dbPath);
-    let conn = await getLadybugConn();
+    const conn = await getLadybugConn();
     await seedLatestResidual(conn, "version-20-symbol");
     await setSchemaVersion(conn, 20);
-    await closeLadybugDb();
-
-    await initLadybugDb(dbPath);
-    conn = await getLadybugConn();
+    // Historical migration coverage stops before the fresh-database boundary.
+    await runPendingMigrations(conn, 20, migrations.filter(({ version }) => version <= 26));
 
     assert.equal(await getSchemaVersion(conn), 26);
     assert.deepEqual(await readSourceIds(conn), []);
@@ -389,29 +387,22 @@ describe("SymbolEmbedding migration registry and initializer paths", () => {
     const dbPath = join(testRoot, "version-7.lbug");
     mkdirSync(testRoot, { recursive: true });
     await initLadybugDb(dbPath);
-    let conn = await getLadybugConn();
+    const conn = await getLadybugConn();
     await seedLatestResidual(conn, "version-7-symbol");
     await setSchemaVersion(conn, 7);
-    await closeLadybugDb();
 
     const invoked: number[] = [];
-    const originals = migrations.map((migration) => migration);
-    for (let index = 0; index < migrations.length; index++) {
-      const original = migrations[index];
-      if (original.version >= 8) {
-        migrations[index] = {
-          ...original,
-          async up(writeConn) {
-            invoked.push(original.version);
-            await original.up(writeConn);
-          },
-        };
-      }
-    }
+    const historicalMigrations = migrations
+      .filter(({ version }) => version <= 26)
+      .map((original) => ({
+        ...original,
+        async up(writeConn: import("kuzu").Connection) {
+          invoked.push(original.version);
+          await original.up(writeConn);
+        },
+      }));
 
-    try {
-      await initLadybugDb(dbPath);
-      conn = await getLadybugConn();
+    await runPendingMigrations(conn, 7, historicalMigrations);
       assert.deepEqual(
         invoked,
         Array.from({ length: 19 }, (_, index) => index + 8),
@@ -422,11 +413,6 @@ describe("SymbolEmbedding migration registry and initializer paths", () => {
         (await readDestinationRows(conn))[0]?.embeddingMiniLM,
         encoded(384),
       );
-    } finally {
-      for (let index = 0; index < migrations.length; index++) {
-        migrations[index] = originals[index];
-      }
-    }
   });
 
   it("preserves a future schema version without running migrations", async () => {

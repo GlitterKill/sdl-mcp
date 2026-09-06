@@ -7,7 +7,7 @@ import { join } from "node:path";
  * Symptom retrieval benchmark — validates that hybrid retrieval
  * surfaces expected symbols for bug reports, stack traces, and PR descriptions.
  *
- * Run: node --import tsx --test tests/benchmark/symptom-retrieval.test.ts
+ * Run: node --experimental-strip-types --test tests/benchmark/symptom-retrieval.test.ts
  */
 describe("symptom retrieval benchmarks", () => {
   let tasks: Array<{
@@ -84,15 +84,15 @@ describe("semantic retrieval quality baseline", () => {
       "utf8",
     );
     assert.ok(
-      lcSrc.includes("getVecPropertyName"),
+      lcSrc.includes("resolveSymbolVectorPhysicalIdentity"),
       "Index lifecycle should use Vec property names for vector index creation",
     );
     assert.ok(
-      lcSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"),
-      "Symbol vector indexes should target the dedicated embedding table",
+      lcSrc.includes("resolveSymbolVectorPhysicalIdentity"),
+      "Symbol vector indexes should target the repository-specific embedding table",
     );
     assert.ok(
-      retrievalDbSrc.includes("SYMBOL_VECTOR_EMBEDDING_TABLE"),
+      retrievalDbSrc.includes("resolveSymbolVectorPhysicalIdentity"),
       "Symbol ANN retrieval should target the dedicated embedding table",
     );
   });

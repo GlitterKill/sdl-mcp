@@ -299,6 +299,8 @@ async function runTestFile(testFile, index, baseTestEnv, testTempDir) {
     (
       normalizedTestFile === "tests/integration/semantic-embedding.test.ts" ||
       normalizedTestFile === "tests/integration/provider-first-scip-execution.test.ts" ||
+      normalizedTestFile === "tests/integration/repository-vector-exact.test.ts" ||
+      normalizedTestFile === "tests/integration/repository-vector-table-lifecycle.test.ts" ||
       normalizedTestFile === "tests/unit/ladybug-edge-queries.test.ts"
     )
   ) {

@@ -117,7 +117,8 @@ describe("code-mode manual generator", () => {
   });
 
   it("FN_NAME_MAP covers all current actions", () => {
-    const actionNames = Object.keys(createActionMap());
+    // info is a workflow-only meta action, outside the gateway action map.
+    const actionNames = [...Object.keys(createActionMap()), "info"];
 
     assert.strictEqual(Object.keys(FN_NAME_MAP).length, actionNames.length);
     for (const action of actionNames) {

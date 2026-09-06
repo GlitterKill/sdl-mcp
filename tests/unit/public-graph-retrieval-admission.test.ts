@@ -140,7 +140,7 @@ const CENTRAL_GRAPH_WORKFLOW_FNS = new Set(
   ),
 );
 const EXCLUDED_WORKFLOW_FNS = new Set(
-  ACTION_AUDIT.filter((entry) => !entry[3]).map((entry) => entry[1]),
+  [...ACTION_AUDIT.filter((entry) => !entry[3]).map((entry) => entry[1]), "info"],
 );
 
 const GATED_FILE_OPS = new Set(["previewWindow", "sourceWindow"]);
@@ -496,7 +496,7 @@ describe("public graph retrieval admission classifier", () => {
     assert.deepEqual(
       new Set(Object.values(FN_NAME_MAP)),
       new Set(
-        GATEWAY_ACTION_DEFINITIONS.map((definition) => definition.action),
+        [...GATEWAY_ACTION_DEFINITIONS.map((definition) => definition.action), "info"],
       ),
     );
   });

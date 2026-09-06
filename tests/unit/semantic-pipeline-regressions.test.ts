@@ -11,148 +11,40 @@ function readSource(path: string): string {
 }
 
 describe("semantic pipeline regressions", () => {
-  it("checks embedding cache before invoking provider embed (batched)", () => {
+  it("checks repository embedding cache before invoking the initialized provider", () => {
     const source = readSource("src/indexer/embeddings.ts");
-    const fnStart = source.indexOf(
-      "export async function refreshSymbolEmbeddings(",
-    );
-    const nextFnStart = source.indexOf("\nexport ", fnStart + 1);
-    const fnEnd = nextFnStart !== -1 ? nextFnStart : source.length;
-    assert.ok(fnStart !== -1);
-
-    const fnBody = source.slice(fnStart, fnEnd);
-
-    // Phase 4: Batched refresh patterns
-    // 1. storageModel pinned once at start (const, not let)
-    const storageModelIdx = fnBody.indexOf(
-      "const storageModel = provider.isMockFallback",
-    );
-    assert.ok(
-      storageModelIdx !== -1,
-      "refreshSymbolEmbeddings should pin storageModel once at start",
-    );
-
-    // 2. Pre-pass batch load of existing embeddings
-    const prePassIdx = fnBody.indexOf("getSymbolVectorEmbeddings");
-    assert.ok(
-      prePassIdx !== -1,
-      "refreshSymbolEmbeddings should use batch getSymbolVectorEmbeddings",
-    );
-
-    // 3. cardHash computed per symbol in uncached filter loop
-    const cardHashIdx = fnBody.indexOf(
-      "const cardHash = buildCardHash(\n      symbol,\n      prefixedText,\n      jinaCacheCompatibilityKey,\n    )",
-    );
-    assert.ok(
-      cardHashIdx !== -1,
-      "refreshSymbolEmbeddings should compute cardHash for each symbol",
-    );
-
-    // 4. Batch embed call
-    const batchEmbedIdx = fnBody.indexOf(
-      "await measureInference(() => provider.embed(batchTexts))",
-    );
-    assert.ok(
-      batchEmbedIdx !== -1,
-      "refreshSymbolEmbeddings should batch embed calls",
-    );
-
-    // 5. Post-embed recheck for race avoidance
-    const postEmbedIdx = fnBody.indexOf("postEmbedExisting");
-    assert.ok(
-      postEmbedIdx !== -1,
-      "refreshSymbolEmbeddings should recheck cache after embed for race avoidance",
-    );
-
-    // Order checks: pre-pass before batch embed, batch embed before post-check
-    assert.ok(
-      prePassIdx < batchEmbedIdx,
-      "pre-pass cache load should occur before batch embed",
-    );
-    assert.ok(
-      batchEmbedIdx < postEmbedIdx,
-      "batch embed should occur before post-embed recheck",
-    );
-
-    // Cache hit skip pattern in uncached filter loop
-    assert.match(
-      fnBody,
-      /if\s*\(\s*existing\s*&&\s*existing\.cardHash === cardHash\s*\)/s,
-      "refreshSymbolEmbeddings should skip cached symbols before batching",
-    );
-
-    // Batch size source: either the legacy `REFRESH_BATCH_SIZE` constant
-    // (kept as an exported alias) or the resolved `batchSize` local that
-    // clamps the new `params.batchSize` field against
-    // `DEFAULT_EMBEDDING_BATCH_SIZE` / `MAX_EMBEDDING_BATCH_SIZE`.
-    assert.match(
-      fnBody,
-      /REFRESH_BATCH_SIZE|DEFAULT_EMBEDDING_BATCH_SIZE/,
-      "refreshSymbolEmbeddings should reference the batch-size constants",
-    );
+    const start = source.indexOf("export async function refreshSymbolEmbeddings(");
+    const end = source.indexOf("\nfunction isExpectedRepositoryVectorIndexIdentity", start);
+    assert.ok(start !== -1 && end > start);
+    const body = source.slice(start, end);
+    const initialized = body.indexOf("await provider.initialize?.()");
+    const cache = body.indexOf("await getRepoSymbolVectorEmbeddings(");
+    const hash = body.indexOf("const cardHash = buildCardHash(");
+    const embed = body.indexOf("provider.embed(batch.map");
+    assert.ok(initialized >= 0 && initialized < cache);
+    assert.ok(cache < hash && hash < embed);
+    assert.match(body, /if \(existing\?\.cardHash === cardHash\)/);
+    assert.match(body, /provider\.isMockFallback\?\.\(\)[\s\S]*degraded: true/);
+    assert.match(body, /DEFAULT_EMBEDDING_BATCH_SIZE/);
+    assert.match(body, /await validateRepoSymbolVectorOwnership\([\s\S]*await setRepoSymbolVectorEmbeddingBatch\(/);
+    assert.match(body, /assertCompleteRepositoryVectorCoverage/);
   });
 
-  it("retains Symbol HNSW for bounded writes and rebuilds bulk changes", () => {
-    const symbolSource = readSource("src/indexer/embeddings.ts");
-    const symbolStart = symbolSource.indexOf(
-      "export async function refreshSymbolEmbeddings(",
-    );
-    const symbolEnd = symbolSource.indexOf("\nexport ", symbolStart + 1);
-    assert.ok(symbolStart !== -1);
-    const symbolBody = symbolSource.slice(
-      symbolStart,
-      symbolEnd === -1 ? symbolSource.length : symbolEnd,
-    );
-
-    assert.match(
-      symbolBody,
-      /dropVectorIndex\(\s*wConn,\s*SYMBOL_VECTOR_EMBEDDING_TABLE,\s*indexName/s,
-      "bulk Symbol embedding refresh must remove the shared-table HNSW before writes",
-    );
-    assert.match(
-      symbolBody,
-      /symbol-vector-rebuild-pre-drop[\s\S]*symbol-vector-rebuild-post-create/,
-      "Symbol embedding refresh must checkpoint the drop/write/recreate cycle",
-    );
-    assert.match(
-      symbolBody,
-      /dropResult\.status === "failed"[\s\S]*throw new IndexError/,
-      "Symbol embedding refresh must fail before writes when HNSW drop fails",
-    );
-    assert.doesNotMatch(
-      symbolBody,
-      /rebuildMinUncachedRows|SYMBOL_VECTOR_REBUILD_MIN_ROWS/,
-      "the bounded lane must persist rather than defer changed Symbol vectors",
-    );
-    assert.match(
-      symbolSource,
-      /const SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS = 50;/,
-      "the retained-HNSW ceiling must stay pinned to the verified 50-row write",
-    );
-    assert.match(
-      symbolBody,
-      /uncachedItems\.length <= SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS/,
-      "bounded Symbol changes must retain the live HNSW",
-    );
-    assert.match(
-      symbolBody,
-      /uncachedItems\.length > SYMBOL_VECTOR_RETAINED_HNSW_MAX_ROWS/,
-      "larger Symbol changes must use the bulk rebuild path",
-    );
+  it("reconciles repository HNSW around vector mutations", () => {
+    const source = readSource("src/indexer/embeddings.ts");
+    assert.match(source, /const plan = planRepositorySymbolVectorReconciliation\(/);
+    assert.match(source, /if \(plan\.dropExpectedBeforeMutation\)[\s\S]*dropExpectedRepositoryVectorIndex\(\s*writeConn,\s*identity\.tableName,\s*identity\.indexName/s);
+    assert.match(source, /liveHnsw: plan\.retainExpectedIndex/);
+    assert.match(source, /resolveRepositorySymbolVectorIndexMode\(postCount\)/);
+    assert.match(source, /createVectorIndex\(\s*writeConn,\s*identity\.tableName,\s*identity\.propertyName,\s*identity\.indexName/s);
+    assert.match(source, /const result = await dropVectorIndex\(conn, tableName, indexName\);\s*if \(result\.status === "failed"\) \{\s*throw new IndexError/s);
+    assert.match(source, /runHnswRebuildCycle\(/);
   });
 
-  it("fails refresh when a required Symbol HNSW bootstrap fails", () => {
+  it("fails refresh when a required repository HNSW bootstrap fails", () => {
     const source = readSource("src/indexer/embeddings.ts");
-    const createStart = source.indexOf(
-      "const createRequiredVectorIndex = async (): Promise<void> =>",
-    );
-    const createEnd = source.indexOf(
-      "const bootstrapVectorIndex = async (): Promise<void> =>",
-      createStart,
-    );
-    const createBody = source.slice(createStart, createEnd);
-
-    assert.match(createBody, /if \(!ok\)[\s\S]*throw new IndexError/);
+    assert.match(source, /if \(!created\) \{\s*throw new IndexError\(\s*`Failed to create required repository vector index/s);
+    assert.match(source, /if \(requiredMode === "hnsw"\) \{[\s\S]*await queryVectorIndexProbe\(/);
   });
 
   it("runs semantic rebuilds outside ambient indexer sessions", () => {
