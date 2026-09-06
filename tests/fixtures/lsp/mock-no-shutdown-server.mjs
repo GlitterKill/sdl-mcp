@@ -21,6 +21,8 @@ connection.onRequest("initialize", () => ({
 
 connection.onNotification("initialized", () => undefined);
 connection.onRequest("shutdown", () => new Promise(() => undefined));
-connection.onNotification("exit", () => process.exit(0));
+connection.onNotification("exit", () => {
+  if (!process.argv.includes("--ignore-exit")) process.exit(0);
+});
 
 connection.listen();

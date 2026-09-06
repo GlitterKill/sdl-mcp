@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -18,6 +19,107 @@ function npmShim(
 }
 
 describe("SemanticLspClient", () => {
+  it(
+    "retains concurrent disposal ownership until escalation closes the child",
+    { timeout: 10_000 },
+    async (t) => {
+      const client = new SemanticLspClient({
+        serverId: "held-exit",
+        command: process.execPath,
+        args: [
+          join(process.cwd(), "tests/fixtures/lsp/mock-no-shutdown-server.mjs"),
+          "--ignore-exit",
+        ],
+        workspaceRoot: process.cwd(),
+        timeoutMs: 1_000,
+      });
+      await client.start();
+      const originalKill = ChildProcess.prototype.kill;
+      let child: ChildProcess | undefined;
+      let closed = false;
+      const signals: Array<NodeJS.Signals | number | undefined> = [];
+      let childClosed: Promise<void> | undefined;
+      let signalSent!: () => void;
+      const termination = new Promise<void>((resolve) => {
+        signalSent = resolve;
+      });
+      t.mock.method(
+        ChildProcess.prototype,
+        "kill",
+        function (this: ChildProcess, signal?: NodeJS.Signals | number) {
+          child = this;
+          signals.push(signal);
+          childClosed ??= new Promise((resolve) =>
+            this.once("close", () => {
+              closed = true;
+              resolve();
+            }),
+          );
+          signalSent();
+          // Emulate ignored SIGTERM portably, then let escalation kill the real child.
+          return signal === "SIGKILL" ? originalKill.call(this, signal) : true;
+        },
+      );
+      let firstDone = false;
+      let secondDone = false;
+      const first = client.dispose().then(() => {
+        firstDone = true;
+      });
+      let second: Promise<void> | undefined;
+      try {
+        await termination;
+        second = client.dispose().then(() => {
+          secondDone = true;
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(closed, false);
+        assert.equal(
+          firstDone,
+          false,
+          "first dispose must retain the live child",
+        );
+        assert.equal(
+          secondDone,
+          false,
+          "concurrent dispose must join the same drain",
+        );
+        assert.deepEqual(signals, [undefined]);
+        await Promise.all([first, second]);
+        assert.equal(
+          closed,
+          true,
+          "dispose must settle after the actual child close event",
+        );
+        assert.deepEqual(signals, [undefined, "SIGKILL"]);
+        await client.dispose();
+      } finally {
+        if (child && !closed) originalKill.call(child, "SIGKILL");
+        await Promise.all([first, second]);
+        await childClosed;
+        t.mock.restoreAll();
+      }
+    },
+  );
+
+  it(
+    "drains a failed spawn even when its close event precedes disposal",
+    { timeout: 5_000 },
+    async () => {
+      const client = new SemanticLspClient({
+        serverId: "missing-executable",
+        command: join(process.cwd(), "tests/fixtures/lsp/missing-executable"),
+        workspaceRoot: process.cwd(),
+        timeoutMs: 1_000,
+      });
+      try {
+        await assert.rejects(client.start(), /ENOENT/);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      } finally {
+        await Promise.all([client.dispose(), client.dispose()]);
+      }
+    },
+  );
+
   it("guards LSP requests until initialize completes", async () => {
     const client = new SemanticLspClient({
       serverId: "mock",

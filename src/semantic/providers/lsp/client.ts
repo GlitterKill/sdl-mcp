@@ -451,6 +451,8 @@ interface DiagnosticWaiter {
 export class SemanticLspClient {
   private readonly options: LspClientOptions;
   private process: ChildProcessWithoutNullStreams | null = null;
+  private processClosed: Promise<void> | null = null;
+  private disposal: Promise<void> | null = null;
   private connection: MessageConnection | null = null;
   private readonly diagnosticsByUri = new Map<string, Diagnostic[]>();
   private readonly diagnosticWaiters: DiagnosticWaiter[] = [];
@@ -461,7 +463,7 @@ export class SemanticLspClient {
   }
 
   async start(timeoutMs?: number): Promise<InitializeResult> {
-    if (this.connection) {
+    if (this.process || this.connection || this.disposal) {
       throw new Error(`LSP client ${this.options.serverId} is already running`);
     }
 
@@ -476,6 +478,13 @@ export class SemanticLspClient {
       stdio: "pipe",
       windowsHide: true,
       shell: spawnCommand.shell,
+    });
+    // Listen immediately: failed startup or an early exit can precede disposal.
+    this.process = child;
+    this.processClosed = new Promise((resolve) => child.once("close", resolve));
+    const spawned = new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
     });
     const connection = createMessageConnection(
       new StreamMessageReader(child.stdout),
@@ -500,11 +509,11 @@ export class SemanticLspClient {
     });
     connection.listen();
 
-    this.process = child;
     this.connection = connection;
 
     let result: InitializeResult;
     try {
+      await spawned;
       result = await this.sendRequest(
         InitializeRequest,
         {
@@ -651,7 +660,17 @@ export class SemanticLspClient {
     });
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    // Concurrent callers join the same drain; none can release ownership early.
+    this.disposal ??= this.disposeProcess().finally(() => {
+      this.disposal = null;
+    });
+    return this.disposal;
+  }
+
+  private async disposeProcess(): Promise<void> {
+    const child = this.process;
+    const closed = this.processClosed;
     const connection = this.connection;
     if (connection) {
       try {
@@ -678,11 +697,25 @@ export class SemanticLspClient {
         }
       }
     }
-    if (this.process && !this.process.killed) {
-      this.process.kill();
+    if (child) {
+      const isAlive = () =>
+        child.exitCode === null && child.signalCode === null;
+      if (isAlive() && !child.killed) child.kill();
+      // SIGTERM may be ignored. Escalation sends a signal; only close releases
+      // ownership, including when the child exited but its streams are draining.
+      const forceKill = setTimeout(() => {
+        if (isAlive()) child.kill("SIGKILL");
+      }, SHUTDOWN_TIMEOUT_MS);
+      forceKill.unref();
+      try {
+        await closed;
+      } finally {
+        clearTimeout(forceKill);
+      }
     }
     this.connection = null;
     this.process = null;
+    this.processClosed = null;
     this.initialized = false;
     for (const waiter of [...this.diagnosticWaiters]) {
       waiter.resolve();
