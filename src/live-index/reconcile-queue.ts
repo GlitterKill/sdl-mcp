@@ -1,4 +1,5 @@
 import { normalizePath } from "../util/paths.js";
+import { ConcurrencyLimiter } from "../util/concurrency.js";
 import type { DependencyFrontier } from "./dependency-frontier.js";
 
 export interface ReconcileQueueStatus {
@@ -58,6 +59,20 @@ const MAX_QUEUE_ENTRIES = 10_000;
 
 export class ReconcileQueue {
   private readonly repos = new Map<string, RepoQueueState>();
+  // Fence identity survives queue clear/removal while admitted native work drains.
+  private readonly publicationFences = new Map<string, ConcurrencyLimiter>();
+
+  withPublicationFence<T>(
+    repoId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    let fence = this.publicationFences.get(repoId);
+    if (!fence) {
+      fence = new ConcurrencyLimiter({ maxConcurrency: 1 });
+      this.publicationFences.set(repoId, fence);
+    }
+    return fence.run(operation);
+  }
   // Survives repository/file retirement so delayed results cannot match reopened work.
   private generation = 0;
 

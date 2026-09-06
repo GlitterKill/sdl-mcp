@@ -24,6 +24,7 @@ import {
   deleteFileParserStatesByFileIdsInTransaction,
   deleteParserProvenanceForRepoInTransaction,
 } from "./ladybug-parser-provenance.js";
+import { deleteReconcileFileAuthoritiesInTransaction } from "./ladybug-semantic.js";
 import { prepareSymbolsForFileDeletionInTransaction } from "./ladybug-symbols.js";
 
 export interface MetricsRow {
@@ -819,6 +820,7 @@ async function _deleteFilesByIdsInner(
   );
 
   await deleteFileParserStatesByFileIdsInTransaction(conn, uniqueFileIds);
+  await deleteReconcileFileAuthoritiesInTransaction(conn, uniqueFileIds);
 
   // Step 7b: Delete known ownership edges, then detach any stale backward
   // relationship-table entries before removing owned File nodes.

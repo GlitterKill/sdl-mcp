@@ -343,6 +343,19 @@ export async function applyGraphIntegrityFilePatchInTransaction(
     }
   }
   await upsertGraphIntegrityFileStateInTransaction(conn, file);
+  await applyGraphIntegrityFilelessDeltaInTransaction(
+    conn,
+    file.repoId,
+    fileless,
+  );
+}
+
+/** Apply one aggregate delta after all files in a coherent unit are prepared. */
+export async function applyGraphIntegrityFilelessDeltaInTransaction(
+  conn: Connection,
+  repoId: string,
+  fileless: GraphIntegrityFilelessDelta,
+): Promise<void> {
   for (
     let offset = 0;
     offset < fileless.upserts.length;
@@ -361,7 +374,7 @@ export async function applyGraphIntegrityFilePatchInTransaction(
            s.canonicalSymbolJson = row.canonicalSymbolJson,
            s.referenceCount = row.referenceCount
        MERGE (s)-[:GRAPH_INTEGRITY_FILELESS_STATE_IN_REPO]->(r)`,
-      { repoId: file.repoId, rows },
+      { repoId: repoId, rows },
     );
   }
   for (
@@ -373,7 +386,7 @@ export async function applyGraphIntegrityFilePatchInTransaction(
       .slice(offset, offset + GRAPH_INTEGRITY_MANIFEST_BATCH_SIZE)
       .map((symbolId) => ({
         symbolId,
-        stateId: graphIntegrityFilelessStateId(file.repoId, symbolId),
+        stateId: graphIntegrityFilelessStateId(repoId, symbolId),
       }));
     await exec(
       conn,
@@ -381,7 +394,7 @@ export async function applyGraphIntegrityFilePatchInTransaction(
        MATCH (s:Symbol {symbolId: row.symbolId})-[rel:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
        WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)-[:FILE_IN_REPO]->(:Repo {repoId: $repoId})
        DELETE rel`,
-      { repoId: file.repoId, rows },
+      { repoId: repoId, rows },
     );
     await exec(
       conn,
@@ -391,7 +404,7 @@ export async function applyGraphIntegrityFilePatchInTransaction(
          AND s.repoId = $repoId
          AND s.symbolId = row.symbolId
        DELETE rel, s`,
-      { repoId: file.repoId, rows },
+      { repoId: repoId, rows },
     );
   }
 }

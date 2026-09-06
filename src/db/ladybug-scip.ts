@@ -16,6 +16,7 @@ import {
   queryAll,
   querySingle,
   toNumber,
+  toBoolean,
   withTransaction,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
@@ -736,7 +737,7 @@ export async function batchMergeScipEdges(
 
 const SYMBOL_BATCH_SIZE = 100;
 
-interface ScipExternalSymbolRow {
+export interface ScipExternalSymbolRow {
   symbolId: string;
   kind: string;
   name: string;
@@ -752,6 +753,40 @@ interface ScipExternalSymbolRow {
   packageName?: string;
   packageVersion?: string;
   updatedAt: string;
+}
+
+/** Includes fileless targets; null repository reads exact global facts for ownership guards. */
+export async function getProviderExternalSymbolsByIds(
+  conn: Connection,
+  repoId: string | null,
+  symbolIds: readonly string[],
+): Promise<Map<string, ScipExternalSymbolRow & { repoId: string }>> {
+  if (!symbolIds.length) return new Map();
+  const rows = await queryAll<ScipExternalSymbolRow & { repoId: string }>(
+    conn,
+    `MATCH (s:Symbol)${repoId === null ? "" : "-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})"} WHERE s.symbolId IN $symbolIds
+     RETURN s.symbolId AS symbolId, ${repoId === null ? "s.repoId" : "$repoId"} AS repoId, s.kind AS kind, s.name AS name,
+       s.exported AS exported, s.language AS language, s.rangeStartLine AS rangeStartLine,
+       s.rangeStartCol AS rangeStartCol, s.rangeEndLine AS rangeEndLine, s.rangeEndCol AS rangeEndCol,
+       s.external AS external, s.scipSymbol AS scipSymbol, s.source AS source,
+       s.packageName AS packageName, s.packageVersion AS packageVersion, s.updatedAt AS updatedAt
+     ORDER BY s.symbolId`,
+    { ...(repoId === null ? {} : {repoId}), symbolIds: [...symbolIds] },
+  );
+  return new Map(
+    rows.map((row) => [
+      row.symbolId,
+      {
+        ...row,
+        exported: toBoolean(row.exported),
+        external: toBoolean(row.external),
+        rangeStartLine: toNumber(row.rangeStartLine),
+        rangeStartCol: toNumber(row.rangeStartCol),
+        rangeEndLine: toNumber(row.rangeEndLine),
+        rangeEndCol: toNumber(row.rangeEndCol),
+      },
+    ]),
+  );
 }
 
 export async function pruneStaleScipExternalSymbols(

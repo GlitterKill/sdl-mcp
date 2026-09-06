@@ -12,11 +12,13 @@ export interface DependencyFrontier {
 
 export async function buildDependencyFrontier(params: {
   conn: Connection;
+  repoId: string;
   touchedSymbolIds: string[];
   outgoingEdges: Array<{ toSymbolId: string; edgeType: string }>;
   currentFilePath: string;
 }): Promise<DependencyFrontier> {
-  const { conn, touchedSymbolIds, outgoingEdges, currentFilePath } = params;
+  const { conn, repoId, touchedSymbolIds, outgoingEdges, currentFilePath } =
+    params;
 
   const touchedSet = new Set(touchedSymbolIds);
   const dependentSymbolIds = new Set<string>();
@@ -24,7 +26,11 @@ export async function buildDependencyFrontier(params: {
   const importedFilePaths = new Set<string>();
 
   if (touchedSymbolIds.length > 0) {
-    const inboundBySymbol = await ladybugDb.getEdgesToSymbols(conn, touchedSymbolIds);
+    const inboundBySymbol = await ladybugDb.getEdgesToSymbolsInRepo(
+      conn,
+      repoId,
+      touchedSymbolIds,
+    );
     for (const edges of inboundBySymbol.values()) {
       for (const edge of edges) {
         if (touchedSet.has(edge.fromSymbolId)) {
@@ -36,40 +42,51 @@ export async function buildDependencyFrontier(params: {
   }
 
   if (dependentSymbolIds.size > 0) {
-    const dependentSymbols = await ladybugDb.getSymbolsByIds(
+    const dependentSymbols = await ladybugDb.getRepoSymbolFileIdsByIds(
       conn,
+      repoId,
       Array.from(dependentSymbolIds),
     );
     const fileIds = new Set<string>();
     for (const symbol of dependentSymbols.values()) {
-      fileIds.add(symbol.fileId);
+      fileIds.add(symbol);
     }
     const filesById = await ladybugDb.getFilesByIds(conn, Array.from(fileIds));
     for (const file of filesById.values()) {
-      if (file.relPath !== currentFilePath) {
+      if (file.repoId === repoId && file.relPath !== currentFilePath) {
         dependentFilePaths.add(file.relPath);
       }
     }
   }
 
   const importedTargetIds = outgoingEdges
-    .filter((edge) => edge.edgeType === "import" && !edge.toSymbolId.startsWith("unresolved:"))
+    .filter(
+      (edge) =>
+        edge.edgeType === "import" &&
+        !edge.toSymbolId.startsWith("unresolved:"),
+    )
     .map((edge) => edge.toSymbolId);
   if (importedTargetIds.length > 0) {
-    const importedSymbols = await ladybugDb.getSymbolsByIds(conn, importedTargetIds);
+    const importedSymbols = await ladybugDb.getRepoSymbolFileIdsByIds(
+      conn,
+      repoId,
+      importedTargetIds,
+    );
     const fileIds = new Set<string>();
     for (const symbol of importedSymbols.values()) {
-      fileIds.add(symbol.fileId);
+      fileIds.add(symbol);
     }
     const filesById = await ladybugDb.getFilesByIds(conn, Array.from(fileIds));
     for (const file of filesById.values()) {
-      if (file.relPath !== currentFilePath) {
+      if (file.repoId === repoId && file.relPath !== currentFilePath) {
         importedFilePaths.add(file.relPath);
       }
     }
   }
 
-  const invalidations: Array<"metrics" | "clusters" | "processes"> = ["metrics"];
+  const invalidations: Array<"metrics" | "clusters" | "processes"> = [
+    "metrics",
+  ];
   if (dependentSymbolIds.size > 0) {
     invalidations.push("clusters", "processes");
   }

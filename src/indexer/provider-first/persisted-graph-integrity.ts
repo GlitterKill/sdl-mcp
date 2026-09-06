@@ -1,6 +1,7 @@
 import { createHash, type Hash } from "node:crypto";
 
 import type { Connection } from "kuzu";
+import { invalidateReconcileAuthoritiesInTransaction } from "../../db/ladybug-semantic.js";
 
 import {
   DatabaseError,
@@ -953,6 +954,7 @@ export class PersistedGraphIntegritySession {
           this.repoId,
           manifest,
         );
+        await invalidateReconcileAuthoritiesInTransaction(txConn, this.repoId);
         return nextRevision;
       }),
     );
@@ -1893,7 +1895,7 @@ export async function verifyPersistedGraphIntegrityRevision(
  * and placeholder field exactly as persisted. Dependency placeholders are
  * physically normalized during finalization instead of being hidden here.
  */
-function canonicalizePersistedGraphIntegritySymbol(
+export function canonicalizePersistedGraphIntegritySymbol(
   symbol: CanonicalSymbol,
 ): CanonicalSymbol {
   if (

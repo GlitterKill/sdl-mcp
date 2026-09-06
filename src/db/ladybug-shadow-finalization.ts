@@ -1191,6 +1191,7 @@ async function readSemanticProviderRunsForRepo(
   }>(
     conn,
     `MATCH (r:SemanticProviderRun {repoId: $repoId})
+     WHERE NOT starts_with(r.runId, '__sdl_reconcile_authority_v1__')
      RETURN r.runId AS runId,
             r.repoId AS repoId,
             r.providerType AS providerType,

@@ -119,6 +119,40 @@ export async function deleteProviderReplacementSymbols(
   }
 }
 
+/** Bounded DML only; caller owns the transaction and the publication fence. */
+export async function deleteProviderReplacementSymbolsInTransaction(
+  conn: Connection,
+  repoId: string,
+  fileIds: readonly string[],
+  incomingSymbolIds: readonly string[],
+): Promise<void> {
+  const ids = await collectProviderReplacementSymbolIds(
+    conn,
+    repoId,
+    fileIds,
+    incomingSymbolIds,
+  );
+  if (ids.length > LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT) {
+    throw new IndexError(
+      `Provider Symbol replacement would retire ${ids.length} rows, exceeding the LadybugDB safety limit of ${LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT}. A fresh database rebuild is required.`,
+    );
+  }
+  const size = Math.min(
+    resolveLadybugWriteChunkSize("symbols"),
+    PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE * 4,
+  );
+  // Empty files can still own token references. Cleanup is independent of symbols.
+  for (let offset = 0; offset < Math.max(1, ids.length); offset += size) {
+    await retireProviderSymbolsByIds(
+      conn,
+      repoId,
+      ids.slice(offset, offset + size),
+      [...fileIds],
+      offset === 0 ? [...fileIds] : [],
+    );
+  }
+}
+
 async function retireProviderSymbolsByIds(
   conn: Connection,
   repoId: string,

@@ -20,6 +20,12 @@ import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 import { ProviderFirstIncrementalReplacementError } from "../../dist/indexer/indexer-pass1-policy.js";
+import { materializeProviderFacts } from "../../dist/indexer/provider-first/materializer.js";
+import { verifyNoOpIncrementalGraphIntegrity } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
+import {
+  readReconcileFileAuthorities,
+  writeReconcileFileAuthoritiesInTransaction,
+} from "../../dist/db/ladybug-semantic.js";
 import { writeTestScipIndex } from "../fixtures/scip/builder.ts";
 
 const EXISTING_PROVIDER_SYMBOLS = 2_049;
@@ -215,6 +221,50 @@ describe("provider-first incremental replacement safety — integration", () => 
       const derivedStateBefore = await getDerivedState(REPO_ID);
       assert.equal(derivedStateBefore?.graphIntegrityState, "verified");
 
+      const authorityFile = filesBefore[0];
+      await writeReconcileFileAuthoritiesInTransaction(conn, [
+        {
+          repoId: REPO_ID,
+          fileId: authorityFile.fileId,
+          relPath: authorityFile.relPath,
+          graphVersionId: derivedStateBefore!.graphIntegrityVersionId!,
+          sourceHash: authorityFile.contentHash,
+          configHash: "fixture",
+          authorityJson: "{}",
+        },
+      ]);
+      const authorityBefore = await readReconcileFileAuthorities(conn, REPO_ID, [
+        authorityFile.fileId,
+      ]);
+      await verifyNoOpIncrementalGraphIntegrity(REPO_ID);
+      assert.deepEqual(
+        await readReconcileFileAuthorities(conn, REPO_ID, [authorityFile.fileId]),
+        authorityBefore,
+        "manual no-op retains targeted authority",
+      );
+      await assert.rejects(
+        materializeProviderFacts(
+          conn,
+          {
+            files: await ladybugDb.getFilesByRepo(conn, REPO_ID),
+            symbols: [],
+            externalSymbols: [],
+            edges: [],
+            changedFileIds: new Set(filesBefore.map((file) => file.fileId)),
+          },
+          {
+            deleteExistingFileSymbols: true,
+            graphIntegrityExpectationsTracked: true,
+          },
+        ),
+        /safety limit/,
+      );
+      assert.deepEqual(
+        await readReconcileFileAuthorities(conn, REPO_ID, [authorityFile.fileId]),
+        authorityBefore,
+        "rejected direct materialization retains targeted authority",
+      );
+
       const assertUnsafeIncrementalPreservesGraph = async (): Promise<void> => {
         await assert.rejects(
           indexRepo(REPO_ID, "incremental"),
@@ -246,6 +296,10 @@ describe("provider-first incremental replacement safety — integration", () => 
         assert.deepEqual(filesAfter, filesBefore);
         assert.deepEqual(derivedStateAfter, derivedStateBefore);
         assert.equal(derivedStateAfter?.graphIntegrityState, "verified");
+        assert.deepEqual(
+          await readReconcileFileAuthorities(conn, REPO_ID, [authorityFile.fileId]),
+          authorityBefore,
+        );
       };
 
       // Changed-file replacement must fail before provider or legacy writes.

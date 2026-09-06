@@ -510,10 +510,7 @@ export async function upsertSymbolBatch(
   // UNWIND-batched MERGE: collapses N round-trips to one statement per chunk
   // while preserving idempotency (MERGE) and side-effect-only semantics (no
   // RETURN — avoids LadybugDB issue #285 cardinality bug).
-  const chunkSize = resolveLadybugWriteChunkSize(
-    "symbols",
-    options?.chunkSize,
-  );
+  const chunkSize = resolveLadybugWriteChunkSize("symbols", options?.chunkSize);
   await withTransaction(conn, async (txConn) => {
     // Coerce nullable STRING fields to '' — kuzu binder picks ANY type when a
     // struct field is uniformly null. Empty string keeps the shape stable.
@@ -1623,6 +1620,9 @@ export async function getSymbolsByFile(
     packageVersion: string | null;
     scipSymbol: string | null;
     source: string | null;
+    symbolStatus: SymbolStatus | null;
+    placeholderKind: string | null;
+    placeholderTarget: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -1654,6 +1654,9 @@ export async function getSymbolsByFile(
             s.packageVersion AS packageVersion,
             s.scipSymbol AS scipSymbol,
             s.source AS source,
+            s.symbolStatus AS symbolStatus,
+            s.placeholderKind AS placeholderKind,
+            s.placeholderTarget AS placeholderTarget,
             s.updatedAt AS updatedAt${boundedOrderClause}`,
     params,
   );
@@ -1686,6 +1689,9 @@ export async function getSymbolsByFile(
     packageVersion: row.packageVersion,
     scipSymbol: row.scipSymbol,
     source: row.source,
+    symbolStatus: row.symbolStatus ?? "real",
+    placeholderKind: row.placeholderKind,
+    placeholderTarget: row.placeholderTarget,
     updatedAt: row.updatedAt,
   }));
 }
@@ -1975,6 +1981,10 @@ export async function getSymbolsByIds(
     packageName: string | null;
     packageVersion: string | null;
     scipSymbol: string | null;
+    source: string | null;
+    symbolStatus: SymbolRow["symbolStatus"];
+    placeholderKind: string | null;
+    placeholderTarget: string | null;
     updatedAt: string;
   }>(
     conn,
@@ -2008,6 +2018,10 @@ export async function getSymbolsByIds(
             s.packageName AS packageName,
             s.packageVersion AS packageVersion,
             s.scipSymbol AS scipSymbol,
+            s.source AS source,
+            s.symbolStatus AS symbolStatus,
+            s.placeholderKind AS placeholderKind,
+            s.placeholderTarget AS placeholderTarget,
             s.updatedAt AS updatedAt`,
     { symbolIds },
   );
@@ -2041,6 +2055,10 @@ export async function getSymbolsByIds(
       packageName: row.packageName,
       packageVersion: row.packageVersion,
       scipSymbol: row.scipSymbol,
+      source: row.source,
+      symbolStatus: row.symbolStatus,
+      placeholderKind: row.placeholderKind,
+      placeholderTarget: row.placeholderTarget,
       updatedAt: row.updatedAt,
     });
   }
@@ -3584,4 +3602,39 @@ export async function findSymbolByExactName(
     params,
   );
   return rows[0] ?? null;
+}
+
+/** Read global sharing without relying on the denormalized Symbol.repoId. */
+export async function getSymbolIdsInOtherRepos(
+  conn: Connection,
+  repoId: string,
+  symbolIds: string[],
+): Promise<Set<string>> {
+  if (!symbolIds.length) return new Set();
+  const rows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo)
+     WHERE s.symbolId IN $symbolIds AND r.repoId <> $repoId
+     RETURN DISTINCT s.symbolId AS symbolId ORDER BY symbolId`,
+    { repoId, symbolIds },
+  );
+  return new Set(rows.map((row) => row.symbolId));
+}
+
+/** Attach a shared definition without replacing its globally owned properties. */
+export async function attachSymbolRepoMembershipsInTransaction(
+  conn: Connection,
+  repoId: string,
+  symbolIds: string[],
+): Promise<void> {
+  if (!symbolIds.length) return;
+  await exec(
+    conn,
+    `UNWIND $symbolIds AS symbolId
+     MATCH (s:Symbol {symbolId: symbolId}), (r:Repo {repoId: $repoId})
+     OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
+     WITH s, r, existing WHERE existing IS NULL
+     CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+    { repoId, symbolIds },
+  );
 }

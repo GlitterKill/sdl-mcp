@@ -1,8 +1,13 @@
 import type { Connection } from "kuzu";
 
+import { invalidateReconcileAuthoritiesInTransaction } from "../../db/ladybug-semantic.js";
+
 import type { EdgeRow, FileRow, SymbolRow } from "../../db/ladybug-queries.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import { deleteProviderReplacementSymbols } from "../../db/ladybug-provider-first.js";
+import {
+  deleteProviderReplacementSymbols,
+  deleteProviderReplacementSymbolsInTransaction,
+} from "../../db/ladybug-provider-first.js";
 import type { EdgeType, SymbolKind } from "../../domain/types.js";
 import { serializeTestCaseFacet } from "../../util/test-case.js";
 import {
@@ -60,6 +65,26 @@ export interface ProviderFirstGraphRows {
   externalSymbols: ProviderFirstExternalSymbolRow[];
   edges: EdgeRow[];
   changedFileIds: Set<string>;
+}
+
+/** Targeted row publication: no FTS DDL, COPY, pruning, or transaction ownership. */
+export async function materializeProviderRowsInTransaction(
+  conn: Connection,
+  repoId: string,
+  rows: ProviderFirstGraphRows,
+): Promise<void> {
+  await deleteProviderReplacementSymbolsInTransaction(
+    conn,
+    repoId,
+    [...rows.changedFileIds],
+    rows.symbols.map((symbol) => symbol.symbolId),
+  );
+  await ladybugDb.upsertFileBatch(conn, rows.files);
+  await ladybugDb.upsertSymbolBatch(conn, rows.symbols);
+  await ladybugDb.batchMergeExternalSymbols(conn, repoId, rows.externalSymbols);
+  await ladybugDb.insertEdges(conn, rows.edges, {
+    useExistingTransaction: true,
+  });
 }
 
 export interface ProviderFactsToGraphRowsOptions {
@@ -389,6 +414,7 @@ export async function materializeProviderFacts(
       });
     }
     await ladybugDb.withTransaction(conn, async (txConn) => {
+      await invalidateReconcileAuthoritiesInTransaction(txConn, repoId);
       await measurePhase("upsertFiles", async () => {
         await ladybugDb.upsertFileBatch(txConn, rows.files);
       });

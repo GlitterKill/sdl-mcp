@@ -13,6 +13,94 @@ import {
   withTransaction,
 } from "./ladybug-core.js";
 import { normalizePath } from "../util/paths.js";
+import { hashValue } from "../util/hashing.js";
+
+// Internal proof adjuncts share storage only; they are never provider execution telemetry.
+export const RECONCILE_AUTHORITY_PREFIX = "__sdl_reconcile_authority_v1__";
+export interface ReconcileFileAuthority {
+  repoId: string;
+  fileId: string;
+  relPath: string;
+  graphVersionId: string;
+  sourceHash: string;
+  configHash: string;
+  authorityJson: string;
+}
+function reconcileAuthorityId(repoId: string, fileId: string) {
+  return RECONCILE_AUTHORITY_PREFIX + hashValue([repoId, fileId]);
+}
+export async function readReconcileFileAuthorities(
+  conn: Connection,
+  repoId: string,
+  fileIds: readonly string[],
+): Promise<Map<string, ReconcileFileAuthority>> {
+  if (!fileIds.length) return new Map();
+  const rows = await queryAll<{ metadataJson: string }>(
+    conn,
+    `MATCH (r:SemanticProviderRun {repoId: $repoId}) WHERE r.runId IN $ids RETURN r.metadataJson AS metadataJson`,
+    { repoId, ids: fileIds.map((id) => reconcileAuthorityId(repoId, id)) },
+  );
+  const result = new Map<string, ReconcileFileAuthority>();
+  for (const row of rows) {
+    const value = JSON.parse(row.metadataJson) as ReconcileFileAuthority & {
+      kind?: string;
+      version?: number;
+    };
+    if (
+      value.kind !== "reconcile-file-authority" ||
+      value.version !== 1 ||
+      value.repoId !== repoId ||
+      !fileIds.includes(value.fileId)
+    )
+      throw new Error("Invalid reconciliation authority ownership");
+    const { kind: _kind, version: _version, ...authority } = value;
+    result.set(value.fileId, authority);
+  }
+  return result;
+}
+export async function writeReconcileFileAuthoritiesInTransaction(
+  conn: Connection,
+  authorities: readonly ReconcileFileAuthority[],
+): Promise<void> {
+  if (!authorities.length) return;
+  await exec(
+    conn,
+    `UNWIND $rows AS row MERGE (r:SemanticProviderRun {runId: row.id}) SET r.repoId = row.repoId, r.cacheKey = row.fileId, r.metadataJson = row.metadataJson`,
+    {
+      rows: authorities.map((row) => ({
+        id: reconcileAuthorityId(row.repoId, row.fileId),
+        repoId: row.repoId,
+        fileId: row.fileId,
+        metadataJson: JSON.stringify({
+          kind: "reconcile-file-authority",
+          version: 1,
+          ...row,
+        }),
+      })),
+    },
+  );
+}
+export async function deleteReconcileFileAuthoritiesInTransaction(
+  conn: Connection,
+  fileIds: readonly string[],
+): Promise<void> {
+  if (!fileIds.length) return;
+  await exec(
+    conn,
+    `MATCH (r:SemanticProviderRun) WHERE starts_with(r.runId, $prefix) AND r.cacheKey IN $fileIds DELETE r`,
+    { prefix: RECONCILE_AUTHORITY_PREFIX, fileIds: [...fileIds] },
+  );
+}
+export async function invalidateReconcileAuthoritiesInTransaction(
+  conn: Connection,
+  repoId: string,
+): Promise<void> {
+  await exec(
+    conn,
+    `MATCH (r:SemanticProviderRun {repoId: $repoId}) WHERE starts_with(r.runId, $prefix) DELETE r`,
+    { prefix: RECONCILE_AUTHORITY_PREFIX, repoId },
+  );
+}
 
 export interface SemanticEdgeWriteRow {
   sourceSymbolId: string;
@@ -241,6 +329,7 @@ export async function getLatestSemanticProviderRuns(
   }>(
     conn,
     `MATCH (r:SemanticProviderRun {repoId: $repoId})
+     WHERE NOT starts_with(r.runId, '__sdl_reconcile_authority_v1__')
      RETURN r.runId AS runId,
             r.repoId AS repoId,
             r.providerType AS providerType,

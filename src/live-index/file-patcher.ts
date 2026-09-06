@@ -17,6 +17,7 @@ import {
   type GraphIntegrityFileStateRecord,
   type GraphIntegrityFilelessStateRecord,
 } from "../db/ladybug-graph-integrity.js";
+import { deleteReconcileFileAuthoritiesInTransaction } from "../db/ladybug-semantic.js";
 import { symbolCardCache } from "../graph/cache.js";
 import {
   notifyGraphIntegrityVerifier,
@@ -103,6 +104,16 @@ export interface PreparedSavedFilePatch {
   parserContract: DraftParseResult["parserContract"];
   parseResult: DraftParseResult;
   frontier: DependencyFrontier;
+  /** Exact resulting rows, including preserved provider facts, for atomic batch publication. */
+  rows: {
+    file: ladybugDb.FileRow;
+    symbols: ladybugDb.SymbolRow[];
+    edges: ladybugDb.EdgeRow[];
+    references: ladybugDb.SymbolReferenceRow[];
+    parserState: Parameters<
+      typeof upsertFileParserStatesInTransaction
+    >[1][number];
+  };
   /** Caller owns the write-heavy lock and rechecks source/generation before commit.
    * Supplying an admitted writer also makes the caller responsible for publishing failures.
    */
@@ -246,7 +257,7 @@ export async function prepareSavedFilePatch(
         preflight,
       );
   const frontier = await buildDependencyFrontier({
-    conn,
+    conn, repoId: request.repoId,
     touchedSymbolIds: parseResult.symbols.map((symbol) => symbol.symbolId),
     outgoingEdges: parseResult.edges.map((edge) => ({
       toSymbolId: edge.toSymbolId,
@@ -344,6 +355,7 @@ export async function prepareSavedFilePatch(
     | ReturnType<typeof createGraphIntegrityFilelessDelta>
     | undefined;
   let touchedFilelessSymbolIds = new Set<string>();
+  let preparedEdges: ladybugDb.EdgeRow[] = [];
   if (integrityBaseline && hasTrustedFileBaseline) {
     let previousReferences: ReturnType<
       typeof parseGraphIntegrityFilelessReferences
@@ -377,6 +389,7 @@ export async function prepareSavedFilePatch(
         (symbol) => existingEdges.get(symbol.symbolId) ?? [],
       ),
     ];
+    preparedEdges = postWriteEdges;
     const nextFilelessSymbols = createGraphIntegrityFilelessSymbols({
       symbols: expectedSymbols,
       externalSymbols: [],
@@ -454,6 +467,13 @@ export async function prepareSavedFilePatch(
     parserContract: requiredContract,
     parseResult,
     frontier,
+    rows: {
+      file: durableFile,
+      symbols: expectedSymbols,
+      edges: preparedEdges,
+      references: parsedReferences,
+      parserState: nextFileParserState,
+    },
     commit,
   };
 
@@ -493,6 +513,9 @@ export async function prepareSavedFilePatch(
           }
 
           mutationStarted = true;
+          await deleteReconcileFileAuthoritiesInTransaction(txConn, [
+            durableFile.fileId,
+          ]);
           await ladybugDb.upsertFile(txConn, durableFile);
 
           // Always refresh symbol references for this file

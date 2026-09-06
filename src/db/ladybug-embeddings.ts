@@ -417,8 +417,30 @@ export interface SymbolReferenceRow {
   createdAt: string;
 }
 
-export interface InsertSymbolReferencesOptions
-  extends LadybugWriteChunkOptions {}
+export interface InsertSymbolReferencesOptions extends LadybugWriteChunkOptions {}
+
+/** Complete targeted reference state used by saved-file publication equality. */
+export async function getSymbolReferencesByFileIds(
+  conn: Connection,
+  repoId: string,
+  fileIds: readonly string[],
+): Promise<SymbolReferenceRow[]> {
+  if (fileIds.length === 0) return [];
+  const rows = await queryAll<
+    Omit<SymbolReferenceRow, "lineNumber"> & { lineNumber: unknown }
+  >(
+    conn,
+    `MATCH (r:SymbolReference {repoId: $repoId}) WHERE r.fileId IN $fileIds
+     RETURN r.refId AS refId, r.repoId AS repoId, r.fileId AS fileId,
+       r.symbolName AS symbolName, r.lineNumber AS lineNumber, r.createdAt AS createdAt
+     ORDER BY r.fileId, r.refId`,
+    { repoId, fileIds: [...fileIds] },
+  );
+  return rows.map((row) => ({
+    ...row,
+    lineNumber: row.lineNumber == null ? null : toNumber(row.lineNumber),
+  }));
+}
 
 export async function insertSymbolReference(
   conn: Connection,

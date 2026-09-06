@@ -91,7 +91,7 @@ export interface InsertKnownSymbolEdgesOptions
 // (5e-324). Adding 1e-12 to integer values forces the binder to encode
 // them as DOUBLE while losing precision only at the 13th decimal place
 // — negligible for weight/confidence which round to 2-3 places.
-function forceDoubleEncoding(value: number): number {
+export function forceDoubleEncoding(value: number): number {
   return Number.isInteger(value) ? value + 1e-12 : value;
 }
 

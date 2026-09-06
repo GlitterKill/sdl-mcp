@@ -249,23 +249,33 @@ export async function markDerivedStateDirty(
   targetVersionId: string,
   flags: DerivedStateDirtyFlags,
 ): Promise<void> {
+  await withWriteConn((conn) =>
+    markDerivedStateDirtyInTransaction(conn, repoId, targetVersionId, flags),
+  );
+}
+
+/** Keep dirty flags atomic with the row publication that creates the work. */
+export async function markDerivedStateDirtyInTransaction(
+  conn: Connection,
+  repoId: string,
+  targetVersionId: string,
+  flags: DerivedStateDirtyFlags,
+): Promise<void> {
   const updatedAt = getCurrentTimestamp();
-  await withWriteConn(async (wConn) => {
-    await exec(
-      wConn,
-      "MERGE (d:DerivedState {repoId: $repoId}) ON CREATE SET d.clustersDirty = $clustersDirty, d.processesDirty = $processesDirty, d.algorithmsDirty = $algorithmsDirty, d.summariesDirty = $summariesDirty, d.embeddingsDirty = $embeddingsDirty, d.targetVersionId = $targetVersionId, d.updatedAt = $updatedAt ON MATCH SET d.clustersDirty = d.clustersDirty OR $clustersDirty, d.processesDirty = d.processesDirty OR $processesDirty, d.algorithmsDirty = d.algorithmsDirty OR $algorithmsDirty, d.summariesDirty = d.summariesDirty OR $summariesDirty, d.embeddingsDirty = d.embeddingsDirty OR $embeddingsDirty, d.targetVersionId = $targetVersionId, d.updatedAt = $updatedAt",
-      {
-        repoId,
-        clustersDirty: Boolean(flags.clusters),
-        processesDirty: Boolean(flags.processes),
-        algorithmsDirty: Boolean(flags.algorithms),
-        summariesDirty: Boolean(flags.summaries),
-        embeddingsDirty: Boolean(flags.embeddings),
-        targetVersionId,
-        updatedAt,
-      },
-    );
-  });
+  await exec(
+    conn,
+    "MERGE (d:DerivedState {repoId: $repoId}) ON CREATE SET d.clustersDirty = $clustersDirty, d.processesDirty = $processesDirty, d.algorithmsDirty = $algorithmsDirty, d.summariesDirty = $summariesDirty, d.embeddingsDirty = $embeddingsDirty, d.targetVersionId = $targetVersionId, d.updatedAt = $updatedAt ON MATCH SET d.clustersDirty = d.clustersDirty OR $clustersDirty, d.processesDirty = d.processesDirty OR $processesDirty, d.algorithmsDirty = d.algorithmsDirty OR $algorithmsDirty, d.summariesDirty = d.summariesDirty OR $summariesDirty, d.embeddingsDirty = d.embeddingsDirty OR $embeddingsDirty, d.targetVersionId = $targetVersionId, d.updatedAt = $updatedAt",
+    {
+      repoId,
+      clustersDirty: Boolean(flags.clusters),
+      processesDirty: Boolean(flags.processes),
+      algorithmsDirty: Boolean(flags.algorithms),
+      summariesDirty: Boolean(flags.summaries),
+      embeddingsDirty: Boolean(flags.embeddings),
+      targetVersionId,
+      updatedAt,
+    },
+  );
 }
 
 export async function markDerivedStateComputed(

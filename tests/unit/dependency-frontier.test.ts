@@ -111,6 +111,7 @@ describe("buildDependencyFrontier", () => {
     const conn = await getLadybugConn();
     const frontier = await buildDependencyFrontier({
       conn,
+      repoId,
       touchedSymbolIds: ["sym-a"],
       outgoingEdges: [{ toSymbolId: "sym-c", edgeType: "import" }],
       currentFilePath: "src/a.ts",
