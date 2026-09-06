@@ -1,5 +1,3 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import type {
   CallResolutionTelemetry,
   PendingCallEdge,
@@ -18,7 +16,6 @@ import { resolveParserWorkerPoolSize } from "./parser.js";
 import {
   isScannedFileChanged,
   scanRepoForIndex,
-  type ScanRepoForIndexResult,
 } from "./scanner.js";
 import {
   filterProviderFirstFallbackScan,
@@ -148,9 +145,9 @@ import type {
 import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
 import type { EmbeddingMemorySnapshot } from "./embeddings.js";
 import {
-  executeProviderFirstLspIncremental,
+  type executeProviderFirstLspIncremental,
   executeProviderFirstLspFull,
-  executeProviderFirstScipIncremental,
+  type executeProviderFirstScipIncremental,
   executeProviderFirstScipFull,
   resolveProviderFirstExecutionPlan,
   type ProviderFirstCoverageSummary,
@@ -220,10 +217,12 @@ import type {
   ProviderFactSet,
   ProviderFirstPipelineSelection,
 } from "./provider-first/types.js";
+import type { ScipGeneratorCacheDiagnostic } from "../scip/scip-io-runner.js";
 import {
-  runScipIoBeforeIndex,
-  type ScipGeneratorCacheDiagnostic,
-} from "../scip/scip-io-runner.js";
+  cleanupProviderFirstIncrementalTempPaths,
+  executeProviderFirstIncremental,
+  runProviderFirstIncrementalScipIo,
+} from "./provider-first/reconcile-preparation.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
 export { resolveProviderFirstSemanticEligiblePaths } from "./provider-first/semantic-scope.js";
 export {
@@ -1814,64 +1813,6 @@ function providerRowsHaveMaterialization(
   );
 }
 
-async function runProviderFirstIncrementalScipIo(params: {
-  repoId: string;
-  repoRoot: string;
-  repoConfig: RepoConfig;
-  appConfig: AppConfig;
-  changedFiles: ScanRepoForIndexResult["files"];
-  signal?: AbortSignal;
-}): Promise<{
-  diagnostics: ScipPreRefreshDiagnostics;
-  tempPaths: string[];
-}> {
-  const generatorCfg = params.appConfig.scip?.generator;
-  if (!generatorCfg?.enabled) {
-    throw new Error(
-      "Provider-first SCIP incremental execution requires an enabled scip.generator",
-    );
-  }
-  const relPaths = params.changedFiles.map((file) => normalizePath(file.path));
-  const tempRoot = join(
-    params.repoRoot,
-    ".sdl-mcp",
-    "provider-first-incremental",
-  );
-  await mkdir(tempRoot, { recursive: true });
-  const runKey = hashValue({
-    repoId: params.repoId,
-    relPaths,
-    startedAt: Date.now(),
-  }).slice(0, 16);
-  const manifestPath = join(tempRoot, `${runKey}.files.txt`);
-  const outputPath = join(tempRoot, `${runKey}.scip`);
-  await writeFile(manifestPath, `${relPaths.join("\n")}\n`, "utf-8");
-
-  const diagnostics = await runScipIoBeforeIndex({
-    repoRootPath: params.repoRoot,
-    generatorCfg,
-    signal: params.signal,
-    repoLanguages: params.repoConfig.languages,
-    repoConfig: params.repoConfig,
-    repoId: params.repoId,
-    filesFromPath: manifestPath,
-    outputPath,
-  });
-
-  return {
-    diagnostics,
-    tempPaths: [manifestPath, outputPath],
-  };
-}
-
-async function cleanupProviderFirstIncrementalTempPaths(
-  tempPaths: readonly string[],
-): Promise<void> {
-  await Promise.all(
-    tempPaths.map((tempPath) => rm(tempPath, { force: true }).catch(() => undefined)),
-  );
-}
-
 async function countSymbolVersionsForVersion(
   versionId: string,
 ): Promise<number> {
@@ -2925,7 +2866,7 @@ async function indexRepoImpl(
                 });
               }
               if (providerFirstExecutor === "lspIncremental") {
-                return executeProviderFirstLspIncremental({
+                return executeProviderFirstIncremental("lspIncremental", {
                   repoId,
                   repoRoot: repoRow.rootPath,
                   config: appConfig,
@@ -2950,7 +2891,7 @@ async function indexRepoImpl(
                 signal,
               };
               return providerFirstExecutor === "scipIncremental"
-                ? executeProviderFirstScipIncremental(scipParams)
+                ? executeProviderFirstIncremental("scipIncremental", scipParams)
                 : executeProviderFirstScipFull(scipParams);
             },
           );

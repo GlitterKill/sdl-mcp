@@ -86,7 +86,30 @@ export interface SavedFilePatchObserver {
 
 class SavedFilePatchRetry extends Error {}
 
-const RETRY_SAVED_FILE_PATCH = Symbol("retry-saved-file-patch");
+/** Preparation reports corruption without changing ownership or durable state. */
+export class SavedFileBaselineError extends GraphIntegrityVerificationError {
+  constructor(readonly baseline: { versionId: string; revision: number }) {
+    super();
+  }
+}
+
+export interface PreparedSavedFilePatch {
+  repoId: string;
+  filePath: string;
+  content: string;
+  contentHash: string;
+  graphVersionId: string;
+  graphRevision: number;
+  parserContract: DraftParseResult["parserContract"];
+  parseResult: DraftParseResult;
+  frontier: DependencyFrontier;
+  /** Caller owns the write-heavy lock and rechecks source/generation before commit.
+   * Supplying an admitted writer also makes the caller responsible for publishing failures.
+   */
+  commit(writeConn?: Awaited<ReturnType<typeof getLadybugConn>>): Promise<SavedFilePatchResult | typeof RETRY_SAVED_FILE_PATCH>;
+}
+
+export const RETRY_SAVED_FILE_PATCH = Symbol("retry-saved-file-patch");
 
 /** @internal Synchronous benchmark control; production saved edits never call it. */
 export async function captureForegroundPersistedGraphIntegrity(
@@ -103,9 +126,14 @@ export async function patchSavedFile(
   observer?: SavedFilePatchObserver,
 ): Promise<SavedFilePatchResult> {
   for (let attempt = 0; attempt < WATCHER_REINDEX_MAX_ATTEMPTS; attempt += 1) {
-    const result = await withRepoWriteHeavyLock(request.repoId, () =>
-      patchSavedFileUnlocked(request, observer),
-    );
+    const result = await withRepoWriteHeavyLock(request.repoId, async () => {
+      try {
+        return await (await prepareSavedFilePatch(request, observer)).commit();
+      } catch (error) {
+        if (!(error instanceof SavedFileBaselineError)) throw error;
+        return failOwnedSavedFileBaseline(request.repoId, error.baseline);
+      }
+    });
     if (result !== RETRY_SAVED_FILE_PATCH) return result;
     await waitForGraphIntegrityVerifier(request.repoId);
   }
@@ -114,10 +142,12 @@ export async function patchSavedFile(
   );
 }
 
-async function patchSavedFileUnlocked(
+/** Read/parse/diff only. Publication stays deferred until commit is explicitly called. */
+export async function prepareSavedFilePatch(
   request: SavedFilePatchRequest,
   observer?: SavedFilePatchObserver,
-): Promise<SavedFilePatchResult | typeof RETRY_SAVED_FILE_PATCH> {
+): Promise<PreparedSavedFilePatch> {
+  request = { ...request };
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, request.repoId);
   if (!repo) {
@@ -164,7 +194,7 @@ async function patchSavedFileUnlocked(
     );
   } catch (error) {
     if (!(error instanceof GraphIntegrityManifestValidationError)) throw error;
-    return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    throw new SavedFileBaselineError(integrityBaseline);
   }
   if (
     trustedFileState &&
@@ -177,12 +207,12 @@ async function patchSavedFileUnlocked(
       }),
     )
   ) {
-    return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    throw new SavedFileBaselineError(integrityBaseline);
   }
   const hasTrustedFileBaseline =
     trustedFileState !== null || existingSymbols.length === 0;
   if (!hasTrustedFileBaseline) {
-    return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    throw new SavedFileBaselineError(integrityBaseline);
   }
 
   const cached = request.parseResult;
@@ -324,7 +354,7 @@ async function patchSavedFileUnlocked(
           trustedFileState.filelessReferencesJson,
         );
       } catch {
-        return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+        throw new SavedFileBaselineError(integrityBaseline);
       }
     }
 
@@ -381,7 +411,7 @@ async function patchSavedFileUnlocked(
     } catch (error) {
       if (!(error instanceof GraphIntegrityManifestValidationError))
         throw error;
-      return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+      throw new SavedFileBaselineError(integrityBaseline);
     }
     try {
       const nextReferences = createGraphIntegrityFilelessReferenceTuples(
@@ -404,220 +434,243 @@ async function patchSavedFileUnlocked(
         integrityBaseline.pruningSupported,
       );
     } catch {
-      return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+      throw new SavedFileBaselineError(integrityBaseline);
     }
   }
 
   if (!nextFileState || !filelessDelta) {
-    return failOwnedSavedFileBaseline(request.repoId, integrityBaseline);
+    throw new SavedFileBaselineError(integrityBaseline);
   }
 
-  let committedRevision: number | undefined;
-  let mutationStarted = false;
-  try {
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.withTransaction(wConn, async (txConn) => {
-        const currentVersion = await ladybugDb.getLatestVersion(
-          txConn,
-          request.repoId,
-        );
-        const currentDerivedState = await getDerivedStateFromConnection(
-          txConn,
-          request.repoId,
-        );
-        const currentRepoParserState = await getRepoParserState(
-          txConn,
-          request.repoId,
-        );
-        if (
-          currentVersion?.versionId !== integrityBaseline.versionId ||
-          currentDerivedState?.graphIntegrityRevision !==
-            integrityBaseline.revision ||
-          !parserCoverageMatchesCurrentGraph(
-            currentDerivedState,
-            integrityBaseline.versionId,
-            currentRepoParserState,
-          ) ||
-          currentRepoParserState?.coverageDigest !==
-            integrityBaseline.repoParserState.coverageDigest
-        ) {
-          throw new SavedFilePatchRetry();
-        }
-
-        mutationStarted = true;
-        await ladybugDb.upsertFile(txConn, durableFile);
-
-        // Always refresh symbol references for this file
-        await ladybugDb.deleteSymbolReferencesByFileId(
-          txConn,
-          durableFile.fileId,
-        );
-        await ladybugDb.insertSymbolReferences(txConn, parsedReferences);
-        await ladybugDb.upsertSymbolBatch(txConn, symbolsToUpsert);
-
-        // --- Matched symbols: update properties, refresh non-SCIP edges ---
-        if (diff.matched.length > 0) {
-          const matchedOldIds = diff.matched.map((m) => m.old.symbolId);
-
-          // Delete only non-SCIP outgoing edges for matched symbols.
-          // SCIP edges (resolverId === "scip") are preserved.
-          await ladybugDb.deleteNonScipOutgoingEdges(txConn, matchedOldIds);
-
-          // Insert fresh tree-sitter edges for matched symbols.
-          // Filter to edges originating from matched old symbol IDs.
-          const matchedEdges = parseResult.edges
-            .filter((edge) => matchedNewToOldId.has(edge.fromSymbolId))
-            .map((edge) => ({
-              ...edge,
-              // Remap fromSymbolId to the old (stable) symbol ID
-              fromSymbolId:
-                matchedNewToOldId.get(edge.fromSymbolId) ?? edge.fromSymbolId,
-              createdAt: now,
-            }));
-          if (matchedEdges.length > 0) {
-            await ladybugDb.insertEdges(txConn, matchedEdges);
-          }
-        }
-
-        // --- Added symbols: insert fresh ---
-        if (diff.added.length > 0) {
-          // Insert edges originating from added symbols
-          const addedEdges = parseResult.edges
-            .filter((edge) => addedIds.has(edge.fromSymbolId))
-            .map((edge) => ({
-              ...edge,
-              createdAt: now,
-            }));
-          if (addedEdges.length > 0) {
-            await ladybugDb.insertEdges(txConn, addedEdges);
-          }
-        }
-
-        // --- Removed symbols: delete (source != "scip") ---
-        if (diff.removed.length > 0) {
-          const removedIds = diff.removed.map((s) => s.symbolId);
-          await ladybugDb.deleteSymbolsByIds(txConn, removedIds);
-        }
-
-        // --- Preserved symbols: SCIP-only, leave untouched ---
-        // (No action needed -- they survive reconciliation.)
-        if (diff.preserved.length > 0) {
-          logger.debug("SCIP-only symbols preserved during reconciliation", {
-            repoId: request.repoId,
-            filePath: relPath,
-            preservedCount: diff.preserved.length,
-            symbolIds: diff.preserved.map((s) => s.symbolId),
-          });
-        }
-
-        await upsertFileParserStatesInTransaction(txConn, [
-          nextFileParserState,
-        ]);
-        const nextCoverage = existingFile
-          ? {
-              coverageState: currentRepoParserState!.coverageState,
-              coverageDigest: currentRepoParserState!.coverageDigest,
-            }
-          : await ladybugDb.summarizeParserCoverageInTransaction(
-              txConn,
-              request.repoId,
-            );
-        await ladybugDb.upsertRepoParserStateInTransaction(txConn, {
-          ...currentRepoParserState!,
-          ...nextCoverage,
-          graphRevision: integrityBaseline.revision + 1,
-        });
-
-        // Keep physical placeholder rows and their manifest tuples in the same
-        // transaction. ID scoping avoids a repo-wide placeholder scan on each
-        // foreground save.
-        await ladybugDb.normalizeDependencyPlaceholderSymbols(
-          txConn,
-          request.repoId,
-          {
-            fileIds: new Set([durableFile.fileId]),
-            symbolIds: touchedFilelessSymbolIds,
-          },
-        );
-
-        await applyGraphIntegrityFilePatchInTransaction(
-          txConn,
-          nextFileState,
-          filelessDelta,
-        );
-        committedRevision =
-          (await advanceGraphIntegrityRevisionInTransaction(
-            txConn,
-            request.repoId,
-            integrityBaseline.versionId,
-            integrityBaseline.revision,
-          )) ?? undefined;
-        if (committedRevision === undefined) throw new SavedFilePatchRetry();
-      });
-    });
-  } catch (error) {
-    if (error instanceof SavedFilePatchRetry) return RETRY_SAVED_FILE_PATCH;
-    if (mutationStarted) {
-      try {
-        const failed = await markCurrentGraphIntegrityRevisionFailed(
-          request.repoId,
-          integrityBaseline.versionId,
-          integrityBaseline.revision,
-          GRAPH_INTEGRITY_VERIFICATION_FAILURE,
-        );
-        if (!failed) return RETRY_SAVED_FILE_PATCH;
-      } catch (cleanupError) {
-        logger.error("Failed to publish saved-file integrity failure", {
-          repoId: request.repoId,
-          cleanupError:
-            cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError),
-        });
-      }
-    }
-    throw error;
-  }
-
-  // Saved-file patches retain the ledger version used by the card cache key.
-  symbolCardCache.invalidateRepo(request.repoId);
-
-  if (committedRevision !== undefined) {
-    try {
-      observer?.onCommitted(committedRevision);
-    } catch (error) {
-      logger.debug("Saved-file patch observer failed", {
-        repoId: request.repoId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    notifyGraphIntegrityVerifier(request.repoId);
-  }
-
+  const preparedFileState = nextFileState;
+  const preparedFilelessDelta = filelessDelta;
   return {
     repoId: request.repoId,
     filePath: relPath,
-    fileId: durableFile.fileId,
-    symbolsUpserted: diff.matched.length + diff.added.length,
-    symbolsAdded: diff.added.length,
-    symbolsRemoved: diff.removed.length,
-    symbolsPreserved: diff.preserved.length,
-    edgesUpserted: parseResult.edges.length,
-    referencesUpserted: parsedReferences.length,
-    parseResult: {
-      ...parseResult,
-      file: durableFile,
-      symbols: parsedSymbols.map((symbol) => ({
-        ...symbol,
-        updatedAt: now,
-      })),
-      edges: parseResult.edges.map((edge) => ({
-        ...edge,
-        createdAt: now,
-      })),
-    },
+    content,
+    contentHash: hashContent(content),
+    graphVersionId: integrityBaseline.versionId,
+    graphRevision: integrityBaseline.revision,
+    parserContract: requiredContract,
+    parseResult,
     frontier,
+    commit,
   };
+
+  // The existing transaction is reused by the legacy wrapper and future guarded
+  // publisher. Its graph/parser CAS rejects preparation from an older baseline.
+  async function commit(writeConn?: Awaited<ReturnType<typeof getLadybugConn>>): Promise<SavedFilePatchResult | typeof RETRY_SAVED_FILE_PATCH> {
+    let committedRevision: number | undefined;
+    let mutationStarted = false;
+    try {
+      const publish = async (wConn: Awaited<ReturnType<typeof getLadybugConn>>) => {
+        await ladybugDb.withTransaction(wConn, async (txConn) => {
+          const currentVersion = await ladybugDb.getLatestVersion(
+            txConn,
+            request.repoId,
+          );
+          const currentDerivedState = await getDerivedStateFromConnection(
+            txConn,
+            request.repoId,
+          );
+          const currentRepoParserState = await getRepoParserState(
+            txConn,
+            request.repoId,
+          );
+          if (
+            currentVersion?.versionId !== integrityBaseline.versionId ||
+            currentDerivedState?.graphIntegrityRevision !==
+              integrityBaseline.revision ||
+            !parserCoverageMatchesCurrentGraph(
+              currentDerivedState,
+              integrityBaseline.versionId,
+              currentRepoParserState,
+            ) ||
+            currentRepoParserState?.coverageDigest !==
+              integrityBaseline.repoParserState.coverageDigest
+          ) {
+            throw new SavedFilePatchRetry();
+          }
+
+          mutationStarted = true;
+          await ladybugDb.upsertFile(txConn, durableFile);
+
+          // Always refresh symbol references for this file
+          await ladybugDb.deleteSymbolReferencesByFileId(
+            txConn,
+            durableFile.fileId,
+          );
+          await ladybugDb.insertSymbolReferences(txConn, parsedReferences);
+          await ladybugDb.upsertSymbolBatch(txConn, symbolsToUpsert);
+
+          // --- Matched symbols: update properties, refresh non-SCIP edges ---
+          if (diff.matched.length > 0) {
+            const matchedOldIds = diff.matched.map((m) => m.old.symbolId);
+
+            // Delete only non-SCIP outgoing edges for matched symbols.
+            // SCIP edges (resolverId === "scip") are preserved.
+            await ladybugDb.deleteNonScipOutgoingEdges(txConn, matchedOldIds);
+
+            // Insert fresh tree-sitter edges for matched symbols.
+            // Filter to edges originating from matched old symbol IDs.
+            const matchedEdges = parseResult.edges
+              .filter((edge) => matchedNewToOldId.has(edge.fromSymbolId))
+              .map((edge) => ({
+                ...edge,
+                // Remap fromSymbolId to the old (stable) symbol ID
+                fromSymbolId:
+                  matchedNewToOldId.get(edge.fromSymbolId) ?? edge.fromSymbolId,
+                createdAt: now,
+              }));
+            if (matchedEdges.length > 0) {
+              await ladybugDb.insertEdges(txConn, matchedEdges);
+            }
+          }
+
+          // --- Added symbols: insert fresh ---
+          if (diff.added.length > 0) {
+            // Insert edges originating from added symbols
+            const addedEdges = parseResult.edges
+              .filter((edge) => addedIds.has(edge.fromSymbolId))
+              .map((edge) => ({
+                ...edge,
+                createdAt: now,
+              }));
+            if (addedEdges.length > 0) {
+              await ladybugDb.insertEdges(txConn, addedEdges);
+            }
+          }
+
+          // --- Removed symbols: delete (source != "scip") ---
+          if (diff.removed.length > 0) {
+            const removedIds = diff.removed.map((s) => s.symbolId);
+            await ladybugDb.deleteSymbolsByIds(txConn, removedIds);
+          }
+
+          // --- Preserved symbols: SCIP-only, leave untouched ---
+          // (No action needed -- they survive reconciliation.)
+          if (diff.preserved.length > 0) {
+            logger.debug("SCIP-only symbols preserved during reconciliation", {
+              repoId: request.repoId,
+              filePath: relPath,
+              preservedCount: diff.preserved.length,
+              symbolIds: diff.preserved.map((s) => s.symbolId),
+            });
+          }
+
+          await upsertFileParserStatesInTransaction(txConn, [
+            nextFileParserState,
+          ]);
+          const nextCoverage = existingFile
+            ? {
+                coverageState: currentRepoParserState!.coverageState,
+                coverageDigest: currentRepoParserState!.coverageDigest,
+              }
+            : await ladybugDb.summarizeParserCoverageInTransaction(
+                txConn,
+                request.repoId,
+              );
+          await ladybugDb.upsertRepoParserStateInTransaction(txConn, {
+            ...currentRepoParserState!,
+            ...nextCoverage,
+            graphRevision: integrityBaseline.revision + 1,
+          });
+
+          // Keep physical placeholder rows and their manifest tuples in the same
+          // transaction. ID scoping avoids a repo-wide placeholder scan on each
+          // foreground save.
+          await ladybugDb.normalizeDependencyPlaceholderSymbols(
+            txConn,
+            request.repoId,
+            {
+              fileIds: new Set([durableFile.fileId]),
+              symbolIds: touchedFilelessSymbolIds,
+            },
+          );
+
+          await applyGraphIntegrityFilePatchInTransaction(
+            txConn,
+            preparedFileState,
+            preparedFilelessDelta,
+          );
+          committedRevision =
+            (await advanceGraphIntegrityRevisionInTransaction(
+              txConn,
+              request.repoId,
+              integrityBaseline.versionId,
+              integrityBaseline.revision,
+            )) ?? undefined;
+          if (committedRevision === undefined) throw new SavedFilePatchRetry();
+        });
+      };
+      // A guarded publisher can supply its already-admitted writer; the legacy
+      // wrapper retains the original acquisition behavior.
+      if (writeConn) await publish(writeConn);
+      else await withWriteConn(publish);
+    } catch (error) {
+      if (error instanceof SavedFilePatchRetry) return RETRY_SAVED_FILE_PATCH;
+      if (mutationStarted && !writeConn) {
+        try {
+          const failed = await markCurrentGraphIntegrityRevisionFailed(
+            request.repoId,
+            integrityBaseline.versionId,
+            integrityBaseline.revision,
+            GRAPH_INTEGRITY_VERIFICATION_FAILURE,
+          );
+          if (!failed) return RETRY_SAVED_FILE_PATCH;
+        } catch (cleanupError) {
+          logger.error("Failed to publish saved-file integrity failure", {
+            repoId: request.repoId,
+            cleanupError:
+              cleanupError instanceof Error
+                ? cleanupError.message
+                : String(cleanupError),
+          });
+        }
+      }
+      throw error;
+    }
+
+    // Saved-file patches retain the ledger version used by the card cache key.
+    symbolCardCache.invalidateRepo(request.repoId);
+
+    if (committedRevision !== undefined) {
+      try {
+        observer?.onCommitted(committedRevision);
+      } catch (error) {
+        logger.debug("Saved-file patch observer failed", {
+          repoId: request.repoId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      notifyGraphIntegrityVerifier(request.repoId);
+    }
+
+    return {
+      repoId: request.repoId,
+      filePath: relPath,
+      fileId: durableFile.fileId,
+      symbolsUpserted: diff.matched.length + diff.added.length,
+      symbolsAdded: diff.added.length,
+      symbolsRemoved: diff.removed.length,
+      symbolsPreserved: diff.preserved.length,
+      edgesUpserted: parseResult.edges.length,
+      referencesUpserted: parsedReferences.length,
+      parseResult: {
+        ...parseResult,
+        file: durableFile,
+        symbols: parsedSymbols.map((symbol) => ({
+          ...symbol,
+          updatedAt: now,
+        })),
+        edges: parseResult.edges.map((edge) => ({
+          ...edge,
+          createdAt: now,
+        })),
+      },
+      frontier,
+    };
+  }
 }
 
 async function failOwnedSavedFileBaseline(

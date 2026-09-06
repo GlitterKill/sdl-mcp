@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -40,6 +41,14 @@ import {
   parseGraphIntegrityCanonicalSymbol,
 } from "../../dist/indexer/provider-first/persisted-graph-integrity.js";
 import { patchSavedFile } from "../../dist/live-index/file-patcher.js";
+import * as filePatcher from "../../dist/live-index/file-patcher.js";
+import { prepareReconcileFiles } from "../../dist/indexer/provider-first/reconcile-preparation.js";
+import { AppConfigSchema, RepoConfigSchema } from "../../dist/config/types.js";
+import { hashContent } from "../../dist/util/hashing.js";
+import { runToolDispatch } from "../../dist/mcp/dispatch-limiter.js";
+import { isIndexingActive } from "../../dist/mcp/indexing-gate.js";
+import { withRepoWriteHeavyLock } from "../../dist/indexer/derived-refresh-queue.js";
+import { ReconcileQueue } from "../../dist/live-index/reconcile-queue.js";
 import {
   parseDraftFile,
   parserCoverageMatchesVerifiedGraph,
@@ -391,6 +400,77 @@ describe("saved file graph patch", () => {
   beforeEach(async () => {
     await cancelAndWaitForGraphIntegrityVerifier(repoId);
     resetDefaultLiveIndexCoordinator();
+  });
+
+  it("prepares parser rows without publication and leaves a corrupt baseline unmodified", async () => {
+    assert.equal(typeof filePatcher.prepareSavedFilePatch, "function", "read-only parser preparation is required");
+    const conn = await getLadybugConn();
+    const beforeState = await getDerivedState(repoId);
+    const beforeGraph = await capturePersistedGraphIntegrity(conn, repoId);
+    const manifest = {
+      files: await ladybugDb.listGraphIntegrityFileStates(conn, repoId),
+      fileless: await ladybugDb.listGraphIntegrityFilelessStates(conn, repoId),
+    };
+    const request = { repoId, filePath: "src/example.ts", content: "export function fresh() { return 2; }", version: 2 };
+    const prepared = await filePatcher.prepareSavedFilePatch(request);
+    assert.equal(prepared.contentHash, prepared.parseResult.file.contentHash);
+    assert.equal(prepared.graphRevision, beforeState!.graphIntegrityRevision);
+    assert.equal(prepared.parserContract.engine, "typescript");
+    assert.equal(typeof prepared.commit, "function");
+    assert.deepEqual(await capturePersistedGraphIntegrity(conn, repoId), beforeGraph);
+    assert.deepEqual(await getDerivedState(repoId), beforeState);
+    await withWriteConn((writeConn) => ladybugDb.replaceGraphIntegrityManifestInTransaction(writeConn, repoId, { files: [], fileless: manifest.fileless }));
+    try {
+      await assert.rejects(filePatcher.prepareSavedFilePatch(request), /integrity/i);
+      assert.deepEqual(await getDerivedState(repoId), beforeState);
+    } finally {
+      await withWriteConn((writeConn) => ladybugDb.replaceGraphIntegrityManifestInTransaction(writeConn, repoId, manifest));
+    }
+  });
+
+  it("keeps dispatch, writer, write-heavy lock and new saves available during parser-selected preparation", { timeout: 15_000 }, async (t) => {
+    const content = readFileSync(join(repoDir, "src/example.ts"), "utf8");
+    const repoConfig = RepoConfigSchema.parse({ repoId, rootPath: repoDir, languages: ["ts"] });
+    const entered = deferred();
+    const release = deferred();
+    let held = false;
+    await clearTestPreparedStatementCaches();
+    const originalPrepare = Connection.prototype.prepare;
+    t.mock.method(Connection.prototype, "prepare", async function (statement) {
+      if (!held && statement.includes("MATCH (f:GraphIntegrityFileState")) {
+        held = true;
+        entered.resolve();
+        await release.promise;
+      }
+      return originalPrepare.call(this, statement);
+    });
+    const beforeState = await getDerivedState(repoId);
+    const pending = prepareReconcileFiles({ repoId, repoRoot: repoDir, repoConfig,
+      appConfig: AppConfigSchema.parse({ repos: [repoConfig], policy: {}, indexing: { pipeline: "legacy" } }),
+      files: [{ path: "src/example.ts", content, contentHash: hashContent(content), size: Buffer.byteLength(content) }],
+      dependencyInputs: [], assertCurrent: () => {},
+    });
+    try {
+      await entered.promise;
+      assert.equal(isIndexingActive(), false);
+      await runToolDispatch(async () => {});
+      await withWriteConn(async () => {});
+      await withRepoWriteHeavyLock(repoId, async () => {});
+      const queue = new ReconcileQueue();
+      const frontier = { touchedSymbolIds: [], dependentSymbolIds: [], dependentFilePaths: [], importedFilePaths: [], invalidations: [] };
+      queue.enqueue(repoId, frontier, "1", { "src/example.ts": { kind: "saved", content, sourceHash: hashContent(content) } });
+      const claim = queue.claimNext()!;
+      assert.equal(queue.enqueue(repoId, frontier, "2", { "src/example.ts": { kind: "saved", content: "newer", sourceHash: hashContent("newer") } }), true);
+      assert.equal(queue.isCurrent(claim), false);
+      release.resolve();
+      const prepared = await pending;
+      assert.equal(prepared.kind, "parser");
+      assert.equal(prepared.patches[0].parserContract.engine, "typescript");
+      assert.deepEqual(await getDerivedState(repoId), beforeState);
+    } finally {
+      release.resolve();
+      await pending.catch(() => {});
+    }
   });
 
   it("accepts current partial repository coverage for a durable file with a valid parser contract", async () => {
@@ -1783,6 +1863,19 @@ describe("saved file graph patch", () => {
     assert.equal(state.language, "plugin-live");
     assert.equal(state.adapterKey, result.parseResult.parserContract.adapterKey);
     assert.match(state.adapterKey, /live-parser-plugin/);
+  });
+
+  it("commits prepared parser rows through an already-admitted writer", { timeout: 15_000 }, async () => {
+    const beforeState = await getDerivedState(repoId);
+    const prepared = await filePatcher.prepareSavedFilePatch({
+      repoId, filePath: "src/example.ts", content: "export function owned() { return 1; }", version: 80,
+    });
+    const result = await withRepoWriteHeavyLock(repoId, () =>
+      withWriteConn((conn) => prepared.commit(conn)),
+    );
+    assert.notEqual(result, filePatcher.RETRY_SAVED_FILE_PATCH);
+    const state = await waitForVerifiedRevision(repoId, beforeState!.graphIntegrityRevision + 1);
+    assert.equal(state.graphIntegrityState, "verified");
   });
 
   it("leaves the shared fixture verified after destructive failure coverage", async () => {

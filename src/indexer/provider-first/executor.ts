@@ -336,7 +336,7 @@ interface CollectedLspProviderDocument extends LspProviderDocument {
   diagnostics?: Diagnostic[];
 }
 
-interface ProviderFirstSourceFileMetadata {
+export interface ProviderFirstSourceFileMetadata {
   path: string;
   size: number;
   contentHash: string;
@@ -2128,7 +2128,7 @@ async function resolveCanonicalDocumentPath(
   }
 }
 
-async function readRepositoryFileBounded(
+export async function readRepositoryFileBounded(
   repoRoot: string,
   relPath: string,
   maxFileBytes: number,
