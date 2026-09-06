@@ -276,3 +276,52 @@ it("does not acknowledge inventory recovery through the legacy worker", async ()
   assert.ok(queue.getStatus("overflow").queueDepth > 0);
   assert.equal(queue.peekNext(), false);
 });
+
+for (const failB of [false, true]) {
+  it(`settles A before its B frontier and ${failB ? "retains B failure" : "finishes the noncyclic batch"}`, async () => {
+    const queue = new ReconcileQueue();
+    const calls: string[] = [];
+    const repoId = `dependency-batch-${failB}`;
+    const worker = new ReconcileWorker(queue, {
+      clusterScheduler: { schedule() {}, async waitForIdle() {} },
+      planReconcileWork: ({ frontier }) => ({
+        filePaths: frontier.dependentFilePaths,
+        recomputeDerivedData: false,
+      }),
+      patchSavedFile: async ({ filePath }) => {
+        calls.push(filePath);
+        // Bound the regression without waiting for the production drain limit.
+        if (calls.length > 6) {
+          worker.clearRepo(repoId);
+          throw new Error("noncyclic frontier repeated");
+        }
+        if (filePath === "b.ts" && failB)
+          throw new Error("B parser unavailable");
+        return {
+          frontier: {
+            touchedSymbolIds: [],
+            dependentSymbolIds: [],
+            dependentFilePaths: filePath === "a.ts" ? ["b.ts"] : [],
+            importedFilePaths: [],
+            invalidations: [],
+          },
+        };
+      },
+    });
+    worker.enqueue(repoId, {
+      touchedSymbolIds: [],
+      dependentSymbolIds: [],
+      dependentFilePaths: ["a.ts", "b.ts"],
+      importedFilePaths: [],
+      invalidations: [],
+    });
+    await worker.waitForIdle();
+    assert.deepEqual(calls, ["a.ts", "b.ts"]);
+    assert.equal(queue.getStatus(repoId).queueDepth, failB ? 1 : 0);
+    assert.equal(
+      queue.getStatus(repoId).lastError,
+      failB ? "B parser unavailable" : null,
+    );
+    assert.equal(queue.peekNext(), false);
+  });
+}

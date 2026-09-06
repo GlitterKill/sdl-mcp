@@ -189,6 +189,9 @@ export class ReconcileWorker {
               const seenFiles = new Set<string>();
 
               for (const filePath of plan.filePaths) {
+                // A preceding patch may invalidate a sibling through its frontier.
+                // Reclaim that sibling before patching it under an obsolete batch.
+                if (!this.queue.isCurrent(claimed)) break;
                 const fileKey = `${claimed.repoId}:${filePath}`;
                 if (seenFiles.has(fileKey)) {
                   continue;
@@ -207,6 +210,9 @@ export class ReconcileWorker {
                       filePath,
                     }),
                   );
+                  // Record this completed patch before its frontier supersedes
+                  // sibling generations; otherwise batch discard repeats it.
+                  this.queue.settleFile(claimed, filePath, "success");
                   if (
                     patched.frontier.dependentFilePaths.length > 0 ||
                     patched.frontier.importedFilePaths.length > 0 ||
