@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { scanRepository } from "../../dist/indexer/fileScanner.js";
+import { scanRepoForIndex } from "../../dist/indexer/scanner.js";
+import { createAsyncFsOperations } from "../../dist/util/asyncFs.js";
 import { RepoConfigSchema, type RepoConfig } from "../../dist/config/types.js";
 
 const tempDirs: string[] = [];
@@ -51,6 +53,119 @@ describe("fileScanner.scanRepository", () => {
     const files = await scanRepository(repoPath, repoConfig(repoPath));
 
     assert.deepStrictEqual(files, []);
+  });
+
+  it("strict inventory accepts an absent implicit package.json", async () => {
+    const repoPath = makeTempRepo();
+    writeFileSync(join(repoPath, "a.ts"), "export const a = 1;");
+    const files = await scanRepository(repoPath, repoConfig(repoPath), {
+      requireComplete: true,
+    });
+    assert.deepStrictEqual(files.map((file) => file.path), ["a.ts"]);
+  });
+
+  it("strict inventory rejects missing listed files instead of treating them as removals", async () => {
+    const repoPath = makeTempRepo();
+    writeFileSync(join(repoPath, "files.txt"), "missing.ts\n");
+    const config = repoConfig(repoPath, { sourceFileListPath: "files.txt" });
+    assert.deepStrictEqual(await scanRepository(repoPath, config), []);
+    await assert.rejects(scanRepository(repoPath, config, { requireComplete: true }),
+      { code: "ENOENT" });
+  });
+
+  it("strict inventory rejects unreadable listed content after discovery", async () => {
+    const repoPath = makeTempRepo();
+    mkdirSync(join(repoPath, "directory.ts"));
+    writeFileSync(join(repoPath, "files.txt"), "directory.ts\n");
+    const config = repoConfig(repoPath, { sourceFileListPath: "files.txt" });
+    assert.deepStrictEqual(await scanRepository(repoPath, config), []);
+    await assert.rejects(scanRepository(repoPath, config, { requireComplete: true }),
+      { code: "EISDIR" });
+  });
+
+  it("strict inventory rejects malformed or unavailable workspace inputs", async () => {
+    const repoPath = makeTempRepo();
+    writeFileSync(join(repoPath, "package.json"), "{");
+    assert.deepStrictEqual(await scanRepository(repoPath, repoConfig(repoPath)), []);
+    await assert.rejects(scanRepository(repoPath, repoConfig(repoPath), {
+      requireComplete: true,
+    }), SyntaxError);
+    await assert.rejects(scanRepository(repoPath, repoConfig(repoPath, {
+      packageJsonPath: "missing-package.json",
+    }), { requireComplete: true }), { code: "ENOENT" });
+    mkdirSync(join(repoPath, "package-directory"));
+    await assert.rejects(scanRepository(repoPath, repoConfig(repoPath, {
+      packageJsonPath: "package-directory",
+    }), { requireComplete: true }), { code: "EISDIR" });
+  });
+
+  it("read-only inventory rejects incomplete scans before accessing graph storage", async () => {
+    const repoPath = makeTempRepo();
+    writeFileSync(join(repoPath, "package.json"), "{");
+    // No database is initialized in this scanner fixture.
+    await assert.rejects(scanRepoForIndex({
+      repoId: "strict-inventory-without-db",
+      repoRoot: repoPath,
+      config: repoConfig(repoPath),
+      deleteRemovedFiles: false,
+      requireComplete: true,
+    }), SyntaxError);
+  });
+
+  it("strict inventory drains stat and content reads before reporting a sibling failure", { timeout: 5_000 }, async (t) => {
+    const prototype = Object.getPrototypeOf(createAsyncFsOperations());
+    for (const method of ["stat", "readFileBuffer"] as const) {
+      await t.test(method, async (context) => {
+        const repoPath = makeTempRepo();
+        writeFileSync(join(repoPath, "held.ts"), "x");
+        writeFileSync(join(repoPath, "failed.ts"), "x");
+        const original = prototype[method];
+        let release!: () => void;
+        let entered!: () => void;
+        const barrier = new Promise<void>((resolve) => { release = resolve; });
+        const started = new Promise<void>((resolve) => { entered = resolve; });
+        const failure = new Error(`controlled ${method} failure`);
+        context.mock.method(prototype, method, async function (filePath: string) {
+          if (filePath === join(repoPath, "failed.ts")) throw failure;
+          if (filePath === join(repoPath, "held.ts")) {
+            entered();
+            await barrier;
+          }
+          return original.call(this, filePath);
+        });
+        let settled = false;
+        const scan = scanRepository(repoPath, repoConfig(repoPath), { requireComplete: true });
+        const outcome = scan.then(
+          (files) => { settled = true; return files; },
+          (error) => { settled = true; throw error; },
+        );
+        // Register rejection observation before releasing the held sibling.
+        const rejected = assert.rejects(outcome, (error) => error === failure);
+        try {
+          await started;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          assert.equal(settled, false);
+        } finally {
+          release();
+        }
+        await rejected;
+      });
+    }
+  });
+
+  it("strict inventory preserves language, ignore, size, workspace and TS/JS selection", async () => {
+    const repoPath = makeTempRepo();
+    mkdirSync(join(repoPath, "packages", "a", "dist"), { recursive: true });
+    writeFileSync(join(repoPath, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }));
+    for (const name of ["a.ts", "a.js", "skip.ts", "other.py", "packages/a/dist/output.ts"]) {
+      writeFileSync(join(repoPath, name), "x");
+    }
+    writeFileSync(join(repoPath, "large.ts"), "x".repeat(101));
+    const config = repoConfig(repoPath, { languages: ["ts", "js"], ignore: ["**/skip.ts"], maxFileBytes: 100 });
+    const normal = await scanRepository(repoPath, config);
+    const strict = await scanRepository(repoPath, config, { requireComplete: true });
+    assert.deepStrictEqual(strict, normal);
+    assert.deepStrictEqual(strict.map((file) => file.path), ["a.ts"]);
   });
 
   it("discovers files matching configured language extensions", async () => {

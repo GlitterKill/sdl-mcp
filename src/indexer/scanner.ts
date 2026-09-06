@@ -36,6 +36,8 @@ export async function scanRepoForIndex(params: {
   config: RepoConfig;
   onProgress?: (progress: IndexProgress) => void;
   deleteRemovedFiles?: boolean;
+  /** Fail incomplete inventory before deriving removals; normal index scans stay best-effort. */
+  requireComplete?: boolean;
 }): Promise<ScanRepoForIndexResult> {
   const {
     repoId,
@@ -43,10 +45,11 @@ export async function scanRepoForIndex(params: {
     config,
     onProgress,
     deleteRemovedFiles = true,
+    requireComplete = false,
   } = params;
 
   onProgress?.({ stage: "scanning", current: 0, total: 0 });
-  const files = await scanRepository(repoRoot, config);
+  const files = await scanRepository(repoRoot, config, { requireComplete });
 
   const conn = await getLadybugConn();
   const existingFiles = await ladybugDb.getFilesByRepo(conn, repoId);

@@ -148,6 +148,7 @@ export function getLanguageExtensions(languages: string[]): string[] {
 async function resolveWorkspaces(
   repoPath: string,
   config: RepoConfig,
+  requireComplete: boolean,
 ): Promise<string[]> {
   if (config.workspaceGlobs && config.workspaceGlobs.length > 0) {
     return config.workspaceGlobs;
@@ -182,6 +183,15 @@ async function resolveWorkspaces(
 
     return workspaces;
   } catch (err) {
+    // An absent implicit manifest is normal; other failures leave inventory
+    // scope unknown and must not become evidence that persisted files vanished.
+    if (
+      requireComplete &&
+      !(!config.packageJsonPath &&
+        (err as NodeJS.ErrnoException).code === "ENOENT")
+    ) {
+      throw err;
+    }
     logger.debug("Failed to detect workspaces from package.json", {
       packageJsonPath,
       error: err instanceof Error ? err.message : String(err),
@@ -193,6 +203,7 @@ async function resolveWorkspaces(
 async function discoverFiles(
   repoPath: string,
   config: RepoConfig,
+  requireComplete: boolean,
 ): Promise<string[]> {
   const explicitFileList = await readSourceFileList(repoPath, config);
   if (explicitFileList) {
@@ -202,7 +213,7 @@ async function discoverFiles(
   const extensions = getLanguageExtensions(config.languages);
   const patterns = extensions.map((ext) => `**/*${ext}`);
 
-  const workspaces = await resolveWorkspaces(repoPath, config);
+  const workspaces = await resolveWorkspaces(repoPath, config, requireComplete);
   const ignorePatterns = [...config.ignore];
 
   for (const workspace of workspaces) {
@@ -270,12 +281,18 @@ async function filterFilesBySize(
   files: string[],
   repoPath: string,
   maxBytes: number,
+  requireComplete: boolean,
 ): Promise<ScannedFileMetadata[]> {
   const metadata: ScannedFileMetadata[] = [];
 
   const stats = await Promise.allSettled(
     files.map((file) => statAsync(resolve(repoPath, file))),
   );
+  // allSettled retains IO ownership even if an earlier path has failed.
+  if (requireComplete) {
+    const failure = stats.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
   const candidates: Array<{
     file: string;
     size: number;
@@ -307,6 +324,10 @@ async function filterFilesBySize(
       };
     }),
   );
+  if (requireComplete) {
+    const failure = hashed.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
 
   for (const result of hashed) {
     if (result.status === "fulfilled") metadata.push(result.value);
@@ -341,18 +362,22 @@ function deduplicateCompiledJs<TFile extends FileMetadata>(
  *
  * @param repoPath - Absolute path to repository root
  * @param config - Repository configuration with languages, ignore patterns, and limits
+ * @param options - Require complete IO before using inventory to infer removals
  * @returns Array of file metadata sorted by path
  */
 export async function scanRepository(
   repoPath: string,
   config: RepoConfig,
+  options: { requireComplete?: boolean } = {},
 ): Promise<ScannedFileMetadata[]> {
+  const requireComplete = options.requireComplete === true;
   await ensureConfiguredLanguagePackAdapters(config.languages);
-  const discoveredFiles = await discoverFiles(repoPath, config);
+  const discoveredFiles = await discoverFiles(repoPath, config, requireComplete);
   const metadata = await filterFilesBySize(
     discoveredFiles,
     repoPath,
     config.maxFileBytes,
+    requireComplete,
   );
 
   const deduplicated = deduplicateCompiledJs(metadata);
