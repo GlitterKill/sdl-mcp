@@ -38,13 +38,13 @@ describe("Code-mode descriptions", () => {
     });
   }
 
-  it("MANUAL_DESCRIPTION mentions SDL-MCP API manual", () => {
-    assert.ok(MANUAL_DESCRIPTION.includes("SDL-MCP"));
-    assert.ok(MANUAL_DESCRIPTION.includes("manual"));
+  it("MANUAL_DESCRIPTION directs callers to focused action syntax", () => {
+    assert.ok(MANUAL_DESCRIPTION.includes('actions:["action.name"]'));
+    assert.ok(MANUAL_DESCRIPTION.includes("sdl.action.search"));
   });
 
-  it("MANUAL_DESCRIPTION mentions sdl.workflow", () => {
-    assert.ok(MANUAL_DESCRIPTION.includes("sdl.workflow"));
+  it("MANUAL_DESCRIPTION directs callers to reuse schemas", () => {
+    assert.ok(MANUAL_DESCRIPTION.includes("Reuse the returned schemas/examples"));
   });
 
   it("WORKFLOW_DESCRIPTION mentions workflow operations", () => {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { realpathSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -128,7 +129,7 @@ it(
             {
               relPath: "z.txt",
               absPath: join(repoRoot, "z.txt"),
-              canonicalAbsPath: join(repoRoot, "z.txt"),
+              canonicalAbsPath: realpathSync.native(join(repoRoot, "z.txt")),
               sha256: hashContent("old"),
               mtimeMs: null,
             },
@@ -265,13 +266,19 @@ it(
           preconditions: ["a.txt", "z.txt"].map((name) => ({
             relPath: name,
             absPath: join(repoRoot, name),
-            canonicalAbsPath: join(repoRoot, name),
+            // Match preview canonicalization, including Windows directory casing.
+            canonicalAbsPath: realpathSync.native(join(repoRoot, name)),
             sha256: hashContent("old"),
             mtimeMs: null,
           })),
         },
         true,
         coordinator,
+      );
+      assert.equal(
+        batch.results.find((result) => result.file === "z.txt")?.reason,
+        "later batch write failed after newer saves",
+        "the fixture must reach newer saves before testing rollback ownership",
       );
       assert.equal(batch.rollback.triggered, true);
       assert.deepEqual(batch.rollback.restoredFiles, []);

@@ -904,7 +904,10 @@ describe("Semantic Embedding Pipeline", () => {
     releaseBarrier();
     const outcome = await incremental;
     if (outcome.error) {
-      assert.match(String(outcome.error), /(?:embedding refresh incomplete|semantic final assessment is incomplete)/i);
+      assert.match(
+        String(outcome.error),
+        /(?:embedding refresh incomplete|SEMANTIC_FINAL_ASSESSMENT_(?:INCOMPLETE|DEGRADED))/i,
+      );
     }
   });
 

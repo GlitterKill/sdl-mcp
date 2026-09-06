@@ -1208,7 +1208,7 @@ describe("provider-first indexRepo fallback", () => {
 
     await assert.rejects(
       incremental,
-      /Semantic final assessment is incomplete/,
+      /SEMANTIC_FINAL_ASSESSMENT_DEGRADED/,
     );
   });
 
