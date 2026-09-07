@@ -227,7 +227,8 @@ class FakeElement extends FakeEventTarget {
   }
 
   closest(selector: string): FakeElement | null {
-    for (let current: FakeElement | null = this; current; current = current.parentElement) {
+    if (this.matches(selector)) return this;
+    for (let current = this.parentElement; current; current = current.parentElement) {
       if (current.matches(selector)) return current;
     }
     return null;

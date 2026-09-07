@@ -40,7 +40,7 @@ describe("cli-tool-output", () => {
 
     it("formats as json-compact", () => {
       const stream = createMockStream();
-      // @ts-expect-error
+      // @ts-expect-error - The mock implements only the writable stream methods under test.
       formatOutput(testObj, "json-compact", stream);
       assert.strictEqual(stream.getOutput(), '{"id":1,"name":"test"}\n');
     });
@@ -53,7 +53,7 @@ describe("cli-tool-output", () => {
           { symbolId: "sym2", name: "barBaz", file: "b.ts", kind: "class" },
         ],
       };
-      // @ts-expect-error
+      // @ts-expect-error - The mock implements only the writable stream methods under test.
       formatOutput(searchRes, "pretty", stream);
       const out = stream.getOutput();
       assert.match(out, /Found 2 symbol\(s\):/);
@@ -70,7 +70,7 @@ describe("cli-tool-output", () => {
           { id: 2, type: "review" },
         ],
       };
-      // @ts-expect-error
+      // @ts-expect-error - The mock implements only the writable stream methods under test.
       formatOutput(feedbackQueryRes, "table", stream);
       const out = stream.getOutput();
       assert.match(out, /id\s+type/i); // Header row
@@ -80,7 +80,7 @@ describe("cli-tool-output", () => {
 
     it("falls back to json for unknown objects in pretty mode", () => {
       const stream = createMockStream();
-      // @ts-expect-error
+      // @ts-expect-error - The mock implements only the writable stream methods under test.
       formatOutput({ unknownData: true }, "pretty", stream);
       assert.strictEqual(stream.getOutput(), '{\n  "unknownData": true\n}\n');
     });

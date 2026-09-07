@@ -28,6 +28,12 @@ SDL_TEST_JOBS=2 npm test                             # Override worker count
 node --experimental-strip-types --test tests/unit/my.test.ts  # Single file (set SDL_GRAPH_DB_PATH)
 ```
 
+## LINTING
+
+Tests use the `typescript-eslint` non-type-checked override because they run directly in Node and are excluded from the production TypeScript project. Syntax and ordinary lint rules still apply; type-aware rules such as `no-floating-promises` remain enabled for production source only.
+
+Run `npm run lint:tests` to lint all `tests/**/*.test.ts` files, or `npx eslint tests/unit/example.test.ts` for one file. `npm run lint` runs production lint followed by test lint, so the existing CI lint step covers both. Warnings are reported but do not fail the gate.
+
 ## CONVENTIONS
 - All tests use: `import { describe, it } from "node:test"` and `import assert from "node:assert"`
 - Test concurrency: `scripts/run-tests.mjs` runs isolated test files through a small worker pool; `SDL_TEST_JOBS` overrides the default `min(4, availableParallelism - 1)`.

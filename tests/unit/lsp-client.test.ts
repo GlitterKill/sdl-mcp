@@ -47,6 +47,8 @@ describe("SemanticLspClient", () => {
         ChildProcess.prototype,
         "kill",
         function (this: ChildProcess, signal?: NodeJS.Signals | number) {
+          // Retain the intercepted child so finally can terminate it if assertions fail.
+          // eslint-disable-next-line @typescript-eslint/no-this-alias
           child = this;
           signals.push(signal);
           childClosed ??= new Promise((resolve) =>

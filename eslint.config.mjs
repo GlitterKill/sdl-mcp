@@ -54,6 +54,11 @@ export default tseslint.config(
     },
   },
   {
+    // Tests run through Node directly and are outside the production TS project.
+    files: ["tests/**/*.ts"],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
     files: ["src/**/*.ts"],
     ignores: ["src/db/**/*.ts"],
     rules: {

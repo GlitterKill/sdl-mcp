@@ -806,6 +806,8 @@ describe("LadybugDB Connection Manager", { skip: !ladybugAvailable }, () => {
       const closeAttempts = new Map<Connection, number>();
       let closeShouldFail = false;
       prototype.setMaxNumThreadForExec = async function () {
+        // Capture the mocked receiver to verify cleanup after construction fails.
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
         constructed = this;
         throw setupFailure;
       };

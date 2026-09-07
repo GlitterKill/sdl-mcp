@@ -790,7 +790,7 @@ test("dashboard registers a consuming renderer for every rendered or derived met
 
     assertCoverage?.(METRIC_DISPOSITIONS, registry, createMetricConsumerVerifier());
     const encoderDom = installFakeDashboardDocument();
-    (registry["packed.perEncoder[]"] as Function)(runtimeSnapshot(), new Set());
+    (registry["packed.perEncoder[]"] as (snapshot: unknown, rendered: Set<unknown>) => void)(runtimeSnapshot(), new Set());
     const encoderTable = encoderDom.panels.get("tokenEfficiency")?.fields.get("packedByEncoder")?.serialize() ?? "";
     assert.match(encoderTable, /Per-encoder count/);
     assert.match(encoderTable, /Total decisions/);
@@ -1205,7 +1205,7 @@ test("dashboard client keeps session and lifetime receipt clocks independent", a
   });
   try {
     const dashboard = await import("../../../dist/ui/observability.js");
-    const createClient = dashboard.createDashboardClient as Function;
+    const createClient = dashboard.createDashboardClient;
     assert.equal(typeof createClient, "function");
     let now = 100;
     const applied: string[] = [];
@@ -1622,7 +1622,7 @@ test("session renderer clears dynamic values without destroying the indexing don
 
 test("dashboard client uses one authenticated REST fallback and handles older servers", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
-  const createClient = dashboard.createDashboardClient as Function;
+  const createClient = dashboard.createDashboardClient;
   const calls: Array<{ url: string; init: RequestInit }> = [];
   let interval: (() => Promise<void>) | null = null;
   const intervalHistory: number[] = [];
@@ -1823,7 +1823,7 @@ test("a hung old-repository poll cannot own or clear the new repository poll", a
 
 test("dashboard lifetime reset is exact, recovery-safe, and rehydrates before focus returns", async () => {
   const dashboard = await import("../../../dist/ui/observability.js");
-  const createClient = dashboard.createDashboardClient as Function;
+  const createClient = dashboard.createDashboardClient;
   const requests: Array<{ url: string; init: RequestInit }> = [];
   let nextLifetime = readyEnvelope();
   const control = { focusCount: 0, focus() { this.focusCount += 1; } };
