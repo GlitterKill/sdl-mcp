@@ -86,6 +86,9 @@ node dist/cli/index.js benchmark:ci --skip-indexing
 
 ### CI/CD Integration
 
+The hosted Zod structural guardrail derives a temporary config from `config/sdlmcp.config.json` with only `semantic.enabled` set to `false`. Its metrics cover indexing, graph structure, slices, skeletons, token sizes, and edge coverage; they do not evaluate embedding quality. This isolates mock embeddings from semantic readiness checks while preserving production checks and the existing `config/benchmark.ci.config.json` thresholds.
+
+
 ```yaml
 # GitHub Actions example
 - name: Run Benchmark CI

@@ -222,3 +222,7 @@ Each update should include:
 Do not mix workflow bugs, dependency audit issues, and native test crashes into one vague summary. Keep them separate so the next agent can decide quickly whether the right fix belongs in workflow YAML, dependency metadata, or test code.
 
 If you change the workflows themselves, document why a workflow change was necessary and why a code or test fix was insufficient. If you change only repo code or tests, record that too so future agents do not keep editing CI YAML to compensate for an application-level problem.
+
+### 2026-09-06: Structural benchmark requested semantic readiness from mock embeddings
+
+Run `34068993668`, job `101582753074`, aborted before threshold evaluation with `SEMANTIC_FINAL_ASSESSMENT_DEGRADED`. The structural lane inherited enabled mock semantics from the shared config. It now derives a temporary runner config with only `semantic.enabled: false`; the shared config, production readiness checks, thresholds, fresh database isolation, and exit-139-only retry remain unchanged. `tests/unit/benchmark-scope.test.ts` executes the workflow config preparation and checks that no other setting changes. Hosted validation remains required.

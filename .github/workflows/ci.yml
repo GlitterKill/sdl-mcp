@@ -293,7 +293,7 @@ jobs:
       - name: Run Benchmark CI Guardrails (locked OSS repo)
         shell: bash
         env:
-          SDL_CONFIG: config/sdlmcp.config.json
+          SDL_CONFIG: ${{ runner.temp }}/benchmark-structural.config.json
           # Keep benchmark:ci as a stable JS/LadybugDB regression guardrail.
           # Native parser crash coverage lives in native-build and sync-memory;
           # enabling it here has repeatedly produced Linux exit 139 flakes.
@@ -304,6 +304,14 @@ jobs:
           # at that boundary even when the Rust addon is disabled.
           SDL_MCP_PASS1_STABLE_DB_WRITES: "1"
         run: |
+          # This structural guardrail does not measure embedding quality.
+          # Keep the shared config intact; disable semantics only for this process.
+          node --input-type=module <<'BENCHMARK_CONFIG'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const config = JSON.parse(readFileSync('config/sdlmcp.config.json', 'utf8'));
+          config.semantic = { ...config.semantic, enabled: false };
+          writeFileSync(process.env.SDL_CONFIG, JSON.stringify(config));
+          BENCHMARK_CONFIG
           echo "Running benchmark CI against locked OSS repo (zod-oss)..."
           THRESHOLD_PATH="config/benchmark.ci.config.json"
           echo "Using threshold config: ${THRESHOLD_PATH}"
