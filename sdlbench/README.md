@@ -9,11 +9,10 @@ node sdlbench/src/cli.mjs setup all
 node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent codex --variant baseline --model gpt-5.5
 node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent codex --variant sdl --model gpt-5.5
 node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent codex --variant sdl --model gpt-5.5 --behavior
-node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent codex --variant sdl --warm-session
 # opencode agent + Neuralwatt-hosted GLM-5.2 / Kimi K2.7 Code (see docs/opencode.md):
 node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent opencode --variant sdl --model glm-5.2 --behavior
 node sdlbench/src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent opencode --variant sdl --model kimi-k2.7-code --behavior
-node sdlbench/src/cli.mjs scaling --sizes tiny,small --agent codex --variant baseline,sdl --i-understand-cost
+node sdlbench/src/cli.mjs scaling --sizes tiny,small --agent codex --variant baseline,sdl --repetitions 2 --i-understand-cost
 node sdlbench/src/cli.mjs claims --in sdlbench/results/sessions.jsonl --profile realism --variant sdl
 node sdlbench/src/cli.mjs analyze --in sdlbench/results/sessions.jsonl
 node sdlbench/src/cli.mjs view --port 4177
@@ -21,25 +20,13 @@ node sdlbench/src/cli.mjs view --port 4177
 
 ## Honest Reporting
 
-SDLBench enforces truth in savings claims:
+Schema v4 separates provider billing usage (`providerUsage`) from independently tokenized observed prompt and output text (`observedContent`). Observed text has partial coverage: it does not capture every tool message, tool schema, hidden reasoning token, or repeated model-request input. Counting it once cannot establish total billed input.
 
-- **Schema v3**: every session record carries explicit `cache` telemetry. Fixture and tokenizer-only records use `{ "available": false, "reason": "provider-usage-unavailable" }`; provider-backed Codex and OpenCode behavior records save measured cache reads and writes.
-- **Pass-gated paired deltas**: `paired[]` compares `tokens.total` only when both baseline and the selected product passed. `deltas.<variant>.tokensSaved` comes from those paired rows, not from per-record `tokens.saved`.
-- **Headline claim**: `summary.headlineClaim` is always "median paired savings
-  on tasks both solved."
-- **Claim gates**: run `sdlbench claims --profile realism --variant sdl` to validate one product against baseline. The default variant is `sdl`; cache fields are report-only and never change gate results. See `docs/claims.md`.
-- **Prompt-cache hygiene**: reports weighted provider cache hit rate, telemetry coverage, and the input-price discount relative to billing all input at the normal rate. Cache reads are not labeled as raw tokens saved.
-- **Cost guardrails**: `scaling` command requires `--i-understand-cost` and
-  prints predicted USD before launching.
-- **Attribution**: behavior records carry `attribution.toolCalls[]` (parsed
-  from Codex `function_call` items) and `attribution.phaseBreakdown` (retrieval
-  vs reasoning vs output). SDL records carry `artifacts.sdl.observability`
-  (polled from `/api/observability/snapshot`).
-- **Amortization**: `--warm-session` reuses the SDL HTTP server across tasks
-  of the same repo; `tokens.indexCost` is non-zero only on the first warm task.
-- **Coverage**: tasks with `contextTargets` produce `record.coverage` with
-  file/symbol coverage, precision, and recall.
-- **Prompt specificity**: tasks declare `sparse`, `normal`, or `explicit`; records persist the tier and `analyze` reports `byPromptSpecificity` so sparse-task savings remain visible.
+- **Paired savings** compare matching baseline and SDL attempts only when both pass. Failed attempts remain in the raw records, and ambiguous duplicate attempts fail analysis before pass-gating.
+- **Cache reporting** uses explicit provider cache counters and reports availability. Cache reads describe billing discounts; they are not raw tokens saved.
+- **Cost reporting** separates model usage from indexing. Missing indexing or enrichment spend stays unknown; the index response JSON is not a token-cost measurement. Scaling requires `--i-understand-cost`; its pre-run budget is unknown.
+- **Execution reporting** distinguishes fixture plumbing from behavior runs. Only `baseline` and `sdl` are executable variants. Warm-session execution is rejected until the server can prove it indexes the exact agent worktree.
+- **Claim gates** require measured evidence and remain separate from performance targets. A fair experiment can show negative savings. See [claims](docs/claims.md) and the [measurement audit](docs/measurement-audit.md) for evidence limits.
 
 `setup all` creates `sdlbench/.work/tiktoken-venv` and installs OpenAI `tiktoken` from the pinned GitHub tag `0.13.0`. Benchmark runs fail if tiktoken cannot count tokens; they do not fall back to estimates.
 
@@ -72,13 +59,13 @@ The temporary config starts from `config/sdlmcp.config.example.json` and keeps p
 
 
 
-SDL token counts use the rendered prompt plus measured agent session data when available. `context.raw`, `context.sdl`, and `context.sdlQueries` are fixture metadata, not privileged behavior-mode prompt input. If HTTP indexing fails, or if both Codex attribution and server observability report zero SDL tool activity, the SDL run fails instead of writing savings evidence.
+Provider usage and independently counted visible prompt/output text are separate measurements. `context.raw`, `context.sdl`, and `context.sdlQueries` are fixture metadata, not privileged behavior-mode prompt input. If HTTP indexing fails, or if both Codex attribution and server observability report zero SDL tool activity, the SDL run fails instead of writing savings evidence.
 
 ## Metrics
 
 `results/sessions.jsonl` is the canonical chart source. `analyze` writes `results/summary.json`; the viewer renders paired raw-token deltas, cost, time, correctness, timeline, weighted cache efficiency, and a product matrix.
 
-Token counts use the selected model first: `--model`, then `config/agents/<agent>.json` `model`, then `config/pricing.json` `defaultModel`. Fixture-mode records use the tokenizer subprocess, which calls `tiktoken.encoding_for_model(model)` and falls back to the configured encoding only when tiktoken does not know that model. Codex behavior-mode records prefer Codex session JSONL `token_count` totals for the matching run worktree, including `input`, `cachedInput`, `output`, `reasoningOutput`, and `total`; the prompt estimate is kept at `artifacts.estimatedTokens` only when session counts are available.
+Tokenization selects the model from `--model`, then the agent configuration, then the pricing default. Independently counted prompt/output text records tokenizer provenance and partial coverage. Behavior runs use provider session counters for billing usage; provider counters are not labeled as tiktoken measurements. Fixture runs only test the observable-text accounting and supplied-solution path.
 
 Cost estimates use `sdlbench/config/pricing.json`. When that file declares a `models` map, the selected model must have a matching pricing entry; otherwise the run fails instead of silently using another model's rates. `contextPerMTok` defaults to `0` for API cost estimates because prompt/context tokens are already included in input token charges.
 
@@ -92,7 +79,7 @@ Raw paired token savings and prompt-cache savings are separate measurements:
 
 ## Product Status
 
-Every executed non-baseline product uses the same session, analysis, scaling, cache, and viewer paths. `crg` and `repomix` are currently dry-run declarations in `config/products.lock.json`; they cannot produce claim-bearing comparison rows until real behavior integrations exist.
+Only `baseline` and `sdl` execute. Unsupported variant names fail before task execution. `crg` and `repomix` remain declarations in `config/products.lock.json` until real behavior integrations exist.
 
 ## Model Behavior Mode
 
@@ -105,4 +92,30 @@ Codex behavior runs are isolated from the developer environment. SDLBench uses a
 
 The `opencode` agent uses the same neutral prompt and a per-run `XDG_DATA_HOME`. `OPENCODE_CONFIG_CONTENT` contains only the live SDL MCP entry for SDL or an empty MCP block for baseline. Provider token and cache counts come from the matching session row in the isolated `opencode.db`. See `docs/opencode.md` for models, pricing, and limits.
 
-Behavior records include `artifacts.promptPath`, `artifacts.agent`, and `artifacts.changedFiles`. A pass means the agent command exited successfully and the verifier passed.
+Behavior records include `artifacts.promptPath`, `artifacts.agent`, and `artifacts.changedFiles`. A pass means the agent command exited successfully and the verifier passed. Agent execution is asynchronous so observability sampling can continue; the runner awaits initial and final snapshots before recording the delta. Errors and timeouts remain unsuccessful attempt records.
+
+## Comparison limitations and pairing safety
+
+See [the measurement audit](docs/measurement-audit.md) before interpreting results as product effectiveness claims.
+
+Analysis pairs by repository, task, agent, model, execution mode, warm-session setting, experiment ID, and repetition ID, with recorded provenance checks. Each input must contain at most one attempt per variant for that key, including failed attempts. Assign the same explicit `--experiment-id` and `--repetition-id` to separately launched baseline and SDL counterparts. Reusing those IDs for a retry creates an ambiguous attempt; preserve failures and assign a new planned repetition instead.
+
+Paired uncertainty uses equally weighted repository/task means across repetitions and bootstraps those task means. Reports include independent task and paired observation counts; fewer than two tasks produce no interval. This does not prove that the selected tasks represent real workloads.
+
+Historical records without complete provenance do not establish identical revisions, prompts, agent configurations, or pricing. Preserve the original JSONL rather than retroactively inventing missing evidence.
+
+## Scaling experiments
+
+Scaling defaults to behavior execution. Use `--execution-mode fixture` only for harness checks. It selects the requested size class before agent execution or indexing, records actual selected counts, and uses the same pairing rules as ordinary analysis.
+
+`--repetitions N` rotates variant order across repetitions. Counterparts share an experiment ID and repetition ID. Selected counts include attempted tasks; paired counts include only matching attempts that both pass. Neither count proves representativeness or statistical independence.
+
+## Offline verification
+
+Run the harness tests from the repository root:
+
+```bash
+node --test sdlbench/tests/*.test.mjs
+```
+
+Offline tests use fixture or fake-agent evidence. They do not establish live product savings, actual enrichment expenses, or a validated warm-session experiment.

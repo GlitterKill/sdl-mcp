@@ -1,42 +1,49 @@
-# SDLBench Claim Policy
+# SDLBench claim policy
 
-This document defines which raw token-reduction claims SDLBench permits for a selected product.
+SDLBench separates product-performance targets from evidence that an experiment is valid. Passing a savings threshold does not prove a fair comparison.
 
-## Claimable Data
+## Eligible comparisons
 
-Only provider-backed behavior records with `claimGrade: "primary"` can support savings claims. Current Codex and OpenCode behavior paths qualify when matching provider usage was captured. Fixture and tokenizer-only records carry `claimGrade: "none"` and make no savings assertion.
+Claims require provider-backed behavior records with `claimGrade: "primary"` and a matching baseline/SDL pair that both passed. Fixture runs and independently tokenized observed text do not establish billed session usage or product effectiveness. OpenCode remains secondary evidence until its provider semantics receive the required verification; capturing counters alone does not promote it to primary.
 
-Only pass-gated baseline/product pairs count: both runs must solve the same task. The summary's `paired[]` array contains these rows, and every delta uses `tokens.total`.
+Pairing requires matching repository, task, agent, model, execution mode, experiment, repetition, and recorded provenance. Preserve failures and timeouts. Duplicate attempts are errors; do not select the best retry.
 
-## Claim Gates
+## Performance targets and experimental validity
 
-Run `sdlbench claims --in results/sessions.jsonl --profile <profile> --variant <product>` to validate one product against baseline. `--variant` defaults to `sdl`.
+Run the claim check from the repository root:
 
-| Profile | p50 Floor | p25 Floor | Min Task | Coverage | Fairness |
-|---|---|---|---|---|---|
-| `smoke` | 30% | 20% | 5% | 0.5 | 0% |
-| `efficient` | 45% | 35% | 0% | 0.4 | 10% |
-| `realism` | 50% | 40% | 20% | 0.5 | 20% |
+```bash
+node sdlbench/src/cli.mjs claims --in sdlbench/results/sessions.jsonl --profile realism --variant sdl
+```
 
-- Gates are computed on the selected product's `paired[].deltaPct` only.
-- `coverage.fileCoverage` is recorded as a percentage; claim floors use ratios, so `0.5` means 50%.
-- `fairness.netSavingsPct` must meet the floor.
-- Cache hit rate, cache discount savings, and cache telemetry coverage are reported separately. They never change gates or exit status.
+| Profile | Median savings | 25th percentile | Minimum task savings |
+| --- | --- | --- | --- |
+| `smoke` | 30% | 20% | 5% |
+| `efficient` | 45% | 35% | 0% |
+| `realism` | 50% | 40% | 20% |
 
-## Approved Claim Language
+The result separates `performancePassed` from `experimentalValidity`. Overall `passed` requires both. Validity requires available, passing fairness evidence for every selected pair. Missing evidence stays unavailable; it is not replaced with zero savings.
 
-After the realism profile passes:
+The runner currently records incomplete fairness evidence as unavailable. Those records cannot pass the overall claim gate merely because token savings are large. A valid experiment may show negative savings and fail the performance target.
 
-- "On paired behavior-mode tasks where both approaches solved the task, <product> achieved a median raw token reduction of >=50% (p25 >=40%, min task >=20%)."
-- Claims must cite the number of paired tasks and the execution mode.
-- Claims must not mix fixture-mode and behavior-mode data.
-- Cache reads must not be described as raw tokens saved. Cache discount savings describe provider input-price savings only.
+Edit coverage and provider cache metrics remain report-only. Edit coverage is not retrieval relevance or independently graded answer quality. Cache reads describe provider billing discounts and must not be called raw tokens saved.
 
-## Not Claimable
+## Reporting results
 
-- Fixture-mode records or tokenizer-only estimates.
-- Unpaired tasks.
-- Per-variant aggregate sums from mixed-mode sessions.
-- Any savings number not derived from `paired[].deltaPct`.
-- Cache estimates without explicit provider cache counters.
-- `crg` or `repomix` results while those products remain dry-run declarations without behavior integrations.
+Report paired token, model-cost, and agent-time differences alongside success rates and missing telemetry. Conditional savings on jointly solved tasks do not account for unsuccessful tasks by themselves.
+
+Uncertainty bootstraps equally weighted repository/task means across repetitions. Include both independent task counts and paired observation counts. Fewer than two independent tasks produce no interval; extra repetitions do not create extra independent tasks.
+
+State whether costs cover provider agent usage or independently counted text estimates. Unknown indexing expenses prevent a complete cold-run total, and warm-session amortization is unavailable. Do not present known model spend as complete experiment spend.
+
+After the realism profile and validity gate both pass, a supported description is: "On paired behavior tasks that both approaches solved, SDL reduced median provider-reported tokens by at least 50%, with a 25th percentile of at least 40% and a minimum task reduction of at least 20%." Include the task and observation counts, provenance conditions, uncertainty, and unresolved measurement coverage.
+
+## Unsupported claims
+
+- Fixture results, observed-text estimates, or mixed execution modes presented as behavior savings.
+- Unpaired results or a winning retry selected from duplicate attempts.
+- Cache discounts without explicit provider counters.
+- Complete indexing, enrichment, or amortized expenses without measured usage and rates.
+- Results for products without implemented integrations, including `crg` and `repomix`.
+
+See the [measurement audit](measurement-audit.md) for the verified corrections and remaining evidence limits.

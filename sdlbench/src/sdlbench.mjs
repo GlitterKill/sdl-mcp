@@ -8,12 +8,12 @@ import { createServer as createNetServer } from "node:net";
 import { performance } from "node:perf_hooks";
 import { signalsForLoss } from "./attribution-signals.mjs";
 import { computeCoverage } from "./coverage.mjs";
-import { percentile, mean, stdDev, bootstrapCI, mannWhitneyU } from "./stats.mjs";
+import { percentile, mean, stdDev, clusteredPairedCI } from "./stats.mjs";
 import { prepareOpencodeSterileRuntime } from "./agents/opencode-runtime.mjs";
 import { extractOpencodeSessionUsage, tokensFromOpencodeSessionCounts } from "./agents/opencode.mjs";
 
-const SESSION_SCHEMA_VERSION = 3;
-const ANALYSIS_SCHEMA_VERSION = 3;
+const SESSION_SCHEMA_VERSION = 4;
+const ANALYSIS_SCHEMA_VERSION = 4;
 const DEFAULT_RESULTS = "sdlbench/results/sessions.jsonl";
 const DEFAULT_ENCODING = "o200k_base";
 const DEFAULT_MODEL = "gpt-5.5";
@@ -66,11 +66,14 @@ export async function runBenchmark(options = {}) {
   const resultsPath = abs(root, options.resultsPath ?? DEFAULT_RESULTS);
   const agent = options.agent ?? "codex";
   const variant = options.variant ?? "baseline";
+  if (!["baseline", "sdl"].includes(variant)) throw new Error(`Unsupported variant ${variant}`);
+  const experimentId = options.experimentId ?? randomUUID();
+  const repetitionId = String(options.repetitionId ?? "1");
   const tokenizerCommand = options.tokenizerCommand ?? defaultTokenizerCommand(root);
   const executionMode = options.executionMode ?? (options.behavior ? "behavior" : "fixture");
   if (!["fixture", "behavior"].includes(executionMode)) throw new Error(`Unknown executionMode ${executionMode}`);
-  if (variant === "sdl" && options.warmSession && !options.sdlHttpBaseUrl) {
-    throw new Error("warmSession requires sdlHttpBaseUrl so SDL and the agent operate on the same reused worktree.");
+  if (options.warmSession) {
+    throw new Error("warmSession is unavailable until the reused server is verified against the exact agent worktree.");
   }
   const workDir = abs(root, options.workDir ?? defaultWorkDir(root, executionMode));
   const pricing = await loadPricing(root, options.pricingPath);
@@ -80,40 +83,39 @@ export async function runBenchmark(options = {}) {
   const matrix = await readJson(matrixPath);
   const reposLock = await loadReposLock(root, options.reposLockPath);
   const tasks = await loadTasks(root, dirname(matrixPath), matrix);
-  const filteredTasks = options.repoIdFilter
-    ? tasks.filter((task) => task.repoId === options.repoIdFilter)
-    : tasks;
+  const filteredTasks = tasks.filter((task) =>
+    (!options.repoIdFilter || task.repoId === options.repoIdFilter)
+    && (!options.sizeClassFilter || resolveRepoMeta(task.repoId, reposLock).sizeClass === options.sizeClassFilter));
   const records = [];
-  const warmSessions = new Map();
-  const indexedRepos = new Set();
+
 
   await mkdir(dirname(resultsPath), { recursive: true });
   await mkdir(workDir, { recursive: true });
 
   for (const task of filteredTasks) {
     const started = performance.now();
-    const taskRunId = `${Date.now()}-${task.taskId}-${variant}`.replace(/[^a-zA-Z0-9_.-]/g, "-");
+    const taskRunId = `${randomUUID()}-${task.taskId}-${variant}`.replace(/[^a-zA-Z0-9_.-]/g, "-");
     const runRoot = join(workDir, taskRunId);
-    await rm(runRoot, { force: true, recursive: true });
-    await cp(abs(root, task.repo.sourcePath), runRoot, { recursive: true });
-
+    const provenance = {
+      sourceHash: null,
+      taskHash: hash(JSON.stringify(task)),
+      verifierHash: hash(JSON.stringify(task.verify)),
+      promptHash: hash(renderAgentPrompt(task, variant)),
+      agentConfigHash: hash(JSON.stringify(agentConfig)),
+      pricingHash: hash(JSON.stringify(modelPricing)),
+      productVersion: variant === "sdl" ? (await readJson(join(root, "package.json")).catch(() => ({}))).version ?? null : null,
+    };
     let sdlSession = null;
     let ownsSdlSession = false;
+    let attemptRecord = null;
+    let attemptAgent = null;
     try {
+      await cp(abs(root, task.repo.sourcePath), runRoot, { recursive: true });
+      provenance.sourceHash = hash(JSON.stringify([...await snapshotFiles(runRoot)].sort(([a], [b]) => a.localeCompare(b))));
       const setupStart = performance.now();
       if (variant === "sdl") {
-        if (options.warmSession) {
-          const warmKey = task.repoId;
-          sdlSession = warmSessions.get(warmKey) ?? null;
-          if (!sdlSession) {
-            sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options, repoMeta: resolveRepoMeta(task.repoId, reposLock) });
-            warmSessions.set(warmKey, sdlSession);
-            indexedRepos.add(warmKey);
-          }
-        } else {
-          sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options, repoMeta: resolveRepoMeta(task.repoId, reposLock) });
-          ownsSdlSession = true;
-        }
+        sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options, repoMeta: resolveRepoMeta(task.repoId, reposLock) });
+        ownsSdlSession = true;
       }
       const sdlEvidence = sdlSession?.evidence ?? null;
       const setupMs = Math.round(performance.now() - setupStart);
@@ -147,7 +149,8 @@ export async function runBenchmark(options = {}) {
         const before = await snapshotFiles(runRoot);
         agentStartedAt = Date.now();
         const agentStart = performance.now();
-        agentResult = runAgentCommand(agentConfig, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime });
+        agentResult = await runAgentCommand(agentConfig, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime });
+        attemptAgent = agentResult;
         agentMs = Math.round(performance.now() - agentStart);
         changedFiles = diffSnapshots(before, await snapshotFiles(runRoot));
         outputText = [agentResult.stdout, agentResult.stderr].filter(Boolean).join("\n");
@@ -155,15 +158,17 @@ export async function runBenchmark(options = {}) {
         await applySolution(runRoot, task);
       }
 
-      const verify = runCommand(task.verify.command, runRoot, task.verify.timeoutMs ?? 10000);
+      await sdlSession?.finishObservation?.();
+      const verify = await runCommandAsync(task.verify.command, runRoot, task.verify.timeoutMs ?? 10000);
       const durationMs = Math.round(performance.now() - activeStart);
       const wallMs = Math.round(performance.now() - started);
       const passed = verify.exitCode === 0 && (!agentResult || agentResult.exitCode === 0);
       const estimatedTokens = countSessionTokens(task, variant, tokenizerCommand, "", outputText, {
         model,
         encoding: modelPricing.encoding,
+        promptText: executionMode === "behavior" ? renderAgentPrompt(task, variant) : task.prompt,
       });
-      const codexTokenCounts = executionMode === "behavior"
+      const codexTokenCounts = executionMode === "behavior" && agent === "codex"
         ? await findCodexSessionTokenCounts({
           runRoot,
           sessionsDir: codexRuntime?.sessionsDir ?? options.codexSessionsDir,
@@ -175,7 +180,7 @@ export async function runBenchmark(options = {}) {
         throw new Error(`Codex behavior benchmark did not find matching session token_count JSONL for ${runRoot}`);
       }
       const codexSterility = agent === "codex" && codexTokenCounts?.sessionFile
-        ? await inspectCodexSessionSterility(codexTokenCounts.sessionFile)
+        ? await inspectCodexSessionsSterility(codexTokenCounts.sessionFiles ?? [codexTokenCounts.sessionFile])
         : null;
       if (codexSterility && !codexSterility.passed) {
         throw new Error(`Non-sterile Codex session ${codexTokenCounts.sessionFile}: ${codexSterility.forbidden.join(", ")}`);
@@ -196,25 +201,34 @@ export async function runBenchmark(options = {}) {
       const attribution = codexTokenCounts?.attribution
         ? buildAttribution(codexTokenCounts.attribution, tokens)
         : undefined;
-      const sdlRetrievedSymbols = variant === "sdl"
+      const sdlRetrievedSymbols = variant === "sdl" && attribution
         ? extractRetrievedSymbolsFromAttribution(attribution, task.contextTargets)
-        : [];
+        : null;
       const claimGrade = resolveClaimGrade(executionMode, tokens.tokenizerSource);
       const repoMeta = resolveRepoMeta(task.repoId, reposLock);
       const workflowSteps = Array.isArray(task.workflow) ? task.workflow : [];
       const turns = workflowSteps.length || task.workflow?.turns || 1;
-      const perTurnTokens = workflowSteps.length > 0
-        ? workflowSteps.map((step, i) => ({ turn: i + 1, phase: step.phase ?? `turn-${i + 1}`, tokens: Math.round(tokens.total / workflowSteps.length) }))
-        : [];
-      const isFirstWarmTask = options.warmSession && variant === "sdl" && indexedRepos.has(task.repoId) && !records.some((r) => r.repoId === task.repoId && r.variant === variant);
-      const indexCost = sdlSession?.evidence?.index
-        ? (isFirstWarmTask ? estimateIndexCost(sdlSession.evidence.index, tokenizerCommand, { model, encoding: modelPricing.encoding }) : 0)
-        : (variant === "sdl" ? estimateIndexCost(null, tokenizerCommand, { model, encoding: modelPricing.encoding }) : 0);
-      tokens.indexCost = indexCost;
+      const perTurnTokens = [];
+      // Index responses describe work; their JSON size is not provider usage.
+      const indexing = {
+        durationMs: variant === "sdl" ? sdlSession?.evidence?.durationMs ?? null : 0,
+        usage: null,
+        rates: null,
+        totalUsd: variant === "sdl" ? null : 0,
+        status: variant === "sdl" ? "usage-unavailable" : "not-applicable",
+      };
       const cost = estimateCost(tokens, modelPricing);
+      cost.scope = tokens.usageSource ? "provider-agent-usage" : "observed-text-estimate";
+      cost.billingUsageAvailable = Boolean(tokens.usageSource);
+      cost.coldTotalUsd = indexing.totalUsd === null ? null : cost.totalUsd + indexing.totalUsd;
+      cost.amortizedTotalUsd = null;
       const cache = computeCacheMetrics({ tokens, cost });
       const record = {
         schemaVersion: SESSION_SCHEMA_VERSION,
+        experimentId,
+        repetitionId,
+        provenance,
+        pricingSnapshot: modelPricing,
         runId: taskRunId,
         sessionId: randomUUID(),
         timestamp: new Date().toISOString(),
@@ -229,12 +243,17 @@ export async function runBenchmark(options = {}) {
         taskId: task.taskId,
         category: task.category,
     promptSpecificity: task.promptSpecificity,
-        status: passed ? "pass" : "fail",
+        status: agentResult?.timedOut || verify.timedOut ? "timeout" : passed ? "pass" : "fail",
         durationMs,
         wallMs,
+        timingScope: { agentMs: "agent-child-execution", durationMs: "runtime-preparation-through-verification", wallMs: "copy-through-verification-excludes-accounting-and-cleanup" },
         setupMs,
-        agentMs: agentResult ? agentMs : durationMs,
+        agentMs: agentResult ? agentMs : null,
         tokens,
+        providerUsage: tokens.usageSource ? tokens : null,
+        observedContent: { ...estimatedTokens, coverage: executionMode === "behavior" ? "prompt-and-captured-agent-output" : "fixture-prompt-and-solution", completeModelSession: false, missing: ["tool-schemas", "repeated-request-input", "hidden-reasoning"] },
+        indexing,
+        fairness: { available: false, passed: false, promptHash: provenance.promptHash, promptTokens: estimatedTokens.input, injectedTokens: null, toolBudget: null },
         cost,
         cache,
         attribution,
@@ -250,14 +269,15 @@ export async function runBenchmark(options = {}) {
           passed,
           errorRate: passed ? 0 : 1,
           weightedErrorRate: passed ? 0 : 1,
-          rubricScore: passed ? task.rubric?.maxScore ?? 1 : 0,
+          rubricScore: null,
+          verifierPassed: verify.exitCode === 0,
         },
         workflow: {
           executionMode,
           turns,
-          toolCalls: task.workflow?.toolCalls ?? (variant === "sdl" ? 2 : 0),
-          fileReads: task.workflow?.fileReads ?? (variant === "sdl" ? 1 : 3),
-          shellCommands: 1 + (agentResult ? 1 : 0),
+          toolCalls: attribution?.toolCalls?.length ?? null,
+          fileReads: null,
+          shellCommands: null,
           testsRun: 1,
           filesChanged: changedFiles.length,
           humanInterventions: 0,
@@ -269,14 +289,15 @@ export async function runBenchmark(options = {}) {
           changedFiles,
           codexSession: codexTokenCounts ? codexSessionArtifact(codexTokenCounts) : undefined,
           codexSterility: codexSterility ?? undefined,
-          estimatedTokens: codexTokenCounts ? estimatedTokens : undefined,
+          estimatedTokens,
           sdl: { ...sdlEvidence, observability: sdlSession?.observability ?? undefined },
+          verifier: { exitCode: verify.exitCode, timedOut: verify.timedOut },
           verifyStdout: verify.stdout.slice(-4000),
           verifyStderr: verify.stderr.slice(-4000),
         },
       };
 
-      records.push(record);
+      attemptRecord = record;
       assertSdlBehaviorIntegrity({
     variant,
     executionMode,
@@ -284,15 +305,32 @@ export async function runBenchmark(options = {}) {
     observability: record.artifacts?.sdl?.observability,
     claimGrade: record.claimGrade,
   });
-  await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
+      records.push(record);
+      await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
+    } catch (error) {
+      // Preserve the planned attempt even when setup or provider telemetry fails.
+      const record = attemptRecord ?? {
+        schemaVersion: SESSION_SCHEMA_VERSION, experimentId, repetitionId, provenance,
+        runId: taskRunId, agent, model, variant, product: variant, repoId: task.repoId,
+        repo: resolveRepoMeta(task.repoId, reposLock), taskId: task.taskId,
+        workflow: { executionMode }, tokens: null, providerUsage: null,
+        cost: { totalUsd: null, coldTotalUsd: null, amortizedTotalUsd: null },
+        artifacts: { worktree: runRoot, agent: attemptAgent },
+      };
+      record.status = attemptAgent?.timedOut ? "timeout" : "error";
+      record.claimGrade = "none";
+      record.quality = { ...record.quality, passed: false };
+      record.error = { message: error.message };
+      records.push(record);
+      await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
     } finally {
       if (ownsSdlSession) await sdlSession?.stop?.();
     }
   }
 
-  for (const session of warmSessions.values()) await session?.stop?.();
 
-  return { records, resultsPath };
+
+  return { records, resultsPath, selectedTaskCount: filteredTasks.length, experimentId, repetitionId };
 }
 
 export function importTranscript({ agent, variant, text, repoId = "unknown", taskId = "imported", tokenizerCommand = defaultTokenizerCommand(defaultRoot()) }) {
@@ -302,16 +340,9 @@ export function importTranscript({ agent, variant, text, repoId = "unknown", tas
     transcript: rawText,
   });
   const total = counted.counts.transcript;
-  const input = Math.ceil(total / 2);
-  const output = total - input;
-  const tokens = normalizeTokens({
-    input,
-    output,
-    productContext: 0,
-    tokenizer: counted,
-  });
-
-  const cost = estimateCost(tokens);
+  // A transcript is observed text, not a sequence of billable model requests.
+  const tokens = { ...normalizeTokens({ input: 0, output: 0, tokenizer: counted }), input: null, output: null, total };
+  const cost = { totalUsd: null, scope: "unavailable", billingUsageAvailable: false };
   const cache = computeCacheMetrics({ tokens, cost });
 
   return {
@@ -326,6 +357,8 @@ export function importTranscript({ agent, variant, text, repoId = "unknown", tas
     repoId,
     taskId,
     status: "imported",
+    providerUsage: null,
+    observedContent: { ...tokens, coverage: "imported-transcript", completeModelSession: false },
     durationMs: 0,
     setupMs: 0,
     agentMs: 0,
@@ -389,21 +422,31 @@ function analyzeSessionsCore(records) {
       passed: 0,
       tokens: 0,
       costUsd: 0,
+      missingCostSessions: 0,
+      missingTokenSessions: 0,
       durationMs: [],
       cache: createCacheAggregate(),
     };
     modeBucket.sessions += 1;
     modeBucket.passed += record.quality?.passed ? 1 : 0;
-    modeBucket.tokens += record.tokens?.total ?? 0;
-    modeBucket.costUsd += record.cost?.totalUsd ?? 0;
-    modeBucket.durationMs.push(record.durationMs ?? 0);
-    bucket.durationMs.push(record.durationMs ?? 0);
+    if (Number.isFinite(record.tokens?.total)) modeBucket.tokens += record.tokens.total;
+    else modeBucket.missingTokenSessions++;
+    if (Number.isFinite(record.cost?.totalUsd)) modeBucket.costUsd += record.cost.totalUsd;
+    else modeBucket.missingCostSessions++;
+    if (Number.isFinite(record.durationMs)) {
+      modeBucket.durationMs.push(record.durationMs);
+      bucket.durationMs.push(record.durationMs);
+    }
     addCacheAggregate(modeBucket.cache, record.cache);
     addCacheAggregate(bucket.cache, record.cache);
   }
 
   for (const bucket of Object.values(byVariant)) {
     for (const modeBucket of Object.values(bucket.byExecutionMode)) {
+      modeBucket.knownCostUsd = modeBucket.costUsd;
+      if (modeBucket.missingCostSessions) modeBucket.costUsd = null;
+      modeBucket.costPerSolvedTaskUsd = modeBucket.passed && modeBucket.costUsd !== null ? modeBucket.costUsd / modeBucket.passed : null;
+      if (modeBucket.missingTokenSessions) modeBucket.tokens = null;
       modeBucket.passRate = pct(modeBucket.passed, modeBucket.sessions);
       modeBucket.p50DurationMs = percentile(modeBucket.durationMs, 50);
       modeBucket.cache = finalizeCacheAggregate(modeBucket.cache);
@@ -422,25 +465,23 @@ function analyzeSessionsCore(records) {
       if (variant === "baseline") continue;
       const pairedForVariant = paired.filter((row) => row.variant === variant);
       const tokensSaved = pairedForVariant.reduce((sum, row) => sum + row.deltaTok, 0);
-      const costSavedUsd = round4(
-        pairedForVariant.reduce((sum, row) => sum + (row.baselineCostUsd - row.productCostUsd), 0),
-      );
+      const costSavedUsd = pairedForVariant.every(row => Number.isFinite(row.baselineCostUsd) && Number.isFinite(row.productCostUsd))
+        ? round4(pairedForVariant.reduce((sum, row) => sum + row.baselineCostUsd - row.productCostUsd, 0))
+        : null;
       const deltaPctValues = pairedForVariant.map((row) => row.deltaPct);
 
-      const stats = deltaPctValues.length >= 3
-        ? {
-            deltasMean: round4(mean(deltaPctValues)),
-            deltasStd: round4(stdDev(deltaPctValues)),
-            bootstrap95: {
-              lower: round4(bootstrapCI(deltaPctValues).lower),
-              upper: round4(bootstrapCI(deltaPctValues).upper),
-            },
-            significant: mannWhitneyU(
-              pairedForVariant.map((pair) => pair.baselineTok),
-              pairedForVariant.map((pair) => pair.productTok),
-            ).significant,
-          }
-        : {};
+      const uncertainty = {
+        tokens: clusteredPairedCI(pairedForVariant, "deltaTok"),
+        costUsd: clusteredPairedCI(pairedForVariant, "deltaCostUsd"),
+        agentMs: clusteredPairedCI(pairedForVariant, "deltaAgentMs"),
+        percent: clusteredPairedCI(pairedForVariant, "deltaPct"),
+      };
+      const stats = {
+        deltasMean: round4(mean(deltaPctValues)),
+        deltasStd: round4(stdDev(deltaPctValues)),
+        bootstrap95: uncertainty.percent.interval,
+        uncertainty,
+      };
 
       deltas[variant] = {
         tokensSaved,
@@ -492,16 +533,32 @@ function buildCacheComparison(baselineCache, productCache) {
   };
 }
 
-function buildPairedDeltas(records) {
+export function buildPairedDeltas(records) {
   const byKey = new Map();
+  const attempts = new Set();
+
   for (const record of records) {
-    if (!record.quality?.passed) continue;
     const mode = record.workflow?.executionMode ?? "unknown";
-    const key = `${record.taskId}|${record.agent ?? "unknown"}|${record.model ?? "unknown"}|${mode}`;
+    const attemptKey = JSON.stringify([record.repoId ?? "unknown", record.taskId, record.agent ?? "unknown", record.model ?? "unknown", mode, record.warmSession ?? false, record.experimentId ?? null, record.repetitionId ?? null, record.variant]);
+    if (attempts.has(attemptKey)) throw new Error(`Ambiguous benchmark pair for ${attemptKey}; assign distinct repetition IDs to planned retries.`);
+    attempts.add(attemptKey);
+    const key = JSON.stringify([
+      record.repoId ?? "unknown", record.taskId, record.agent ?? "unknown",
+      record.model ?? "unknown", mode, record.warmSession ?? false,
+      record.experimentId ?? null, record.repetitionId ?? null,
+      ...["sourceHash", "taskHash", "verifierHash", "promptHash", "agentConfigHash", "pricingHash"].map(key => record.provenance?.[key] ?? null),
+      record.tokens?.usageSource ?? record.tokens?.tokenizerSource ?? null,
+      record.observedContent?.encoding ?? record.tokens?.encoding ?? null,
+      record.observedContent?.tokenizerVersion ?? record.tokens?.tokenizerVersion ?? null,
+    ]);
     let slot = byKey.get(key);
     if (!slot) {
-      slot = {};
+      slot = Object.create(null);
       byKey.set(key, slot);
+    }
+    // Validate before pass-gating: failed retries must not disappear from pairing.
+    if (Object.hasOwn(slot, record.variant)) {
+      throw new Error(`Ambiguous benchmark pair for ${key}, variant ${record.variant}; analyze one attempt per variant in a separate input file.`);
     }
     slot[record.variant] = record;
   }
@@ -509,16 +566,20 @@ function buildPairedDeltas(records) {
   const paired = [];
   for (const slot of byKey.values()) {
     const baseline = slot.baseline;
-    if (!baseline) continue;
+    if (!baseline?.quality?.passed) continue;
     const products = Object.entries(slot)
-      .filter(([variant]) => variant !== "baseline")
+      .filter(([variant, product]) => variant !== "baseline" && product.quality?.passed)
       .sort(([left], [right]) => left.localeCompare(right));
     for (const [variant, product] of products) {
-      const baselineTok = baseline.tokens?.total ?? 0;
-      const productTok = product.tokens?.total ?? 0;
+      if (!Number.isFinite(baseline.tokens?.total) || !Number.isFinite(product.tokens?.total)) continue;
+      const baselineTok = baseline.tokens.total;
+      const productTok = product.tokens.total;
       const deltaTok = baselineTok - productTok;
       const deltaPctVal = pct(deltaTok, baselineTok);
       const row = {
+        repoId: baseline.repoId,
+        experimentId: baseline.experimentId,
+        repetitionId: baseline.repetitionId,
         taskId: baseline.taskId,
         agent: baseline.agent,
         model: baseline.model,
@@ -532,11 +593,13 @@ function buildPairedDeltas(records) {
         deltaTok,
         deltaPct: deltaPctVal,
         bothPass: true,
-        baselineCostUsd: baseline.cost?.totalUsd ?? 0,
-        productCostUsd: product.cost?.totalUsd ?? 0,
+        baselineCostUsd: baseline.cost?.totalUsd ?? null,
+        productCostUsd: product.cost?.totalUsd ?? null,
+        deltaCostUsd: Number.isFinite(baseline.cost?.totalUsd) && Number.isFinite(product.cost?.totalUsd) ? baseline.cost.totalUsd - product.cost.totalUsd : null,
         cache: buildCacheComparison(baseline.cache, product.cache),
         coverage: product.coverage,
-        fairness: product.fairness,
+        fairness: { available: baseline.fairness?.available === true && product.fairness?.available === true, passed: baseline.fairness?.passed === true && product.fairness?.passed === true },
+        deltaAgentMs: Number.isFinite(baseline.agentMs) && Number.isFinite(product.agentMs) ? baseline.agentMs - product.agentMs : null,
         lossSignals: deltaPctVal < 0
           ? signalsForLoss({
               baselineTok,
@@ -601,11 +664,7 @@ async function loadTasks(root, matrixDir, matrix) {
   const validated = [];
   for (const task of all) {
     const validatedTask = validateTask(root, task);
-    // Skip tasks whose local sourcePath doesn't exist (e.g. repos not cloned yet).
-    // Cloneable repos (cloneUrl) are loaded — cloning happens in startSdlHttpSession/runBenchmark.
-    if (validatedTask.repo?.sourcePath && !existsSync(abs(root, validatedTask.repo.sourcePath))) {
-      continue;
-    }
+    // Missing sources are failed planned attempts, recorded by the runner.
     validated.push(validatedTask);
   }
   return validated;
@@ -668,7 +727,7 @@ export function renderAgentPrompt(task, _variant) {
   ].join("\n\n");
 }
 
-function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime }) {
+async function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime }) {
   const command = renderCommandTemplate(config.commandTemplate, {
     repo: runRoot,
     prompt: promptPath,
@@ -678,7 +737,7 @@ function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sd
     sdlMcpConfig: sdlMcpConfigArgs(sdlSession),
     sdlMcpUrl: sdlSession?.mcpUrl ?? "",
   });
-  return { command, ...runCommand(command, runRoot, config.timeoutMs ?? 600_000, agentRuntime?.env) };
+  return { command, ...await runCommandAsync(command, runRoot, config.timeoutMs ?? 600_000, agentRuntime?.env) };
 }
 
 function renderCommandTemplate(template, values) {
@@ -832,19 +891,44 @@ function diffSnapshots(before, after) {
     .sort();
 }
 
-function runCommand(command, cwd, timeoutMs, env = undefined) {
-  const result = spawnSync(command, {
-    cwd,
-    encoding: "utf8",
-    env: env ? { ...process.env, ...env } : process.env,
-    shell: true,
-    timeout: timeoutMs,
+export function runCommandAsync(command, cwd, timeoutMs, env = undefined) {
+  return new Promise((resolveResult) => {
+    const child = spawn(command, {
+      cwd, shell: true, detached: process.platform !== "win32",
+      env: env ? { ...process.env, ...env } : process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    // Bound captured output without blocking the child on unread pipes.
+    child.stdout.on("data", chunk => { stdout = (stdout + chunk).slice(-4_000_000); });
+    child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-4_000_000); });
+    const finish = (exitCode, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveResult({ exitCode: exitCode ?? 1, stdout, stderr: stderr || error?.message || "", timedOut });
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // Kill the shell's process tree so timed-out agents cannot keep editing.
+      if (process.platform === "win32") {
+        const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        killer.on("error", () => child.kill());
+      } else {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+      }
+    }, timeoutMs);
+    child.once("error", error => finish(1, error));
+    child.once("close", code => finish(timedOut ? 1 : code));
   });
-  return {
-    exitCode: result.status ?? 1,
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? result.error?.message ?? "",
-  };
+}
+
+async function inspectCodexSessionsSterility(sessionFiles) {
+  const inspections = await Promise.all(sessionFiles.map(inspectCodexSessionSterility));
+  return { passed: inspections.every(item => item.passed), forbidden: [...new Set(inspections.flatMap(item => item.forbidden))], inspectedBytes: inspections.reduce((sum, item) => sum + item.inspectedBytes, 0) };
 }
 
 export async function inspectCodexSessionSterility(sessionFile) {
@@ -871,7 +955,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       task,
       timeoutMs: options.sdlHttpTimeoutMs ?? 120_000,
     });
-    const observability = startObservabilityPolling(baseUrl, authToken, task.repoId, options);
+    const observability = await startObservabilityPolling(baseUrl, authToken, task.repoId, options);
     const stop = observability.stop;
     return {
       baseUrl,
@@ -880,7 +964,8 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       repoId: task.repoId,
       evidence,
       get observability() { return observability.getDelta(); },
-      stop: async () => { stop(); },
+      finishObservation: () => observability.stop(),
+      stop: async () => { await stop(); },
     };
   }
 
@@ -930,7 +1015,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       task,
       timeoutMs: options.sdlHttpTimeoutMs ?? 120_000,
     });
-    const observability = startObservabilityPolling(baseUrl, authToken, task.repoId, options);
+    const observability = await startObservabilityPolling(baseUrl, authToken, task.repoId, options);
     return {
       baseUrl,
     configPath,
@@ -943,7 +1028,8 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
         server: { port, logTail: logs.join("").slice(-4000) },
       },
       get observability() { return observability.getDelta(); },
-      stop: async () => { observability.stop(); await stopChild(child); },
+      finishObservation: () => observability.stop(),
+      stop: async () => { await observability.stop(); await stopChild(child); },
     };
   } catch (error) {
     await stopChild(child);
@@ -1002,38 +1088,39 @@ function languagesForRepo(repoMeta, defaultLanguages) {
   return selected.length > 0 ? selected : defaultLanguages;
 }
 
-function startObservabilityPolling(baseUrl, authToken, repoId, options) {
+export async function startObservabilityPolling(baseUrl, authToken, repoId, options = {}) {
   const intervalMs = options.sdlObservabilityPollMs ?? 2000;
-  const samples = [];
   let first = null;
   let last = null;
-  let timer = null;
-  let callCounter = 0;
-
+  let pending = null;
+  let stopped = false;
+  let failures = 0;
+  let samples = 0;
+  let finalSucceeded = false;
   async function poll() {
     try {
-      const url = `${trimSlash(baseUrl)}/api/observability/snapshot?repoId=${encodeURIComponent(repoId)}&_c=${callCounter++}`;
-      const snapshot = await getJson(url, authToken, 5000);
-      if (!first) first = snapshot;
+      const snapshot = await getJson(`${trimSlash(baseUrl)}/api/observability/snapshot?repoId=${encodeURIComponent(repoId)}`, authToken, 5000);
       last = snapshot;
-      samples.push(snapshot);
-    } catch {
-      // Observability may not be ready yet; silently skip.
-    }
+      samples++;
+      return snapshot;
+    } catch { failures++; return null; }
   }
-
-  // Fire one immediate poll, then start interval.
-  poll();
-  timer = setInterval(poll, intervalMs);
+  first = await poll();
+  const timer = setInterval(() => {
+    // Slow endpoints must not accumulate a queue of stale snapshots.
+    if (!stopped && !pending) pending = poll().finally(() => { pending = null; });
+  }, intervalMs);
   timer.unref?.();
-
   return {
-    stop() {
-      if (timer) { clearInterval(timer); timer = null; }
+    async stop() {
+      if (stopped) return pending;
+      stopped = true;
+      clearInterval(timer);
+      await pending;
+      finalSucceeded = Boolean(await poll());
     },
     getDelta() {
-      if (!first || !last) return null;
-      return computeObservabilityDelta(first, last);
+      return first && finalSucceeded ? { ...computeObservabilityDelta(first, last), sampleCount: samples, failedSamples: failures } : null;
     },
   };
 }
@@ -1195,8 +1282,8 @@ function countSessionTokens(task, variant, tokenizerCommand, sdlContext, outputO
   const outputText = outputOverride ?? Object.values(task.solution?.files ?? {}).join("\n");
   const activeContext = sdlContext;
   const counted = runTokenizer(tokenizerCommand, {
-    input: `${task.prompt}\n\n${activeContext}`,
-    output: outputText || task.expectedArtifacts?.join("\n") || task.prompt,
+    input: `${tokenizerOptions.promptText ?? task.prompt}\n\n${activeContext}`,
+    output: outputText ?? "",
     productContext: variant === "sdl" ? activeContext : "",
     rawInput: `${task.prompt}\n\n${task.context.raw}`,
   }, tokenizerOptions);
@@ -1260,8 +1347,18 @@ export async function findCodexSessionTokenCounts({ runRoot, sessionsDir = defau
     if (match) matches.push(match);
   }
 
-  matches.sort((a, b) => (b.mtimeMs - a.mtimeMs) || String(b.sessionFile).localeCompare(String(a.sessionFile)));
-  return matches[0] ?? null;
+  matches.sort((a, b) => String(a.sessionFile).localeCompare(String(b.sessionFile)));
+  if (!matches.length) return null;
+  const usage = {};
+  for (const match of matches) {
+    for (const [key, value] of Object.entries(match.usage)) {
+      if (typeof value === "number") usage[key] = (usage[key] ?? 0) + value;
+    }
+  }
+  return {
+    ...matches[0], usage, sessionFiles: matches.map(match => match.sessionFile),
+    attribution: { toolCalls: matches.flatMap(match => match.attribution?.toolCalls ?? []) },
+  };
 }
 
 function defaultCodexSessionsDir() {
@@ -1322,8 +1419,11 @@ async function readCodexSessionTokenFile(sessionFile, normalizedRunRoot, tokeniz
     }
   }
 
-  if (!metadata?.cwd || normalizeSessionPath(metadata.cwd) !== normalizedRunRoot || !tokenInfo?.total_token_usage) {
-    return null;
+  if (!metadata?.cwd || normalizeSessionPath(metadata.cwd) !== normalizedRunRoot) return null;
+  const usage = tokenInfo?.total_token_usage;
+  if (!usage || !["input_tokens", "output_tokens", "total_tokens"].every(key => typeof usage[key] === "number" && Number.isFinite(usage[key]) && usage[key] >= 0)
+    || usage.total_tokens !== usage.input_tokens + usage.output_tokens) {
+    throw new Error(`Incomplete provider usage in matching Codex session ${sessionFile.path}`);
   }
 
   const toolCalls = tokenizerCommand
@@ -1367,8 +1467,8 @@ function tokenizeFunctionCalls(calls, outputs, tokenizerCommand) {
   } catch {
     return calls.map((call) => ({
       toolName: call.toolName,
-      tokensIn: 0,
-      tokensOut: 0,
+      tokensIn: null,
+      tokensOut: null,
       ts: call.ts,
       arguments: boundAttributionText(call.arguments),
       output: boundAttributionText(outputs.get(call.callId) ?? ""),
@@ -1413,16 +1513,18 @@ function normalizeSessionPath(value) {
 
 function buildAttribution(rawAttribution, tokens) {
   const toolCalls = rawAttribution.toolCalls ?? [];
-  const retrievalTokens = toolCalls
-    .filter((tc) => tc.toolName?.startsWith("sdl."))
-    .reduce((sum, tc) => sum + tc.tokensIn + tc.tokensOut, 0);
+  const retrievalCalls = toolCalls.filter((tc) => /(?:^|[._])sdl(?:[._]|$)|sdl_mcp/i.test(tc.toolName ?? ""));
+  const retrievalTokens = retrievalCalls.every(tc => Number.isFinite(tc.tokensIn) && Number.isFinite(tc.tokensOut))
+    ? retrievalCalls.reduce((sum, tc) => sum + tc.tokensIn + tc.tokensOut, 0) : null;
   return {
     toolCalls,
+    // Retrieval counts visible tool text; it is not a disjoint billing bucket.
+    phaseBreakdownOverlapsProviderUsage: true,
     phaseBreakdown: {
-      coldIndex: 0,
+      coldIndex: null,
       retrieval: retrievalTokens,
       reasoning: tokens.reasoningOutput ?? 0,
-      output: tokens.output ?? 0,
+      output: Math.max(0, (tokens.output ?? 0) - (tokens.reasoningOutput ?? 0)),
     },
   };
 }
@@ -1446,10 +1548,10 @@ function tokensFromCodexSessionCounts(sessionCounts, estimatedTokens) {
     saved: 0,
     savingsPercent: 0,
     model: estimatedTokens.model,
-    encoding: estimatedTokens.encoding,
+    encoding: null,
     modelHint: estimatedTokens.modelHint,
-    tokenizerResolution: "tiktoken_session_count",
-    tokenizerVersion: sessionCounts.cliVersion,
+    tokenizerResolution: "provider_usage",
+    tokenizerVersion: null,
     tokenizerSource: "codex-session",
     usageSource: "codex_session_token_count",
     sessionId: sessionCounts.sessionId,
@@ -1464,22 +1566,11 @@ function resolveClaimGrade(executionMode, tokenizerSource) {
   return "secondary";
 }
 
-function estimateIndexCost(indexPayload, tokenizerCommand, { model, encoding } = {}) {
-  if (!tokenizerCommand) return 0;
-  try {
-    const text = indexPayload ? JSON.stringify(indexPayload) : "";
-    if (!text.trim()) return 0;
-    const counted = runTokenizer(tokenizerCommand, { indexPayload: text }, { model, encoding });
-    return counted.counts.indexPayload ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
 function codexSessionArtifact(sessionCounts) {
   return {
     sessionId: sessionCounts.sessionId,
     sessionFile: sessionCounts.sessionFile,
+    sessionFiles: sessionCounts.sessionFiles,
     cwd: sessionCounts.cwd,
     source: sessionCounts.source,
     cliVersion: sessionCounts.cliVersion,

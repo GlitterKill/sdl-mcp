@@ -83,3 +83,26 @@ function normalCdf(z) {
   const d = 0.3989423 * Math.exp(-z * z / 2);
   return d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
 }
+
+export function clusteredPairedCI(rows, field) {
+  const clusters = new Map();
+  let pairedCount = 0;
+  for (const row of rows) {
+    if (!row.repoId || !row.taskId || !Number.isFinite(row[field])) continue;
+    const key = JSON.stringify([row.repoId, row.taskId]);
+    const values = clusters.get(key) ?? [];
+    values.push(row[field]);
+    clusters.set(key, values);
+    pairedCount++;
+  }
+  // Repetitions share a task, so average them before resampling independent tasks.
+  const taskMeans = [...clusters.values()].map(mean);
+  const bounds = taskMeans.length >= 2 ? bootstrapCI(taskMeans) : null;
+  return {
+    method: "task-cluster-bootstrap",
+    taskCount: taskMeans.length,
+    pairedCount,
+    mean: taskMeans.length ? mean(taskMeans) : null,
+    interval: bounds ? { lower: bounds.lower, upper: bounds.upper } : null,
+  };
+}

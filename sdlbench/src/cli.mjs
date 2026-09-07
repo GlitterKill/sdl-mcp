@@ -103,6 +103,8 @@ async function dispatch() {
       warmSession: opts["warm-session"] === true || opts.warmSession === true,
       reposLockPath: opts.repos ?? opts["repos-lock"],
       repoIdFilter: opts["repo-id"],
+      experimentId: opts["experiment-id"],
+      repetitionId: opts["repetition-id"],
       agentTimeoutMs: opts.agentTimeoutMs || opts["agent-timeout-ms"] ? Number(opts.agentTimeoutMs ?? opts["agent-timeout-ms"]) : undefined,
     });
     console.log(JSON.stringify({ records: result.records.length, resultsPath: result.resultsPath }, null, 2));
@@ -130,6 +132,9 @@ async function dispatch() {
       root: process.cwd(),
       matrixPath: opts.matrix ?? "sdlbench/tasks/matrix.json",
       sizeClasses: sizes,
+      executionMode: opts.behavior ? "behavior" : opts["execution-mode"] ?? "behavior",
+      experimentId: opts["experiment-id"],
+      repetitions: opts.repetitions === undefined ? 1 : Number(opts.repetitions),
       agent: opts.agent ?? "codex",
       model: opts.model,
       variant: opts.variant ?? "baseline,sdl",

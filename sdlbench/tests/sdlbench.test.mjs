@@ -19,7 +19,7 @@ import {
   importTranscript,
   inspectCodexSessionSterility,
   renderAgentPrompt,
-  runBenchmark,
+  runBenchmark as executeBenchmark,
   trimSlash,
 } from "../src/sdlbench.mjs";
 import { prepareOpencodeSterileRuntime } from "../src/agents/opencode-runtime.mjs";
@@ -35,6 +35,31 @@ import { extractCursorSessionUsage } from "../src/agents/cursor.mjs";
 import { extractAiderSessionUsage } from "../src/agents/aider.mjs";
 import { extractOpencodeSessionUsage } from "../src/agents/opencode.mjs";
 import { runScalingCurve } from "../src/scaling.mjs";
+
+// All fixture integrations stay offline, including scaling's injected runner.
+async function runBenchmark(options) {
+  const scoped = options.matrixPath === "sdlbench/tasks/matrix.json"
+    ? { ...options, repoIdFilter: options.repoIdFilter ?? "fixture-js" }
+    : options;
+  if (scoped.variant !== "sdl" || scoped.sdlHttpBaseUrl || scoped.warmSession) return executeBenchmark(scoped);
+  assert.notEqual(scoped.executionMode, "behavior", "Behavior tests must provide their own fake SDL server");
+  const server = createServer((req, res) => {
+    if (req.url.includes("/reindex-stream")) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end('event: complete\ndata: {"ok":true}\n\n');
+    } else {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end('{"status":"ok"}');
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    return await executeBenchmark({ ...scoped, sdlHttpBaseUrl: "http://127.0.0.1:" + server.address().port });
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
 
 test("trimSlash stays linear on a non-matching slash suffix", () => {
   const value = "/".repeat(40_000) + "x";
@@ -171,7 +196,7 @@ test("behavior mode runs an agent command instead of applying canned solution fi
     });
     const [record] = result.records;
 
-    assert.equal(record.status, "pass");
+    assert.equal(record.status, "pass", JSON.stringify(record.artifacts.agent));
     assert.equal(record.artifacts.agent.exitCode, 0);
     assert.equal(record.workflow.executionMode, "behavior");
     assert.equal(record.workflow.filesChanged, 1);
@@ -183,7 +208,7 @@ test("behavior mode runs an agent command instead of applying canned solution fi
 });
 
 
-test("behavior mode records Codex tiktoken session counts when available", async () => {
+test("behavior mode records Codex provider usage separately from observed content", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-codex-tokens-"));
   const repo = join(root, "repo");
   const matrixPath = join(root, "matrix.json");
@@ -221,7 +246,7 @@ test("behavior mode records Codex tiktoken session counts when available", async
       import { mkdirSync, writeFileSync } from "node:fs";
       import { join } from "node:path";
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
-      const sessions = process.argv[process.argv.indexOf("--sessions") + 1];
+      const sessions = join(process.env.CODEX_HOME, "sessions");
       mkdirSync(sessions, { recursive: true });
       writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"actual-session\\\";\\n");
       writeFileSync(join(sessions, "rollout-test.jsonl"), [
@@ -232,7 +257,7 @@ test("behavior mode records Codex tiktoken session counts when available", async
     `);
 
     const result = await runBenchmark({
-      agent: "local",
+      agent: "codex",
       agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo} --sessions ${JSON.stringify(dayDir)}`,
       codexSessionsDir,
       executionMode: "behavior",
@@ -244,7 +269,7 @@ test("behavior mode records Codex tiktoken session counts when available", async
     });
     const [record] = result.records;
 
-    assert.equal(record.status, "pass");
+    assert.equal(record.status, "pass", JSON.stringify(record.artifacts.agent));
     assert.equal(record.tokens.tokenizerSource, "codex-session");
     assert.equal(record.tokens.input, 1234);
     assert.equal(record.tokens.cachedInput, 900);
@@ -332,7 +357,7 @@ test("Codex behavior mode uses a sterile temporary CODEX_HOME", async () => {
     });
     const [record] = result.records;
 
-    assert.equal(record.status, "pass");
+    assert.equal(record.status, "pass", JSON.stringify(record.artifacts.agent));
     assert.equal(record.tokens.tokenizerSource, "codex-session");
     assert.equal(record.artifacts.codexSterility.passed, true);
     assert.equal(record.artifacts.codexSession.sessionId, "sterile-session");
@@ -454,7 +479,7 @@ test("agentTimeoutMs overrides timeout from behavior agent config", async () => 
     });
     const [record] = result.records;
 
-    assert.equal(record.status, "pass");
+    assert.equal(record.status, "pass", JSON.stringify(record.artifacts.agent));
     assert.equal(record.artifacts.agent.exitCode, 0);
     assert.equal(record.artifacts.agent.error, undefined);
   } finally {
@@ -649,7 +674,7 @@ test("SDL behavior mode exposes a live MCP server without seeded lookup context"
     });
     const [record] = result.records;
 
-    assert.equal(record.status, "pass");
+    assert.equal(record.status, "pass", JSON.stringify(record.artifacts.agent));
     assert.match(record.artifacts.agent.command, /mcp_servers\.sdl-mcp\.url/);
   for (const relativePath of [
     "AGENTS.md",
@@ -711,16 +736,29 @@ test("temporary SDL benchmark server disables HTTP auth for Codex MCP access", (
   assert.deepEqual(fixtureConfig.repos[0].languages, ["js", "jsx"]);
 });
 
-test("runBenchmark fails instead of estimating when tokenizer is unavailable", async () => {
-  await assert.rejects(
-    runBenchmark({
+test("runBenchmark preserves tokenizer failure without estimating tokens", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-missing-tokenizer-"));
+  try {
+    const result = await runBenchmark({
       agent: "codex",
       matrixPath: "sdlbench/tasks/matrix.json",
       tokenizerCommand: "node missing-tokenizer.mjs",
       variant: "baseline",
-    }),
-    /Tokenizer failed/
-  );
+      repoIdFilter: "fixture-js",
+      workDir: join(root, "work"),
+      resultsPath: join(root, "sessions.jsonl"),
+    });
+    assert.ok(result.records.length > 0);
+    for (const record of result.records) {
+      assert.equal(record.status, "error");
+      assert.match(record.error.message, /Tokenizer failed/);
+      assert.equal(record.tokens, null);
+    }
+    const persisted = (await readFile(join(root, "sessions.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
+    assert.equal(persisted.length, result.records.length);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("runBenchmark tags records with repo.sizeClass and repo.languageTags from repos.lock.json", async () => {
@@ -926,8 +964,9 @@ test("behavior records carry attribution.toolCalls and phaseBreakdown from codex
     }));
     await writeFile(agentPath, `
       import { mkdirSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
-      const sessions = process.argv[process.argv.indexOf("--sessions") + 1];
+      const sessions = join(process.env.CODEX_HOME, "sessions");
       mkdirSync(sessions, { recursive: true });
       writeFileSync(repo + "/src/value.js", "export const value = \\\"attr\\\";\\n");
       writeFileSync(sessions + "/rollout-attr-record.jsonl", [
@@ -939,7 +978,7 @@ test("behavior records carry attribution.toolCalls and phaseBreakdown from codex
     `);
 
     const result = await runBenchmark({
-      agent: "local",
+      agent: "codex",
       agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo} --sessions ${JSON.stringify(dayDir)}`,
       codexSessionsDir,
       executionMode: "behavior",
@@ -955,7 +994,8 @@ test("behavior records carry attribution.toolCalls and phaseBreakdown from codex
     assert.ok(record.attribution.toolCalls.length >= 1);
     assert.ok(record.attribution.phaseBreakdown);
     assert.equal(record.attribution.phaseBreakdown.reasoning, 30);
-    assert.equal(record.attribution.phaseBreakdown.output, 80);
+    assert.equal(record.attribution.phaseBreakdown.output, 50);
+    assert.equal(record.attribution.phaseBreakdown.output + record.attribution.phaseBreakdown.reasoning, record.tokens.output);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -1053,7 +1093,7 @@ test("signalsForLoss returns concrete signals on negative deltaPct and none on p
   assert.equal(winSignals.length, 0);
 });
 
-test("computeCoverage returns file/symbol coverage, precision, and recall", () => {
+test("computeCoverage separates edit coverage from observed retrieval relevance", () => {
   const coverage = computeCoverage({
     changedFiles: ["src/cart.js", "src/discounts.js"],
     retrievedSymbols: ["buildCart", "resolvePromo", "estimateShipping"],
@@ -1065,8 +1105,10 @@ test("computeCoverage returns file/symbol coverage, precision, and recall", () =
 
   assert.equal(coverage.fileCoverage, 66.67);
   assert.equal(coverage.symbolCoverage, 100);
-  assert.equal(coverage.precision, 80);
-  assert.equal(coverage.recall, 80);
+  assert.equal(coverage.precision, null);
+  assert.equal(coverage.recall, null);
+  assert.equal(coverage.retrievalRelevance.precision, 66.67);
+  assert.equal(coverage.retrievalRelevance.recall, 100);
   assert.deepEqual(coverage.filesFound, ["src/cart.js", "src/discounts.js"]);
   assert.deepEqual(coverage.symbolsFound, ["buildCart", "resolvePromo"]);
 });
@@ -1076,7 +1118,7 @@ test("computeCoverage returns null when contextTargets is absent", () => {
   assert.equal(computeCoverage({ changedFiles: [], retrievedSymbols: [], contextTargets: { files: [], symbols: [] } }), null);
 });
 
-test("warmSession requires an external SDL server to avoid reusing a stale copied worktree", async () => {
+test("warmSession rejects unverified reused worktrees", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-warm-local-"));
   const matrixPath = join(root, "matrix.json");
 
@@ -1094,79 +1136,22 @@ test("warmSession requires an external SDL server to avoid reusing a stale copie
         workDir: join(root, "work"),
         warmSession: true,
       }),
-      /warmSession.*sdlHttpBaseUrl/,
+      /warmSession is unavailable.*exact agent worktree/,
     );
   } finally {
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test("warmSession reuses SDL server across tasks and only charges indexCost on first task", async () => {
-  const root = await mkdtemp(join(tmpdir(), "sdlbench-warm-"));
-  let reindexCount = 0;
-  const server = createServer((req, res) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (url.pathname.endsWith("/reindex-stream")) {
-      reindexCount++;
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
-      return;
-    }
-    if (url.pathname.endsWith("/api/observability/snapshot")) {
-      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({
-        schemaVersion: 1, generatedAt: new Date().toISOString(), repoId: "fixture-js", uptimeMs: 500,
-        retrieval: { totalRetrievals: 1, emptyResultCount: 0, avgLatencyMs: 1, p95LatencyMs: 2, byMode: {}, candidateCountPerSource: {}, phaseLatencyMs: {}, byRetrievalType: {} },
-        beam: { totalSliceBuilds: 1, avgBuildMs: 1, p95BuildMs: 2, avgAccepted: 1, avgEvicted: 0, avgRejected: 0, avgFrontierMaxSize: 1, p95FrontierMaxSize: 1, retainedExplainHandles: 0 },
-        delta: { totalBlastRadiusComputations: 0, avgBlastRadiusLatencyMs: 0, p95BlastRadiusLatencyMs: 0, avgDbRoundTripsPerChangedSymbol: 0, avgPathExplanationLatencyMs: 0, p95PathExplanationLatencyMs: 0, fallbackPathQueryCount: 0 },
-        indexing: { totalEvents: 10, filesPerMinute: 60, avgPass1Ms: 1, avgPass2Ms: 1, phaseCounts: {}, perLanguageAvgMs: {}, engineDispatch: { rust: 1, ts: 0 }, failures: 0, derivedStateLagMs: null },
-        tokenEfficiency: { totalUsed: 100, totalSaved: 50, savingsRatio: 0.33, avgPerCall: 10, compressionLayers: {} },
-        health: { score: 80, components: { freshness: 1, coverage: 0.8, errorRate: 0, edgeQuality: 0.9, callResolution: 0.85 }, watcherRunning: true, watcherQueueDepth: 0, watcherStale: false, watcherErrors: 0, watcherRestartCount: 0 },
-        latency: { avgMs: 1, p50Ms: 1, p95Ms: 2, p99Ms: 3, maxMs: 5, perTool: {} },
-        pool: { totalAcquired: 1, totalReleased: 1, active: 0, maxActive: 1, avgWaitMs: 0, p95WaitMs: 0, timeoutCount: 0, evictionCount: 0, writeQueueDepth: 0, writeQueueMaxDepth: 0 },
-        scip: { totalIndexes: 0, totalSymbols: 0, externalSymbols: 0, autoIngestedIndexes: 0, generatorRuns: 0, generatorFailures: 0 },
-        packed: { totalEvents: 0, totalSymbols: 0, totalFiles: 0, avgSizeBytes: 0, maxSizeBytes: 0, deduplicatedCount: 0, compressionRatio: 0 },
-        ppr: { totalRuns: 0, totalNodes: 0, totalEdges: 0, avgNodesPerRun: 0, avgDurationMs: 0, p95DurationMs: 0 },
-        resources: { rssMb: 50, heapMb: 20, heapUsedMb: 10, cpuPercent: 1, eventLoopDelayMs: 0 },
-        bottleneck: { class: "idle", confidence: 0.9, components: [] },
-        toolVolume: { totalCalls: 1, perTool: {}, perToolErrors: {}, callsPerMinute: 10 },
-        auditBuffer: { depth: 0, maxDepth: 0, droppedTotal: 0, sessionActive: false },
-        postIndexSession: { totalSessions: 0, avgSessionDurationMs: 0, activeWriteCount: 0, totalWriteOps: 0, maxWriteOps: 0 },
-        predictiveContext: { enabled: false, strategy: null, hits: 0, misses: 0, evictions: 0, hitRatePct: 0 },
-      }));
-      return;
-    }
-    res.writeHead(200, { "Content-Type": "application/json" }).end('{"status":"ok"}');
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address();
-
-  try {
-    const result = await runBenchmark({
-      agent: "codex",
-      matrixPath: "sdlbench/tasks/matrix.json",
-      resultsPath: join(root, "sessions.jsonl"),
-      tokenizerCommand: await fakeTokenizer(root),
-      variant: "sdl",
-      workDir: join(root, "work"),
-      sdlAuthToken: "test-token",
-      sdlHttpBaseUrl: `http://127.0.0.1:${port}`,
-      warmSession: true,
-    });
-
-    assert.ok(result.records.length >= 2);
-    assert.ok(result.records.every((r) => r.warmSession === true));
-    // With warmSession, we reindex once (the first task reuses for the rest).
-    assert.ok(reindexCount <= result.records.length);
-    const firstWithIndex = result.records.find((r) => (r.tokens?.indexCost ?? 0) > 0);
-    const restWithout = result.records.filter((r) => (r.tokens?.indexCost ?? 0) === 0);
-    assert.ok(firstWithIndex || restWithout.length === result.records.length);
-  } finally {
-    server.close();
-    await rm(root, { force: true, recursive: true });
-  }
+test("warmSession rejects external servers without exact worktree proof", async () => {
+  await assert.rejects(runBenchmark({
+    warmSession: true,
+    sdlHttpBaseUrl: "http://127.0.0.1:1",
+    variant: "sdl",
+  }), /warmSession is unavailable.*exact agent worktree/);
 });
 
-test("validateTask accepts multi-turn workflow[] and runBenchmark records perTurnTokens", async () => {
+test("validateTask accepts declared workflow steps without fabricating per-turn tokens", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-multiturn-"));
   const matrixPath = join(root, "matrix.json");
 
@@ -1203,9 +1188,7 @@ test("validateTask accepts multi-turn workflow[] and runBenchmark records perTur
     const [record] = result.records;
 
     assert.equal(record.workflow.turns, 3);
-    assert.ok(Array.isArray(record.perTurnTokens));
-    assert.equal(record.perTurnTokens.length, 3);
-    assert.ok(record.perTurnTokens.every((turn) => typeof turn.tokens === "number"));
+    assert.equal(record.perTurnTokens, undefined);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -1226,7 +1209,7 @@ test("stats: mean, stdDev, bootstrapCI, mannWhitneyU work on N>=3 samples", () =
 });
 
 test("analyzeSessions computes deltasMean/Std/bootstrap95 when N>=3 paired repeats exist", () => {
-  const base = { agent: "codex", model: "m", quality: { errorRate: 0 }, cost: { totalUsd: 0 }, workflow: { executionMode: "fixture" }, durationMs: 0 };
+  const base = { repoId: "fixture", agent: "codex", model: "m", quality: { errorRate: 0 }, cost: { totalUsd: 0 }, workflow: { executionMode: "fixture" }, durationMs: 0 };
   const records = [];
   for (let i = 0; i < 3; i++) {
     records.push({ ...base, variant: "baseline", taskId: `t${i}`, tokens: { total: 100 + i * 10 }, quality: { passed: true } });
@@ -1236,10 +1219,11 @@ test("analyzeSessions computes deltasMean/Std/bootstrap95 when N>=3 paired repea
   assert.ok(summary.deltas.sdl.deltasMean !== undefined);
   assert.ok(summary.deltas.sdl.deltasStd !== undefined);
   assert.ok(summary.deltas.sdl.bootstrap95);
-  assert.equal(typeof summary.deltas.sdl.significant, "boolean");
+  assert.equal(summary.deltas.sdl.uncertainty.percent.taskCount, 3);
+  assert.equal(summary.deltas.sdl.uncertainty.percent.method, "task-cluster-bootstrap");
 });
 
-test("auditFairness measures SDL prompt injection token imbalance and recommends deduction", () => {
+test("auditFairness leaves unmeasured injection and tool budgets unknown", () => {
   const largeContent = "Use SDL-MCP as the repository interface. ".repeat(50);
   const result = auditFairness({
     baselinePromptTokens: 500,
@@ -1252,11 +1236,12 @@ test("auditFairness measures SDL prompt injection token imbalance and recommends
     baselineInjectedFiles: [],
   });
 
-  assert.ok(result.promptTokenImbalance > 0, `expected positive imbalance, got ${result.promptTokenImbalance}`);
-  assert.ok(result.toolBudgetImbalance > 0);
-  assert.ok(result.recommendedDeduction > 0);
+  assert.equal(result.promptTokenImbalance, null);
+  assert.equal(result.toolBudgetImbalance, null);
+  assert.equal(result.recommendedDeduction, null);
   assert.equal(result.sdlInjectedFiles.length, 3);
-  assert.ok(typeof result.netSavingsPct === "number");
+  assert.equal(result.netSavingsPct, null);
+  assert.equal(result.available, false);
 });
 
 test("extractClaudeSessionUsage reads usage records from .claude JSONL files", async () => {
@@ -1465,10 +1450,10 @@ test("behavior mode with agent=opencode records session usage as opencode-sessio
     });
     const [record] = result.records;
 
-    assert.equal(record.status, "pass");
+    assert.equal(record.status, "pass", JSON.stringify(record.artifacts.agent));
     assert.equal(record.tokens.tokenizerSource, "opencode-session");
     assert.equal(record.tokens.input, 2200);
-    assert.equal(record.tokens.output, 400);
+    assert.equal(record.tokens.output, 575);
     assert.equal(record.tokens.reasoningOutput, 175);
     assert.equal(record.tokens.cachedInput, 1800);
     assert.equal(record.tokens.cachedWriteInput, 50);
@@ -1479,7 +1464,7 @@ test("behavior mode with agent=opencode records session usage as opencode-sessio
     assert.equal(record.cache.hitPercent, 81.82);
     assert.ok(record.cache.discountSavingsUsd >= 0);
     // Total excludes cache (cache is a component of input per OpenAI convention):
-    // total = input + output + reasoning = 2775
+    // total = input + inclusive output = 2775
     assert.equal(record.tokens.total, 2775);
     assert.equal(record.tokens.usageSource, "opencode_session_usage");
     assert.equal(record.cost.pricingModel, "glm-5.2");
@@ -1489,7 +1474,7 @@ test("behavior mode with agent=opencode records session usage as opencode-sessio
   }
 });
 
-test("behavior mode with agent=opencode throws when no session usage is found", async () => {
+test("behavior mode with agent=opencode preserves failure when no session usage is found", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-no-usage-"));
   const repo = join(root, "repo");
   const matrixPath = join(root, "matrix.json");
@@ -1528,8 +1513,7 @@ test("behavior mode with agent=opencode throws when no session usage is found", 
       writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"ok\\\";\\n");
     `);
 
-    await assert.rejects(
-      runBenchmark({
+    const result = await runBenchmark({
         agent: "opencode",
         agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo}`,
         executionMode: "behavior",
@@ -1539,9 +1523,11 @@ test("behavior mode with agent=opencode throws when no session usage is found", 
         tokenizerCommand: await fakeTokenizer(root),
         variant: "baseline",
         workDir: join(root, "work"),
-      }),
-      /Opencode behavior benchmark did not find session usage/,
-    );
+      });
+    assert.equal(result.records.length, 1);
+    assert.equal(result.records[0].status, "error");
+    assert.equal(result.records[0].providerUsage, null);
+    assert.match(result.records[0].error.message, /Opencode behavior benchmark did not find session usage/);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -1555,13 +1541,13 @@ test("validateClaims returns gates for smoke/efficient/realism profiles on paire
     executionMode: "behavior",
   };
   const paired = [
-    { ...claimable, deltaPct: 60, coverage: { contextCoverage: 80, fileCoverage: 90 }, fairness: { netSavingsPct: 50 } },
-    { ...claimable, deltaPct: 50, coverage: { contextCoverage: 70, fileCoverage: 80 }, fairness: { netSavingsPct: 40 } },
-    { ...claimable, deltaPct: 35, coverage: { contextCoverage: 60, fileCoverage: 50 }, fairness: { netSavingsPct: 25 } },
+    { ...claimable, deltaPct: 60, coverage: { contextCoverage: 80, fileCoverage: 90 }, fairness: { available: true, passed: true, netSavingsPct: 50 } },
+    { ...claimable, deltaPct: 50, coverage: { contextCoverage: 70, fileCoverage: 80 }, fairness: { available: true, passed: true, netSavingsPct: 40 } },
+    { ...claimable, deltaPct: 35, coverage: { contextCoverage: 60, fileCoverage: 50 }, fairness: { available: true, passed: true, netSavingsPct: 25 } },
   ];
 
   const realism = validateClaims({ paired, profile: "realism" });
-  assert.ok(realism.gates.length >= 5);
+  assert.equal(realism.gates.length, 4);
   assert.equal(typeof realism.passed, "boolean");
   assert.ok(realism.gates.find((g) => g.name === "p50_paired_savings"));
 
@@ -1571,15 +1557,14 @@ test("validateClaims returns gates for smoke/efficient/realism profiles on paire
   const efficient = validateClaims({ paired, profile: "efficient" });
   assert.ok(efficient.passed, "efficient profile should pass with good data");
 
-  const coverageGate = smoke.gates.find((gate) => gate.name === "avg_coverage");
-  assert.equal(coverageGate.actual, (0.9 + 0.8 + 0.5) / 3);
+  assert.equal(smoke.experimentalValidity.passed, true);
 
   const evenMedian = validateClaims({
     paired: [10, 20, 30, 40].map((deltaPct) => ({
       ...claimable,
       deltaPct,
       coverage: { fileCoverage: 100 },
-      fairness: { netSavingsPct: 100 },
+      fairness: { available: true, passed: true, netSavingsPct: 100 },
     })),
     profile: "smoke",
   });
@@ -1604,7 +1589,7 @@ test("analyzeSessions returns baseline deltas and imports transcript records", a
   assert.equal(imported.tokens.total > 0, true);
   assert.equal(imported.status, "imported");
   assert.equal(imported.tokens.tokenizerSource, "tiktoken");
-  assert.equal(imported.schemaVersion, 3);
+  assert.equal(imported.schemaVersion, 4);
   assert.deepEqual(imported.cache, { available: false, reason: "provider-usage-unavailable" });
 
   const summary = analyzeSessions([
@@ -1623,7 +1608,7 @@ test("analyzeSessions returns baseline deltas and imports transcript records", a
 });
 
 test("analyzeSessions builds a pass-gated paired ledger that excludes failures and separates execution modes", () => {
-  const base = { agent: "codex", model: "m", quality: { errorRate: 0 }, cost: { totalUsd: 0 }, workflow: { executionMode: "fixture" }, durationMs: 0 };
+  const base = { repoId: "fixture", agent: "codex", model: "m", quality: { errorRate: 0 }, cost: { totalUsd: 0 }, workflow: { executionMode: "fixture" }, durationMs: 0 };
   const summary = analyzeSessions([
     { ...base, variant: "baseline", taskId: "t1", tokens: { total: 100 }, quality: { passed: true } },
     { ...base, variant: "sdl", taskId: "t1", tokens: { total: 60 }, quality: { passed: true } },
@@ -1798,7 +1783,7 @@ test("serveViewer lists sidecar jsonl files and serves them", async () => {
   }
 });
 
-test("fixture records carry claimGrade=none, unavailable cache, and zeroed savings after schema v3", async () => {
+test("fixture records carry claimGrade=none, unavailable cache, and zeroed savings after schema v4", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-claim-fixture-"));
 
   try {
@@ -1811,7 +1796,7 @@ test("fixture records carry claimGrade=none, unavailable cache, and zeroed savin
       workDir: join(root, "work"),
     });
 
-    assert.ok(result.records.every((record) => record.schemaVersion === 3));
+    assert.ok(result.records.every((record) => record.schemaVersion === 4));
     assert.ok(result.records.every((record) => record.claimGrade === "none"));
     assert.ok(result.records.every((record) => record.tokens.saved === 0));
     assert.ok(result.records.every((record) => record.tokens.savingsPercent === 0));
@@ -1861,7 +1846,7 @@ test("behavior records carry claimGrade=primary when codex session counts are pr
       import { mkdirSync, writeFileSync } from "node:fs";
       import { join } from "node:path";
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
-      const sessions = process.argv[process.argv.indexOf("--sessions") + 1];
+      const sessions = join(process.env.CODEX_HOME, "sessions");
       mkdirSync(sessions, { recursive: true });
       writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"claim-primary\\\";\\n");
       writeFileSync(join(sessions, "rollout-claim.jsonl"), [
@@ -1871,7 +1856,7 @@ test("behavior records carry claimGrade=primary when codex session counts are pr
     `);
 
     const result = await runBenchmark({
-      agent: "local",
+      agent: "codex",
       agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo} --sessions ${JSON.stringify(dayDir)}`,
       codexSessionsDir,
       executionMode: "behavior",
@@ -1883,7 +1868,7 @@ test("behavior records carry claimGrade=primary when codex session counts are pr
     });
     const [record] = result.records;
 
-    assert.equal(record.schemaVersion, 3);
+    assert.equal(record.schemaVersion, 4);
     assert.equal(record.claimGrade, "primary");
     assert.equal(record.tokens.tokenizerSource, "codex-session");
     assert.equal(record.cache.available, true);
@@ -2047,7 +2032,7 @@ test("behavior mode with agent=opencode passes the sterile runtime env to the ag
     });
     const [record] = result.records;
 
-    assert.equal(record.status, "pass");
+    assert.equal(record.status, "pass", JSON.stringify(record.artifacts.agent));
     assert.equal(record.agent, "opencode");
     assert.equal(record.workflow.executionMode, "behavior");
     const probe = JSON.parse(await readFile(probePath, "utf8"));
@@ -2261,7 +2246,7 @@ test("generic product cache pairing preserves SDL headline and weighted aggregat
     record("sdl", "task-2", 75, 0.075, availableCache(300, 0, 0)),
   ]);
 
-  assert.equal(summary.schemaVersion, 3);
+  assert.equal(summary.schemaVersion, 4);
   assert.equal(summary.paired.length, 2);
   const sdlPair = summary.paired.find((row) => row.variant === "sdl");
   const competitorPair = summary.paired.find((row) => row.variant === "competitor");
@@ -2313,7 +2298,7 @@ test("validateClaims isolates products and ignores cache fields", () => {
       bothPass: true,
       deltaPct: 60,
       coverage: { fileCoverage: 100 },
-      fairness: { netSavingsPct: 60 },
+      fairness: { available: true, passed: true, netSavingsPct: 60 },
       cache: { comparable: true, hitPercentDelta: 99 },
     },
     {
@@ -2323,7 +2308,7 @@ test("validateClaims isolates products and ignores cache fields", () => {
       bothPass: true,
       deltaPct: -50,
       coverage: { fileCoverage: 100 },
-      fairness: { netSavingsPct: 60 },
+      fairness: { available: true, passed: true, netSavingsPct: 60 },
       cache: { comparable: true, hitPercentDelta: -99 },
     },
   ];
@@ -2374,7 +2359,7 @@ test("claims CLI defaults to SDL and accepts an explicit competitor variant", as
     quality: { passed: true },
     workflow: { executionMode: "behavior" },
     coverage: { fileCoverage: 100 },
-    fairness: { netSavingsPct: 60 },
+    fairness: { available: true, passed: true, netSavingsPct: 60 },
   });
 
   try {
@@ -2418,54 +2403,31 @@ test("claims CLI defaults to SDL and accepts an explicit competitor variant", as
 });
 
 
-test("scaling pairs every product and uses product-neutral repository metadata", async () => {
+test("scaling pairs supported products and rejects unsupported integrations", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "sdlbench-scaling-generic-"));
-  const resultsDir = `sdlbench/.work/scaling-generic-${Date.now()}`;
-  const tokenizerCommand = await fakeTokenizer(tempRoot);
-
   try {
-    const withSdl = await runScalingCurve({
+    const options = {
       root: process.cwd(),
       matrixPath: "sdlbench/tasks/matrix.json",
       sizeClasses: ["tiny"],
       agent: "codex",
       model: "gpt-5.5",
-      variant: "baseline,sdl,competitor",
+      executionMode: "fixture",
       reposLockPath: "sdlbench/config/repos.lock.json",
-      resultsDir,
+      resultsDir: join(tempRoot, "results"),
       iUnderstandCost: true,
-      tokenizerCommand,
-    });
-    assert.deepEqual(
-      withSdl.scalingRows.map((row) => row.variant).sort(),
-      ["competitor", "sdl"],
-    );
-    const sdlRow = withSdl.scalingRows.find((row) => row.variant === "sdl");
-    const competitorRow = withSdl.scalingRows.find((row) => row.variant === "competitor");
-    assert.equal(sdlRow.productTok, sdlRow.sdlTok);
-    assert.equal(sdlRow.sdlVariant, "sdl");
-    assert.equal(competitorRow.productTok > 0, true);
-    assert.equal("sdlTok" in competitorRow, false);
-    assert.equal(competitorRow.symbolCount, null);
-
-    const withoutSdl = await runScalingCurve({
-      root: process.cwd(),
-      matrixPath: "sdlbench/tasks/matrix.json",
-      sizeClasses: ["tiny"],
-      agent: "codex",
-      model: "gpt-5.5",
-      variant: "baseline,competitor",
-      reposLockPath: "sdlbench/config/repos.lock.json",
-      resultsDir,
-      iUnderstandCost: true,
-      tokenizerCommand,
-    });
-    assert.equal(withoutSdl.scalingRows.length, 1);
-    assert.equal(withoutSdl.scalingRows[0].variant, "competitor");
-    assert.equal(withoutSdl.scalingRows[0].symbolCount, null);
+      tokenizerCommand: await fakeTokenizer(tempRoot),
+    };
+    const result = await runScalingCurve({ ...options, variant: "baseline,sdl" }, runBenchmark);
+    assert.equal(result.scalingRows.length, 1);
+    const [row] = result.scalingRows;
+    assert.equal(row.variant, "sdl");
+    assert.equal(row.productTok, row.sdlTok);
+    assert.equal(row.sdlVariant, "sdl");
+    assert.equal(row.selectedTaskCount, 4);
+    await assert.rejects(runScalingCurve({ ...options, variant: "baseline,competitor" }, runBenchmark), /Unsupported.*variant/);
   } finally {
     await rm(tempRoot, { force: true, recursive: true });
-    await rm(join(process.cwd(), resultsDir), { force: true, recursive: true });
   }
 });
 

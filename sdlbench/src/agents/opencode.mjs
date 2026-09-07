@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
  * per-session aggregated token counts as direct columns:
  *
  *   - tokens_input           -> input
- *   - tokens_output          -> output
+ *   - tokens_output          -> output excluding reasoning (SQLite adapter contract)
  *   - tokens_reasoning       -> reasoningOutput
  *   - tokens_cache_read      -> cachedInput
  *   - tokens_cache_write     -> cachedWriteInput
@@ -37,45 +37,26 @@ export function extractOpencodeSessionUsage({ storageDir, runRoot }) {
 }
 
 function querySessions(db, runRoot, dbPath) {
-  // Try to match by directory first (most rigorous).
-  const normalizedRunRoot = runRoot ? normalizeSessionPath(runRoot) : null;
-  let sessions = [];
-  if (normalizedRunRoot) {
-    const stmt = db.prepare(`
-      SELECT id, directory, time_created, time_updated,
-             tokens_input, tokens_output, tokens_reasoning,
-             tokens_cache_read, tokens_cache_write, cost
-      FROM session
-      WHERE lower(directory) = ?
-      ORDER BY time_updated DESC
-    `);
-    sessions = stmt.all(normalizedRunRoot);
-  }
-  // Fallback: if no directory match (older opencode or different path scheme),
-  // take the most-recently-updated session. Callers requiring strict
-  // runRoot-matching should assert rather than accept this fallback.
-  if (sessions.length === 0) {
-    const stmt = db.prepare(`
-      SELECT id, directory, time_created, time_updated,
-             tokens_input, tokens_output, tokens_reasoning,
-             tokens_cache_read, tokens_cache_write, cost
-      FROM session
-      ORDER BY time_updated DESC
-      LIMIT 1
-    `);
-    const row = stmt.all();
-    sessions = row ? row : [];
-  }
-  if (sessions.length === 0) return emptyUsage();
+  // Per-run storage is not proof of attribution: require the exact worktree.
+  if (!runRoot) return emptyUsage();
+  const normalizedRunRoot = normalizeSessionPath(runRoot);
+  const sessions = db.prepare(`
+    SELECT id, directory, time_created, time_updated,
+           tokens_input, tokens_output, tokens_reasoning,
+           tokens_cache_read, tokens_cache_write, cost
+    FROM session
+    ORDER BY time_updated DESC, id
+  `).all();
+  const session = sessions.find((row) => normalizeSessionPath(row.directory) === normalizedRunRoot);
+  if (!session) return emptyUsage();
 
-  // Use the most-recent session.
-  const session = sessions[0];
   const input = whole(session.tokens_input);
-  const output = whole(session.tokens_output);
   const reasoningOutput = whole(session.tokens_reasoning);
+  // Normalize the separate SQLite text/reasoning counters to inclusive output.
+  const output = whole(session.tokens_output) + reasoningOutput;
   const cachedInput = whole(session.tokens_cache_read);
   const cachedWriteInput = whole(session.tokens_cache_write);
-  const total = input + output + reasoningOutput;
+  const total = input + output;
   return {
     input,
     output,
@@ -121,7 +102,8 @@ function normalizeSessionPath(value) {
 /**
  * Reshape extracted OpenCode session usage into the v3 tokens schema used by
  * estimateCost and the SessionRecord tokens field. Input is the provider total;
- * cachedInput and cachedWriteInput remain subsets of that input.
+ * cachedInput and cachedWriteInput remain subsets of that input. Output includes
+ * reasoningOutput. These counters do not identify the provider tokenizer.
  *
  * Mirrors tokensFromCodexSessionCounts in sdlbench.mjs (kept here so all
  * OpenCode-specific token logic lives in one agent module, isolating new
@@ -130,7 +112,7 @@ function normalizeSessionPath(value) {
 export function tokensFromOpencodeSessionCounts(sessionCounts, estimatedTokens) {
   const input = sessionCounts.input ?? 0;
   const output = sessionCounts.output ?? 0;
-  const total = sessionCounts.total || input + output;
+  const total = input + output;
   const cachedInput = sessionCounts.cachedInput ?? 0;
   const reasoningOutput = sessionCounts.reasoningOutput ?? 0;
   const cachedWriteInput = sessionCounts.cachedWriteInput ?? 0;
@@ -147,10 +129,10 @@ export function tokensFromOpencodeSessionCounts(sessionCounts, estimatedTokens) 
     saved: 0,
     savingsPercent: 0,
     model: estimatedTokens.model,
-    encoding: estimatedTokens.encoding,
+    encoding: null,
     modelHint: estimatedTokens.modelHint,
-    tokenizerResolution: "tiktoken_session_count",
-    tokenizerVersion: "opencode",
+    tokenizerResolution: "provider_usage",
+    tokenizerVersion: null,
     tokenizerSource: "opencode-session",
     usageSource: "opencode_session_usage",
     sessionFiles: sessionCounts.sessionFiles ?? [],
