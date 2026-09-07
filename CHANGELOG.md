@@ -7,66 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Added
-
-- **Per-repository Symbol vector tables**: Symbol vectors now use one deterministic repository table shared by the supported Symbol models, with repository-specific HNSW indexes only at the internal eligibility threshold. Retrieval routes through cached `none`, `exact`, `hnsw`, or `degraded` health rather than a shared global ANN table.
+## [0.13.7] - 2026-09-06
 
 ### Changed
 
-- **Required vector-layout rebuild**: Schema version 27 requires SDL-MCP to be stopped and rebuilt through the safe-rebuild workflow when replacing a populated historical shared Symbol-vector table. Startup performs no automatic migration, index refresh, or background orphan cleanup.
+- **Repository-isolated vectors and required rebuild**: Symbol vectors now use repository-specific tables and indexes, with exact-query fallback and bounded concurrent access. This keeps retrieval scoped to the requested repository. Schema version 27 requires stopping SDL-MCP and using the documented safe-rebuild workflow when replacing a populated historical shared Symbol-vector table; startup does not migrate it automatically.
+  <!-- release-note-commits: a33615eec0c7f663de0493eb3bf848ea67be979c 0fc93b81a8f7df324a0bb38c91e55b255899850e 7bb324c336918e8ab70e469d01075d13d9b6c49f 9cb0e2b27b46af224dbfe29ffa79f98a660cf7b5 b29e6393779dd693158232d16b0fb213e6ddd163 16fe3cb0350e8f65715feeea11fb9fcb3793a605 2604d2b8324801640058cab3cc00c2a69f814f4e ed5465ee96e1a8ffec3b8f9908e9c3f8d719b3bc 44bdaca9059a6b3ad29040a94a5d86cbece27edc 034d5dd4b7d1554fc992dc876beb2aeb9bb9399c fe4901f9a7df5bf2cf7e8cf0023d5b203d466ac1 63223f3ed26fdb4200f6a6e499070ed0652bce17 -->
+
+- **Saved-file reconciliation**: Saved files and watcher events now use targeted background reconciliation. Publication is guarded and atomic, queued save acknowledgements survive deferred work, and retries retain ownership until changes are published. This addresses broad watcher-triggered indexing that could occupy the dispatch queue and delay reads.
+  <!-- release-note-commits: 2e4783ff3f12954e8ab782424b28776ea78096fe 0590e57db6d40c578e92290a5bd0c5aa2f2dc21d 46fab787f6eb9832f8ff58843f20366c21963d35 65086a7eeb7e621ba1b2357ce87cdcce455e7eec 883b7be90ea934f6a8ce29e26d11c05f74c74d04 b991a9925d648cc0273e0b24b49655056f5eb559 a7fd86251e33bfbc2860dccaa0d9cbd8f14226f0 548d6f94d536c72e37311de747e7d2aab17fd120 82a6934247a5080d146256e3cc71ebf526783c16 a4378a24f3783c4d6f247ab08132f5f722bede14 8c37d7034f3483288a4253ba29f5cad06b10468d 6f49c97a8038d2369a228a04d235a902427602ed -->
+
+- **Explicit enrichment and compact agent workflows**: Louvain enrichment now runs only when explicitly requested. Agent workflow guidance defaults to compact responses without diagnostics, reducing routine output and unnecessary background work.
+  <!-- release-note-commits: 82cf560de3594d4b03e37798171cde0c4e8b437a d155b2022cf6c8df68b74f94f5b57185b95c4f45 -->
 
 ### Fixed
 
-- **Provider-first semantic readiness**: Preserve repository vector-health lifecycle state through result-cache invalidation so completed embedding refreshes can publish ready status.
+- **Public tool output contracts**: Preserve retrieval and agent-slice fields through response projection, retain typed workflow errors, and route low-budget results through continuations. Omit undefined fields before validation, redact runtime output paths, and keep volatile slice lease expiries behind diagnostic opt-in so otherwise valid calls do not fail output validation.
+  <!-- release-note-commits: 26a3e566b64c88b782d32beda841e13571f19593 5db26d3390ca83a706b9c710e8cb3fea39546c82 af37acd76f7fef11c75e34163870489dda28a150 97f519ef6a47f06e41808c6dba15babdc865c192 -->
 
-- **Workflow projection errors**: Preserve typed projection-boundary failures and route low-budget object results through their continuation instead of emitting incomplete child payloads that fail the strict internal `sdl.workflow` output validator.
+- **Bounded source fallback**: Allow targeted raw reads when indexed source is unparseable and structured retrieval cannot serve the request. Document the bounded fallback and close its review gaps so agents can recover without an unnecessary index rebuild.
+  <!-- release-note-commits: d1ed8874138d7c34b2bea3aa42bd33e75ffd8021 7b00d7891fd5c383053bce0abb846806c173f068 04bb0184d184f7dc4279f8c6a93b67c1eeae730c b06a06fa207ad90ae906d9f5d7a8fe6896d6b4e6 de63d2f331ac2faed2396d6024eb8a0fadf04df8 -->
 
-- **Public tool output contracts**: Redact runtime output paths before inline or persisted exposure, retain slice payloads beside handles, omit volatile slice lease expiries unless diagnostics are requested, keep typed workflow errors accurate, and accept the documented `info` workflow function.
+- **Semantic readiness and shutdown**: Preserve vector health through cache invalidation, finalization, and no-change recovery so ready embeddings remain usable and dirty work is not falsely reported as complete. Propagate cancellation, retain LSP disposal ownership until children close, preserve pending reconciliation during shutdown, and keep native script exit codes.
+  <!-- release-note-commits: e9ad1d0fe1136ab1633947e01402b319a9efa2ad 4ac87088392f5b26e0db3cdab1528b0ffe340c01 a1f69a8d23648aa65f57336ccf6a2f782bd9e729 11dfad0590939f2c677cc8ec416965009b1aa97b 56f1c1e083fdaa12994561fae442489bf8e913fb b17ef0a7893920c6a7ae45d31958e34fa1149ec8 15f87d8003f6b6dfc5b67b6925ba797fa2ca8743 -->
 
-- **Dependency security**: Update transitive `fast-uri`, `browserslist`, `qs`, and `@humanfs/node` resolutions to patched versions.
+- **Rust call proof and workflow diagnostics**: Recognize Rust use aliases in SCIP call proof. Isolate workflow dry runs from indexing side effects and log active dispatch age to help diagnose requests delayed behind long-running work.
+  <!-- release-note-commits: 33cd4a4bb48f7fd348ae3b24d241e1d39575d0f3 fffa2091407aa6675cfc83ffeba53a977dcb546a e97411d28d88c8b098e7267106c73a466581adaf 30f18030e041e3a9d2fe37428759944afdfab6e7 9aa3db5181b9b9bf465e93a67d23ec799648063d ae402d9155ff7ece816e37a520d7f257818236f4 -->
 
-- **Windows LadybugDB FTS security runtime**: Upgrade the exact Windows x64 OpenSSL runtime pin to `@sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1` and retire `3.5.7-sdl.2` ([#51](https://github.com/GlitterKill/sdl-mcp/issues/51)).
+### Security
+
+- **Patched dependencies and Windows FTS runtime**: Update fast-uri, browserslist, qs, and @humanfs/node resolutions. Pin the Windows x64 OpenSSL runtime to @sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1, bypass stale extension caches, align compatibility probes with LadybugDB 0.19.0, and retry registry propagation checks.
+  <!-- release-note-commits: 6c558639da1e4501bc610158d72c7207b2d81735 d581634ea68a626c23e70ab5b1084c5489225123 1d86358655406665ee4db34e8c20718f89540559 9fbd9f2ac6b4e4003dea05591e22c984a79f7109 1e38983eb3a47407f42deff549d76af0e9bcd231 1877e6693aa1c94a0ff5ae59d70327ca605dc960 8e66715cd782efec09330fe6920eb57764bbadd3 308d891e3ff4dd87cf2e7f5ea772353bd80c99f3 -->
+
+### Performance
+
+- **Retrieval coverage and fresh-vector writes**: Cache symbol retrieval coverage and overlap fresh vector writes with inference to reduce repeated retrieval work and idle time during embedding generation. Bound private vector traces and expose their events for measurement.
+  <!-- release-note-commits: 5cb14ac9fdf5e18fab05dd486e8681b65a88af2c bbd05db6be780efbb2b750b99e364281234c0fc9 d78b453e64ba5c1641f94268fd6bc526088e6d1e 5f2754b58c31858030815f22a3678dbd9023f113 -->
+
+### Engineering
+
+- **SDLBench cache measurements**: Record provider cache efficiency and compare prompt-cache hygiene across products. Remove injected SDL guidance and linked host skills, preserve sterile workdirs, align statistic units, and reject data that cannot support paired claims so benchmark comparisons use consistent conditions.
+  <!-- release-note-commits: 44a8f0ebd01296ff6b694eb73d1bc9c8b89b9a08 7d94d293091a93ca9e07f3dce73c50410467aae2 70fb89d375c10eb8f65546b8b3a840aa04ee5ec7 dc784a6354143b611827592205164d69f61d842d 7711b870c2609122417c6eb9056b2225a2949a1f 5ff104e01f3d9ad09b4a62a706b613a00c712bda a1c53a0920601a4d8834e63aece6ab17f0eb78d1 63445f1bb6785c9075397292d718edcb95eeac02 a44e8317fe54db8c73d53e6e501300c5270d2b1a bcfb4d95974eb3319d2fdcdafc5cc6833d8db9de 11932178d410939ee9e827e9dc86dcb82459ef1a a75e4627078006f13a53dc72f3bec43b5bfa0c24 6391050c01e1164cfda312c643aee519952e4d3c 8b86a7183e551e66c30c26a36340bf9b626f582e a2eeb407b0140e8827e861f126f7b21f64588626 1d4997b9279d9e60af8fddded52e74d920fb8eeb 75febb995b6a003408cd446b5e7bdb0258a3f292 9960b5ed1b2a14682cbccffcd3801a1a5a009e5f -->
+
+- **Cross-platform verification**: Enable test linting in CI; isolate semantic and watcher fixtures; correct stale assertions, canonical paths, checkpoint ownership, qualification deadlines, and concurrent fixture writes. Fix reconciliation script typing and mutex-drain coverage, and remove obsolete design documents.
+  <!-- release-note-commits: 37033a278f1a28e3449a82aa3c1386b5fc2ffa8c cb1d328f895b82def312cdf60a32f677d9aac90f 694b6aea1d7bd6749e2d56ecbd4f2da1ebbdec6f ea2888c765c7c1618eb1e1040932be8a6684ab42 e58e15245dc8afeae8e666c1c88dae2c4c235770 46ac70911ae0f3f3df013fed96965e4c04f0e8e0 190d12edc63c2b601afb6f1ae858575de1bfad5f 6a06e8e1f074b389cf8053c3f7a01d4d8142bfde f8cfc6004b6550741f417f6e65857e381649005e 1eb69f599bac34ecc539027755485325b3e08f6c 740c64584e0227334bc8ad28d63d7a95bb8a3e0b c1b9b176d460f28de51fa32bfbd5521561f0dafb -->
 
 ## [0.13.6] - 2026-08-30
 
 ### Changed
 
 - **CPU embedding auto-tuning**: Omitted local CPU settings now use physical-core and startup free-memory bounds for embedding concurrency, symbol batch 8, and the physical-core width for automatic ONNX intra-op threads. Auto-detected and pinned performance tiers share these presets, while explicit settings remain authoritative; remove explicit `embeddingConcurrency`, `embeddingBatchSize`, or positive `onnx.intraOpNumThreads` fields to adopt the automatic values.
-  <!-- release-note-commits: fe11889c1885bb18ae75ee96b46944684346fcb7 53e5f435923b58554cb7840df24e0226b71ba9da bc9a81a3463bb934ddc323af3646bc1570db0d1f ea5ae15c30d6648559d91a5d2c78c840916772ec 14c5fe05a7db02fab4c5a7d3cf3bc1b4518de5f1 60456ffdfffd96b6dbf3c1f1613092c2e59081b3 b6e3fc9d081987db95b18da5b51ca0ab5453223a d7c6c6a2209bbeb7401c8023282a047b84516f53 06e8420c76ee0b3418f00bafe615446805f8b081 5abf0895c86a82c6841bdab6fde3ad331a002f5e 284c5140770a20bb9891f6ba0fb8b2005e1e8050 d38478a3e1fcba51f0b3ec4e27828f7b9d50b6bc b5ffb751036a6489e69f313fa5fb2202af9f5156 24ca95ac16ae5a7a61e2f794106b50ae00c3b26f 3dc98656125736139238977f9ac8865439557b98 7aba818e68535fbde95e5733f50978606ec26293 b9e3ec82fb1c3a628a88d843548ba6514572b7c1 ff7accbf7ee7709ad718a873a22f241af55075db 66e281a385a3a69ae9e2c0eb1942ec4532d41e2e bcab1c6df6e11dba585ee9e4b3682a6d3861a0ec -->
 
 - **GPU-aware Jina default**: Omitted/commonly configured Jina sessions now choose platform-appropriate FP16 or quantized graphs, initialize and cache by effective artifact, verify downloaded models, and invalidate semantic hashes when the effective artifact changes.
-  <!-- release-note-commits: 9d64e54dd0b899a21772c7b2e7c8cab3808980b1 7a8e3e0785e3d440b0a61d7d39951608b7a7ffd1 53efa896e9dd5190effb81b9959ac643d83e0ceb 3817b65b9c270e7e398cc43b152ac22f63cf2327 7050d204941a5c7128d6651d77fe3f53f6cc34bc c4670fb88e36dbb977cdb8565b580d3273d730bc 6d20041f0eef1885f0f978893ea84e8ae3110eab 4ba2deb8763fc2a81906c49b0796d9da2d4e56af 6a49d8b2f550dd6e8ce841281c478bb5433a69c1 ce6814d363c98e1185fe3b8fa4911e7a8bb7539f 3447e77382dab07f3c92cb732050941a95f110f7 7294c8cfc6d45849d11611af859fb511f6e420c0 f614c6019c00e098ce1558f6f825d896387ffec4 56f13f931e4d1f1861754e68678b3b851e071b18 3de1ab4da79ba6c530aa9ebb5ed9ac68ce79a7c9 -->
 
 - **DirectML session safety**: Pinned ONNX Runtime 1.24.3, enforced DirectML-compatible session options, and serialized inference on DirectML sessions.
-  <!-- release-note-commits: 3d891588b468adf5fc237573607ed71178233d8b 7946b5c91c2c960d290a2694b0cd1e41548209f1 4a1109a76c963d641d028a6a5fbcc7603a2caf16 d3ae4e559e3c9b8ea648a1f1b51bd8cf7e7e2130 fd557484b71ae0bc1e4d6f6cfe8cb51cfd276e09 -->
 
 - **Incremental symbol embedding refresh**: Moved symbol vectors to a dedicated shared table, preserved repository ownership and migration behavior, retained live HNSW indexes for bounded updates, and rebuilt them once around larger replacements.
-  <!-- release-note-commits: 029cafae009c9035c1b08369da53c72231040781 786f6684957ebe5dd5659fe5b91851f2813d65ad 716e4666949915103950c2d83c59e82800efcf4e 9f311a77b8a2e58e92ab94d8fbd097863d38e93a 89789f398362d83828b37b4e87fbcf6e5e0915eb b45e22e4a9a296be6b869300b0f176d96e21708d 972857814cad03b5ecd924bee6d1eb1b1a17b2a7 1f669656edab2b5a5bbf624c5f4d690dfc067a6b 7da3622a496e9716e038ab08bfe1a1baf91c235b 4b0fc78fc19a5ece92ec443a484623e3c2688b84 4a4c080051732d281f0c0ffe42441dcce25e02c1 c971fd552120327ffe355634ada35ccf939cd168 e57d4f782a75a1c9296617e63a5e990b15ca0fa6 747fc924fb3b9cca3ddc97d4ebbd8282775362a8 411f70f191a4e07c727073fd9395c038cab9ff4f 212266c59d4e7dfabe428e328173a8841432b1e2 -->
 
 - **Stable global installs**: Install global package payloads as stable copies so temporary package-manager paths cannot break the installed CLI.
-  <!-- release-note-commits: 550b6abbe46a6ffbe38366c5d524cf4de3ca9d6e -->
 
 ### Fixed
 
 - **Multi-repository Jina indexing crash**: Coalesce bounded incremental symbol-vector replacements into one live-HNSW write, preventing repeated writes from terminating later repository indexes.
-  <!-- release-note-commits: af4783ba77e63e62a4b29a204fc3bb7b67b0e1ff -->
 
 - **Workflow continuation compatibility**: Accept scalar workflow continuation data without rejecting otherwise valid stored-response flows.
-  <!-- release-note-commits: 36e3d2fc64bd36f106bda1836d97bc0d0e64b9fc -->
 
 - **Cross-platform test stability**: Corrected platform-sensitive regressions and refreshed the retrieval seed artifact used by verification.
-  <!-- release-note-commits: 20535b755d40391fb9a9a91a67df5b3509932943 0b3c789564ec72e593f75e851821232f963f1bcb -->
 
 - **Windows Ladybug vector tests**: Provision the packaged OpenSSL runtime only for tests that require the Ladybug vector extension, while preserving explicit native-disabled coverage elsewhere.
-  <!-- release-note-commits: d2443a4ac9aa5fd6e407681db6819f17429c97f7 -->
 
 ### Engineering
 
 - **Scoped CodeQL analysis**: Added scoped CodeQL analysis and documented the warning/status cutover decisions behind the workflow.
-  <!-- release-note-commits: 077f9438b78c81ce1bc22e3ff3b27e1ad839b359 a2d0af555d967f6aa71bbe28efc4349da2ecf862 7e98ecdb123acc9cd9a4775504d8d6b68754e500 f1424fdde771845a02b4f36e320ae6de5731c079 -->
 
 - **Complete release-summary coverage**: Added full-range, full-OID coverage validation and immutable tagged release-note rendering.
-  <!-- release-note-commits: 66b7df8d4649f48be59f86c1633c656b6cda4193 cf6b4d7e3e7b175b9fcce649cb2ee2a8c3530d3b f3b6a9df44f222de2c66cbd50c24ec5e587da9ff -->
 
 ## [0.13.5] - 2026-08-25
 
