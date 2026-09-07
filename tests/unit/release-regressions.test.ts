@@ -206,8 +206,13 @@ describe("release regression guards", () => {
     );
     assert.match(
       benchmarksJob,
-      /SDL_CONFIG:\s*config\/sdlmcp\.config\.json/,
-      "benchmark CI should load the checked-in config that declares the locked OSS repository",
+      /SDL_CONFIG:\s*\$\{\{\s*runner\.temp\s*\}\}\/benchmark-structural\.config\.json/,
+      "benchmark CI should load its isolated structural config",
+    );
+    assert.match(
+      benchmarksJob,
+      /readFileSync\('config\/sdlmcp\.config\.json', 'utf8'\)/,
+      "benchmark CI should derive its config from the checked-in locked OSS repository configuration",
     );
     assert.match(
       benchmarksJob,
