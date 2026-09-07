@@ -749,6 +749,75 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     },
   );
 
+  it("preserves runtime failures across workflow output modes", async () => {
+    const server = new MCPServer();
+    registerTools(
+      server,
+      {},
+      undefined,
+      CodeModeConfigSchema.parse({ enabled: true, exclusive: true }),
+    );
+    const sdkServer = server.getServer() as unknown as {
+      _requestHandlers: Map<
+        string,
+        (
+          request: {
+            method: "tools/call";
+            params: {
+              name: string;
+              arguments: Record<string, unknown>;
+            };
+          },
+          extra: {
+            _meta: Record<string, unknown>;
+            sendNotification: () => Promise<void>;
+            signal: AbortSignal;
+          },
+        ) => Promise<ToolResponseEnvelope>
+      >;
+    };
+    const handler = sdkServer._requestHandlers.get("tools/call");
+    assert.ok(handler);
+    for (const persistOutput of [false, true]) {
+      for (const outputMode of ["minimal", "summary", "intent", "digest"]) {
+        const response = await handler(
+          {
+            method: "tools/call",
+            params: {
+              name: "sdl.workflow",
+              arguments: {
+                repoId,
+                steps: [{
+                  fn: "runtimeExecute",
+                  args: {
+                    runtime: "node",
+                    code: "process.exitCode = 2;",
+                    outputMode,
+                    persistOutput,
+                  },
+                }],
+              },
+            },
+          },
+          {
+            _meta: {},
+            sendNotification: async () => {},
+            signal: new AbortController().signal,
+          },
+        );
+        const result = response.structuredContent as {
+          results?: Array<{ status?: string; error?: string }>;
+        };
+        assert.equal(
+          result.results?.[0]?.status,
+          "error",
+          `${outputMode}, persist=${persistOutput}: ${JSON.stringify(response)}`,
+        );
+        assert.match(result.results?.[0]?.error ?? "", /exit code 2/u);
+      }
+    }
+  });
+
   it("should not warn about balanced quotes inside direct argv code", async () => {
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");

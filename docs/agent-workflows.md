@@ -334,6 +334,7 @@ Workflow guidance:
 - Set `budget`: `{ maxTotalTokens, maxSteps, maxDurationMs }`; `maxTokens` is accepted as an alias for `maxTotalTokens`.
 - `onError`: `"continue"` (default, skip only dependency-blocked steps), `"continueAll"` (legacy run-every-later-step behavior), or `"stop"` (halt on first error).
 - Any errored step makes the top-level MCP response `isError: true`, without changing ordered results or `onError` behavior. A graph-retrieval error remains fail-closed even after an earlier `indexRefresh`; request explicit current-turn user approval before refreshing separately, and wait only when the task depends on the resulting graph state.
+- Workflow responses omit object fields whose values are `undefined`, including absent runtime failure excerpts, before output-schema validation. Raw `$N` data is preserved; command failures still return their step error in every runtime output mode.
 - The workflow enforces the same context-ladder escalation rules as individual tools.
 - Cross-step ETag caching is automatic — no need to pass ETags manually between steps.
 - Use workflows for multi-step operations: retrieval ladder escalation, runtime execution, data shaping, batch mutations, and CI pipelines. Do not use them merely to wrap a single `sdl.context` call or any other single action.

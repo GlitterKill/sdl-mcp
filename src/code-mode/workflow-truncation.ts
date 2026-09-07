@@ -309,6 +309,8 @@ export function sanitizeWorkflowStepValue(
   if (!isRecordValue(value)) return value;
   const sanitized: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
+    // Match JSON object serialization before strict public-output validation.
+    if (child === undefined) continue;
     if (
       !VOLATILE_WORKFLOW_FIELDS.has(key)
       || (key === "diagnostics" && includeDiagnostics)
