@@ -223,6 +223,12 @@ async function runRealPatch() {
   const filePath = join(sourceDir, "profiles.ts");
   writeFileSync(filePath, original, "utf8");
   process.env.SDL_GRAPH_DB_PATH = dbPath;
+  // This fixture exercises FTS mutation and saved-file patching, not embeddings.
+  const config = JSON.parse(readFileSync("config/sdlmcp.config.json", "utf8"));
+  config.semantic = { ...config.semantic, enabled: false };
+  const configPath = join(home, "fts-fixture.config.json");
+  writeFileSync(configPath, JSON.stringify(config));
+  process.env.SDL_CONFIG = configPath;
 
   const { closeLadybugDb, getLadybugConn, initLadybugDb } = await import(
     "../../../dist/db/ladybug.js"

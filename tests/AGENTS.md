@@ -91,3 +91,5 @@ Tests run with `--experimental-strip-types`, **not** tsx. Do not use `--import t
 - Parser-only reconciliation fixtures must explicitly disable SCIP. Provider tests should supply their configured tooling or controlled provider fixtures.
 - Write saved bytes to disk before sending a clean buffer or save event. Request a checkpoint explicitly when asserting overlay retirement, then verify committed graph content and checkpoint success.
 - Tests that seed repositories directly in the DB must also populate `replaceRegisteredRepoIds` when exercising normal startup admission. Otherwise, first-request notification discovery adds a separate repository lookup before dispatch admission.
+
+- The Windows FTS clean-environment child derives a temporary config with only `semantic.enabled: false` before indexing its saved-file fixture. This test covers FTS runtime, mutation, and patch safety; keep its FTS assertions and production semantic readiness checks intact.
