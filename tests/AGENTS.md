@@ -87,7 +87,9 @@ Tests run with `--experimental-strip-types`, **not** tsx. Do not use `--import t
 
 - Hand-built search-edit plans must use `realpathSync.native()` for existing-file `canonicalAbsPath` values; joined Windows paths can differ in directory casing. Rollback fixtures must assert that their injected later-write failure was reached.
 
-- Route fixture seed writes through `withWriteConn`; background reconciliation can still be active between assertions.
+- Route fixture seed, configuration-change, and cleanup writes through `withWriteConn`; background reconciliation can still be active between assertions.
+- Graph-only indexing fixtures must explicitly set `semantic.enabled: false` so model availability cannot fail call-edge assertions.
+- The Windows driver qualification test has a 30-minute test budget and a 31-minute outer runner deadline. Other files retain the 10-minute outer deadline; keep the two timeout layers consistent.
 
 - Seed a valid repository `configJson`, including `repoId` and `rootPath`; managed writes validate the complete configuration.
 - Parser-only reconciliation fixtures must explicitly disable SCIP. Provider tests should supply their configured tooling or controlled provider fixtures.

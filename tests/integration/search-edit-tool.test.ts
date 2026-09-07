@@ -1063,12 +1063,12 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     };
 
     try {
-      await ladybugDb.upsertRepo(conn, {
+      await withWriteConn((writeConn) => ladybugDb.upsertRepo(writeConn, {
         repoId: REPO_ID,
         rootPath: priorRepo.rootPath,
         configJson: JSON.stringify(repoConfig),
         createdAt: priorRepo.createdAt,
-      });
+      }));
 
     const eligibleRelPath = "src/eligible-search-edit.ts";
     await mkdir(join(repoRoot, "src"), { recursive: true });
@@ -1119,7 +1119,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
         eligibleVerified?.graphIntegrityRevision,
       );
 
-    await ladybugDb.upsertRepo(conn, {
+    await withWriteConn((writeConn) => ladybugDb.upsertRepo(writeConn, {
         repoId: REPO_ID,
         rootPath: priorRepo.rootPath,
         configJson: JSON.stringify({
@@ -1127,7 +1127,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
           ignore: ["ignored/**"],
         }),
         createdAt: priorRepo.createdAt,
-      });
+      }));
 
       const ignoredRelPath = "ignored/search-edit-target.ts";
       const ignoredFileId = generateFileId(REPO_ID, ignoredRelPath);
@@ -1203,12 +1203,12 @@ describe("sdl.search.edit", { concurrency: false }, () => {
         ignoredBaseline,
       );
     } finally {
-      await ladybugDb.upsertRepo(conn, {
+      await withWriteConn((writeConn) => ladybugDb.upsertRepo(writeConn, {
         repoId: REPO_ID,
         rootPath: priorRepo.rootPath,
         configJson: priorRepo.configJson,
         createdAt: priorRepo.createdAt,
-      });
+      }));
     }
   });
 
@@ -1280,9 +1280,9 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       const priorRepo = await ladybugDb.getRepo(conn, REPO_ID);
       assert.ok(priorRepo);
       t.after(async () => {
-        await ladybugDb.upsertRepo(conn, priorRepo);
+        await withWriteConn((writeConn) => ladybugDb.upsertRepo(writeConn, priorRepo));
       });
-      await ladybugDb.upsertRepo(conn, {
+      await withWriteConn((writeConn) => ladybugDb.upsertRepo(writeConn, {
         ...priorRepo,
         configJson: JSON.stringify({
           repoId: REPO_ID,
@@ -1295,7 +1295,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
           tsconfigPath: null,
           workspaceGlobs: null,
         }),
-      });
+      }));
       const before = await getDerivedState(REPO_ID);
       assert.ok(before?.graphIntegrityRevision != null);
       const preview = (await handleSearchEdit(

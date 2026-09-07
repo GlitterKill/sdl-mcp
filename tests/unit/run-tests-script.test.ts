@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, it } from "node:test";
 
 const repoRoot = process.cwd();
@@ -17,6 +18,34 @@ const pkg = JSON.parse(
 ) as { scripts?: Record<string, string> };
 
 describe("run-tests script parallel suites", () => {
+  it("honors the qualification deadline without extending ordinary files", async () => {
+    const source = runnerSource.slice(
+      runnerSource.indexOf("async function runTestFile("),
+      runnerSource.indexOf("\nfunction recordTestResult("),
+    );
+    for (const [platform, file, expected] of [
+      ["win32", "tests\\integration\\ladybug-driver-qualification.test.ts", 1_860_000],
+      ["linux", "tests/integration/ladybug-driver-qualification.test.ts", 600_000],
+      ["win32", "tests/integration/search-edit-tool.test.ts", 600_000],
+    ] as const) {
+      let deadline: number | undefined;
+      const run = runInNewContext(source + "; runTestFile", {
+        process: { platform, execPath: process.execPath },
+        join, resolve, repoRoot, TEST_FILE_TIMEOUT_MS: 600_000,
+        needsPreinitializedDb: () => false,
+        needsExperimentalModuleMocks: () => false,
+        runProcess: async (_command: string, _args: string[], options: { timeoutMs?: number }) => {
+          deadline = options.timeoutMs ?? 600_000;
+          return { timedOut: true };
+        },
+      });
+      const result = await run(file, 0, {}, repoRoot);
+      assert.equal(deadline, expected);
+      assert.equal(result.passed, false);
+      assert.equal(result.reason, `timed out after ${expected}ms`);
+    }
+  });
+
   it("exposes group-filtered npm scripts", () => {
     assert.strictEqual(
       pkg.scripts?.["test:unit"],
@@ -67,7 +96,7 @@ describe("run-tests script parallel suites", () => {
     );
     assert.match(
       runnerSource,
-      /if \(result\.timedOut\) \{[\s\S]*reason: `timed out after \$\{TEST_FILE_TIMEOUT_MS\}ms`/,
+      /if \(result\.timedOut\) \{[\s\S]*reason: `timed out after \$\{timeoutMs\}ms`/,
     );
   });
 

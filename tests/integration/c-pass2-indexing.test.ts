@@ -72,6 +72,8 @@ describe("C pass2 indexing", () => {
           repos: [],
           policy: {},
           indexing: { engine: "typescript", enableFileWatching: false },
+          // Call-edge coverage must not depend on model downloads or readiness.
+          semantic: { enabled: false },
         },
         null,
         2,

@@ -324,6 +324,11 @@ async function runTestFile(testFile, index, baseTestEnv, testTempDir) {
     }
   }
 
+  // Match the qualification test's 30-minute Windows budget, plus setup/cleanup.
+  const timeoutMs = process.platform === "win32" &&
+    normalizedTestFile === "tests/integration/ladybug-driver-qualification.test.ts"
+    ? 31 * 60 * 1000
+    : TEST_FILE_TIMEOUT_MS;
   const result = await runProcess(
     process.execPath,
     [
@@ -339,6 +344,7 @@ async function runTestFile(testFile, index, baseTestEnv, testTempDir) {
     {
       cwd: repoRoot,
       env,
+      timeoutMs,
     },
   );
 
@@ -347,7 +353,7 @@ async function runTestFile(testFile, index, baseTestEnv, testTempDir) {
       ...result,
       testFile,
       passed: false,
-      reason: `timed out after ${TEST_FILE_TIMEOUT_MS}ms`,
+      reason: `timed out after ${timeoutMs}ms`,
     };
   }
   if (result.error) {
