@@ -149,6 +149,8 @@ After graph finalization, SDL-MCP runs the configured semantic readiness refresh
 
 If semantic refresh fails or an embedding provider degrades, the CLI reports `Semantic readiness: deferred`, records the derived-state error, and aborts readiness finalization. Sub-threshold FileSummary vector work is different: SDL-MCP records it as an intentional backlog, continues the remaining semantic lanes and deferred-index work, clears any earlier semantic error plus completed summary work, and leaves `DerivedState.embeddingsDirty` set until the FileSummary HNSW rebuild floor is reached or an explicit safe rebuild completes it. Symbol embeddings do not use that backlog floor: up to 50 changed model rows are buffered into one delete/reinsert write while a healthy `SymbolVectorEmbedding` HNSW remains live, and larger changes rebuild it immediately through the checkpointed safety lane. Mock fallback remains degraded and its rows are not reported as embedded. Repeated provider-first runs that reuse already-current active provider rows run the same post-graph semantic refresh rather than reporting a clean graph prematurely.
 
+Required HNSW rebuild checkpoints retain exclusive database admission until native checkpoint work settles. They do not use the two-second best-effort housekeeping deadline. A checkpoint error still aborts the rebuild and preserves its original cause.
+
 Final-assessment failures begin with `SEMANTIC_FINAL_ASSESSMENT_DEGRADED` when readiness is degraded or `SEMANTIC_SUCCESS_BATCH_REJECTED` when an otherwise successful batch is rejected. Before SDL-MCP publishes the generic failure, it writes bounded repository, model, and reason diagnostics to operational logs.
 
 

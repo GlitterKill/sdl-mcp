@@ -1,4 +1,5 @@
 import { watch } from "fs";
+import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, basename } from "path";
 
 import type { RepoConfig } from "../config/types.js";
@@ -276,6 +277,8 @@ export async function watchRepositoryWithIndexer(
   if (!repoRow) {
     throw new Error(`Repository ${repoId} not found`);
   }
+  // Native Windows watchers require long paths with platform separators.
+  const repoRoot = await realpath(repoRow.rootPath);
   const coordinator = options.coordinator ?? getDefaultLiveIndexCoordinator();
   coordinator.setReconciliationReadiness?.(repoId, isWriteReady);
 
@@ -363,7 +366,7 @@ export async function watchRepositoryWithIndexer(
     if (closed) return;
     const accepted = admitWatcherEvent({
       repoId,
-      repoRoot: repoRow.rootPath,
+      repoRoot,
       repoConfig,
       extensions,
       compiledIgnorePatterns,
@@ -431,7 +434,7 @@ export async function watchRepositoryWithIndexer(
   const startWatchmanProvider = (): Promise<RuntimeWatcher> =>
     startWatchmanRuntimeWatcher({
       repoId,
-      repoRoot: repoRow.rootPath,
+      repoRoot,
       configuredProvider,
       extensions,
       health,
@@ -445,9 +448,9 @@ export async function watchRepositoryWithIndexer(
       throw new Error("chokidar is not installed or could not be loaded");
     }
 
-    const watcher = chokidar.watch(repoRow.rootPath, {
+    const watcher = chokidar.watch(repoRoot, {
       ignored: createChokidarIgnoredPredicate(
-        repoRow.rootPath,
+        repoRoot,
         compiledIgnorePatterns,
       ),
       ignoreInitial: true,
@@ -487,7 +490,7 @@ export async function watchRepositoryWithIndexer(
     });
 
     const chokidarHandler = (filePath: string, removed = false): void => {
-      const relPath = normalizePath(relative(repoRow.rootPath, filePath));
+      const relPath = normalizePath(relative(repoRoot, filePath));
       handleProviderEvent({ type: "path", relativePath: relPath, removed });
     };
 
@@ -528,7 +531,7 @@ export async function watchRepositoryWithIndexer(
 
   const startFsWatchProvider = async (): Promise<RuntimeWatcher> => {
     const fsWatcher = watch(
-      repoRow.rootPath,
+      repoRoot,
       { recursive: true },
       (_eventType, filename) => {
         if (!filename || _eventType === "rename") {

@@ -166,6 +166,8 @@ For an indexed saved file, `indexUpdate: { applied: false, pending: true }` mean
 
 An explicit checkpoint retires a clean saved draft only after confirming its committed publication. Newer saves invalidate older prepared graph work. Newer unsaved drafts stay in the overlay, do not invalidate saved-file preparation, and cannot be cleared by an older checkpoint.
 
+Watcher startup resolves repository roots to native real paths before opening a provider or interpreting its events. On Windows, this expands 8.3 aliases and preserves native separators, avoiding libuv's short-path prefix assertion.
+
 Watchers use this same save path and do not start incremental indexing. Incremental indexes remain explicit, manually approved recovery or maintenance work. A Windows Node 24.14.0 integration probe holds an actual publication transaction and observes graph and FTS reads returning the old committed result before release and the new result after commit. That probe demonstrates the publication boundary; it is not a universal latency or concurrency guarantee for native exclusive operations.
 
 Recovery inventories use the configured source and ignore rules. If a previously indexed file still exists but becomes excluded, such as after an ignore or size-limit change, targeted retirement remains blocked; an explicit incremental index can apply that scope change. Incomplete inventories never imply deletion.

@@ -169,6 +169,33 @@ describe("HNSW rebuild lifecycle", () => {
     }
   });
 
+  it("waits for required checkpoints beyond the housekeeping deadline", async () => {
+    let checkpointConn!: import("kuzu").Connection;
+    await withWriteConn(async (conn) => { checkpointConn = conn; });
+    const originalQuery = checkpointConn.query.bind(checkpointConn);
+    let checkpointCount = 0;
+    checkpointConn.query = async (statement, progressCallback) => {
+      if (/^CHECKPOINT\s*;?$/i.test(statement.trim())) {
+        checkpointCount++;
+        // Slow durable I/O must finish before the rebuild advances.
+        await new Promise((resolve) => setTimeout(resolve, 2200));
+      }
+      return originalQuery(statement, progressCallback);
+    };
+    try {
+      await runHnswRebuildCycle({
+        preCheckpointPhase: "slow-required-pre",
+        postCheckpointPhase: "slow-required-post",
+        body: async () => { assert.equal(checkpointCount, 1); },
+      });
+      assert.equal(checkpointCount, 2);
+    } finally {
+      // Drain an in-flight checkpoint even when the old deadline rejects early.
+      await withWriteConn(async () => {});
+      checkpointConn.query = originalQuery;
+    }
+  });
+
   it("preserves both rebuild and post-checkpoint failures", async () => {
     let checkpointConn!: import("kuzu").Connection;
     await withWriteConn(async (conn) => {

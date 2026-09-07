@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   mkdtemp,
   mkdir,
@@ -41,7 +42,13 @@ it(
         await writeFile(file, "export const value = 11;\n");
         const config = RepoConfigSchema.parse({
           repoId: provider,
-          rootPath: repoRoot,
+          // Exercise Windows 8.3 aliases, including aliases in parent directories.
+          rootPath: process.platform === "win32"
+            ? execFileSync("cmd.exe", ["/d", "/c", "for %I in (.) do @echo %~fsI"], {
+                cwd: repoRoot,
+                encoding: "utf8",
+              }).trim()
+            : repoRoot,
           languages: ["ts"],
         });
         process.env.SDL_CONFIG = join(root, `${provider}.json`);
@@ -56,7 +63,7 @@ it(
         await withWriteConn((conn) =>
           db.upsertRepo(conn, {
             repoId: provider,
-            rootPath: repoRoot,
+            rootPath: config.rootPath,
             configJson: JSON.stringify(config),
           }),
         );

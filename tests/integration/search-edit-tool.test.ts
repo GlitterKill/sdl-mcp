@@ -117,25 +117,24 @@ function parseSearchEditResponse(value: unknown): void {
 }
 
 async function ensureRepoRegistered(root: string): Promise<void> {
-  const conn = await getLadybugConn();
-  const existing = await ladybugDb.getRepo(conn, REPO_ID);
-  if (existing) {
-    if (normalizePath(existing.rootPath) === normalizePath(root)) return;
-    // Different root; re-register.
-  }
-  await ladybugDb.upsertRepo(conn, {
-    repoId: REPO_ID,
-    rootPath: root,
-    configJson: JSON.stringify({
+  // Fixture writes share admission with background reconciliation.
+  await withWriteConn(async (conn) => {
+    const existing = await ladybugDb.getRepo(conn, REPO_ID);
+    if (existing && normalizePath(existing.rootPath) === normalizePath(root)) return;
+    await ladybugDb.upsertRepo(conn, {
       repoId: REPO_ID,
       rootPath: root,
-      languages: ["ts"],
-      scip: { enabled: false },
-      semanticEnrichment: {
-        providers: { scip: { enabled: false }, lsp: { enabled: false } },
-      },
-    }),
-    createdAt: new Date().toISOString(),
+      configJson: JSON.stringify({
+        repoId: REPO_ID,
+        rootPath: root,
+        languages: ["ts"],
+        scip: { enabled: false },
+        semanticEnrichment: {
+          providers: { scip: { enabled: false }, lsp: { enabled: false } },
+        },
+      }),
+      createdAt: new Date().toISOString(),
+    });
   });
 }
 
@@ -229,6 +228,33 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     const child = relative(resolve(fixtureRoot), resolve(repoRoot));
     assert.ok(child && !child.startsWith("..") && !isAbsolute(child));
     await rm(resolve(fixtureRoot), { recursive: true, force: true });
+  });
+
+  it("registers fixture repositories through the serialized writer", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const writer = withWriteConn((conn) => withTransaction(conn, async () => {
+      entered.resolve();
+      await release.promise;
+    }));
+    await entered.promise;
+    let settled = false;
+    const registration = ensureRepoRegistered(fixtureRoot).then(
+      () => { settled = true; return undefined; },
+      (error: unknown) => { settled = true; return error; },
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(settled, false, "registration must queue behind the active transaction");
+      release.resolve();
+      await writer;
+      assert.equal(await registration, undefined);
+    } finally {
+      release.resolve();
+      await writer;
+      await registration;
+      await ensureRepoRegistered(repoRoot);
+    }
   });
 
   it("preview returns planHandle and per-file entries", async () => {

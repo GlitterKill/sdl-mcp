@@ -1,4 +1,5 @@
-import { runWalCheckpoint } from "../db/ladybug.js";
+import { withWriteConn } from "../db/ladybug.js";
+import { execCheckpoint } from "../db/ladybug-core.js";
 import { withExclusiveLadybugOperation } from "../db/ladybug-operation-gate.js";
 import { withPostIndexWriteSession } from "../db/write-session.js";
 import { DatabaseError } from "../domain/errors.js";
@@ -7,10 +8,17 @@ async function requireCheckpoint(
   phase: string,
   boundary: "pre" | "post",
 ): Promise<void> {
-  if (await runWalCheckpoint(phase)) return;
-  throw new DatabaseError(
-    `HNSW rebuild ${boundary}-checkpoint failed during ${phase}`,
-  );
+  try {
+    // Required durability boundaries retain admission until native I/O settles.
+    // The best-effort housekeeping deadline must not abort a rebuild checkpoint.
+    await withWriteConn(execCheckpoint);
+  } catch (cause) {
+    const error = new DatabaseError(
+      `HNSW rebuild ${boundary}-checkpoint failed during ${phase}`,
+    );
+    error.cause = cause;
+    throw error;
+  }
 }
 
 export interface HnswRebuildCycleOptions<T> {

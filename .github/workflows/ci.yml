@@ -174,11 +174,17 @@ jobs:
           # stdin handle (mirrors a real MCP client connection).
           node dist/cli/index.js serve --stdio \
             2>/tmp/sdl-mcp-serve-stderr.log \
-            < <(sleep 15) &
+            < <(sleep 45) &
           SERVER_PID=$!
 
-          # Give the server 2 seconds to fully start up
-          sleep 2
+          # Wait at most 30 seconds for readiness, stopping immediately on exit.
+          for attempt in {1..150}; do
+            if ! kill -0 "${SERVER_PID}" 2>/dev/null ||
+              grep -q "Starting MCP server on stdio transport" /tmp/sdl-mcp-serve-stderr.log; then
+              break
+            fi
+            sleep 0.2
+          done
 
           # Must still be running — silent exit is the reported bug
           if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
@@ -188,7 +194,7 @@ jobs:
             exit 1
           fi
 
-          echo "[PASS] serve --stdio is still running after 2 s"
+          echo "[PASS] serve --stdio is still running after readiness polling"
 
           # Verify the startup message reached stderr
           if grep -q "Starting MCP server on stdio transport" /tmp/sdl-mcp-serve-stderr.log; then

@@ -87,6 +87,8 @@ Tests run with `--experimental-strip-types`, **not** tsx. Do not use `--import t
 
 - Hand-built search-edit plans must use `realpathSync.native()` for existing-file `canonicalAbsPath` values; joined Windows paths can differ in directory casing. Rollback fixtures must assert that their injected later-write failure was reached.
 
+- Route fixture seed writes through `withWriteConn`; background reconciliation can still be active between assertions.
+
 - Seed a valid repository `configJson`, including `repoId` and `rootPath`; managed writes validate the complete configuration.
 - Parser-only reconciliation fixtures must explicitly disable SCIP. Provider tests should supply their configured tooling or controlled provider fixtures.
 - Write saved bytes to disk before sending a clean buffer or save event. Request a checkpoint explicitly when asserting overlay retirement, then verify committed graph content and checkpoint success.
