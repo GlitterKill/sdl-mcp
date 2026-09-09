@@ -51,11 +51,15 @@ The acceptance fixture suite has four longer agentic tasks:
 
 Each task copies `sdlbench/tests/fixtures/repo` into `sdlbench/.work/repos/<taskRunId>`, applies task-local solution files in that isolated copy, runs the task verifier, and appends one `SessionRecord` JSON object per task. The source fixture is not modified by benchmark runs; edit-heavy task mutations stay confined to the copied work directory, so the next task starts from a clean fixture copy.
 
+## Index preflight
+
+Before an agent starts, SDLBench validates the server's effective config against the copied worktree, scans expected source/test files, and rejects incomplete provider coverage or reported generator failures. Generated configs explicitly use local embeddings and mock summaries; records retain that mode and the runtime limit. The [2026-09-07 preflight](docs/index-preflight.md) documents the corrections, offline evidence, and remaining fresh-index check.
+
 ## SDL Evidence
 
-For `--variant sdl`, the runner prepares a normal SDL-MCP HTTP server and indexes the copied fixture repo before the task starts. By default it starts a temporary `serve --http` process, waits until `/health` is reachable, then runs `POST /api/repo/:repoId/reindex-stream` with `mode: "full"`. It does not pre-run task-specific searches or paste fixture SDL context; behavior agents discover context through live tools. Tests can pass `sdlHttpBaseUrl` to use an existing server. Codex behavior runs using an external server must also pass `sdlConfigPath` so the production hook targets that server's pidfile.
+For `--variant sdl`, the runner prepares a normal SDL-MCP HTTP server and indexes the copied fixture repo before the task starts. By default it starts a temporary `serve --http` process, waits until `/health` is reachable, validates `GET /api/config`, then runs `POST /api/repo/:repoId/reindex-stream` with `mode: "full"`. It does not pre-run task-specific searches or paste fixture SDL context; behavior agents discover context through live tools. Tests can pass `sdlHttpBaseUrl` to use an existing server. Codex behavior runs using an external server must also pass `sdlConfigPath` so the production hook targets that server's pidfile.
 
-The temporary config starts from `config/sdlmcp.config.example.json` and keeps provider-first indexing, Rust indexing, SCIP, semantic retrieval/enrichment, policy, prefetch, and exclusive Code Mode. SDLBench disables file watching because each copied repository is indexed explicitly before the measured run, and overrides only the copied root, graph DB path, local HTTP/auth settings, benchmark ignores, and repo languages. Provider-first counts as evidence only when the indexing response reports it.
+The temporary config starts from `config/sdlmcp.config.example.json` and keeps provider-first indexing, Rust indexing, SCIP, semantic retrieval/enrichment, policy, prefetch, and exclusive Code Mode. SDLBench disables file watching because each copied repository is indexed explicitly before the measured run, and sets the copied root, graph DB path, local HTTP/auth settings, benchmark ignores, repo languages, and explicit local-embedding/mock-summary mode. JavaScript and TypeScript filters include their module extensions. Repository lock entries can declare `expectedIndexFiles`; excluded required files fail setup. Provider-first readiness requires successful execution and matching scan coverage, not merely a reported pipeline name.
 
 
 
@@ -94,6 +98,9 @@ The `opencode` agent uses the same neutral prompt and a per-run `XDG_DATA_HOME`.
 
 Behavior records include `artifacts.promptPath`, `artifacts.agent`, and `artifacts.changedFiles`. A pass means the agent command exited successfully and the verifier passed. Agent execution is asynchronous so observability sampling can continue; the runner awaits initial and final snapshots before recording the delta. Errors and timeouts remain unsuccessful attempt records.
 
+For Git repositories, source hashes and changed-file coverage include tracked files and untracked files permitted by Git ignore rules. Ignored build caches are excluded; tracked files remain included even when an ignore rule matches them. Non-Git fixtures retain recursive snapshots. Required source read errors still fail the attempt, and post-setup errors retain completed index evidence.
+
+
 ## Comparison limitations and pairing safety
 
 See [the measurement audit](docs/measurement-audit.md) before interpreting results as product effectiveness claims.
@@ -119,3 +126,20 @@ node --test sdlbench/tests/*.test.mjs
 ```
 
 Offline tests use fixture or fake-agent evidence. They do not establish live product savings, actual enrichment expenses, or a validated warm-session experiment.
+
+### Local Moshi JVM backport profile (Windows)
+
+To reproduce Moshi at `889013ec2edb8d8034902662a1dc8c4f3b3f8111` with the verified scip-java path fix and Kotlin 2.3.21 SemanticDB backport, stage the source-built artifacts once from the repository root:
+
+```powershell
+node sdlbench/scripts/stage-moshi-jvm.mjs <patched-scip-io.exe> <scip-java-pack-directory> <disposable-maven-repository>
+node sdlbench/scripts/rerun-moshi-jvm.mjs
+```
+
+The stage command requires the verified Kotlin JAR hash and a clean pinned Moshi checkout in `sdlbench/.work/repos/moshi`. It refuses to overwrite an existing bundle. The rerun checks every staged artifact hash, then uses the normal SDL HTTP indexing and Codex behavior path for both Moshi tasks. It writes a new experiment under `sdlbench/results/` and updates `.work/products/moshi-kotlin-2.3.21-scripts4/last-run.json`.
+
+The generated repository lock sets `scipGenerator` (server generator overrides) and `scipIoConfig` (TOML written exclusively into each disposable worktree). Existing project TOML is never overwritten. The local wrapper supplies the dedicated Maven repository after SDL's environment scrub; `OS=Windows_NT` remains preserved. Installed release binaries and cached release JARs are not replaced. Generated-index reuse and automatic installation are disabled. `--parallel 1` prevents the Java and Kotlin invocations from cleaning each other's Gradle build directories.
+
+This explicit profile uses local embeddings and mock summaries. The default repository lock still uses installed generators. A passing process alone is insufficient: inspect index readiness, zero generator failures, and validate the fresh SCIP documents, symbols, source ranges, and references. See [index preflight evidence](docs/index-preflight.md).
+
+The current staged profile includes compiler-backed Gradle Kotlin DSL indexing and pins `0.5.1-kotlin-2.3.21-scripts4-SNAPSHOT`. SDL materializes compiler-typed script locals with document-scoped identities and verified definition text. Previous bundles remain separate. Missing output, files whose only definitions are untyped locals, invalid source proof, or legacy fallback still fail the same readiness checks.

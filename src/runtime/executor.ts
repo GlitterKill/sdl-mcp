@@ -154,7 +154,9 @@ export async function execute(
   let stderrTruncated = false;
 
   const stdinBuffer =
-    request.stdin !== undefined ? Buffer.from(request.stdin, "utf-8") : undefined;
+    request.stdin !== undefined
+      ? Buffer.from(request.stdin, "utf-8")
+      : undefined;
   const stdinSha256 = stdinBuffer
     ? createHash("sha256").update(stdinBuffer).digest("hex")
     : undefined;
@@ -220,37 +222,50 @@ export async function execute(
   });
 
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    if (child.pid) {
-      killProcessTree(child.pid);
-    }
-  }, request.timeoutMs);
-  timer.unref();
-
   let cancelled = false;
-  const onAbort = () => {
-    cancelled = true;
-    if (child.pid) {
-      killProcessTree(child.pid);
-    }
-  };
-
-  request.signal?.addEventListener("abort", onAbort, { once: true });
-
   const { exitCode, signal } = await new Promise<{
     exitCode: number | null;
     signal: string | null;
   }>((resolve) => {
-    child.on("close", (code, sig) => resolve({ exitCode: code, signal: sig }));
-    child.on("error", (err) => {
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (code: number | null, sig: string | null) => {
+      clearTimeout(timer);
+      clearTimeout(releaseTimer);
+      request.signal?.removeEventListener("abort", onAbort);
+      resolve({ exitCode: code, signal: sig });
+    };
+    const stop = () => {
+      if (releaseTimer) return;
+      if (child.pid) killProcessTree(child.pid);
+      // A detached descendant can retain pipes after its launcher exits.
+      // Bound output draining after termination rather than waiting forever for close.
+      releaseTimer = setTimeout(() => {
+        stdoutTruncated ||= !child.stdout?.readableEnded;
+        stderrTruncated ||= !child.stderr?.readableEnded;
+        child.stdin?.destroy();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.unref();
+        finish(null, null);
+      }, RUNTIME_SIGKILL_GRACE_MS);
+    };
+    const onAbort = () => {
+      cancelled = true;
+      stop();
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, request.timeoutMs);
+    timer.unref();
+    child.once("close", finish);
+    child.once("error", (err) => {
       logger.error("Process spawn error", { error: String(err) });
-      resolve({ exitCode: 1, signal: null });
+      finish(1, null);
     });
+    request.signal?.addEventListener("abort", onAbort, { once: true });
+    if (request.signal?.aborted) onAbort();
   });
-
-  clearTimeout(timer);
-  request.signal?.removeEventListener("abort", onAbort);
 
   const status = classifyRuntimeStatus({
     cancelled,
@@ -278,9 +293,7 @@ export async function execute(
     stderrTruncated,
     totalStdoutBytes,
     totalStderrBytes,
-    ...(stdinBuffer
-      ? { stdinBytes: stdinBuffer.length, stdinSha256 }
-      : {}),
+    ...(stdinBuffer ? { stdinBytes: stdinBuffer.length, stdinSha256 } : {}),
   };
 }
 

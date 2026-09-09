@@ -59,10 +59,14 @@
           },
           "languages": {
             "type": "array",
-            "description": "Programming languages to index",
+            "description": "Programming languages to index; js/ts/jsx/tsx and mjs/cjs/mts/cts select their exact extensions",
             "items": {
               "type": "string",
               "enum": [
+                "mjs",
+                "cjs",
+                "mts",
+                "cts",
                 "ts",
                 "tsx",
                 "js",

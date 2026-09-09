@@ -887,7 +887,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "file.read": { filePath: "src/example.ts", search: "oldName", searchContext: 2 },
   "file.write": {
     filePath: "src/example.ts",
-    replacePattern: { pattern: "oldName\\r?\\n", replacement: "newName\n" },
+    replaceLines: { start: 0, end: 1, content: "const value = 1;" },
     createBackup: false,
   },
 

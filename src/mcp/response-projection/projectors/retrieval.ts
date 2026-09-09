@@ -356,6 +356,13 @@ function compactEvidence(
     : isRecord(value.content)
     ? compactCode(value.content, input, "context")
     : value.content;
+  if (value.rung !== "card" && isRecord(content) && isRecord(value.content)
+    && isRecord(value.content.card)) {
+    content.card = compactCard(value.content.card, false, input.options.detail === "full");
+    if (isRecord(content.card) && value.content.card.changedSincePrior === true) {
+      content.card.changedSincePrior = true;
+    }
+  }
   if (
     content !== undefined
     && (!isRecord(content) || Object.keys(content).length > 0)

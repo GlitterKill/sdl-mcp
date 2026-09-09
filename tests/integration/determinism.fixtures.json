@@ -131,6 +131,20 @@
         "repoId": "{REPO_ID}",
         "taskType": "explain",
         "taskText": "Explain UserRepository findById behavior",
+        "budget": { "maxTokens": 8192 },
+        "focusSymbols": ["UserRepository", "findById"],
+        "refsMode": "off",
+        "responseMode": "inline",
+        "wireFormat": "json",
+        "detail": "standard"
+      }
+    },
+    {
+      "tool": "sdl.context",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "taskType": "explain",
+        "taskText": "Explain UserRepository findById behavior",
         "budget": {
           "maxTokens": 2048
         },
@@ -565,6 +579,16 @@
         "actions": [
           "symbol.search"
         ],
+        "detail": "compact"
+      }
+    },
+    {
+      "tool": "sdl.manual",
+      "args": {
+        "actions": ["file.write", "file.symbolEditPreview", "file.symbolEditApply"],
+        "includeSchemas": true,
+        "includeExamples": true,
+        "format": "json",
         "detail": "compact"
       }
     },

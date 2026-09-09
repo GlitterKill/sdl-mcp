@@ -243,7 +243,7 @@ interface ContextSessionDeltaSummary {
   unchangedRefs: number;
 }
 
-function applyContextSessionRefs(
+export function applyContextSessionRefs(
   response: Record<string, unknown>,
   options: { repoId: string; refsMode?: "auto" | "off"; sessionId?: string },
 ): void {
@@ -262,17 +262,22 @@ function applyContextSessionRefs(
   };
   let sawCard = false;
   response.evidence = response.evidence.map((item) => {
-    if (!isRecord(item) || item.rung !== "card") return item;
-    if (typeof item.symbolId !== "string") return item;
+    if (!isRecord(item) || typeof item.symbolId !== "string") return item;
+    const nested = item.rung !== "card" && isRecord(item.content) && isRecord(item.content.card);
+    if (item.rung !== "card" && !nested) return item;
+    const card = nested && isRecord(item.content) ? item.content.card : item.content;
     sawCard = true;
     const key = `card:${options.repoId}:${item.symbolId}`;
     const result = sessionContentLedger.record({
       sessionId: options.sessionId,
       key,
-      contentHash: hashContent(JSON.stringify(item.content)),
+      contentHash: hashContent(JSON.stringify(card)),
     });
     if (result.status === "unchanged") {
       sessionDelta.unchangedRefs += 1;
+      if (nested && isRecord(item.content)) {
+        return { ...item, content: { ...item.content, card: { ref: { key }, unchanged: true } } };
+      }
       return {
         rung: item.rung,
         symbolId: item.symbolId,
@@ -286,6 +291,9 @@ function applyContextSessionRefs(
     }
     if (result.status === "changed") {
       sessionDelta.changedCards += 1;
+      if (nested && isRecord(item.content) && isRecord(card)) {
+        return { ...item, content: { ...item.content, card: { ...card, changedSincePrior: true } } };
+      }
       return { ...item, changedSincePrior: true };
     }
     sessionDelta.newCards += 1;

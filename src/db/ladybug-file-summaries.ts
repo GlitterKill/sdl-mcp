@@ -21,6 +21,7 @@ import {
   querySingle,
   withTransaction,
 } from "./ladybug-core.js";
+import { withExclusiveLadybugOperation } from "./ladybug-operation-gate.js";
 import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
 import {
@@ -284,11 +285,16 @@ export async function insertNewFileSummaryBatch(
       rows.map((row) => [row.fileId, row.fileId] as const),
     );
 
-    await withTransaction(conn, async (txConn) => {
-      await copyCsvArtifact(txConn, "FileSummary", summaryPath);
-      await copyCsvArtifact(txConn, "FILE_SUMMARY_IN_REPO", summaryInRepoPath);
-      await copyCsvArtifact(txConn, "SUMMARY_OF_FILE", summaryOfFilePath);
-    });
+    // LadybugDB 0.19 on Windows can crash a File scan when this COPY
+    // transaction overlaps a reader. Drain readers before BEGIN and keep
+    // admission exclusive through COMMIT, including both ownership relations.
+    await withExclusiveLadybugOperation(() =>
+      withTransaction(conn, async (txConn) => {
+        await copyCsvArtifact(txConn, "FileSummary", summaryPath);
+        await copyCsvArtifact(txConn, "FILE_SUMMARY_IN_REPO", summaryInRepoPath);
+        await copyCsvArtifact(txConn, "SUMMARY_OF_FILE", summaryOfFilePath);
+      }),
+    );
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }

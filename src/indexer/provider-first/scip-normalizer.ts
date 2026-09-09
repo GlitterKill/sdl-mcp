@@ -1,4 +1,9 @@
-import type { EdgeType, Range, RepoId, SymbolKind } from "../../domain/types.js";
+import type {
+  EdgeType,
+  Range,
+  RepoId,
+  SymbolKind,
+} from "../../domain/types.js";
 import {
   extractNameFromDescriptors,
   extractPackageInfo,
@@ -24,10 +29,7 @@ import type {
 import { generateFileId } from "../../util/hashing.js";
 import { normalizePath } from "../../util/paths.js";
 import { findTypeScriptVariableStatementRange } from "./typescript-variable-range.js";
-import type {
-  IndexProgress,
-  IndexProgressSubstage,
-} from "../indexer-init.js";
+import type { IndexProgress, IndexProgressSubstage } from "../indexer-init.js";
 import {
   createProviderEdgeDedupeKey,
   createProviderOccurrenceId,
@@ -188,6 +190,7 @@ export function normalizeScipProviderFacts(
     sourceLinesByPath: context.sourceLinesByPath,
   };
   const emittedSymbolsByProviderId = new Map<string, SymbolFact>();
+  const variantSymbolsByPath = new Map<string, Map<string, string>>();
   const retainOccurrenceFacts = options.retainOccurrenceFacts ?? true;
 
   measureNormalizePhase(options, "symbols", () => {
@@ -219,14 +222,33 @@ export function normalizeScipProviderFacts(
           );
           continue;
         }
-        context.symbolIdsByProviderId.set(info.symbol, symbolFact.symbolId);
+        if (
+          info.symbol.startsWith("local ") ||
+          ((context.symbolDefinitionRelPathsByProviderId.get(info.symbol)
+            ?.size ?? 0) > 1 &&
+            !canCoalesceDuplicateProviderSymbol(
+              info.symbol,
+              symbolFact.symbolKind,
+            ))
+        ) {
+          // Keep each source-backed definition, but never choose a variant for
+          // references in another document without compilation-context evidence.
+          const variants =
+            variantSymbolsByPath.get(relPath) ?? new Map<string, string>();
+          variants.set(info.symbol, symbolFact.symbolId);
+          variantSymbolsByPath.set(relPath, variants);
+        } else {
+          context.symbolIdsByProviderId.set(info.symbol, symbolFact.symbolId);
+        }
         if (symbolFact.symbolStatus === "unresolved") {
           context.unresolvedSymbolProviderIds.add(info.symbol);
         }
-        context.symbolSourceTextCandidatesByProviderId.set(
-          info.symbol,
-          sourceTextCandidatesForScipSymbol(info.symbol, symbolFact.name),
-        );
+        if (!info.symbol.startsWith("local ")) {
+          context.symbolSourceTextCandidatesByProviderId.set(
+            info.symbol,
+            sourceTextCandidatesForScipSymbol(info.symbol, symbolFact.name),
+          );
+        }
         emittedSymbolsByProviderId.set(symbolFact.providerSymbolId, symbolFact);
         facts.symbols.push(symbolFact);
       }
@@ -236,6 +258,15 @@ export function normalizeScipProviderFacts(
   measureNormalizePhase(options, "externalSymbols", () => {
     for (const rawExternalSymbol of options.externalSymbols ?? []) {
       const externalSymbol = canonicalizeExternalSymbol(rawExternalSymbol);
+      // Local IDs cannot name entities outside their source document.
+      if (externalSymbol.symbol.startsWith("local ")) continue;
+      if (
+        (context.symbolDefinitionRelPathsByProviderId.get(externalSymbol.symbol)
+          ?.size ?? 0) > 1
+      ) {
+        // External metadata cannot disambiguate competing source definitions.
+        continue;
+      }
       const externalFact = externalSymbolToFact(context, externalSymbol);
       if (!externalFact) continue;
       context.symbolIdsByProviderId.set(
@@ -258,17 +289,42 @@ export function normalizeScipProviderFacts(
   let lastProgressAt = 0;
   for (const document of documents) {
     const relPath = normalizePath(document.relativePath);
+    const variants = variantSymbolsByPath.get(relPath);
+    const documentContext = variants
+      ? {
+          ...context,
+          symbolIdsByProviderId: new Map([
+            ...context.symbolIdsByProviderId,
+            ...variants,
+          ]),
+          symbolSourceTextCandidatesByProviderId: new Map([
+            ...context.symbolSourceTextCandidatesByProviderId,
+            ...document.symbols
+              .filter(
+                (info) =>
+                  info.symbol.startsWith("local ") && variants.has(info.symbol),
+              )
+              .map(
+                (info) =>
+                  [
+                    info.symbol,
+                    [info.displayName, "`" + info.displayName + "`"],
+                  ] as const,
+              ),
+          ]),
+        }
+      : context;
     const sourceLines = context.sourceLinesByPath.get(relPath);
     const definitionOccurrencesBySymbol =
       collectDefinitionOccurrencesBySymbol(document);
     const localSourceTextCandidates = buildLocalSourceTextCandidates(
-      context,
+      documentContext,
       document,
       sourceLines,
     );
     const neutralCallProofOccurrenceIndexes =
       buildMacroExpansionOverlapOccurrenceIndexes(
-        context,
+        documentContext,
         document,
         sourceLines,
         localSourceTextCandidates,
@@ -279,24 +335,27 @@ export function normalizeScipProviderFacts(
       () =>
         retainOccurrenceFacts
           ? document.occurrences.map((occurrence, index) =>
-              occurrenceToFact(context, occurrence, relPath, index),
+              occurrenceToFact(documentContext, occurrence, relPath, index),
             )
           : document.occurrences.map((occurrence) =>
-              occurrenceToCoverageOccurrence(context, occurrence),
+              occurrenceToCoverageOccurrence(documentContext, occurrence),
             ),
     );
     if (retainOccurrenceFacts) {
       appendMany(facts.occurrences, documentOccurrences as OccurrenceFact[]);
     }
     measureNormalizePhase(options, "diagnostics", () => {
-      for (const [occurrenceIndex, occurrence] of document.occurrences.entries()) {
+      for (const [
+        occurrenceIndex,
+        occurrence,
+      ] of document.occurrences.entries()) {
         for (const [
           diagnosticIndex,
           diagnostic,
         ] of occurrence.diagnostics.entries()) {
           facts.diagnostics.push(
             diagnosticToFact(
-              context,
+              documentContext,
               diagnostic,
               relPath,
               occurrenceIndex,
@@ -309,7 +368,7 @@ export function normalizeScipProviderFacts(
     facts.coverage.push(
       measureNormalizePhase(options, "coverage", () =>
         coverageFact(
-          context,
+          documentContext,
           document,
           relPath,
           documentOccurrences,
@@ -322,14 +381,14 @@ export function normalizeScipProviderFacts(
     appendMany(
       facts.edges,
       measureNormalizePhase(options, "relationshipEdges", () =>
-        relationshipEdges(context, document, edgeKeys),
+        relationshipEdges(documentContext, document, edgeKeys),
       ),
     );
     appendMany(
       facts.edges,
       measureNormalizePhase(options, "occurrenceEdges", () =>
         occurrenceEdges(
-          context,
+          documentContext,
           document,
           edgeKeys,
           sourceLines,
@@ -450,7 +509,9 @@ function canonicalizeProviderSymbolIds(document: ScipDocument): ScipDocument {
       symbol: canonicalizeProviderSymbolId(info.symbol),
       relationships: canonicalizeScipRelationships(info.relationships),
       ...(info.enclosingSymbol
-        ? { enclosingSymbol: canonicalizeProviderSymbolId(info.enclosingSymbol) }
+        ? {
+            enclosingSymbol: canonicalizeProviderSymbolId(info.enclosingSymbol),
+          }
         : {}),
     })),
   };
@@ -631,12 +692,9 @@ function scipRelationshipKey(relationship: ScipRelationship): string {
 }
 
 function scipRangeKey(range: ScipRange): string {
-  return [
-    range.startLine,
-    range.startCol,
-    range.endLine,
-    range.endCol,
-  ].join(":");
+  return [range.startLine, range.startCol, range.endLine, range.endCol].join(
+    ":",
+  );
 }
 
 function fileFact(
@@ -660,7 +718,21 @@ function symbolInfoToFact(
   relPath: string,
   definitionOccurrencesBySymbol: ReadonlyMap<string, ScipOccurrence>,
 ): SymbolFact | null {
-  const kind = mapScipKind(info.symbol, info.kind);
+  // SCIP kinds are protocol values (Variable=61, Method=26, Function=17).
+  // Script locals need compiler kind metadata; their IDs have no descriptor suffix.
+  const scriptLocalKind =
+    documentLanguage === "kotlin" &&
+    relPath.endsWith(".gradle.kts") &&
+    info.symbol.startsWith("local ")
+      ? info.kind === 61
+        ? "variable"
+        : info.kind === 26 || info.kind === 17
+          ? "function"
+          : null
+      : null;
+  const kind = scriptLocalKind
+    ? { skip: false as const, sdlKind: scriptLocalKind as SymbolKind }
+    : mapScipKind(info.symbol, info.kind);
   if (kind.skip) return null;
 
   let definitionRange = findDefinitionRange(
@@ -668,6 +740,21 @@ function symbolInfoToFact(
     info.symbol,
   );
   const sourceLines = context.sourceLinesByPath.get(relPath);
+  if (scriptLocalKind) {
+    const line =
+      definitionRange && sourceLines?.get(definitionRange.startLine - 1);
+    const text = line?.slice(
+      definitionRange!.startCol,
+      definitionRange!.endCol,
+    );
+    if (
+      !definitionRange ||
+      definitionRange.startLine !== definitionRange.endLine ||
+      !info.displayName ||
+      (text !== info.displayName && text !== "`" + info.displayName + "`")
+    )
+      return null;
+  }
   let symbolKind = kind.sdlKind;
   if (
     documentLanguage === "typescript" &&
@@ -681,14 +768,7 @@ function symbolInfoToFact(
     symbolKind = "interface";
   }
 
-  if (
-    !shouldMaterializeSymbolInfo(
-      context,
-      info.symbol,
-      relPath,
-      symbolKind,
-    )
-  ) {
+  if (!shouldMaterializeSymbolInfo(context, info.symbol, relPath)) {
     return null;
   }
 
@@ -779,7 +859,10 @@ function canCoalesceProviderSymbolFacts(
       existing.providerSymbolId,
       existing.symbolKind,
     ) &&
-    canCoalesceDuplicateProviderSymbol(next.providerSymbolId, next.symbolKind) &&
+    canCoalesceDuplicateProviderSymbol(
+      next.providerSymbolId,
+      next.symbolKind,
+    ) &&
     existing.name === next.name
   );
 }
@@ -819,20 +902,24 @@ function shouldMaterializeSymbolInfo(
   context: NormalizedScipContext,
   providerSymbolId: string,
   relPath: string,
-  symbolKind: SymbolKind,
 ): boolean {
   const definitionRelPaths =
     context.symbolDefinitionRelPathsByProviderId.get(providerSymbolId);
   if (definitionRelPaths && definitionRelPaths.size > 0) {
+    const scheme = parseScipSymbol(providerSymbolId).scheme;
     if (
       definitionRelPaths.size > 1 &&
-      !canCoalesceDuplicateProviderSymbol(providerSymbolId, symbolKind)
-    ) {
+      scheme !== "semanticdb" &&
+      scheme !== "scip-java" &&
+      scheme !== "local" &&
+      !canCoalesceDuplicateProviderSymbol(
+        providerSymbolId,
+        mapScipKind(providerSymbolId).sdlKind ?? undefined,
+      )
+    )
       return false;
-    }
-    // Some providers repeat SymbolInformation metadata in documents that only
-    // reference the symbol. Emit the symbol from definition-bearing documents
-    // so true cross-file definition collisions still reach validation.
+    // Metadata can appear in reference-only documents. Only actual definitions
+    // establish source identity, including distinct compilation variants.
     return definitionRelPaths.has(relPath);
   }
 
@@ -1101,7 +1188,11 @@ function occurrenceEdges(
       containmentLookup,
     );
     const targetSymbolId = context.symbolIdsByProviderId.get(occurrence.symbol);
-    if (!sourceSymbolId || !targetSymbolId || sourceSymbolId === targetSymbolId) {
+    if (
+      !sourceSymbolId ||
+      !targetSymbolId ||
+      sourceSymbolId === targetSymbolId
+    ) {
       continue;
     }
 
@@ -1223,8 +1314,10 @@ export function sourceTextCandidatesForScipSymbol(
     parsed.descriptors,
   );
   const descriptorName = extractNameFromDescriptors(descriptors);
-  const displayNameWithoutBackticks = stripBalancedBacktickName(displayNameText);
-  const descriptorNameWithoutBackticks = stripBalancedBacktickName(descriptorName);
+  const displayNameWithoutBackticks =
+    stripBalancedBacktickName(displayNameText);
+  const descriptorNameWithoutBackticks =
+    stripBalancedBacktickName(descriptorName);
   addCandidate(extractColonScopedMemberName(displayNameText));
   addCandidate(extractColonScopedMemberName(descriptorName));
   addCandidate(
@@ -1235,11 +1328,15 @@ export function sourceTextCandidatesForScipSymbol(
   addCandidate(stripCppTrailingTemplateArguments(displayNameText));
   addCandidate(stripCppTrailingTemplateArguments(descriptorName));
   addCandidate(stripCppTrailingTemplateArguments(displayNameWithoutBackticks));
-  addCandidate(stripCppTrailingTemplateArguments(descriptorNameWithoutBackticks));
+  addCandidate(
+    stripCppTrailingTemplateArguments(descriptorNameWithoutBackticks),
+  );
   if (isClangStyleSymbolScheme(parsed.scheme)) {
     addCandidate(extractDotScopedMemberName(displayNameText));
     addCandidate(extractDotScopedMemberName(descriptorName));
-    addCandidate(extractDotScopedMemberName(stripDescriptorTerminator(descriptors)));
+    addCandidate(
+      extractDotScopedMemberName(stripDescriptorTerminator(descriptors)),
+    );
   }
   addCandidate(extractInvocationOwnerMemberName(displayNameText));
   addCandidate(extractInvocationOwnerMemberName(descriptorName));
@@ -1254,6 +1351,16 @@ export function sourceTextCandidatesForScipSymbol(
   }
   addCandidate(displayNameText);
   addCandidate(descriptorName);
+  if (parsed.scheme === "semanticdb" || parsed.scheme === "scip-java") {
+    // Kotlin calls Companion.invoke through its owning class name. The full
+    // descriptor ties this spelling to that target, not to arbitrary factories.
+    const owner = /^(.*#)Companion#invoke\([^)]*\)\.$/.exec(descriptors)?.[1];
+    if (owner) addCandidate(extractNameFromDescriptors(owner));
+    // Escaped Kotlin identifiers include their balanced backticks in SCIP ranges.
+    for (const name of [...candidates]) {
+      if (name && !/[`\r\n]/.test(name)) addCandidate("`" + name + "`");
+    }
+  }
   return candidates;
 }
 
@@ -1329,7 +1436,9 @@ function isConstructorSymbolName(name: string): boolean {
   );
 }
 
-function extractConstructorOwnerNameFromDescriptors(descriptors: string): string {
+function extractConstructorOwnerNameFromDescriptors(
+  descriptors: string,
+): string {
   const stripped = stripDescriptorTerminator(descriptors);
   const memberSeparatorIndex = stripped.lastIndexOf("#");
   if (memberSeparatorIndex === -1) return "";
@@ -1453,7 +1562,8 @@ function hasScopedCxxTypeOccurrenceBeforeDeclarator(
   for (const typeOccurrence of document.occurrences) {
     if (typeOccurrence === constructorOccurrence) continue;
     if (
-      typeOccurrence.range.startLine !== constructorOccurrence.range.startLine ||
+      typeOccurrence.range.startLine !==
+        constructorOccurrence.range.startLine ||
       typeOccurrence.range.endLine !== constructorOccurrence.range.startLine ||
       typeOccurrence.range.endCol > constructorOccurrence.range.startCol ||
       typeOccurrence.range.endCol > line.length
@@ -1483,7 +1593,9 @@ function hasScopedCxxTypeOccurrenceBeforeDeclarator(
   return false;
 }
 
-function cxxConstructorNameFromProviderSymbol(providerSymbolId: string): string {
+function cxxConstructorNameFromProviderSymbol(
+  providerSymbolId: string,
+): string {
   const parsed = parseScipSymbol(providerSymbolId);
   if (!isClangStyleSymbolScheme(parsed.scheme)) return "";
   const descriptors = normalizedDescriptorsForSymbol(
@@ -1579,9 +1691,10 @@ function importAliasClauseSourceTextCandidates(
   sourceText: string,
 ): readonly string[] {
   const candidates: string[] = [];
-  const match = /^\s*(?:type\s+)?[A-Za-z_$][A-Za-z0-9_$]*\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*,?\s*$/.exec(
-    sourceText,
-  );
+  const match =
+    /^\s*(?:type\s+)?[A-Za-z_$][A-Za-z0-9_$]*\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*,?\s*$/.exec(
+      sourceText,
+    );
   if (match?.[1]) {
     candidates.push(match[1]);
   }
@@ -1595,9 +1708,7 @@ function isNamedImportAliasForToken(
 ): boolean {
   const block = collectNamedImportBlock(sourceLines, lineNumber);
   if (!block) return false;
-  return new RegExp(
-    `\\bas\\s+${escapeRegExp(token)}\\b`,
-  ).test(block.text);
+  return new RegExp(`\\bas\\s+${escapeRegExp(token)}\\b`).test(block.text);
 }
 
 function namedImportAliasForImportedToken(
@@ -1641,7 +1752,11 @@ function findNamedImportBlockStart(
     if (line === undefined) return undefined;
     // A preceding completed import must not lend aliases to a later cast.
     if (currentLine !== lineNumber && /;\s*$/.test(line)) break;
-    if (/^\s*(?:import\s+(?:type\s+)?\{|(?:pub(?:\([^)]*\))?\s+)?use\s+)/.test(line)) {
+    if (
+      /^\s*(?:import\s+(?:type\s+)?\{|(?:pub(?:\([^)]*\))?\s+)?use\s+)/.test(
+        line,
+      )
+    ) {
       return currentLine;
     }
   }
@@ -1661,7 +1776,11 @@ function findNamedImportBlockEnd(
     const line = sourceLines.get(currentLine);
     if (line === undefined) return undefined;
     // Rust use statements end at a semicolon, including grouped imports.
-    if (isRustUse ? /;\s*$/.test(line) : /}\s*from\s*["'][^"']+["']\s*;?\s*$/.test(line)) {
+    if (
+      isRustUse
+        ? /;\s*$/.test(line)
+        : /}\s*from\s*["'][^"']+["']\s*;?\s*$/.test(line)
+    ) {
       return currentLine;
     }
     if (currentLine !== lineNumber && /^\s*import\s+/.test(line)) break;
@@ -1688,9 +1807,7 @@ function mergeSourceTextCandidates(
   return merged;
 }
 
-function occurrenceRole(
-  occurrence: ScipOccurrence,
-): OccurrenceFact["role"] {
+function occurrenceRole(occurrence: ScipOccurrence): OccurrenceFact["role"] {
   if (occurrence.symbolRoles & SCIP_ROLE_DEFINITION) return "definition";
   if (occurrence.symbolRoles & SCIP_ROLE_IMPORT) return "import";
   return "reference";
@@ -1846,9 +1963,7 @@ function buildMacroExpansionOverlapOccurrenceIndexes(
   );
   for (const [index, occurrence] of document.occurrences.entries()) {
     if (!isReferenceOccurrence(occurrence)) continue;
-    if (
-      !isClangStyleSymbolScheme(parseScipSymbol(occurrence.symbol).scheme)
-    ) {
+    if (!isClangStyleSymbolScheme(parseScipSymbol(occurrence.symbol).scheme)) {
       continue;
     }
     if (occurrence.range.startLine !== occurrence.range.endLine) continue;
@@ -1978,7 +2093,10 @@ function isCxxImplicitConstructorOverInvokedExpression(
   );
 }
 
-function isCxxExpressionCallableContext(line: string, startCol: number): boolean {
+function isCxxExpressionCallableContext(
+  line: string,
+  startCol: number,
+): boolean {
   const prefix = line.slice(0, startCol).trimEnd();
   if (prefix.length === 0) return true;
   if (/\breturn$/.test(prefix)) return true;
@@ -2028,7 +2146,9 @@ function buildCxxOperatorCallParenStarts(
     if (occurrence.range.endCol !== occurrence.range.startCol + 1) continue;
     const line = sourceLines.get(occurrence.range.startLine);
     if (!line) continue;
-    if (line.slice(occurrence.range.startCol, occurrence.range.endCol) !== "(") {
+    if (
+      line.slice(occurrence.range.startCol, occurrence.range.endCol) !== "("
+    ) {
       continue;
     }
     const parsed = parseScipSymbol(occurrence.symbol);
@@ -2080,7 +2200,10 @@ function hasCxxInvocationSuffix(line: string, endCol: number): boolean {
     if (char === ">") {
       depth--;
       if (depth === 0) {
-        return suffix.slice(index + 1).trimStart().startsWith("(");
+        return suffix
+          .slice(index + 1)
+          .trimStart()
+          .startsWith("(");
       }
     }
   }
@@ -2190,9 +2313,7 @@ function findContainingProviderSymbol(
   return null;
 }
 
-function buildContainmentSymbolsByLine(
-  symbols: readonly ContainmentSymbol[],
-): {
+function buildContainmentSymbolsByLine(symbols: readonly ContainmentSymbol[]): {
   buckets: ReadonlyMap<number, readonly ContainmentSymbol[]>;
   complete: boolean;
 } {
@@ -2294,17 +2415,8 @@ function selectDefinitionRange(
 }
 
 function isValidScipRange(range: ScipRange): boolean {
-  const values = [
-    range.startLine,
-    range.startCol,
-    range.endLine,
-    range.endCol,
-  ];
-  if (
-    values.some(
-      (value) => !Number.isSafeInteger(value) || value < 0,
-    )
-  ) {
+  const values = [range.startLine, range.startCol, range.endLine, range.endCol];
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
     return false;
   }
   return (
@@ -2337,9 +2449,7 @@ function scipRangeToRange(range: ScipRange): Range {
   };
 }
 
-function diagnosticSeverity(
-  severity: number,
-): DiagnosticFact["severity"] {
+function diagnosticSeverity(severity: number): DiagnosticFact["severity"] {
   if (severity <= 1) return "error";
   if (severity === 2) return "warning";
   if (severity === 3) return "information";
@@ -2380,7 +2490,8 @@ function normalizeSourceLineUnavailableReasonByPath(
   >,
 ): SourceLineUnavailableReasonByPath {
   const normalizedReasons = new Map<string, CallProofUnavailableReasonCode>();
-  for (const [relPath, reason] of options.sourceLineUnavailableReasonByPath ?? []) {
+  for (const [relPath, reason] of options.sourceLineUnavailableReasonByPath ??
+    []) {
     normalizedReasons.set(normalizePath(relPath), reason);
   }
   return normalizedReasons;

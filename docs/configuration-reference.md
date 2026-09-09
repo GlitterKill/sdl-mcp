@@ -115,7 +115,7 @@ Each entry configures one repository.
 | `repoId`                    | `string`           | Required                | Stable identifier used in all tool calls                                                |
 | `rootPath`                  | `string`           | Required                | Absolute path recommended; relative paths resolve from the config file                  |
 | `ignore`                    | `string[]`         | See below               | Glob patterns excluded from indexing                                                    |
-| `languages`                 | `string[]`         | Core built-ins          | `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh`, `powershell`, `ruby`, `lua`, `dart`, `swift`, `groovy`, `perl`, `r`, `elixir`, `fsharp`, `fortran`, `haskell` |
+| `languages`                 | `string[]`         | Core built-ins          | `ts`, `tsx`, `mts`, `cts`, `js`, `jsx`, `mjs`, `cjs`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh`, `powershell`, `ruby`, `lua`, `dart`, `swift`, `groovy`, `perl`, `r`, `elixir`, `fsharp`, `fortran`, `haskell` |
 | `maxFileBytes`              | `number`           | `2000000`               | Files larger than this are skipped                                                      |
 | `postIndexSessionTimeoutMs` | `number`           | `900000`                | `1000-86400000`. Soft deadline for post-index finalization after pass-1/pass-2          |
 | `includeNodeModulesTypes`   | `boolean`          | `true`                  | TypeScript-only helper for `@types/*` resolution                                        |
@@ -123,6 +123,8 @@ Each entry configures one repository.
 | `tsconfigPath`              | `string \| null`   | `null`                  | Manual `tsconfig.json` override                                                         |
 | `workspaceGlobs`            | `string[] \| null` | `null`                  | Monorepo workspace package discovery                                                    |
 | `memory`                    | object             | Omitted                 | Per-repo override for the top-level memory settings                                     |
+
+JavaScript/TypeScript configuration selectors are explicit extensions: `js` and `ts` do not implicitly admit module variants. Add `mjs`, `cjs`, `mts`, or `cts` as needed. Config defaults are unchanged; registering a repository without a language list includes these newly supported selectors through normal auto-registration.
 
 Use `postIndexSessionTimeoutMs` to record and log when post-index
 finalization exceeds the configured deadline. The deadline cannot cancel
@@ -635,7 +637,7 @@ Memory remains opt-in.
 
 When both `scip.enabled` and `scip.generator.enabled` are true, SDL-MCP auto-adds `index.scip` to `scip.indexes` if you forgot to list it.
 
-The automatic scip-io language filter maps SDL-MCP repo languages to scip-io emitters: `ts`/`tsx` -> `typescript`, `js`/`jsx` -> `javascript`, `rs` -> `rust`, `py` -> `python`, `cs` -> `csharp`, `c`/`cpp` -> `cpp`, plus `go`, `java`, and `kt` -> `kotlin`. Languages without a scip-io backend, such as `php`, `sh`, `powershell`, `ruby`, `lua`, `dart`, and `swift`, are omitted from the generated filter.
+The automatic scip-io language filter maps SDL-MCP repo languages to scip-io emitters: `ts`/`tsx`/`mts`/`cts` -> `typescript`, `js`/`jsx`/`mjs`/`cjs` -> `javascript`, `rs` -> `rust`, `py` -> `python`, `cs` -> `csharp`, `c`/`cpp` -> `cpp`, plus `go`, `java`, and `kt` -> `kotlin`. Languages without a scip-io backend, such as `php`, `sh`, `powershell`, `ruby`, `lua`, `dart`, and `swift`, are omitted from the generated filter.
 
 Generated SCIP files are decoded up to 512 MiB each. When the generated merged `index.scip` is larger than that, SDL-MCP runs `scip-io index --no-merge`, ingests split files under the cap, deduplicates identical TypeScript/JavaScript artifacts by SHA-256 content hash, ignores unchanged split files that existed before the generator run, and reports skipped stale or oversized split files in CLI/audit diagnostics. Manually configured oversize indexes remain manual: provide smaller files in `scip.indexes`. Repeated unchanged generator runs use the generated-index cache by default; CLI summaries print `SCIP generator cache: hit` or `stored` when the cache participates. If `scip-io` exits nonzero but still writes a safe generated index for another requested language, SDL-MCP can use that artifact for the current run and keeps the language failure as a visible generator diagnostic. Split-only cache entries are stored/restored only when every requested scip-io language has a covered split artifact; incomplete entries are treated as cache misses so the generator can retry missing languages.
 

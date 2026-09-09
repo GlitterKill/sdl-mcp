@@ -108,13 +108,17 @@ Supported filters:
 - `actions` for an exact subset
 - `format` for `typescript`, `markdown`, or `json`
 - `includeSchemas` / `includeExamples` for richer output
-- `detail` for shallow `compact` schemas (the default) or recursive `full` schemas
+- `detail` for shallow `compact` schemas in broad discovery or recursive `full` schemas
+
+Exact `actions` selectors with `includeSchemas: true` return recursive fields and descriptions even at compact detail. For example, `actions: ["file.write"]` exposes the required `replaceLines.start`, `end`, and `content` fields and their indexing semantics. Wildcard selectors and text searches stay shallow by default. The file symbol-edit aliases `file.symbolEditPreview`, `file.symbolEditApply`, and `file.symbolEditApplyNow` resolve to `symbol.edit`.
+
+Line replacement uses zero-based, end-exclusive ranges: `replaceLines: { start: 0, end: 1, content: "const value = 1;" }` replaces the first displayed line. Equal start and end values insert without removing a line.
 
 TypeScript and Markdown manuals label `info`, `manual`, `context`, `file`, `retrieve`, and `workflow` as top-level-only tools. Call them directly as `sdl.<name>`; do not use those names as `sdl.workflow` steps. `action.search` remains the meta-tool exception that is also workflow-callable.
 
 ### `sdl.context`
 
-Use this for task-shaped context retrieval inside Code Mode.
+Use this for task-shaped context retrieval inside Code Mode. Selected card and code evidence for the same symbol share one entry: `content.card` carries the card metadata, while the skeleton or hot-path fields retain the code evidence. Card-only results remain standalone when no code rung is delivered. This removes duplicate symbol/path wrappers without changing retrieval priorities.
 
 It mirrors `sdl.context`, but it sits next to `sdl.manual` and `sdl.workflow` so an agent can stay on the Code Mode surface after discovery. Start here for:
 

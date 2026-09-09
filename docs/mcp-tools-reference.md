@@ -1013,7 +1013,7 @@ Semantic test-case facets add normalized titles, suite names, frameworks, catego
 
 **Response:**
 
-The canonical response is evidence-first and contains no synthesized answer.
+The canonical response is evidence-first and contains no synthesized answer. When a selected symbol has both a card and a code-bearing rung, its card metadata appears in `evidence[].content.card` alongside the skeleton or hot-path content, without a second identity wrapper. Card-only evidence remains available when code is unavailable or omitted by the token budget. Consolidation happens after budget enforcement and preserves selected symbol coverage, code, and recovery actions.
 
 A successful canonical payload contains `status`, `taskType`, `retrieval`,
 `evidence`, `edges`, `omitted`, `nextActions`, and `etag`. Retrieval level is
@@ -1472,7 +1472,7 @@ Use it when you need a single manual-ladder step without building a workflow. Th
 
 Return a compact API reference for the SDL action surface.
 
-Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, typed subset of the API instead of the full tool surface. Focused `actions` lookups return known selectors even when the request includes stale names; ignored selectors appear in `unknownActions` and `warning`.
+Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, typed subset of the API instead of the full tool surface. Focused `actions` lookups return known selectors even when the request includes stale names; ignored selectors appear in `unknownActions` and `warning`. With `includeSchemas: true`, exact selectors expose nested required fields, descriptions, and operation variants at compact detail. Wildcard and query discovery remain shallow by default. `file.symbolEditPreview`, `file.symbolEditApply`, and `file.symbolEditApplyNow` resolve to the canonical `symbol.edit` schema.
 
 ### `sdl.file`
 

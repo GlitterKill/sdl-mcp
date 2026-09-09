@@ -1744,7 +1744,12 @@ async function handleRestRequest(
 
       const emitDeferredWorkProgress = (): void => {
         const deferredWork = getActiveDeferredWorkStatus();
-        if (!deferredWork) return;
+        if (!deferredWork) {
+          // Generators can run for minutes before the first index progress event.
+          // Flush the SSE response and keep idle clients alive during that work.
+          if (!res.destroyed && !clientDisconnected) res.write(": heartbeat\n\n");
+          return;
+        }
         const allowedSubstages = new Set([
           "clusterRefresh",
           "processRefresh",

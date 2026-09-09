@@ -45,6 +45,7 @@ import {
   type PreparedContextHydrationPlan,
 } from "./hydrate.js";
 import { getTaskProfile } from "./profiles.js";
+import { consolidateContextEvidence } from "./serialize.js";
 import {
   CONTEXT_RUNG_TOKEN_LIMITS,
   enforceContextBudget,
@@ -1287,7 +1288,7 @@ export class ContextEngineV2 {
         request.budget.maxTokens,
         identifiers,
       );
-      return enforced.budgetError ?? enforced.payload;
+      return enforced.budgetError ?? consolidateContextEvidence(enforced.payload);
     }
 
     const { selection, prepared } = snapshot;
@@ -1338,6 +1339,6 @@ export class ContextEngineV2 {
       request.budget.maxTokens,
       identifiers,
     );
-    return enforced.budgetError ?? enforced.payload;
+    return enforced.budgetError ?? consolidateContextEvidence(enforced.payload);
   }
 }

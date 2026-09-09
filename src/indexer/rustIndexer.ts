@@ -396,6 +396,8 @@ const NATIVE_EXTRACTION_LANGUAGES = new Set([
 export function extensionToLanguage(ext: string): string {
   const map: Record<string, string> = {
     ts: "ts",
+    mts: "ts",
+    cts: "ts",
     tsx: "tsx",
     js: "js",
     mjs: "js",

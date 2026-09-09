@@ -18,6 +18,8 @@ There is no error signal when hygiene breaks. A timestamp accidentally added to 
 
 **Deterministic tool outputs.** Identical tool calls against an unchanged index return byte-identical results when the tool's contract is content-shaped rather than session-scoped — within a process, across fresh processes, and across a from-scratch re-index of unchanged source. For `sdl.context`, this guarantee requires `responseMode: "inline"` with `refsMode: "off"`. Default/auto response-artifact handles and session refs are deliberately session-scoped: handles may vary, and repeated evidence may become `{ ref, unchanged: true }`. Every LadybugDB query carries an explicit `ORDER BY` with a deterministic tiebreaker (file path, then symbol name, then byte offset), because columnar engines with parallel scans do not guarantee row order otherwise. Result serialization uses a locked key order.
 
+Consolidated context evidence keeps card metadata under `content.card` when the same symbol also has code evidence. Session references use the same card identity and content hash for nested and standalone cards; unchanged card metadata may become a reference while the code remains inline. `refsMode: "off"` always retains the card metadata.
+
 `sdl.context` computes its ETag from the complete canonical v2 payload before
 session refs, packed encoding, or generic response-artifact wrapping. The
 canonical payload therefore has one content identity across supported wrappers.

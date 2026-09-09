@@ -31,7 +31,12 @@ export interface ScannedFileMetadata extends FileMetadata {
   contentHash: string;
 }
 
+// JS/TS selectors stay extension-specific, including explicit module variants.
 const EXACT_CONFIG_LANGUAGE_EXTENSIONS = new Map<string, readonly string[]>([
+  ["mjs", [".mjs"]],
+  ["cjs", [".cjs"]],
+  ["mts", [".mts"]],
+  ["cts", [".cts"]],
   ["ts", [".ts"]],
   ["tsx", [".tsx"]],
   ["js", [".js"]],

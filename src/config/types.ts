@@ -46,6 +46,10 @@ import {
 } from "./constants.js";
 
 export const LanguageSchema = z.enum([
+  "mjs",
+  "cjs",
+  "mts",
+  "cts",
   "ts",
   "tsx",
   "js",

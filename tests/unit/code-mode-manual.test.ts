@@ -340,9 +340,9 @@ describe("bounded schema manual regressions", () => {
     assert.doesNotMatch(result.manual, /operation\?: object(?: \| object)*;/);
   });
 
-  it("keeps variant metadata out of compact manuals", () => {
+  it("keeps variant metadata out of broad compact manuals", () => {
     const result = handleManual({
-      actions: ["symbol.edit"],
+      actions: ["symbol.*"],
       format: "markdown",
       includeSchemas: true,
       detail: "compact",

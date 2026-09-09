@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { getCurrentLadybugOperationMode } from "../../dist/db/ladybug-operation-gate.js";
 
 import type {
   EdgeRow,
@@ -924,6 +925,20 @@ describe("LadybugDB write batching", () => {
   it("loads new file summaries with node and relationship COPY artifacts", async () => {
     const statements: string[] = [];
     const conn = createFakeConnection(statements);
+    const admission: Array<string | undefined> = [];
+    const execute = conn.execute.bind(conn);
+    conn.execute = async (...args) => {
+      const sql = (args[0] as unknown as { statement: string }).statement;
+      if (sql === "BEGIN TRANSACTION" || sql === "COMMIT") {
+        admission.push(getCurrentLadybugOperationMode());
+      }
+      return execute(...args);
+    };
+    const query = conn.query.bind(conn);
+    conn.query = async (...args) => {
+      if (args[0].startsWith("COPY ")) admission.push(getCurrentLadybugOperationMode());
+      return query(...args);
+    };
 
     await insertNewFileSummaryBatch(conn, [
       {
@@ -943,6 +958,8 @@ describe("LadybugDB write batching", () => {
     ]);
 
     assert.strictEqual(countStatements(statements, "BEGIN TRANSACTION"), 1);
+    // The entire COPY transaction must exclude readers, not just each COPY.
+    assert.deepStrictEqual(admission, Array(5).fill("exclusive"));
     assert.strictEqual(countStatements(statements, "COMMIT"), 1);
     assert.strictEqual(
       countStatementsContaining(statements, "COPY FileSummary FROM"),

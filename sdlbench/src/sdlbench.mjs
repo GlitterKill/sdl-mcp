@@ -321,6 +321,7 @@ export async function runBenchmark(options = {}) {
       record.claimGrade = "none";
       record.quality = { ...record.quality, passed: false };
       record.error = { message: error.message };
+      if (error.sdlEvidence ?? sdlSession?.evidence) record.artifacts.sdl = error.sdlEvidence ?? sdlSession.evidence;
       records.push(record);
       await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
     } finally {
@@ -869,8 +870,29 @@ function assertCodexWorktreeIsSterile(root, runRoot) {
 }
 
 
-async function snapshotFiles(root) {
+export async function snapshotFiles(root) {
   const files = new Map();
+  if (existsSync(join(root, ".git"))) {
+    // Source provenance and edit coverage exclude ignored build/runtime caches.
+    // Tracked ignored files and new unignored source files remain included.
+    const listed = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+      cwd: root, encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024,
+    });
+    if (listed.error) throw listed.error;
+    if (listed.status !== 0) throw new Error("Source snapshot Git listing failed: " + listed.stderr);
+    for (const rel of new Set(listed.stdout.split("\0").filter(Boolean))) {
+      try {
+        if (!(await stat(join(root, rel))).isFile()) continue;
+        files.set(rel, hash(await readFile(join(root, rel))));
+      } catch (error) {
+        if (error.code === "ENOENT") continue; // Deleted source is absent from the after snapshot.
+        error.message = "Source snapshot " + rel + ": " + error.message;
+        throw error;
+      }
+    }
+    return files;
+  }
+
   async function walk(dir) {
     for (const entry of await readdir(join(root, dir), { withFileTypes: true })) {
       const rel = dir ? dir + "/" + entry.name : entry.name;
@@ -913,12 +935,21 @@ export function runCommandAsync(command, cwd, timeoutMs, env = undefined) {
     };
     const timer = setTimeout(() => {
       timedOut = true;
-      // Kill the shell's process tree so timed-out agents cannot keep editing.
+      const releaseOutput = () => {
+        // Detached descendants can retain pipe handles after the shell exits.
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.unref();
+        finish(1);
+      };
+      // Kill the shell's process tree before abandoning inherited output pipes.
       if (process.platform === "win32") {
         const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-        killer.on("error", () => child.kill());
+        killer.once("close", releaseOutput);
+        killer.once("error", () => { child.kill(); releaseOutput(); });
       } else {
         try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+        releaseOutput();
       }
     }, timeoutMs);
     child.once("error", error => finish(1, error));
@@ -953,6 +984,8 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       baseUrl: options.sdlHttpBaseUrl,
       authToken,
       task,
+      runRoot,
+      expectedFiles: repoMeta?.expectedIndexFiles ?? [],
       timeoutMs: options.sdlHttpTimeoutMs ?? 120_000,
     });
     const observability = await startObservabilityPolling(baseUrl, authToken, task.repoId, options);
@@ -967,6 +1000,12 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       finishObservation: () => observability.stop(),
       stop: async () => { await stop(); },
     };
+  }
+
+  // Only write into this disposable worktree; preserve any repository configuration.
+  if (repoMeta?.scipIoConfig !== undefined) {
+    if (typeof repoMeta.scipIoConfig !== "string") throw new Error("scipIoConfig must be TOML text");
+    await writeFile(join(runRoot, ".scip-io.toml"), repoMeta.scipIoConfig, { encoding: "utf8", flag: "wx" });
   }
 
   const sdlRoot = join(workDir, taskRunId + ".sdl");
@@ -1003,6 +1042,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
     stdio: ["ignore", "pipe", "pipe"],
   });
   const logs = [];
+  const exited = new Promise(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
   child.stdout.on("data", (chunk) => logs.push(String(chunk)));
   child.stderr.on("data", (chunk) => logs.push(String(chunk)));
 
@@ -1013,6 +1053,8 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       baseUrl,
       authToken,
       task,
+      runRoot,
+      expectedFiles: repoMeta?.expectedIndexFiles ?? [],
       timeoutMs: options.sdlHttpTimeoutMs ?? 120_000,
     });
     const observability = await startObservabilityPolling(baseUrl, authToken, task.repoId, options);
@@ -1032,6 +1074,12 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       stop: async () => { await observability.stop(); await stopChild(child); },
     };
   } catch (error) {
+    // Socket closure can precede the child exit event; retain the original exit status.
+    const exit = await Promise.race([exited, new Promise(resolve => setTimeout(() => resolve(null), 250))]);
+    const logPath = join(sdlRoot, "server.log");
+    await writeFile(logPath, logs.join(""), "utf8");
+    error.sdlEvidence = { ...error.sdlEvidence, configPath, dbPath,
+      server: { port, logPath, exit, exitCode: child.exitCode, logTail: logs.join("").slice(-8000) } };
     await stopChild(child);
     throw error;
   }
@@ -1057,8 +1105,11 @@ export function createSdlHttpConfig({ task, runRoot, dbPath, repoMeta }) {
       ],
       languages,
     }],
+    ...(repoMeta?.scipGenerator ? { scip: { ...config.scip, generator: { ...config.scip?.generator, ...repoMeta.scipGenerator } } } : {}),
     graphDatabase: { ...(config.graphDatabase ?? {}), path: dbPath },
     indexing: { ...(config.indexing ?? {}), enableFileWatching: false },
+    // Keep the measured mode explicit instead of silently inheriting example changes.
+    semantic: { ...config.semantic, provider: "local", summaryProvider: "mock" },
     http: { ...(config.http ?? {}), allowRemote: false },
     httpAuth: { enabled: false },
   };
@@ -1066,8 +1117,8 @@ export function createSdlHttpConfig({ task, runRoot, dbPath, repoMeta }) {
 
 function languagesForRepo(repoMeta, defaultLanguages) {
   const map = {
-    javascript: ["js", "jsx"],
-    typescript: ["ts", "tsx", "js", "jsx"],
+    javascript: ["js", "jsx", "mjs", "cjs"],
+    typescript: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
     python: ["py"],
     go: ["go"],
     java: ["java"],
@@ -1084,8 +1135,7 @@ function languagesForRepo(repoMeta, defaultLanguages) {
   };
   const wanted = new Set((repoMeta?.languageTags ?? []).flatMap((tag) => map[String(tag).toLowerCase()] ?? []));
   if (wanted.size === 0) return defaultLanguages;
-  const selected = defaultLanguages.filter((language) => wanted.has(language));
-  return selected.length > 0 ? selected : defaultLanguages;
+  return [...wanted];
 }
 
 export async function startObservabilityPolling(baseUrl, authToken, repoId, options = {}) {
@@ -1156,10 +1206,22 @@ function flattenObservabilityDelta(delta) {
   return flat;
 }
 
-async function prepareSdlHttpEvidence({ baseUrl, authToken, task, timeoutMs }) {
+async function prepareSdlHttpEvidence({ baseUrl, authToken, task, runRoot, expectedFiles, timeoutMs }) {
   const started = performance.now();
   const repoId = encodeURIComponent(task.repoId);
+  const snapshot = await getJson(trimSlash(baseUrl) + "/api/config", authToken, timeoutMs);
+  if (snapshot.validation?.ok !== true || !snapshot.effective) {
+    throw new Error("SDL index preflight: server configuration unavailable or invalid");
+  }
+  const preflight = await preflightSdlConfig(snapshot.effective, { repoId: task.repoId, runRoot, expectedFiles });
   const index = await postSseJson(trimSlash(baseUrl) + "/api/repo/" + repoId + "/reindex-stream", { mode: "full" }, authToken, timeoutMs);
+  try {
+    validateSdlIndexResult(index, preflight);
+  } catch (error) {
+    // Setup failures remain evidence; they must never reach the paid agent.
+    error.sdlEvidence = { transport: "http", repoId: task.repoId, index, preflight };
+    throw error;
+  }
   const context = [
     "SDL HTTP indexed " + task.repoId + " for " + task.taskId,
     "providerFirst=" + (index.providerFirstExecution ? "yes" : "unknown"),
@@ -1169,6 +1231,7 @@ async function prepareSdlHttpEvidence({ baseUrl, authToken, task, timeoutMs }) {
     repoId: task.repoId,
     durationMs: Math.round(performance.now() - started),
     index,
+    preflight,
     retrieval: {
       queries: [],
       resultCount: 0,
@@ -1753,6 +1816,9 @@ function resolveRepoMeta(repoId, reposLock) {
     sizeClass: entry.sizeClass ?? null,
     languageTags: entry.languageTags ?? [],
     ignoreGlobs: entry.ignoreGlobs ?? [],
+    expectedIndexFiles: entry.expectedIndexFiles ?? [],
+    ...(entry.scipGenerator ? { scipGenerator: entry.scipGenerator } : {}),
+    ...(entry.scipIoConfig !== undefined ? { scipIoConfig: entry.scipIoConfig } : {}),
   };
 }
 
@@ -1880,4 +1946,40 @@ export function analyzeSessions(records) {
   }
 
   return { ...summary, byPromptSpecificity };
+}
+
+/** Validate file admission with the same schema and scanner used by indexing. */
+export async function preflightSdlConfig(config, { repoId, runRoot, expectedFiles = [] }) {
+  const { RepoConfigSchema } = await import("../../dist/config/types.js");
+  const { scanRepository } = await import("../../dist/indexer/fileScanner.js");
+  const repo = RepoConfigSchema.parse(config.repos?.find((entry) => entry.repoId === repoId));
+  if (await realpath(repo.rootPath) !== await realpath(runRoot)) {
+    throw new Error("SDL index preflight: configured repository does not match the agent worktree");
+  }
+  const files = (await scanRepository(runRoot, repo, { requireComplete: true })).map((file) => file.path);
+  const admitted = new Set(files);
+  const missing = expectedFiles.filter((file) => !admitted.has(file));
+  if (missing.length) throw new Error("SDL index preflight: excluded expected files: " + missing.join(", "));
+  if (!files.length) throw new Error("SDL index preflight: no source files admitted");
+  return {
+    files,
+    semanticMode: `${config.semantic?.enabled ? config.semantic.provider : "disabled"}-embeddings/${config.semantic?.enabled && config.semantic.generateSummaries ? config.semantic.summaryProvider : "disabled"}-summaries`,
+    runtimeMaxDurationMs: config.runtime?.maxDurationMs ?? null,
+  };
+}
+
+/** HTTP completion alone does not establish usable provider evidence. */
+export function validateSdlIndexResult(index, preflight) {
+  const coverage = index.providerFirstExecution?.coverage;
+  if (!Array.isArray(index.scip?.failures) || index.scip.failures.length) {
+    throw new Error("SDL index preflight: SCIP generator failed or its result is missing");
+  }
+  if (index.providerFirstExecution?.status !== "executed"
+    || coverage?.scannedFiles !== preflight.files.length
+    || coverage.uncoveredFiles !== 0 || coverage.fullFallbackFiles !== 0) {
+    throw new Error("SDL index preflight: provider execution or expected file coverage is incomplete");
+  }
+  if (index.summaryStats?.failed > 0) {
+    throw new Error("SDL index preflight: summary generation failed");
+  }
 }

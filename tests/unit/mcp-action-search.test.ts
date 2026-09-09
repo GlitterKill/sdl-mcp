@@ -269,7 +269,7 @@ describe("sdl.action.search behavior", () => {
       assert.strictEqual(result.nextAction, undefined);
     });
 
-    it("honors compact and full schema detail in manual JSON output", () => {
+    it("preserves focused nested schemas in compact and full manual JSON output", () => {
       const compact = handleManual({
         actions: ["context"],
         format: "json",
@@ -299,8 +299,7 @@ describe("sdl.action.search behavior", () => {
         (field) => field.name === "budget",
       );
       assert.ok(compactBudget);
-      assert.strictEqual("subFields" in compactBudget, false);
-      assert.ok(compactBudget.nestedFieldCount);
+      assert.deepStrictEqual(compactBudget, fullBudget);
       assert.ok(fullBudget);
       assert.ok(Array.isArray(fullBudget.subFields));
       assert.ok(fullBudget.subFields.length > 0);

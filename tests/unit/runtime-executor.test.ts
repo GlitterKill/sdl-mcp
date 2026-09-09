@@ -268,4 +268,21 @@ describe("execute", () => {
 
     assert.strictEqual(result.status, "cancelled");
   });
+
+  it("bounds timeout when an exited launcher leaves inherited pipes open", async () => {
+    const result = await execute(
+      makeRequest({
+        args: [
+          "-e",
+          "const c = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 12000)'], { detached: true, stdio: ['ignore', 1, 2], windowsHide: true }); c.unref();",
+        ],
+        timeoutMs: 500,
+      }),
+    );
+    assert.ok(
+      result.durationMs < 7500,
+      `Timeout waited ${result.durationMs}ms for inherited pipes`,
+    );
+    assert.strictEqual(result.status, "timeout");
+  });
 });

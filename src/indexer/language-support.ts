@@ -200,7 +200,7 @@ function createLazyPass2Resolver(
 export const LANGUAGE_SUPPORT: readonly LanguageSupport[] = Object.freeze([
   {
     language: "typescript",
-    extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+    extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"],
     grammarKey: "typescript",
     adapterFactory: () => new TypeScriptAdapter(),
     pass2ResolverFactory: () =>

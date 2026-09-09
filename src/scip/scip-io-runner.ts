@@ -219,6 +219,8 @@ const ALLOWED_DOWNLOAD_HOSTS = ["github.com", "objects.githubusercontent.com"];
 const SCIP_IO_LANGUAGE_ALIASES = new Map<string, string>([
   ["ts", "typescript"],
   ["tsx", "typescript"],
+  ["mts", "typescript"],
+  ["cts", "typescript"],
   ["typescript", "typescript"],
   ["js", "javascript"],
   ["jsx", "javascript"],
@@ -2411,6 +2413,8 @@ export async function runScipIoIndex(args: {
   const env: Record<string, string> = {};
   if (process.env.PATH) env.PATH = process.env.PATH;
   if (IS_WINDOWS) {
+    // JVM batch launchers otherwise enter a legacy SHIFT loop that changes %0.
+    env.OS = "Windows_NT";
     if (process.env.USERPROFILE) env.USERPROFILE = process.env.USERPROFILE;
     if (process.env.TEMP) env.TEMP = process.env.TEMP;
     if (process.env.SYSTEMROOT) env.SYSTEMROOT = process.env.SYSTEMROOT;

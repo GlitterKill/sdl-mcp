@@ -93,7 +93,11 @@ function normalizeManualActionSelector(selector: string): string {
   const trimmed = selector.trim();
   const exact = MCP_WRAPPER_ACTION_ALIASES.get(trimmed);
   if (exact) return exact;
-  return trimmed.startsWith("sdl.") ? trimmed.slice("sdl.".length) : trimmed;
+  const action = trimmed.startsWith("sdl.") ? trimmed.slice("sdl.".length) : trimmed;
+  // File gateway operation selectors share the canonical symbol edit contract.
+  return ["file.symbolEditPreview", "file.symbolEditApply", "file.symbolEditApplyNow"].includes(action)
+    ? "symbol.edit"
+    : action;
 }
 
 // Give compact discovery responses one stable path to expand selected schemas.
@@ -324,7 +328,11 @@ export function handleManual(
     infoVisible: services.actionAvailability?.infoTool !== false,
     includeSchemas: includeSchemas && (!unfocused || args.detail === "full"),
     includeExamples: includeExamples && (!unfocused || args.detail === "full"),
-    detail: args.detail === "compact" ? "compact" : "full",
+    // Exact selectors opt into usable schemas; broad discovery stays compact.
+    detail: args.detail === "compact" &&
+      !(args.actions?.length && args.actions.every((action) => !action.trim().endsWith(".*")))
+      ? "compact"
+      : "full",
   });
   let catalog = fullCatalog.filter((entry) => !entry.disabled);
   let unknownActions: string[] = [];
@@ -980,6 +988,11 @@ function renderTypescript(catalog: ActionCatalogEntry[]): string {
             )
             .join("; ");
           lines.push(`//   ${field.name} shape: { ${subParams} }`);
+          for (const subField of field.subFields) {
+            if (subField.description) {
+              lines.push(`//   ${field.name}.${subField.name}: ${subField.description}`);
+            }
+          }
         }
       }
     }

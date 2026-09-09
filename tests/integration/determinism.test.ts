@@ -794,12 +794,16 @@ test("SESSION BOUNDARY: context refs preserve identity across a no-op re-index",
       string,
       unknown
     >;
-    const firstCards = (first.evidence as Array<Record<string, unknown>>).filter(
-      (item) => item.rung === "card",
-    );
-    const secondCards = (
-      second.evidence as Array<Record<string, unknown>>
-    ).filter((item) => item.rung === "card");
+    const contextCards = (response: Record<string, unknown>) =>
+      (response.evidence as Array<Record<string, unknown>>).flatMap((item) => {
+        if (item.rung === "card") return [item];
+        const card = (item.content as { card?: Record<string, unknown> })?.card;
+        if (!card) return [];
+        const { ref, unchanged, ...content } = card;
+        return [{ ...item, rung: "card", content, ...(ref ? { ref } : {}), ...(unchanged ? { unchanged } : {}) }];
+      });
+    const firstCards = contextCards(first);
+    const secondCards = contextCards(second);
     assert.ok(firstCards.length > 0);
     assert.deepStrictEqual(
       secondCards.map(({ content: _content, ref: _ref, unchanged: _unchanged, ...item }) => item),
@@ -814,9 +818,7 @@ test("SESSION BOUNDARY: context refs preserve identity across a no-op re-index",
       string,
       unknown
     >;
-    const thirdCards = (third.evidence as Array<Record<string, unknown>>).filter(
-      (item) => item.rung === "card",
-    );
+    const thirdCards = contextCards(third);
     assert.deepStrictEqual(thirdCards, secondCards);
     assert.equal(third.etag, first.etag);
   } finally {

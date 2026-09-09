@@ -444,7 +444,7 @@ describe("ContextEngineV2 pure contracts", () => {
     assert.deepEqual(selectedRungs, ["card", "hotPath"]);
     assert.ok("evidence" in result);
     assert.deepEqual(
-      result.evidence.find((item) => item.rung === "card")?.content,
+      (result.evidence.find((item) => item.rung === "hotPath")?.content as { card: unknown })?.card,
       { kind: "class", name: "MCPServer" },
     );
     assert.ok(

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,6 +13,7 @@ import {
   analyzeSessions,
   computeCacheMetrics,
   createSdlHttpConfig,
+  preflightSdlConfig,
   estimateCost,
   extractRetrievedSymbolsFromAttribution,
   findCodexSessionTokenCounts,
@@ -36,6 +37,39 @@ import { extractAiderSessionUsage } from "../src/agents/aider.mjs";
 import { extractOpencodeSessionUsage } from "../src/agents/opencode.mjs";
 import { runScalingCurve } from "../src/scaling.mjs";
 
+// Fake only the HTTP transport; use the real schema/scanner for file coverage.
+function fakeIndexPreflight(workDir, repoId = "fixture-js") {
+  let coverage;
+  return async (req, res) => {
+    try {
+      if (req.url === "/api/config") {
+        const entries = await readdir(workDir, { withFileTypes: true });
+        const roots = await Promise.all(entries.filter((entry) => entry.isDirectory() && entry.name.endsWith("-sdl"))
+          .map(async (entry) => ({ path: join(workDir, entry.name), mtime: (await stat(join(workDir, entry.name))).mtimeMs })));
+        const runRoot = roots.sort((a, b) => b.mtime - a.mtime)[0]?.path;
+        assert.ok(runRoot, "benchmark must create its worktree before requesting configuration");
+        const effective = createSdlHttpConfig({ task: { repoId }, runRoot, dbPath: join(runRoot, "unused.lbug"), repoMeta: { languageTags: ["javascript"] } });
+        const preflight = await preflightSdlConfig(effective, { repoId, runRoot });
+        coverage = { scannedFiles: preflight.files.length, uncoveredFiles: 0, fullFallbackFiles: 0 };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ validation: { ok: true }, effective }));
+        return true;
+      }
+      if (req.url.includes("/reindex-stream")) {
+        assert.ok(coverage, "configuration preflight must precede indexing");
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.end("event: complete\ndata: " + JSON.stringify({ ok: true, scip: { failures: [] }, providerFirstExecution: { status: "executed", selectedPipeline: "providerFirst", coverage } }) + "\n\n");
+        return true;
+      }
+      return false;
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error.message }));
+      return true;
+    }
+  };
+}
+
 // All fixture integrations stay offline, including scaling's injected runner.
 async function runBenchmark(options) {
   const scoped = options.matrixPath === "sdlbench/tasks/matrix.json"
@@ -43,14 +77,11 @@ async function runBenchmark(options) {
     : options;
   if (scoped.variant !== "sdl" || scoped.sdlHttpBaseUrl || scoped.warmSession) return executeBenchmark(scoped);
   assert.notEqual(scoped.executionMode, "behavior", "Behavior tests must provide their own fake SDL server");
-  const server = createServer((req, res) => {
-    if (req.url.includes("/reindex-stream")) {
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.end('event: complete\ndata: {"ok":true}\n\n');
-    } else {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end('{"status":"ok"}');
-    }
+  const preflight = fakeIndexPreflight(scoped.workDir ?? join(scoped.root ?? process.cwd(), "sdlbench/.work/repos"));
+  const server = createServer(async (req, res) => {
+    if (await preflight(req, res)) return;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end('{"status":"ok"}');
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -551,15 +582,12 @@ test("runBenchmark appends baseline and sdl fixture records with tokenizer-backe
 test("sdl variant indexes through HTTP without pre-retrieving tailored task context", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-http-"));
   const requests = [];
-  const server = createServer((req, res) => {
+  const preflight = fakeIndexPreflight(join(root, "work"));
+  const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     requests.push({ method: req.method, pathname: url.pathname, auth: req.headers.authorization });
 
-    if (url.pathname.endsWith("/reindex-stream")) {
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
-      return;
-    }
+    if (await preflight(req, res)) return;
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end('{"status":"ok"}');
@@ -600,15 +628,12 @@ test("SDL behavior mode exposes a live MCP server without seeded lookup context"
   const matrixPath = join(root, "matrix.json");
   const agentPath = join(root, "agent.mjs");
   const requests = [];
-  const server = createServer((req, res) => {
+  const preflight = fakeIndexPreflight(join(root, "work"), "sdl-agent-fixture");
+  const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     requests.push({ method: req.method, pathname: url.pathname });
 
-    if (url.pathname.endsWith("/reindex-stream")) {
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
-      return;
-    }
+    if (await preflight(req, res)) return;
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end('{"status":"ok"}');
@@ -733,7 +758,7 @@ test("temporary SDL benchmark server disables HTTP auth for Codex MCP access", (
     dbPath: "F:/tmp/graph.lbug",
     repoMeta: { languageTags: ["javascript"] },
   });
-  assert.deepEqual(fixtureConfig.repos[0].languages, ["js", "jsx"]);
+  assert.deepEqual(fixtureConfig.repos[0].languages, ["js", "jsx", "mjs", "cjs"]);
 });
 
 test("runBenchmark preserves tokenizer failure without estimating tokens", async () => {
@@ -1003,13 +1028,10 @@ test("behavior records carry attribution.toolCalls and phaseBreakdown from codex
 
 test("SDL runs poll observability snapshot and carry observabilityDelta onto the sdl record", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-obs-"));
-  const server = createServer((req, res) => {
+  const preflight = fakeIndexPreflight(join(root, "work"));
+  const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (url.pathname.endsWith("/reindex-stream")) {
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
-      return;
-    }
+    if (await preflight(req, res)) return;
     if (url.pathname.endsWith("/api/observability/snapshot")) {
       const calls = parseInt(url.searchParams.get("_c") ?? "0", 10);
       res.writeHead(200, { "Content-Type": "application/json" });

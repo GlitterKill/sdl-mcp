@@ -196,6 +196,28 @@ describe("scip-io-runner: runScipIoIndex", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  it("preserves Windows launcher identity before parsing arguments", { skip: !IS_WINDOWS }, async () => {
+    const launcher = join(tmp, "launcher.cmd");
+    writeFileSync(launcher, [
+      "@echo off",
+      'if "%OS%"=="Windows_NT" goto run',
+      ":legacy",
+      'if "%1"=="" goto run',
+      "shift",
+      "goto legacy",
+      ":run",
+      "echo jar=%~dp0%~n0",
+    ].join("\r\n"));
+    const result = await runScipIoIndex({
+      binaryPath: launcher,
+      repoRootPath: tmp,
+      timeoutMs: 30_000,
+      extraArgs: ["--output", join(tmp, "java.scip")],
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.stdout?.trim(), `jar=${join(tmp, "launcher")}`);
+  });
+
   it("spawns the binary with cwd=repoRoot and 'index' as the first arg", async () => {
     const binDir = join(tmp, "bin1");
     const repoDir = join(tmp, "repo1");
@@ -318,7 +340,7 @@ describe("scip-io-runner: repo language filter args", () => {
   });
 
   it("maps SDL-MCP repo languages to one scip-io language filter", () => {
-    assert.deepEqual(scipIoLanguagesForRepo(["ts", "tsx", "js", "jsx", "rs"]), [
+    assert.deepEqual(scipIoLanguagesForRepo(["mts", "cts", "mjs", "cjs", "rs"]), [
       "typescript",
       "javascript",
       "rust",

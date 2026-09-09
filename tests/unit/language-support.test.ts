@@ -18,6 +18,7 @@ const EXPECTED_EXTENSIONS = {
   ".c": ["c", "CAdapter"],
   ".cc": ["cpp", "CppAdapter"],
   ".cjs": ["typescript", "TypeScriptAdapter"],
+  ".cts": ["typescript", "TypeScriptAdapter"],
   ".cpp": ["cpp", "CppAdapter"],
   ".cs": ["csharp", "CSharpAdapter"],
   ".cxx": ["cpp", "CppAdapter"],
@@ -32,6 +33,7 @@ const EXPECTED_EXTENSIONS = {
   ".kt": ["kotlin", "KotlinAdapter"],
   ".kts": ["kotlin", "KotlinAdapter"],
   ".mjs": ["typescript", "TypeScriptAdapter"],
+  ".mts": ["typescript", "TypeScriptAdapter"],
   ".php": ["php", "PhpAdapter"],
   ".phtml": ["php", "PhpAdapter"],
   ".py": ["python", "PythonAdapter"],
@@ -46,7 +48,7 @@ const EXPECTED_EXTENSIONS = {
 afterEach(() => resetRegistry());
 
 describe("built-in Language Support", () => {
-  it("owns each of the 27 extension registrations exactly once", () => {
+  it("owns each supported extension registration exactly once", () => {
     const actual: Record<string, readonly [string, string]> = {};
     for (const support of LANGUAGE_SUPPORT) {
       const constructorName = support.adapterFactory().constructor.name;

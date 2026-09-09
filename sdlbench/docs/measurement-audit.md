@@ -48,3 +48,25 @@ node --test sdlbench/tests/*.test.mjs
 ```
 
 Verified 2026-09-07: `node --test sdlbench/tests/*.test.mjs` passed all 89 tests (0 failures), including the existing suite and new measurement, pairing, scaling, provider, fairness, and task-cluster regressions. `git diff --check` passed. These checks do not establish live product savings or measured enrichment expense.
+
+## Live-run timeout follow-up (2026-09-07)
+
+A live Codex/Moshi attempt exceeded its 10-minute limit while output pipes remained open after child termination. The timeout handler now releases inherited stdout/stderr pipes after process-tree termination. A detached-descendant regression reproduces the stall and verifies bounded return. All 90 offline tests pass with the correction. The live experiment records its timeout and a separate operator interruption explicitly; neither qualifies as a passing pair.
+
+## Context and discovery remediation (2026-09-07)
+
+Focused manual requests with explicit action names and `includeSchemas:true` now include nested argument fields and descriptions even at compact detail. Broad query and wildcard discovery stays compact. Symbol-edit convenience aliases resolve to the canonical `symbol.edit` schema; the file-write example documents zero-based, end-exclusive line bounds.
+
+Context assembly now folds a selected symbol's card into its matching code evidence after budget enforcement. Card metadata, code, card-only fallback, and session references remain available. Offline replay of the retained fixture payloads reduced 42 entries to 21 while retaining all 21 selected symbols. Serialized JSON measured with `o200k_base` fell from 4,831 to 3,728 tokens for each implementation context and from 5,621 to 4,518 for review. These are payload reductions, not measured provider-token savings. Retrieval still selects the same symbols; relevance narrowing remains unproven.
+
+The [index preflight](index-preflight.md) is **not ready** for another benchmark: generated JavaScript configuration excludes the fixture `.mjs` tests, and both retained Moshi index responses report SCIP generator failures. Local embeddings and mock summaries also require an explicit benchmark-mode label. No fresh indexing or new agent benchmark was run for these changes.
+
+Verification: TypeScript compilation passed; 122 focused manual, discovery, context, and projection tests passed. Scoped ESLint reported no errors (nine existing warnings). Focused manual serialization was compared byte-for-byte across fresh Node processes. The index-using determinism integration suite was not executed; its fixtures and session-card extraction were updated for the nested representation.
+
+Selection follow-up: `selectProgressiveTier` and `selectTierOne` admit candidates while their costs fit, and `defaultExpand` follows the profile's unbounded graph depth. Selection has no task-sufficiency signal; its inputs are ranks, lanes, and token estimates. The captured projected payloads cannot justify a relevance cutoff. Fixing that remaining expansion requires a tested relevance or task-coverage contract, rather than an arbitrary smaller budget.
+
+## Index preflight corrections (2026-09-07)
+
+The [preflight blockers](index-preflight.md) have code corrections with offline regressions: explicit module-extension configuration/routing, the Windows Java launcher environment, required fixture file admission, and provider readiness before agent execution. The scanner now admits 13 tracked fixture source/test files; the initial four-verifier inventory omitted two other tracked `.mjs` fixtures. Generated configs explicitly retain and label local embeddings with mock summaries. Failed provider setup remains an error record with its index evidence and cannot launch the agent. Fresh disposable indexes remain the next validation step; no new benchmark or refresh was performed.
+
+Disposable indexing was subsequently authorized and completed: the fixture passed the readiness gates (13 files, 37 symbols, 13 edges), while Moshi failed on a newly exposed generated Gradle initialization-script error at its Windows jar path. The earlier jar-launcher failure did not recur. Provider fallback was correctly rejected; no benchmark agent ran. See the updated [live preflight evidence](index-preflight.md#disposable-index-validation).

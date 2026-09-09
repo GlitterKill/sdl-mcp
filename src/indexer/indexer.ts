@@ -861,7 +861,9 @@ export function analyzeProviderFirstCoverage(params: {
     }
   }
   for (const symbol of params.symbols) {
-    const key = symbol.providerSymbolId;
+    // SDL symbol identity includes provider and source path; separate compilation
+    // variants may legitimately define the same native SCIP symbol.
+    const key = [symbol.providerId, normalizePath(symbol.relPath), symbol.providerSymbolId].join("\u0000");
     if (seenProviderSymbols.has(key)) {
       duplicateProviderSymbols.add(symbol.providerSymbolId);
     } else {

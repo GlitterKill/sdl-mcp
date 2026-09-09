@@ -116,3 +116,39 @@ export function stableContextValue(payload: ContextPayload): NormalizedValue {
 export function serializeContextPayload(payload: ContextPayload): string {
   return JSON.stringify(stableContextValue(payload));
 }
+
+/** Fold surviving card metadata into code only after budget eviction preserves fallback. */
+export function consolidateContextEvidence(payload: ContextPayload): ContextPayload {
+  const codeByIdentity = new Map<string, ContextEvidence>();
+  const identity = (item: ContextEvidence): string =>
+    JSON.stringify([item.symbolId, item.path, item.rank, item.tier, item.lanes]);
+  for (const item of payload.evidence) {
+    if (item.rung === "card" || !isEvidenceContent(item.content)) continue;
+    if (typeof item.content.skeleton !== "string"
+      && typeof item.content.excerpt !== "string"
+      && typeof item.content.code !== "string") continue;
+    if (!Object.hasOwn(item.content, "card") && !codeByIdentity.has(identity(item))) {
+      codeByIdentity.set(identity(item), item);
+    }
+  }
+  const nestedCards = new Map<ContextEvidence, unknown>();
+  const folded = new Set<ContextEvidence>();
+  for (const item of payload.evidence) {
+    if (item.rung !== "card" || !isEvidenceContent(item.content)) continue;
+    const code = codeByIdentity.get(identity(item));
+    if (!code || nestedCards.has(code)) continue;
+    nestedCards.set(code, item.content);
+    folded.add(item);
+  }
+  return {
+    ...payload,
+    evidence: payload.evidence.filter(item => !folded.has(item)).map(item =>
+      nestedCards.has(item) && isEvidenceContent(item.content)
+        ? { ...item, content: { ...item.content, card: nestedCards.get(item) } }
+        : item),
+  };
+}
+
+function isEvidenceContent(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
