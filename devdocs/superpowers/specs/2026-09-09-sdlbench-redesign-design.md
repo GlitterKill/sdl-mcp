@@ -2,7 +2,7 @@
 
 Date: 2026-09-09 (America/Chicago)
 
-Status: Design direction approved; independent specification review passed; awaiting user review of the detailed specification.
+Status: Detailed specification approved by the user; independent specification and implementation-plan reviews passed. See [the implementation plan](../plans/2026-09-09-sdlbench-redesign.md). Implementation has not started.
 
 ## 1. Decision and scope
 
