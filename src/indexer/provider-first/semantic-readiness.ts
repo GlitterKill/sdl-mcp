@@ -241,26 +241,36 @@ export function createRepositorySemanticLifecycle(params: {
             `Semantic generation changed before final assessment for ${params.repoId}`,
           );
         }
-        const conn = await deps.getConnection();
-        const state = await deps.getDerivedState(conn, params.repoId);
-        if (
-          !state ||
-          state.targetVersionId !== params.versionId ||
-          !state.embeddingsDirty ||
-          state.embeddingLifecycleState !== "refreshing"
-        ) {
-          throw new Error(
-            `Semantic lifecycle ownership changed before final assessment for ${params.repoId}`,
-          );
-        }
+        // HNSW DDL is committed on the write connection; assess there so a
+        // pooled reader cannot report a stale catalog immediately afterward.
+        const snapshots = await deps.withWriteConnection(
+          async (writeConn) => {
+            const state = await deps.getDerivedState(
+              writeConn,
+              params.repoId,
+            );
+            if (
+              !state ||
+              state.targetVersionId !== params.versionId ||
+              !state.embeddingsDirty ||
+              state.embeddingLifecycleState !== "refreshing"
+            ) {
+              throw new Error(
+                `Semantic lifecycle ownership changed before final assessment for ${params.repoId}`,
+              );
+            }
 
-        const snapshots = await deps.assess(conn, {
-          repoId: params.repoId,
-          versionId: params.versionId,
-          generation: capturedGeneration,
-          lifecycleState: "steady",
-          semanticConfig: params.appConfig.semantic,
-        });
+            return deps.assess(writeConn, {
+              repoId: params.repoId,
+              versionId: params.versionId,
+              generation: capturedGeneration,
+              lifecycleState: "steady",
+              semanticConfig: params.appConfig.semantic,
+            });
+          },
+          params.postIndexSessionTimeoutMs,
+        );
+
         if (snapshots.some((snapshot) => snapshot.mode === "degraded")) {
           throw assessmentFailure(
             "SEMANTIC_FINAL_ASSESSMENT_DEGRADED",

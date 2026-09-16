@@ -953,6 +953,8 @@ describe("provider-first indexing foundation", () => {
       fileSummaryEmbeddingModels: [],
     } as NonNullable<AppConfig["semantic"]>;
     const events: string[] = [];
+    const staleReadConnection = {} as Connection;
+    const writeConnection = {} as Connection;
     clearRepositorySymbolVectorHealth(repoId);
     invalidateRepositorySymbolVectorHealth(
       repoId,
@@ -967,11 +969,13 @@ describe("provider-first indexing foundation", () => {
         versionId,
         appConfig: { semantic: semanticConfig },
         deps: {
-          getConnection: async () => ({}) as Connection,
-          getDerivedState: async () =>
-            semanticDerivedStateRow(repoId, versionId),
+          getConnection: async () => staleReadConnection,
+          getDerivedState: async (connection) => {
+            assert.equal(connection, writeConnection);
+            return semanticDerivedStateRow(repoId, versionId);
+          },
           withWriteConnection: async (operation) =>
-            operation({} as Connection),
+            operation(writeConnection),
           markRefreshingIfCurrent: async () => {
             throw new Error("failure finalizer should not run");
           },
@@ -987,7 +991,8 @@ describe("provider-first indexing foundation", () => {
             );
             return true;
           },
-          assess: async (_conn, input) => {
+          assess: async (connection, input) => {
+            assert.equal(connection, writeConnection);
             events.push(`assess:${input.lifecycleState}`);
             return models.map((model) =>
               semanticHealthSnapshot({

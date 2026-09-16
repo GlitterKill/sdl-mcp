@@ -23,6 +23,7 @@ import type { VerifiedLadybugFamilyCopy } from "../db/ladybug-family-files.js";
 import {
   hasExactHealthyIndex,
   resolveRequiredRetrievalIndexes,
+  SYMBOL_HNSW_MIN_ROWS,
   type RequiredRetrievalIndex,
 } from "../retrieval/health.js";
 import { showIndexesStrict } from "../retrieval/index-lifecycle.js";
@@ -41,9 +42,10 @@ export interface ContextQualityCacheExpectation {
 export interface ContextQualityCacheIndexIdentity {
   model?: string;
   tableName: string;
-  name: string;
+  name: string | null;
   type: "fts" | "vector";
   property: string;
+  mode?: "hnsw" | "exact";
   healthy: boolean;
   eligible?: number;
   covered?: number;
@@ -114,6 +116,7 @@ function assertHealthyIndex(
   if (
     index.tableName !== tableName ||
     index.type !== type ||
+    typeof index.name !== "string" ||
     index.name.length === 0 ||
     index.property.length === 0 ||
     index.healthy !== true
@@ -126,6 +129,7 @@ function assertCompleteVectorCoverage(
   indexes: readonly ContextQualityCacheIndexIdentity[],
   models: readonly string[],
   tableName: string,
+  allowExact: boolean = false,
 ): void {
   assertExactArray(
     indexes.map((index) => index.model ?? ""),
@@ -133,7 +137,21 @@ function assertCompleteVectorCoverage(
     `${tableName} vector model identity`,
   );
   for (const index of indexes) {
-    assertHealthyIndex(index, tableName, "vector");
+    if (index.mode === "exact") {
+      if (
+        !allowExact ||
+        index.tableName !== tableName ||
+        index.type !== "vector" ||
+        index.name !== null ||
+        index.property.length === 0 ||
+        index.healthy !== true ||
+        (index.eligible ?? 0) >= SYMBOL_HNSW_MIN_ROWS
+      ) {
+        throw new Error(`Required ${tableName} exact vector mode is not healthy`);
+      }
+    } else {
+      assertHealthyIndex(index, tableName, "vector");
+    }
     if (
       !Number.isSafeInteger(index.eligible) ||
       !Number.isSafeInteger(index.covered) ||
@@ -146,6 +164,7 @@ function assertCompleteVectorCoverage(
     }
   }
 }
+
 
 /**
  * Converts one reopened Ladybug family snapshot into the immutable cache
@@ -224,6 +243,7 @@ export function validateContextQualityCacheSnapshot(
       expectation.repoId,
       "jina-embeddings-v2-base-code",
     ).tableName,
+    true,
   );
   assertCompleteVectorCoverage(
     snapshot.indexes.fileSummaryVectors,
@@ -278,25 +298,57 @@ async function vectorIndexIdentity(
   repoId: string,
   required: RequiredRetrievalIndex,
 ): Promise<ContextQualityCacheIndexIdentity> {
-  const identity = exactIndexIdentity(indexes, required);
-  const coverage =
-    required.tableName !== "FileSummary"
-      ? await getSymbolRetrievalCoverage(
-          connection,
-          repoId,
-          identity.property,
-        )
-      : await getFileSummaryRetrievalCoverage(
-          connection,
-          repoId,
-          identity.property,
-        );
+  if (!required.name || !required.property) {
+    return exactIndexIdentity(indexes, required);
+  }
+
+  const isSymbolVector = required.tableName !== "FileSummary";
+  const coverage = isSymbolVector
+    ? await getSymbolRetrievalCoverage(
+        connection,
+        repoId,
+        required.property,
+      )
+    : await getFileSummaryRetrievalCoverage(
+        connection,
+        repoId,
+        required.property,
+      );
+  const eligible = ladybugDb.toNumber(coverage.eligible);
+  const covered = ladybugDb.toNumber(coverage.covered);
+  const relevantIndexes = indexes.filter(
+    (index) =>
+      index.name === required.name ||
+      (index.tableName === required.tableName &&
+        index.property === required.property),
+  );
+
+  if (
+    isSymbolVector &&
+    eligible < SYMBOL_HNSW_MIN_ROWS &&
+    relevantIndexes.length === 0
+  ) {
+    return {
+      ...(required.model ? { model: required.model } : {}),
+      tableName: required.tableName,
+      name: null,
+      type: required.type,
+      property: required.property,
+      mode: "exact",
+      healthy: true,
+      eligible,
+      covered,
+    };
+  }
+
   return {
-    ...identity,
-    eligible: ladybugDb.toNumber(coverage.eligible),
-    covered: ladybugDb.toNumber(coverage.covered),
+    ...exactIndexIdentity(indexes, required),
+    mode: "hnsw",
+    eligible,
+    covered,
   };
 }
+
 
 export interface ValidateContextQualityCacheFamilyOptions {
   expectation: ContextQualityCacheExpectation;

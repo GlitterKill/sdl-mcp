@@ -126,6 +126,29 @@ describe("context-quality database cache identity", () => {
     });
   });
 
+  it("accepts complete exact-mode Symbol vectors below the HNSW threshold", async () => {
+    const cacheModule = await import(modulePath).catch(() => ({}));
+    const validate = Reflect.get(
+      cacheModule,
+      "validateContextQualityCacheSnapshot",
+    );
+    assert.equal(typeof validate, "function");
+    if (typeof validate !== "function") return;
+
+    const snapshot = exactSnapshot();
+    snapshot.indexes.symbolVectors[0]!.mode = "exact";
+    Reflect.set(snapshot.indexes.symbolVectors[0]!, "name", null);
+
+    const result = validate(snapshot, expectation);
+
+    assert.equal(result.indexes.symbolVectors[0]?.mode, "exact");
+
+    snapshot.indexes.symbolVectors[0]!.eligible = 2_000;
+    snapshot.indexes.symbolVectors[0]!.covered = 2_000;
+    assert.throws(() => validate(snapshot, expectation));
+  });
+
+
   it("rejects stale ownership, integrity, index, and coverage identity", async () => {
     const cacheModule = await import(modulePath).catch(() => ({}));
     const validate = Reflect.get(
