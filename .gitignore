@@ -216,6 +216,7 @@ CLAUDE.md
 
 # Local planning
 /BACKLOG.md
+/BACKLOGCOMPLETE.md
 outputs/logo/preview.html
 outputs/logo/preview2.html
 outputs/logo/preview3.html
@@ -292,3 +293,37 @@ ladybug-openssl/npm/win32-x64/bin/*.dll
 ladybug-openssl/npm/win32-x64/sbom.spdx.json
 ladybug-openssl/build-record.json
 script.ps1
+.sdl-mcp/provider-first-incremental/0a0e7844-116b-43c4-8ac3-06f7b86f0149.files.txt
+.sdl-mcp/provider-first-incremental/05c5d0dd-ae50-4b56-b213-fa03cce2eaee.files.txt
+.sdl-mcp/provider-first-incremental/99b6059d-f61e-41b3-9f10-f2869b345de1.files.txt
+.sdl-mcp/provider-first-incremental/93772bcc-ebc7-4cde-84e3-e157feeaaf59.files.txt
+.sdl-mcp/provider-first-incremental/afcb1cef-e642-41f1-a064-94a896972935.files.txt
+.sdl-mcp/provider-first-incremental/b56bac37-dd3d-460f-9d1b-489b2947e2db.files.txt
+.sdl-mcp/provider-first-incremental/b0327c4b-e7d3-46b2-954d-78b1437cb613.files.txt
+.sdl-mcp/provider-first-incremental/bb3dc064-ce85-492f-80ac-bf025e7902b4.files.txt
+.sdl-mcp/provider-first-incremental/be2202e9-f31f-4b7a-bd15-c931b4876b62.files.txt
+.sdl-mcp/provider-first-incremental/f90dfe8b-8176-437a-b793-280703bf40e3.files.txt
+.work/summarize-batch-v7.py
+.work/python-integration-20260921/format-only.patch
+.work/python-integration-20260921/README.md
+.work/python-integration-20260921/scip-correctness-base.patch
+.work/python-integration-20260921/scip-correctness-report.md
+.work/python-integration-20260921/scip-final.patch
+.work/python-integration-20260921/scip-install-final.patch
+.work/python-integration-20260921/scip.patch
+.work/python-integration-20260921/sdl-current.patch
+.work/python-integration-20260921/sdl-focused.patch
+.work/python-integration-20260921/sdl-semantics.patch
+.work/python-integration-20260921/sdl.patch
+.work/python-integration-20260921/npm-correctness/package-lock.json
+.work/python-integration-20260921/npm-correctness/package.json
+.work/python-integration-20260921/npm-stdin-receipt/package-lock.json
+.work/python-integration-20260921/npm-stdin-receipt/package.json
+.sdl-mcp/provider-first-incremental/05c5d0dd-ae50-4b56-b213-fa03cce2eaee.files.txt
+.sdl-mcp/provider-first-incremental/a2db05cc-5940-43f6-a4c6-88cbed34556b.files.txt
+.sdl-mcp/provider-first-incremental/be2202e9-f31f-4b7a-bd15-c931b4876b62.files.txt
+.sdl-mcp/provider-first-incremental/05c5d0dd-ae50-4b56-b213-fa03cce2eaee.files.txt
+.sdl-mcp/provider-first-incremental/be2202e9-f31f-4b7a-bd15-c931b4876b62.files.txt
+sdlbench/results/codex-fixture-20260910T013430Z.isolation-audit.md
+sdlbench/results/codex-fixture-20260910T013430Z.report.md
+/.sdl-mcp/
