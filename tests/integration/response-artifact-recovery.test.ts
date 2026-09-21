@@ -38,6 +38,7 @@ import {
 } from "../../dist/mcp/tools.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { estimateTokens } from "../../dist/util/tokenize.js";
+import { logger } from "../../dist/util/logger.js";
 
 type ListToolsHandler = (
   request: { method: "tools/list" },
@@ -1677,4 +1678,117 @@ describe("production-registered sdl.retrieve continuation", () => {
 
     assert.fail("production responseGet replay did not terminate");
   });
+});
+
+describe("workflow responseGet pagination", () => {
+  for (const exclusive of [true, false]) {
+    it(`replays projected pages without losing bytes (exclusive=${exclusive})`, async (t) => {
+      const warnings = t.mock.method(logger, "warn", () => {});
+      const baseDir = makeTempDir();
+      configureArtifacts(baseDir);
+      replaceRegisteredRepoIds(["repo-a", "repo-b"]);
+      const server = await createMCPServer({
+        codeModeConfig: {
+          enabled: true, exclusive,
+          maxWorkflowSteps: 20, maxWorkflowTokens: 50_000,
+          maxWorkflowDurationMs: 60_000, ladderValidation: "warn", etagCaching: true,
+        },
+      });
+      t.after(async () => {
+        await server.stop();
+        resetRepoLifecycleForTests();
+      });
+      const handler = getCallToolHandler(server);
+      const call = (name: string, args: Record<string, unknown>, sessionId = "session-a") =>
+        handler({ method: "tools/call", params: { name, arguments: args } }, {
+          _meta: {}, sendNotification: async () => {},
+          signal: new AbortController().signal, sessionId,
+        });
+      const payload = { content: Array.from({ length: 900 }, (_, i) => `${i}: é😀 response page\n`).join("") };
+      const stored = await maybeStoreLargeResponse({
+        repoId: "repo-a", toolName: "sdl.file.read", payload,
+        responseMode: "handle", artifactBaseDir: baseDir,
+        sessionId: "session-a", requiresSameSession: true,
+      });
+      assert.equal(stored.responseMode, "handle");
+      if (stored.responseMode !== "handle") assert.fail("expected handle");
+      const handle = stored.payload.handle;
+      const workflowArgs = (args: Record<string, unknown>, detail = "compact") => ({
+        repoId: "repo-a", steps: [{ fn: "responseGet", args }],
+        defaultMaxResponseTokens: 16_000, detail,
+      });
+
+      // Exercise the registered executor, both projection passes, and final schema.
+      for (const detail of ["compact", "standard", "full"]) {
+        const first = await call("sdl.workflow", workflowArgs({ handle }, detail));
+        assert.notEqual(first.isError, true, JSON.stringify(first));
+        const repeated = await call("sdl.workflow", workflowArgs({ handle }, detail));
+        assert.equal(JSON.stringify(repeated.structuredContent), JSON.stringify(first.structuredContent));
+        const step = (first.structuredContent as { results: Array<{
+          result: Record<string, unknown>;
+          nextAction?: { action: string; args: Record<string, unknown> };
+        }> }).results[0];
+        let page = step.result;
+        assert.equal(page.complete, false);
+        assert.ok(step.nextAction, "workflow must expose an executable continuation");
+        const chunks: Buffer[] = [];
+        let next = step.nextAction;
+        let offsetBytes = 0;
+        for (let count = 0; count < 20; count += 1) {
+          assert.equal(typeof page.content, "string");
+          const chunk = Buffer.from(page.content as string, "utf8");
+          const range = page.range as { offsetBytes: number; returnedBytes: number };
+          assert.equal(range.offsetBytes, offsetBytes);
+          assert.equal(range.returnedBytes, chunk.length);
+          assert.ok(chunk.length <= 8192);
+          chunks.push(chunk);
+          offsetBytes += chunk.length;
+          if (page.complete) break;
+          assert.ok(next);
+          const response = await call(next.action, next.args);
+          assert.notEqual(response.isError, true, JSON.stringify(response));
+          const value = response.structuredContent as Record<string, unknown>;
+          if (next.action === "sdl.workflow") {
+            const continued = (value.results as Array<typeof step>)[0];
+            page = continued.result;
+            next = continued.nextAction;
+          } else {
+            page = value;
+            next = page.nextAction as typeof next;
+          }
+        }
+        assert.equal(page.complete, true);
+        assert.equal(page.nextAction, undefined);
+        assert.deepEqual(Buffer.concat(chunks), Buffer.from(JSON.stringify(payload)));
+      }
+
+      assert.equal(warnings.mock.calls.some((call) =>
+        call.arguments[0] === "Invalid generated recovery omitted"), false);
+      const direct = await call("sdl.retrieve", {
+        repoId: "repo-a", op: "responseGet", args: { handle }, responseMode: "inline",
+      });
+      assert.notEqual(direct.isError, true);
+      assert.equal((direct.structuredContent as { complete: boolean }).complete, false);
+      const full = await call("sdl.workflow", workflowArgs({ handle, full: true }));
+      assert.notEqual(full.isError, true);
+      const fullPage = (full.structuredContent as { results: Array<{ result: Record<string, unknown> }> }).results[0].result;
+      assert.equal(fullPage.complete, true);
+      assert.deepEqual(fullPage.content, payload);
+
+      const small = await maybeStoreLargeResponse({
+        repoId: "repo-a", toolName: "sdl.file.read", payload: { content: "small" },
+        responseMode: "handle", artifactBaseDir: baseDir,
+      });
+      if (small.responseMode !== "handle") assert.fail("expected handle");
+      const smallResponse = await call("sdl.workflow", workflowArgs({ handle: small.payload.handle }));
+      assert.notEqual(smallResponse.isError, true);
+      assert.equal((smallResponse.structuredContent as { results: Array<{ result: { complete: boolean } }> }).results[0].result.complete, true);
+
+      for (const [repoId, sessionId] of [["repo-b", "session-a"], ["repo-a", "session-b"]]) {
+        const rejected = await call("sdl.workflow", { ...workflowArgs({ handle }), repoId }, sessionId);
+        const value = rejected.structuredContent as { results: Array<{ status: string }> };
+        assert.equal(value.results[0].status, "error");
+      }
+    });
+  }
 });

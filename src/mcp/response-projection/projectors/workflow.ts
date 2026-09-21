@@ -130,7 +130,8 @@ function recovery(
     repoId: typeof input.context.requestArgs.repoId === "string"
       ? input.context.requestArgs.repoId
       : undefined,
-    advertisedTools: ["sdl.workflow"],
+    // Response pages may already carry a direct retrieval continuation.
+    advertisedTools: ["sdl.workflow", "sdl.retrieve"],
     activeWorkflowFunctions: [...new Set([...Object.keys(getActiveFnNameMap()), "workflowContinuationGet"])].sort(),
     ...(action ? { failedCall: { action, args: stepArgs(input, index, step) } } : {}),
   }).nextAction;

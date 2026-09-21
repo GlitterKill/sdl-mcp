@@ -594,8 +594,8 @@ describe("response projection inventory", () => {
       ["sdl.file", 1_000],
       // Stored-response continuation, recovery defaults, and diagnostic code metadata total 1,641 nodes.
       ["sdl.retrieve", 1_648],
-      // Optional file-write guidance and the filtered status timestamp add three nodes.
-      ["sdl.workflow", 5_817],
+      // Strict retrieve continuation envelopes add 20 nodes to the workflow schema.
+      ["sdl.workflow", 5_837],
     ]);
 
     for (const [name, maxNodes] of nodeBudgets) {
@@ -848,9 +848,11 @@ describe("response projection inventory", () => {
   });
 
   it("accepts every projected workflow child fixture", () => {
+    // These canonical fixtures bypass the exclusive recovery wrapper; the real
+    // exclusive tools/call path is covered by response-artifact-recovery.test.ts.
     const workflowRegistration = capturePublicToolRegistrations({
       enabled: true,
-      exclusive: true,
+      exclusive: false,
     }).find(({ name }) => name === "sdl.workflow");
     assert.ok(workflowRegistration);
     const workflowOutputSchema = exhaustiveOutputSchema(workflowRegistration);
@@ -967,9 +969,10 @@ describe("response projection inventory", () => {
     const responseRegistration = registrations.find(
       ({ name }) => name === "sdl.response.get",
     );
+    // Keep canonical response.get fixtures on the non-exclusive surface.
     const workflowRegistration = capturePublicToolRegistrations({
       enabled: true,
-      exclusive: true,
+      exclusive: false,
     }).find(({ name }) => name === "sdl.workflow");
     assert.ok(responseRegistration);
     assert.ok(workflowRegistration);

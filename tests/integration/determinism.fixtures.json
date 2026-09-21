@@ -8,6 +8,36 @@
   },
   "toolCalls": [
     {
+      "tool": "sdl.workflow",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "steps": [
+          {
+            "fn": "responseGet",
+            "args": {
+              "handle": "missing-response-artifact"
+            }
+          }
+        ],
+        "detail": "compact"
+      }
+    },
+    {
+      "tool": "sdl.workflow",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "steps": [
+          {
+            "fn": "responseGet",
+            "args": {
+              "handle": "missing-response-artifact"
+            }
+          }
+        ],
+        "detail": "full"
+      }
+    },
+    {
       "tool": "sdl.action.search",
       "args": {
         "query": "file.write",

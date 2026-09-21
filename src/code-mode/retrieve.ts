@@ -45,7 +45,7 @@ const RetrieveResponseGetNextActionSchema = z
   })
   .strict();
 
-const RetrieveResponseGetOutputSchema =
+export const RetrieveResponseGetOutputSchema =
   buildProjectedResponseGetSuccessOutputSchema(
     RetrieveResponseGetNextActionSchema,
     (nextAction) =>

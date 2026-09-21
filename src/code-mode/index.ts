@@ -53,6 +53,7 @@ import {
   buildRetrieveWireSchema,
   handleRetrieve,
   RetrieveOutputSchema,
+  RetrieveResponseGetOutputSchema,
   RetrieveRequestSchema as RetrieveDomainRequestSchema,
 } from "./retrieve.js";
 import { executeWorkflow } from "./workflow-executor.js";
@@ -693,9 +694,12 @@ export function registerCodeModeTools(
             )
           : action === "runtime.execute"
             ? WorkflowRuntimeExecuteResponseSchema
-            : action === "info"
-              ? withProjectionSuccessOutputSchema(action, InfoResponseSchema)
-              : publicSuccessOutputSchemaByAction.get(action);
+            // Exclusive projection rewrites response.get continuations to sdl.retrieve.
+            : action === "response.get" && config.exclusive
+              ? RetrieveResponseGetOutputSchema
+              : action === "info"
+                ? withProjectionSuccessOutputSchema(action, InfoResponseSchema)
+                : publicSuccessOutputSchemaByAction.get(action);
       return outputSchema === undefined ? [] : [[fn, outputSchema] as const];
     }),
     ...Object.entries(INTERNAL_TRANSFORM_SUCCESS_OUTPUT_SCHEMA_BY_ACTION),
