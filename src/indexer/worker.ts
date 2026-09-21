@@ -1,8 +1,18 @@
 import { parentPort } from "worker_threads";
 import type { SyntaxNode } from "tree-sitter";
 import { getAdapterForExtension } from "./adapter/registry.js";
+import type { ScipDocument } from "../scip/types.js";
+import {
+  provePythonLexicalBindings,
+  type PythonBindingProof,
+  type PythonModuleBindings,
+} from "./provider-first/python-lexical-bindings.js";
+import { provePythonNonCalls } from "./provider-first/python-non-call-proof.js";
 import { logger } from "../util/logger.js";
-import { generateAstFingerprint, generateMetadataFingerprint } from "./fingerprints.js";
+import {
+  generateAstFingerprint,
+  generateMetadataFingerprint,
+} from "./fingerprints.js";
 
 import type {
   ExtractedSymbol,
@@ -15,12 +25,16 @@ interface WorkerMessage {
   content: string;
   ext: string;
   languages?: string[];
+  pythonDocument?: ScipDocument;
 }
 
 export type SymbolWithNodeId = ExtractedSymbol & { astFingerprint: string };
 
 interface WorkerResult {
   tree?: null;
+  pythonBindings?: PythonBindingProof;
+  pythonModuleBindings?: PythonModuleBindings;
+  pythonNonCalls?: Set<string>;
   symbols: Array<SymbolWithNodeId>;
   imports: Array<ExtractedImport>;
   calls: Array<ExtractedCall>;
@@ -59,6 +73,29 @@ async function handleWorkerMessage(msg: WorkerMessage): Promise<void> {
       return;
     }
     treeToDelete = tree as unknown as { delete?: () => void };
+
+    if (msg.pythonDocument) {
+      const pythonModuleBindings: PythonModuleBindings = {
+        exports: new Map(),
+        members: [],
+        mutatedModules: [],
+        mutatedMembers: [],
+      };
+      const pythonBindings = provePythonLexicalBindings(
+        msg.pythonDocument,
+        tree.rootNode,
+        pythonModuleBindings,
+      );
+      parentPort?.postMessage({
+        symbols: [],
+        imports: [],
+        calls: [],
+        pythonBindings,
+        pythonModuleBindings,
+        pythonNonCalls: provePythonNonCalls(msg.pythonDocument, tree.rootNode),
+      } satisfies WorkerResult);
+      return;
+    }
 
     let extractedSymbols: ReturnType<typeof adapter.extractSymbols>;
     try {

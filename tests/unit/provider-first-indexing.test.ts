@@ -1,3 +1,4 @@
+import { ParserWorkerPool } from "../../dist/indexer/workerPool.js";
 import { createHash } from "node:crypto";
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -3732,12 +3733,12 @@ describe("provider-first indexing foundation", () => {
     assert.deepEqual(facts.coverage[1]?.callProofUnavailableReasons, []);
   });
 
-  it("promotes Python import aliases when SCIP marks the imported alias clause", () => {
+  it("promotes Python import aliases when SCIP marks the imported alias clause", async () => {
     const main =
       "scip-python python example 0.0.0 `mlir.python.mlir.dialects.affine`/main().";
     const helper =
       "scip-python python example 0.0.0 `mlir.python.mlir.dialects._ods_common`/get_op_result_or_value().";
-    const facts = normalizeScipProviderFacts({
+    const options = {
       repoId: "repo",
       generationId: "gen-1",
       providerId: "scip-python",
@@ -3809,7 +3810,16 @@ describe("provider-first indexing foundation", () => {
           displayName: "get_op_result_or_value",
         },
       ],
-    });
+    };
+    const pool = new ParserWorkerPool(1);
+    let facts;
+    try {
+      const document = options.documents[0];
+      const parsed = await pool.parse(document.relativePath, options.sourceTextByPath.get(document.relativePath)!, ".py", document);
+      facts = normalizeScipProviderFacts({ ...options, pythonBindingsByPath: new Map([[document.relativePath, parsed.pythonBindings ?? new Map()]]) });
+    } finally {
+      await pool.shutdown();
+    }
 
     const callEdges = facts.edges.filter((edge) => edge.edgeType === "call");
     assert.equal(callEdges.length, 1);

@@ -10,6 +10,11 @@ const __dirname = dirname(__filename);
 import type { ExtractedCall } from "./treesitter/extractCalls.js";
 import type { ExtractedImport } from "./treesitter/extractImports.js";
 import type { SymbolWithNodeId } from "./worker.js";
+import type { ScipDocument } from "../scip/types.js";
+import type {
+  PythonBindingProof,
+  PythonModuleBindings,
+} from "./provider-first/python-lexical-bindings.js";
 import { logger } from "../util/logger.js";
 
 interface ParseTask {
@@ -17,10 +22,14 @@ interface ParseTask {
   content: string;
   ext: string;
   languages?: string[];
+  pythonDocument?: ScipDocument;
 }
 
 interface ParseResult {
   tree?: null;
+  pythonBindings?: PythonBindingProof;
+  pythonModuleBindings?: PythonModuleBindings;
+  pythonNonCalls?: Set<string>;
   symbols: Array<SymbolWithNodeId>;
   imports: Array<ExtractedImport>;
   calls: Array<ExtractedCall>;
@@ -143,6 +152,15 @@ export class ParserWorkerPool {
       } else {
         item.resolve({
           tree: msg.tree,
+          ...(msg.pythonBindings !== undefined
+            ? { pythonBindings: msg.pythonBindings }
+            : {}),
+          ...(msg.pythonModuleBindings !== undefined
+            ? { pythonModuleBindings: msg.pythonModuleBindings }
+            : {}),
+          ...(msg.pythonNonCalls !== undefined
+            ? { pythonNonCalls: msg.pythonNonCalls }
+            : {}),
           symbols: msg.symbols,
           imports: msg.imports,
           calls: msg.calls,
@@ -160,8 +178,8 @@ export class ParserWorkerPool {
     });
 
     worker.on("exit", (code) => {
-      // Clean exits during shutdown are expected.
-      if (this.shuttingDown && code === 0) {
+      // terminate() exits a running worker with code 1; shutdown already rejected its tasks.
+      if (this.shuttingDown) {
         return;
       }
       this.handleWorkerCrash(
@@ -190,6 +208,7 @@ export class ParserWorkerPool {
     filePath: string,
     content: string,
     ext: string,
+    pythonDocument?: ScipDocument,
   ): Promise<ParseResult> {
     if (this.shuttingDown) {
       throw new Error("Worker pool shut down");
@@ -201,7 +220,7 @@ export class ParserWorkerPool {
     }
     return new Promise((resolve, reject) => {
       this.queue.push({
-        task: { filePath, content, ext },
+        task: { filePath, content, ext, pythonDocument },
         resolve,
         reject,
       });

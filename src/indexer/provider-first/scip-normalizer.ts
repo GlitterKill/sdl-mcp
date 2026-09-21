@@ -29,6 +29,12 @@ import type {
 import { generateFileId } from "../../util/hashing.js";
 import { normalizePath } from "../../util/paths.js";
 import { findTypeScriptVariableStatementRange } from "./typescript-variable-range.js";
+import {
+  pythonOccurrenceKey,
+  resolvePythonModuleBindings,
+  type PythonBindingProof,
+  type PythonModuleBindings,
+} from "./python-lexical-bindings.js";
 import type { IndexProgress, IndexProgressSubstage } from "../indexer-init.js";
 import {
   createProviderEdgeDedupeKey,
@@ -73,6 +79,9 @@ export interface NormalizeScipProviderFactsOptions {
   sourceLinesByPath?: SourceLinesByPath;
   sourceLineUnavailableReasonByPath?: SourceLineUnavailableReasonByPath;
   sourceTextByPath?: ReadonlyMap<string, string>;
+  pythonBindingsByPath?: ReadonlyMap<string, PythonBindingProof>;
+  pythonModuleBindingsByPath?: ReadonlyMap<string, PythonModuleBindings>;
+  pythonNonCallsByPath?: ReadonlyMap<string, ReadonlySet<string>>;
   sourceIndexPath?: string;
   confidence?: number;
   emittedAt?: string;
@@ -97,7 +106,10 @@ export type SourceLineUnavailableReasonByPath = ReadonlyMap<
   string,
   CallProofUnavailableReasonCode
 >;
-type SourceTextCandidateMap = ReadonlyMap<string, readonly string[]>;
+type SourceTextCandidateMap = ReadonlyMap<
+  string | ScipOccurrence,
+  readonly string[]
+>;
 type NeutralCallProofOccurrenceIndexes = ReadonlySet<number>;
 interface CoverageOccurrence {
   role: OccurrenceFact["role"];
@@ -146,6 +158,13 @@ export function normalizeScipProviderFacts(
     documents.length,
     `coalesced ${documents.length} document(s)`,
   );
+  const pythonBindingsByPath = options.pythonModuleBindingsByPath
+    ? resolvePythonModuleBindings(
+        documents,
+        options.pythonBindingsByPath ?? new Map(),
+        options.pythonModuleBindingsByPath,
+      )
+    : options.pythonBindingsByPath;
   const emittedAt = options.emittedAt ?? new Date().toISOString();
   const base: ProviderFactBase = {
     repoId: options.repoId,
@@ -321,14 +340,23 @@ export function normalizeScipProviderFacts(
       documentContext,
       document,
       sourceLines,
+      pythonBindingsByPath?.get(normalizePath(document.relativePath)),
     );
-    const neutralCallProofOccurrenceIndexes =
+    const neutralCallProofOccurrenceIndexes = new Set(
       buildMacroExpansionOverlapOccurrenceIndexes(
         documentContext,
         document,
         sourceLines,
         localSourceTextCandidates,
-      );
+      ),
+    );
+    // The same occurrence-local neutrality governs coverage and edge emission.
+    const pythonNonCalls = options.pythonNonCallsByPath?.get(relPath);
+    if (pythonNonCalls?.size) {
+      for (const [index, occurrence] of document.occurrences.entries())
+        if (pythonNonCalls.has(pythonOccurrenceKey(occurrence)))
+          neutralCallProofOccurrenceIndexes.add(index);
+    }
     const documentOccurrences = measureNormalizePhase(
       options,
       "occurrenceFacts",
@@ -912,12 +940,21 @@ function shouldMaterializeSymbolInfo(
       scheme !== "semanticdb" &&
       scheme !== "scip-java" &&
       scheme !== "local" &&
+      !(
+        scheme === "scip-python" &&
+        definitionRelPaths.size === 2 &&
+        [...definitionRelPaths].some(
+          (path) => path.endsWith(".py") && definitionRelPaths.has(`${path}i`),
+        )
+      ) &&
       !canCoalesceDuplicateProviderSymbol(
         providerSymbolId,
         mapScipKind(providerSymbolId).sdlKind ?? undefined,
       )
     )
       return false;
+    // Matching Python implementation/stub files retain source-specific variants,
+    // just like compilation variants; third-file references remain ambiguous.
     // Metadata can appear in reference-only documents. Only actual definitions
     // establish source identity, including distinct compilation variants.
     return definitionRelPaths.has(relPath);
@@ -1462,9 +1499,21 @@ function buildLocalSourceTextCandidates(
   context: NormalizedScipContext,
   document: ScipDocument,
   sourceLines: ReadonlyMap<number, string> | undefined,
-): Map<string, string[]> {
-  const candidatesBySymbol = new Map<string, string[]>();
+  pythonProof?: PythonBindingProof,
+): Map<string | ScipOccurrence, string[]> {
+  const candidatesBySymbol = new Map<string | ScipOccurrence, string[]>();
   if (!sourceLines) return candidatesBySymbol;
+
+  if (pythonProof !== undefined) {
+    for (const occurrence of document.occurrences) {
+      const names = pythonProof.get(pythonOccurrenceKey(occurrence));
+      if (names) candidatesBySymbol.set(occurrence, names);
+    }
+    return candidatesBySymbol;
+  }
+  // Sparse source lines cannot prove Python scope or shadowing. Only worker
+  // evidence can supply an alias spelling; missing proof stays unresolved.
+  if (/^python$/i.test(document.language)) return candidatesBySymbol;
 
   const addCandidate = (symbol: string, candidate: string): void => {
     if (!isIdentifierText(candidate)) return;
@@ -1795,11 +1844,13 @@ function escapeRegExp(value: string): string {
 function mergeSourceTextCandidates(
   globalCandidates: readonly string[] | undefined,
   localCandidates: readonly string[] | undefined,
+  occurrenceCandidates?: readonly string[],
 ): readonly string[] {
   const merged: string[] = [];
   for (const candidate of [
     ...(globalCandidates ?? []),
     ...(localCandidates ?? []),
+    ...(occurrenceCandidates ?? []),
   ]) {
     if (candidate.length === 0 || merged.includes(candidate)) continue;
     merged.push(candidate);
@@ -1864,6 +1915,7 @@ function isCallLikeReference(
     expectedNames: mergeSourceTextCandidates(
       context.symbolSourceTextCandidatesByProviderId.get(occurrence.symbol),
       localSourceTextCandidates.get(occurrence.symbol),
+      localSourceTextCandidates.get(occurrence),
     ),
     sourceUnavailableReason:
       context.sourceLineUnavailableReasonByPath.get(relPath),
@@ -1909,6 +1961,7 @@ function callProofCoverage(
       expectedNames: mergeSourceTextCandidates(
         context.symbolSourceTextCandidatesByProviderId.get(occurrence.symbol),
         localSourceTextCandidates.get(occurrence.symbol),
+        localSourceTextCandidates.get(occurrence),
       ),
       sourceUnavailableReason:
         context.sourceLineUnavailableReasonByPath.get(relPath),
@@ -1982,6 +2035,7 @@ function buildMacroExpansionOverlapOccurrenceIndexes(
       ? mergeSourceTextCandidates(
           context.symbolSourceTextCandidatesByProviderId.get(occurrence.symbol),
           localSourceTextCandidates.get(occurrence.symbol),
+          localSourceTextCandidates.get(occurrence),
         )
       : [];
     const sourceProven =
@@ -2039,6 +2093,7 @@ function buildMacroExpansionOverlapOccurrenceIndexes(
       const expectedNames = mergeSourceTextCandidates(
         context.symbolSourceTextCandidatesByProviderId.get(occurrence.symbol),
         localSourceTextCandidates.get(occurrence.symbol),
+        localSourceTextCandidates.get(occurrence),
       );
       if (!expectedNames.includes(sourceText)) {
         neutralIndexes.add(index);

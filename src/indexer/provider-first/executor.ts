@@ -46,6 +46,11 @@ import type {
 } from "../../scip/diagnostics.js";
 import type { ScipDocument, ScipExternalSymbol } from "../../scip/types.js";
 import { logger } from "../../util/logger.js";
+import { ParserWorkerPool } from "../workerPool.js";
+import type {
+  PythonBindingProof,
+  PythonModuleBindings,
+} from "./python-lexical-bindings.js";
 import { hashValue } from "../../util/hashing.js";
 import { getRelativePath, normalizePath } from "../../util/paths.js";
 import type { TestCaseCandidate } from "../adapter/LanguageAdapter.js";
@@ -91,7 +96,7 @@ const PROVIDER_FIRST_DOCUMENT_PROGRESS_INTERVAL = 250;
 const PROVIDER_FIRST_SOURCE_LINE_PROGRESS_INTERVAL = 250;
 const PROVIDER_FIRST_PROGRESS_HEARTBEAT_MS = 2_000;
 const PROVIDER_COLLECTION_CACHE_SCHEMA_VERSION = 1;
-const PROVIDER_COLLECTION_CACHE_NORMALIZER_VERSION = 4;
+const PROVIDER_COLLECTION_CACHE_NORMALIZER_VERSION = 11;
 const DEFAULT_PROVIDER_COLLECTION_CACHE_DIR = join(
   homedir(),
   ".sdl-mcp",
@@ -1929,6 +1934,9 @@ async function decodeScipIndexToFacts(params: {
         documents,
         externalSymbols,
         sourceLinesByPath: sourceLineLoad.sourceLinesByPath,
+        pythonBindingsByPath: sourceLineLoad.pythonBindingsByPath,
+        pythonModuleBindingsByPath: sourceLineLoad.pythonModuleBindingsByPath,
+        pythonNonCallsByPath: sourceLineLoad.pythonNonCallsByPath,
         sourceLineUnavailableReasonByPath:
           sourceLineLoad.sourceLineUnavailableReasonByPath,
         sourceIndexPath: params.relIndexPath,
@@ -2610,6 +2618,9 @@ async function loadDocumentSourceLines(
   },
 ): Promise<{
   sourceLinesByPath: SourceLinesByPath;
+  pythonBindingsByPath: Map<string, PythonBindingProof>;
+  pythonModuleBindingsByPath: Map<string, PythonModuleBindings>;
+  pythonNonCallsByPath: Map<string, Set<string>>;
   sourceLineUnavailableReasonByPath: SourceLineUnavailableReasonByPath;
 }> {
   const sourceLinesByPath = new Map<string, ReadonlyMap<number, string>>();
@@ -2618,6 +2629,32 @@ async function loadDocumentSourceLines(
     CallProofUnavailableReasonCode
   >();
   const neededLinesByPath = collectNeededSourceLines(documents);
+  const pythonBindingsByPath = new Map<string, PythonBindingProof>();
+  const pythonModuleBindingsByPath = new Map<string, PythonModuleBindings>();
+  const pythonNonCallsByPath = new Map<string, Set<string>>();
+  const pythonDocuments = new Map<string, ScipDocument>();
+  for (const document of documents) {
+    if (!/^python$/i.test(document.language)) continue;
+    const path = normalizePath(document.relativePath);
+    const previous = pythonDocuments.get(path);
+    pythonDocuments.set(
+      path,
+      previous
+        ? {
+            ...document,
+            occurrences: [...previous.occurrences, ...document.occurrences],
+          }
+        : document,
+    );
+    // An unavailable/invalid parse must not reactivate line-based alias proof.
+    pythonBindingsByPath.set(path, new Map());
+    // Multiline-only references still need worker syntax evidence.
+    if (!neededLinesByPath.has(path)) neededLinesByPath.set(path, new Set());
+  }
+  const parserPool = new ParserWorkerPool({
+    poolSize: 2,
+    configuredLanguages: ["python"],
+  });
   const sourcePaths: Array<{ relPath: string; sourcePath: string }> = [];
   let normalizedRoot = normalizePath(repoRoot);
   try {
@@ -2677,54 +2714,86 @@ async function loadDocumentSourceLines(
       );
     }
   };
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < sourcePaths.length) {
-        const entry = sourcePaths[nextIndex];
-        nextIndex++;
-        if (!entry) continue;
+  try {
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (nextIndex < sourcePaths.length) {
+          const entry = sourcePaths[nextIndex];
+          nextIndex++;
+          if (!entry) continue;
 
-        try {
-          const realSourcePath = normalizePath(
-            await realpath(entry.sourcePath),
-          );
-          if (!isPathInsideRoot(normalizedRoot, realSourcePath)) {
+          try {
+            const realSourcePath = normalizePath(
+              await realpath(entry.sourcePath),
+            );
+            if (!isPathInsideRoot(normalizedRoot, realSourcePath)) {
+              sourceLineUnavailableReasonByPath.set(
+                entry.relPath,
+                "sourceRealPathOutsideRoot",
+              );
+              continue;
+            }
+            const sourceStats = await stat(realSourcePath);
+            if (sourceStats.size > maxBytes) {
+              sourceLineUnavailableReasonByPath.set(
+                entry.relPath,
+                "sourceTooLarge",
+              );
+              continue;
+            }
+            const sourceText = await readFile(realSourcePath, "utf8");
+            const document = pythonDocuments.get(entry.relPath);
+            if (document) {
+              const parsed = await parserPool.parse(
+                realSourcePath,
+                sourceText,
+                ".py",
+                document,
+              );
+              pythonBindingsByPath.set(
+                entry.relPath,
+                parsed.pythonBindings ?? new Map(),
+              );
+              pythonNonCallsByPath.set(
+                entry.relPath,
+                parsed.pythonNonCalls ?? new Set(),
+              );
+              if (parsed.pythonModuleBindings)
+                pythonModuleBindingsByPath.set(
+                  entry.relPath,
+                  parsed.pythonModuleBindings,
+                );
+            }
+            const selectedLines = selectNeededLines(
+              sourceText,
+              neededLinesByPath.get(entry.relPath) ?? new Set(),
+            );
+            sourceLinesByPath.set(entry.relPath, selectedLines);
+          } catch {
+            // Missing or unreadable source leaves the occurrence as a neutral
+            // fact. Coverage validation later decides whether the file can still
+            // be provider-primary or must fall back to legacy parsing.
             sourceLineUnavailableReasonByPath.set(
               entry.relPath,
-              "sourceRealPathOutsideRoot",
+              "sourceReadFailed",
             );
-            continue;
+          } finally {
+            reportSourceLineProgress();
           }
-          const sourceStats = await stat(realSourcePath);
-          if (sourceStats.size > maxBytes) {
-            sourceLineUnavailableReasonByPath.set(
-              entry.relPath,
-              "sourceTooLarge",
-            );
-            continue;
-          }
-          const selectedLines = selectNeededLines(
-            await readFile(realSourcePath, "utf8"),
-            neededLinesByPath.get(entry.relPath) ?? new Set(),
-          );
-          sourceLinesByPath.set(entry.relPath, selectedLines);
-        } catch {
-          // Missing or unreadable source leaves the occurrence as a neutral
-          // fact. Coverage validation later decides whether the file can still
-          // be provider-primary or must fall back to legacy parsing.
-          sourceLineUnavailableReasonByPath.set(
-            entry.relPath,
-            "sourceReadFailed",
-          );
-        } finally {
-          reportSourceLineProgress();
         }
-      }
-    }),
-  );
-  return { sourceLinesByPath, sourceLineUnavailableReasonByPath };
+      }),
+    );
+  } finally {
+    await parserPool.shutdown();
+  }
+  return {
+    sourceLinesByPath,
+    sourceLineUnavailableReasonByPath,
+    pythonBindingsByPath,
+    pythonModuleBindingsByPath,
+    pythonNonCallsByPath,
+  };
 }
-
 
 function resolveSourceTextMaxBytes(
   repoId: string,

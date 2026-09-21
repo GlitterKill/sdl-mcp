@@ -74,7 +74,7 @@ SDL symbol IDs are derived from `repoId`, provider type, provider ID, native pro
 
 ### SCIP Ownership And Overlap
 
-For SCIP, internal `SymbolFact` ownership follows definition occurrences. Some providers repeat `SymbolInformation` metadata in documents that only reference a symbol; SDL-MCP resolves those occurrences to the symbol's definition document instead of emitting another file-local symbol. If the provider reports real definitions for the same native symbol in multiple non-coalescible files, validation treats that as unsafe rather than guessing which definition should own the SDL identity.
+For SCIP, internal `SymbolFact` ownership follows definition occurrences. Some providers repeat `SymbolInformation` metadata in documents that only reference a symbol; SDL-MCP resolves those occurrences to the symbol's definition document instead of emitting another file-local symbol. SDL-MCP does not relocate missing metadata across documents: metadata must be produced in the defining document by the provider. If the provider reports real definitions for the same native symbol in multiple non-coalescible files, validation treats that as unsafe rather than guessing which definition should own the SDL identity.
 
 Configured SCIP indexes can overlap. Provider-first treats each normalized repo-relative file as single-owner during fact collection:
 
@@ -94,6 +94,8 @@ Provider-first file facts carry raw source fidelity metadata from the repository
 - `byteSize`: the raw byte length.
 
 Provider metadata hashes are not accepted as substitutes for local `File` rows.
+
+Provider source evidence also retains documented multiline spans when no individual source line qualifies for retention. That evidence supports later diagnostics and proof without treating documentation text as an invocation.
 
 ### Provider-Specific Normalization
 
@@ -325,7 +327,7 @@ Per-repo summaries print both `Duration` and `Wall time`:
 
 When the two differ, tune the `Wall time` path first if the goal is user-perceived runtime.
 
-Repeated unchanged generator runs use the generated-index cache by default. Summaries print `SCIP generator cache: hit` or `stored` when that cache participates. Warm cache hits can reuse latest metadata before the full input scan when git status shows that dirty paths are unrelated to configured source extensions or generator config files. Relevant source or build-manifest changes still fall back to the existing stat/content fingerprint path.
+Repeated unchanged generator runs use the generated-index cache by default. Summaries print `SCIP generator cache: hit` or `stored` when that cache participates. Warm cache hits can reuse latest metadata before the full input scan when git status shows that dirty paths are unrelated to configured source extensions or generator config files. Relevant source or build-manifest changes still fall back to the existing stat/content fingerprint path. The collection cache uses normalizer revision `11`, so entries from revision `10` are refreshed before reuse.
 
 ### Provider Timing Block
 
@@ -406,9 +408,11 @@ Call proof includes several language-aware cases:
 - JVM qualified constructor/type references whose source range covers a fully qualified receiver, such as `mockwebserver3.Dispatcher()`, prove the terminal type or constructor name only when the range is followed by invocation syntax.
 - JVM delegated-property spans and broad type/class spans whose provider range exceeds the source line remain neutral instead of being counted as call-proof gaps.
 - Scoped anonymous/type-literal member symbols such as `typeLiteral753:cleanupSession` are compared against their member suffix, so `cleanupSession()` remains provable when SCIP includes the synthetic owner in the symbol name.
-- Python nested callable descriptors such as `eventclass().wrapper` are compared against the terminal callable name, so `wrapper()` can prove the call without globally accepting arbitrary suffix matches.
-- Python import clauses whose SCIP range covers `name as local_name` contribute only the file-local alias as an extra proof candidate, so `_get_op_result_or_value(...)` can prove the imported `get_op_result_or_value` helper while leaving the alias scoped to that document.
-- Python module initializer references that expand to a qualified member invocation, such as `lit.util` inside `lit.util.warning(...)`, remain neutral because the module is not the invoked callable.
+- Python nested callable descriptors such as `eventclass().wrapper` are compared against the terminal callable name, so `wrapper()` can prove the call without globally accepting arbitrary suffix matches. Calls whose spelling already exactly matches the provider symbol continue through the normal exact-proof path.
+- Python `.py` and `.pyi` definitions keep file-specific proof candidates, and SDL-MCP accepts exactly one exact matching definition pair. A reference from a third file is unresolved when several definitions could match; unrelated pairs and a third definition are rejected.
+- Scope-aware Python parsing proves aliases and calls from their occurrence context, including plain and named imports, multiline `from` imports, conditional imports, module re-exports, and aliases that shadow closure bindings. Native syntax-node identity keeps that evidence bound to the parsed occurrence.
+- Parsed non-call evidence recognizes exact declaration names, multiline import aliases, and parenthesized bare assignment values. Ambiguous, mismatched, missing, or invalid non-call evidence is a call-proof coverage gap only when no other proof applies; SDL-MCP does not fall back to line-based Python alias matching.
+- A parser worker exit with code `1` is expected only when the pool explicitly calls `terminate()` during shutdown, and is not reported as a crash. SDL-MCP recovers unexpected worker exits; an unavailable parse leaves an alias invocation requiring lexical proof unresolved as a call-proof coverage gap. Calls whose spelling exactly matches the provider symbol retain the normal exact-proof path.
 - File-local aliases from named imports such as `import { original as localAlias }` are accepted only within the document that declares the alias, so `localAlias()` can prove a call to `original` without globally relaxing the symbol text check.
 - Non-import TypeScript `as` expressions are not treated as aliases.
 - C#/.NET overload arity descriptors from `scip-dotnet`, such as `CharacteristicObject#GetValue(+1).`, are canonicalized to the normal callable descriptor `CharacteristicObject#GetValue().` before symbol identity, name extraction, relationship mapping, and source call proof.

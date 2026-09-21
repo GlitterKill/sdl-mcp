@@ -87,6 +87,43 @@ export function selectNeededLines(
 ): ReadonlyMap<number, string> {
   const sourceLines = sourceText.split(/\r?\n/);
   const selectedLineNumbers = new Set(neededLines);
+  // Retain complete bounded Python import statements even without aliases: a
+  // from-import may bind a name renamed by an upstream re-export.
+  for (let start = 0; start < sourceLines.length; start++) {
+    if (!/^[ \t]*from\s+[.\w]+\s+import\s+\(/.test(sourceLines[start]))
+      continue;
+    let end = start;
+    while (
+      end <
+        Math.min(
+          start + SOURCE_TEXT_IMPORT_ALIAS_BLOCK_SCAN_LIMIT - 1,
+          sourceLines.length - 1,
+        ) &&
+      !sourceLines[end].split("#")[0].includes(")")
+    )
+      end++;
+    if (!sourceLines[end].split("#")[0].includes(")")) continue;
+    if (
+      Array.from({ length: end - start + 1 }, (_, i) => start + i).some((n) =>
+        neededLines.has(n),
+      )
+    ) {
+      for (let n = start; n <= end; n++) selectedLineNumbers.add(n);
+    }
+  }
+  // Retain nested from-import suites so proof can see scope exits and writes.
+  // This is indexing evidence, not an expansion of agent-facing context.
+  for (let start = 0; start < sourceLines.length; start++) {
+    const indent = /^([ \t]+)from\s+[.\w]+\s+import\s+/.exec(
+      sourceLines[start],
+    )?.[1];
+    if (!indent || !selectedLineNumbers.has(start)) continue;
+    for (let row = start + 1; row < sourceLines.length; row++) {
+      selectedLineNumbers.add(row);
+      const code = sourceLines[row].split("#")[0];
+      if (code.trim() && !sourceLines[row].startsWith(indent)) break;
+    }
+  }
   for (const lineNumber of neededLines) {
     const line = sourceLines[lineNumber];
     if (!line?.includes(" as ")) continue;
