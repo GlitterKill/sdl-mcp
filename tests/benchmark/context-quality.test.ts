@@ -2798,82 +2798,8 @@ describe("context quality benchmarks", () => {
     };
   });
 
-  it("retrieves the exact sdl.info contract cases within 2400 tokens", async (t) => {
-    if (CORPUS !== "sdl-mcp") {
-      t.skip("SDL-specific regression is outside the neutral corpus");
-      return;
-    }
-    if (!metrics.repoAvailable) {
-      skipOrFail(metrics.availabilityReason);
-      return;
-    }
-    assert.ok(handleAgentContext, "sdl.context handler must be initialized");
-
-    const request = {
-      repoId: REPO_ID,
-      taskType: "review" as const,
-      taskText:
-        "Find the tests that assert sdl.info is exposed as a top-level Code Mode tool and rejected as an sdl.workflow action.",
-      focusPaths: ["tests"],
-      includeTests: true,
-      budget: { maxTokens: 2400 },
-      responseMode: "inline" as const,
-      refsMode: "off" as const,
-      wireFormat: "json" as const,
-    };
-    const session = { sessionId: "semantic-test-case-acceptance" };
-    const first = await handleAgentContext(request, session);
-    const second = await handleAgentContext(request, session);
-    const serialized = JSON.stringify(first);
-    assert.equal(serialized, JSON.stringify(second));
-    assert.ok("evidence" in first);
-
-    const result = first as {
-      evidence: Array<{
-        path?: string;
-        content?: {
-          name?: string;
-          excerpt?: string;
-          testCase?: { title?: string };
-        };
-      }>;
-      omitted?: { highestRanked?: Array<{ path?: string }> };
-    };
-    const expectedTitles = [
-      "rejects info and sdl.info as sdl.workflow actions",
-      "keeps sdl.info callable and discoverable in exclusive Code Mode",
-    ];
-    const target = result.evidence.filter(
-      (item) => item.path === "tests/unit/code-mode-tool-validation.test.ts",
-    );
-    const foundTitles = new Set(
-      target.flatMap((item) =>
-        typeof item.content?.testCase?.title === "string"
-          ? [item.content.testCase.title]
-          : [],
-      ),
-    );
-    assert.deepEqual(foundTitles, new Set(expectedTitles));
-
-    const targetText = target
-      .map((item) => item.content?.excerpt ?? JSON.stringify(item.content))
-      .join("\n");
-    assert.match(targetText, /Invalid sdl\.workflow request/u);
-    assert.match(targetText, /handlers\.has\("sdl\.info"\)/u);
-    assert.equal(
-      result.evidence.some((item) =>
-        ["createArtifact", "weight"].includes(item.content?.name ?? ""),
-      ),
-      false,
-    );
-    assert.equal(
-      (result.omitted?.highestRanked ?? []).some(
-        (item) => item.path === "tests/unit/code-mode-tool-validation.test.ts",
-      ),
-      false,
-    );
-    assert.ok(estimateBenchmarkTokens(serialized) <= 2400);
-  });
+  // The newer sdl.info retrieval contract runs against its own versioned corpus
+  // in info-contract.test.ts; this benchmark retains its original frozen corpus.
 
   it("keeps scoped precise lookups below the latency target", async (t) => {
     if (

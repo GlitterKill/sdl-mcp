@@ -490,3 +490,30 @@ one failure, two skipped sync jobs, and two still running: Ubuntu graph build
 since 19:12:54 UTC and realism matrix since 19:14:19 UTC. Both running-job log
 endpoints return HTTP 404; internal progress or a stall is not established.
 Publication remains gated on the unresolved corpus decision and hosted results.
+
+### 2026-10-11: Separate versioned contract corpus and qualified test retrieval
+
+The user selected a separate versioned corpus; repository policy has no additional
+owner-approval requirement. `tests/fixtures/info-contract/v1` pins the complete
+12-case source file from `3aff7a6a` with a normalized SHA-256 manifest and two
+indexed retrieval distractors. Both scheduled context-quality OS jobs now run
+`tests/benchmark/info-contract.test.ts` after provisioning real FTS/local models.
+The frozen `fcf4f2e` corpus, benchmark baseline, configs and thresholds are unchanged.
+
+The isolated fixture exposed two additional causes hidden behind the old corpus
+mismatch: V2 hot-path test metadata lives under `content.card`, and fused retrieval
+ranked an unrelated gateway case ahead of the requested qualified test titles.
+The scoped ranking fix promotes matching qualified test titles only for queries
+explicitly asking for tests, preserving pins, stable ties and directory focus.
+The relocated assertion reads both card shapes and checks omitted requested
+symbol IDs, rather than treating unrelated cases in the same file as omissions.
+It retains both exact titles, both assertion excerpts, repeated-response equality,
+indexed distractor exclusion and the 2,400-token ceiling, and additionally requires
+available FTS/vector lanes with full vector coverage.
+
+Local regression: the unmodified ranking failed on this complete fixture; the
+repair passes with real Windows FTS and local embeddings (no skips). All 109
+focused context/retrieval/CI tests, `build:all`, changed-file ESLint and diff checks
+passed. Initial sandbox attempts failed Windows checkpoint renames; verification
+used the authorized unsandboxed isolated test. General determinism fixtures remain
+unchanged because their native-disabled setup does not provision Windows FTS.

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "sourceRevision": "3aff7a6af7de8cd4b45e406b5394d97b7f75bef7",
+  "sourcePath": "tests/unit/code-mode-tool-validation.test.ts",
+  "sha256": "2ad7aa01f8226b72fe53f8a6360aedf8c874efb2a41fd4925bc04c829142bc39",
+  "hashEncoding": "UTF-8 with LF line endings",
+  "expectedTitles": [
+    "rejects info and sdl.info as sdl.workflow actions",
+    "keeps sdl.info callable and discoverable in exclusive Code Mode"
+  ],
+  "distractors": {
+    "sourcePath": "tests/unit/retrieval-distractors.test.ts",
+    "sha256": "d9d6ef9596287556488a39adce4464400b8c0ff2ae02bec2253de4e805c64e8c",
+    "names": [
+      "createArtifact",
+      "weight"
+    ]
+  }
+}

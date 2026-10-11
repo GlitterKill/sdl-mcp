@@ -1239,6 +1239,9 @@ jobs:
       - name: Verify required embedding models
         run: node scripts/postinstall-models.mjs --strict
 
+      - name: Verify versioned sdl.info retrieval contract
+        run: node --experimental-strip-types --test tests/benchmark/info-contract.test.ts
+
       - name: Cache verified context-quality graph families
         id: context-graph-cache
         uses: actions/cache@v5

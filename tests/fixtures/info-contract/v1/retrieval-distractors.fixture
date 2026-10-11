@@ -1,0 +1,12 @@
+// Retrieval distractors: these mention the gateways but assert neither contract.
+// They are indexed as tests/unit/retrieval-distractors.test.ts, never executed.
+
+/** Create an artifact containing sdl.info and sdl.workflow action metadata. */
+export function createArtifact() {
+  return { tools: ["sdl.info", "sdl.workflow"], mode: "Code Mode" };
+}
+
+/** Weight sdl.info and sdl.workflow search results in Code Mode. */
+export function weight(name: string) {
+  return name === "sdl.info" ? 2 : 1;
+}
