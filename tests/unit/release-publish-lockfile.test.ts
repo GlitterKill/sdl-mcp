@@ -199,15 +199,19 @@ describe("release publish lockfile guards", () => {
     );
   });
 
-  it("passes the packed raw native addon to the Windows FTS regression", () => {
+  it("checks the packed umbrella parser contract without a raw-addon bypass", () => {
     const workflow = readSource(".github/workflows/release-publish.yml");
     const verifyJob = workflow.match(/verify-packed-install:\s*[\s\S]*?\n  publish:/)?.[0] ?? "";
+    assert.match(verifyJob, /native_contract=.*verify-native-package\.mjs/);
+    assert.match(verifyJob, /npm install[\s\S]*node "\$\{native_contract\}" "\$\{smoke_dir\}" "\$\{VERSION\}"/);
+    assert.doesNotMatch(verifyJob, /SDL_(?:MCP_NATIVE_ADDON_PATH|LADYBUG_WINDOWS_FTS_NATIVE_ADDON_PATH)=/);
+    assert.doesNotMatch(verifyJob, /require\.resolve\('sdl-mcp-native-win32-x64-msvc'\)/);
+  });
 
-    assert.match(
-      verifyJob,
-      /native_addon_path=.*require\.resolve\('sdl-mcp-native-win32-x64-msvc'\)[\s\S]*SDL_LADYBUG_WINDOWS_FTS_NATIVE_ADDON_PATH="\$\{native_addon_path\}"[\s\S]*SDL_LADYBUG_WINDOWS_FTS_TEST_MODE=fixed-regression/s,
-      "the fixed-regression harness should exercise the raw addon installed from this release run",
-    );
+  it("gates the independent native publisher on a packed parser contract", () => {
+    const workflow = readSource(".github/workflows/publish-native.yml");
+    assert.match(workflow, /name: Qualify packed native parser contract[\s\S]*node scripts\/qualify-native-package\.mjs[\s\S]*--target linux-x64-gnu[\s\S]*name: Publish platform packages/);
+    assert.doesNotMatch(workflow, /name: Qualify packed native parser contract\n\s+continue-on-error:/);
   });
 
   it("bootstraps the publish job on Node 24 with registry URL for trusted publishing", () => {

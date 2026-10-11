@@ -5,6 +5,11 @@ on:
     paths:
       - ".github/workflows/ladybug-windows-fts-compat.yml"
       - "native/**"
+      - "ladybug-openssl/**"
+      - "scripts/ladybug-fts-artifact.mjs"
+      - "scripts/verify-ladybug-openssl-runtime.mjs"
+      - "tests/unit/ladybug-fts-artifact.test.ts"
+      - "tests/unit/ladybug-windows-fts-runtime.test.ts"
       - "package*.json"
       - "src/db/**"
       - "src/live-index/**"
@@ -45,7 +50,7 @@ jobs:
       - name: Install disposable Ladybug 0.19.0 probe
         if: matrix.mode == 'missing-runtime-baseline'
         run: >-
-          npm install --no-save --no-package-lock --ignore-scripts --legacy-peer-deps
+          npm install --no-save --ignore-scripts --legacy-peer-deps
           kuzu@npm:@ladybugdb/core@0.19.0
 
       - name: Install fixed-mode registry packages
@@ -53,9 +58,10 @@ jobs:
         shell: pwsh
         run: |
           $Version = node -p "require('./package.json').version"
-          npm install --no-save --no-package-lock --ignore-scripts --legacy-peer-deps `
+          $OpenSslVersion = node -p "require('./package.json').optionalDependencies['@sdl-mcp/ladybug-openssl-win32-x64']"
+          npm install --no-save --ignore-scripts --legacy-peer-deps `
             kuzu@npm:@ladybugdb/core@0.19.0 `
-            @sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1 `
+            "@sdl-mcp/ladybug-openssl-win32-x64@$OpenSslVersion" `
             sdl-mcp-native@$Version
 
       - name: Setup LadybugDB native binary
@@ -84,6 +90,14 @@ jobs:
           $addonPath = (Resolve-Path "native/sdl-mcp-native.node" -ErrorAction Stop).Path
           "SDL_LADYBUG_WINDOWS_FTS_NATIVE_ADDON_PATH=$addonPath" >> $env:GITHUB_ENV
 
+      - name: Verify artifact rejection and production reopen
+        if: matrix.mode == 'fixed-regression'
+        shell: pwsh
+        run: |
+          node --experimental-strip-types --test-concurrency=1 --test tests/unit/ladybug-fts-artifact.test.ts tests/unit/ladybug-windows-fts-runtime.test.ts *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP/ladybug-windows-fts-runtime.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run isolated compatibility mode
         shell: pwsh
         env:
@@ -111,13 +125,14 @@ jobs:
           npm ci --ignore-scripts --legacy-peer-deps
           npm ls kuzu
 
-      - name: Upload deterministic failure evidence
-        if: failure()
+      - name: Upload compatibility evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: ladybug-windows-fts-${{ matrix.mode }}
           path: |
             ${{ runner.temp }}/ladybug-windows-fts-${{ matrix.mode }}.log
             ${{ runner.temp }}/ladybug-windows-fts-no-sdl-runtime.log
+            ${{ runner.temp }}/ladybug-windows-fts-runtime.log
           if-no-files-found: error
           retention-days: 7

@@ -10,6 +10,10 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
+import { assertInstalledFtsArtifact } from "../../../scripts/ladybug-fts-artifact.mjs";
+import { WINDOWS_FTS_RUNTIME_PACKAGE_VERSION } from "../../../dist/db/ladybug-windows-fts-runtime.js";
+const ftsContract = JSON.parse(readFileSync(new URL("../../../ladybug-openssl/ladybug-fts-0.19.0.json", import.meta.url), "utf8"));
+
 const MODES = new Set([
   "missing-runtime-baseline",
   "fixed-regression",
@@ -161,6 +165,7 @@ async function missingRuntimeBaseline() {
   const conn = new kuzu.Connection(db);
   try {
     await execute(conn, "INSTALL fts");
+    assertInstalledFtsArtifact(home, ftsContract);
     const extensionRoot = join(home, ".lbdb", "extension", "0.19.0");
     const extensionPath = findExtension(extensionRoot);
     assert.ok(extensionPath, "official FTS extension not found under " + extensionRoot);
@@ -263,6 +268,7 @@ async function runRealPatch() {
     let indexes = await showIndexes(conn);
     if (!indexExistsForTable(indexes, "Symbol", SYMBOL_FTS_INDEX_NAME, "fts")) {
       await execute(conn, "INSTALL fts");
+      assertInstalledFtsArtifact(home, ftsContract);
       await execute(conn, "LOAD fts");
       await execute(
         conn,
@@ -295,9 +301,9 @@ async function fixedRegression() {
   let parserAddon;
   if (!disableOpenSslProvisioning) {
     if (
-      packageVersion("@sdl-mcp/ladybug-openssl-win32-x64") !== "3.5.8-sdl.1"
+      packageVersion("@sdl-mcp/ladybug-openssl-win32-x64") !== WINDOWS_FTS_RUNTIME_PACKAGE_VERSION
     ) {
-      missing.push("@sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1");
+      missing.push("@sdl-mcp/ladybug-openssl-win32-x64@" + WINDOWS_FTS_RUNTIME_PACKAGE_VERSION);
     }
     try {
       const imported = await import("sdl-mcp-native");
@@ -363,11 +369,13 @@ async function fixedRegression() {
   const handles = [];
   try {
     await execute(conn, "INSTALL fts");
-    console.log(JSON.stringify({ phase: "install", extension: "fts" }));
+    assertInstalledFtsArtifact(home, ftsContract);
+    console.log(JSON.stringify({ phase: "install", extension: "fts", sha256: ftsContract.artifactSha256 }));
     if (!disableOpenSslProvisioning) {
       for (const dll of dlls) {
         const loaded = addon.preloadWindowsLibrary(join(binPath, dll));
         assertPackageOrigin(loaded.loadedPath, binPath, dll);
+        console.error(JSON.stringify({ phase: "dll-origin", packageVersion: WINDOWS_FTS_RUNTIME_PACKAGE_VERSION, loadedPath: loaded.loadedPath }));
         handles.push(loaded.token);
       }
       console.log(JSON.stringify({ phase: "preload", modules: dlls }));
@@ -429,6 +437,7 @@ async function fixedRegression() {
   } finally {
     for (const token of handles.reverse()) addon.releaseWindowsLibrary(token);
   }
+  assertInstalledFtsArtifact(home, ftsContract);
   console.log(JSON.stringify({ phase: "shutdown", ok: true }));
 }
 

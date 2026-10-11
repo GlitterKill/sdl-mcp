@@ -146,6 +146,9 @@ if (!nativeBinding) {
 }
 
 module.exports.parseFiles = nativeBinding.parseFiles;
+module.exports.parseFilesAsync = nativeBinding.parseFilesAsync;
+module.exports.parseContent = nativeBinding.parseContent;
+module.exports.parserIdentityContractVersion = nativeBinding.parserIdentityContractVersion;
 module.exports.hashContentNative = nativeBinding.hashContentNative;
 module.exports.generateSymbolIdNative = nativeBinding.generateSymbolIdNative;
 module.exports.preloadWindowsLibrary = nativeBinding.preloadWindowsLibrary;

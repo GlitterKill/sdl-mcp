@@ -261,9 +261,12 @@ describe("context overlay evidence invariant", () => {
       session,
     );
     assert.ok("evidence" in context);
-    const symbolEvidence = context.evidence.filter(
-      (evidence) => evidence.rung === "card",
-    );
+    // Serialization folds card metadata into the matching code evidence.
+    const symbolEvidence = context.evidence.flatMap((evidence) => {
+      if (evidence.rung === "card") return [evidence];
+      const content = evidence.content as Record<string, unknown>;
+      return content.card ? [{ ...evidence, content: content.card }] : [];
+    });
     const skeletonEvidence = context.evidence.filter(
       (evidence) => evidence.rung === "skeleton",
     );
@@ -273,8 +276,10 @@ describe("context overlay evidence invariant", () => {
     }
     const evidenceIds = symbolEvidence.map((evidence) => evidence.symbolId);
     assert.ok(!evidenceIds.includes(durableRemoved.symbolId));
-    assert.ok(evidenceIds.includes(durableModified.symbolId));
-    assert.ok(evidenceIds.includes(overlayAdded.symbolId));
+    assert.deepEqual(evidenceIds.toSorted(), [
+      durableModified.symbolId,
+      overlayAdded.symbolId,
+    ].toSorted());
     for (const evidence of context.evidence) {
       assert.ok(
         evidence.symbolId !== durableRemoved.symbolId,

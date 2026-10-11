@@ -20,7 +20,9 @@
           }
         ],
         "detail": "compact"
-      }
+      },
+      "expectError": true,
+      "expectedErrorCode": "NOT_FOUND"
     },
     {
       "tool": "sdl.workflow",
@@ -35,7 +37,9 @@
           }
         ],
         "detail": "full"
-      }
+      },
+      "expectError": true,
+      "expectedErrorCode": "NOT_FOUND"
     },
     {
       "tool": "sdl.action.search",

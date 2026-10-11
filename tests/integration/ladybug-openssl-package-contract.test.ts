@@ -67,14 +67,14 @@ function readPe(filePath: string): { machine: number; optionalMagic: number } {
 
 it("defines the pinned OpenSSL and Ladybug FTS source artifacts", () => {
   assert.deepEqual(source, {
-    opensslVersion: "3.5.8",
-    packageVersion: "3.5.8-sdl.1",
+    opensslVersion: "3.5.9",
+    packageVersion: "3.5.9-sdl.1",
     sourceUrl:
-      "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
+      "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
     signatureUrl:
-      "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz.asc",
+      "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz.asc",
     sourceSha256:
-      "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+      "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
     releaseSignerFingerprint: expectedReleaseSignerFingerprint,
     releaseCertificateFingerprint: expectedReleaseCertificateFingerprint,
     configureTarget: "VC-WIN64A",
@@ -102,8 +102,8 @@ it("defines the pinned OpenSSL and Ladybug FTS source artifacts", () => {
   assert.match(releaseKey, /BEGIN PGP PUBLIC KEY BLOCK/u);
 });
 
-it("pins the exact signer used by the OpenSSL 3.5.8 source release", () => {
-  assert.equal(source.packageVersion, "3.5.8-sdl.1");
+it("pins the exact signer used by the OpenSSL 3.5.9 source release", () => {
+  assert.equal(source.packageVersion, "3.5.9-sdl.1");
   assert.equal(source.releaseSignerFingerprint, expectedReleaseSignerFingerprint);
   assert.equal(source.releaseCertificateFingerprint, expectedReleaseCertificateFingerprint);
 
@@ -223,8 +223,28 @@ it(
     assert.equal(provenance.source.sha256, source.sourceSha256);
     assert.equal(provenance.source.releaseSignerFingerprint, source.releaseSignerFingerprint);
     assert.equal(provenance.source.signatureFingerprint, source.releaseSignerFingerprint);
-    const sbom = readFileSync(join(packageRoot, "sbom.spdx.json"), "utf8");
-    assert.match(sbom, new RegExp("^PackageVersion: " + source.packageVersion + "$", "mu"));
+    assert.equal(provenance.fts.sha256, fts.artifactSha256);
+    assert.equal(provenance.fts.size, fts.artifactSize);
+    const sbom = JSON.parse(readFileSync(join(packageRoot, "sbom.spdx.json"), "utf8"));
+    assert.equal(sbom.spdxVersion, "SPDX-2.3");
+    assert.equal(sbom.dataLicense, "CC0-1.0");
+    assert.match(sbom.creationInfo.created, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u);
+    assert.ok(sbom.creationInfo.creators.length > 0);
+    assert.equal(sbom.packages[0].versionInfo, source.packageVersion);
+    assert.equal(sbom.packages[0].licenseDeclared, packageJson.license);
+    const checksums: string[] = [];
+    const sbomFiles: string[] = [];
+    for (const file of sbom.files) {
+      const relativePath = file.fileName.replace(/^\.\//u, "");
+      sbomFiles.push(relativePath);
+      assert.deepEqual(file.checksums, [{ algorithm: "SHA256", checksumValue: sha256(join(packageRoot, relativePath)) }]);
+      checksums.push(createHash("sha1").update(readFileSync(join(packageRoot, relativePath))).digest("hex"));
+      assert.ok(sbom.relationships.some((item: { spdxElementId: string; relationshipType: string; relatedSpdxElement: string }) =>
+        item.spdxElementId === sbom.packages[0].SPDXID && item.relationshipType === "CONTAINS" && item.relatedSpdxElement === file.SPDXID));
+    }
+    assert.deepEqual(sbomFiles.sort(), [...allowedFiles, "package.json"].filter((file) => file !== "sbom.spdx.json").sort());
+    assert.equal(sbom.packages[0].packageVerificationCode.packageVerificationCodeValue, createHash("sha1").update(checksums.sort().join("")).digest("hex"));
+    assert.deepEqual(sbom.packages[0].packageVerificationCode.packageVerificationCodeExcludedFiles, ["./sbom.spdx.json"]);
     assert.equal(provenance.build.configureTarget, source.configureTarget);
     assert.equal(
       typeof provenance.build.msvcToolchainVersion,

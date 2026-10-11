@@ -41,13 +41,13 @@ type VerifiedRuntimePackage = {
 
 const require = createRequire(import.meta.url);
 const runtimePackageName = "@sdl-mcp/ladybug-openssl-win32-x64";
-const runtimePackageVersion = "3.5.8-sdl.1";
+export const WINDOWS_FTS_RUNTIME_PACKAGE_VERSION = "3.5.8-sdl.1";
 const expectedDlls = ["bin/libcrypto-3-x64.dll", "bin/libssl-3-x64.dll"] as const;
 const verifiedRuntimePackageCache = new Map<string, VerifiedRuntimePackage>();
 
 const recoveryByReason: Record<WindowsFtsRuntimeUnavailable["reason"], string> = {
   "missing-package":
-    "Windows FTS requires @sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1. Reinstall sdl-mcp with optional dependencies enabled.",
+    `Windows FTS requires ${runtimePackageName}@${WINDOWS_FTS_RUNTIME_PACKAGE_VERSION}. Reinstall sdl-mcp with optional dependencies enabled.`,
   "invalid-package":
     "The Windows FTS OpenSSL runtime package is incomplete or failed hash verification. Reinstall sdl-mcp and avoid copying DLLs from another OpenSSL distribution.",
   "native-loader-unavailable":
@@ -99,7 +99,7 @@ function packageRootFromResolver(
 
 function verifyRuntimePackage(options: WindowsFtsRuntimeOptions): VerifiedRuntimePackage | WindowsFtsRuntimeUnavailable {
   const packageName = options.packageName ?? runtimePackageName;
-  const packageVersion = options.packageVersion ?? runtimePackageVersion;
+  const packageVersion = options.packageVersion ?? WINDOWS_FTS_RUNTIME_PACKAGE_VERSION;
   const requireResolve = options.requireResolve ?? require.resolve;
   const packageRoot = packageRootFromResolver(packageName, requireResolve);
   if (!packageRoot) return unavailable("missing-package");

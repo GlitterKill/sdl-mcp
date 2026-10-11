@@ -406,40 +406,51 @@ function verifyFtsImports(ftsPath, exportsByDll) {
 }
 
 function writeSpdxSbom(provenance) {
-  const files = [...allowedPackageFiles]
-    .filter((file) => file !== "sbom.spdx.json")
-    .sort();
-  const documentHash = createHash("sha256")
-    .update(packageJson.name + "@" + packageJson.version + ":" + source.sourceSha256)
-    .digest("hex");
-  const lines = [
-    "SPDXVersion: SPDX-2.3",
-    "DataLicense: CC0-1.0",
-    "SPDXID: SPDXRef-DOCUMENT",
-    "DocumentName: " + packageJson.name + "-" + packageJson.version,
-    "DocumentNamespace: https://sdl-mcp.local/spdx/" + encodeURIComponent(packageJson.name) + "/" + packageJson.version + "/" + documentHash,
-    "Creator: Tool: sdl-mcp-ladybug-openssl-verify",
-    "PackageName: " + packageJson.name,
-    "SPDXID: SPDXRef-Package-ladybug-openssl-win32-x64",
-    "PackageVersion: " + packageJson.version,
-    "PackageDownloadLocation: NOASSERTION",
-    "FilesAnalyzed: true",
-    "PackageLicenseConcluded: Apache-2.0 AND OpenSSL",
-    "PackageLicenseDeclared: Apache-2.0 AND OpenSSL",
-    "PackageCopyrightText: NOASSERTION",
-  ];
-
-  for (const file of files) {
+  const fileNames = [...allowedPackageFiles].filter((file) => file !== "sbom.spdx.json").sort();
+  // SPDX package verification codes use SHA-1; file integrity uses SHA-256.
+  const sha1s = [];
+  const files = fileNames.map((file) => {
     const filePath = join(packageRoot, file);
     assertExists(filePath, file);
-    lines.push("FileName: ./" + file);
-    lines.push("SPDXID: SPDXRef-File-" + file.replace(/[^A-Za-z0-9.-]+/gu, "-"));
-    lines.push("FileChecksum: SHA256: " + sha256(filePath));
-    lines.push("LicenseConcluded: NOASSERTION");
-  }
-
-  lines.push("ExternalRef: SECURITY cpe23Type cpe:2.3:a:openssl:openssl:" + provenance.opensslVersion + ":*:*:*:*:*:*:*");
-  writeFileSync(join(packageRoot, "sbom.spdx.json"), lines.join("\n") + "\n", "utf8");
+    sha1s.push(createHash("sha1").update(readFileSync(filePath)).digest("hex"));
+    return {
+      fileName: "./" + file,
+      SPDXID: "SPDXRef-File-" + file.replace(/[^A-Za-z0-9.-]+/gu, "-"),
+      checksums: [{ algorithm: "SHA256", checksumValue: sha256(filePath) }],
+      licenseConcluded: "NOASSERTION",
+      licenseInfoInFiles: ["NOASSERTION"],
+      copyrightText: "NOASSERTION",
+    };
+  });
+  const created = new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
+  const documentHash = createHash("sha256").update(JSON.stringify({ files, created })).digest("hex");
+  const packageId = "SPDXRef-Package-ladybug-openssl-win32-x64";
+  writeCanonicalJson(join(packageRoot, "sbom.spdx.json"), {
+    spdxVersion: "SPDX-2.3",
+    dataLicense: "CC0-1.0",
+    SPDXID: "SPDXRef-DOCUMENT",
+    name: packageJson.name + "-" + packageJson.version,
+    documentNamespace: "https://sdl-mcp.local/spdx/" + encodeURIComponent(packageJson.name) + "/" + packageJson.version + "/" + documentHash,
+    creationInfo: { created, creators: ["Tool: sdl-mcp-ladybug-openssl-verify"] },
+    documentDescribes: [packageId],
+    packages: [{
+      name: packageJson.name,
+      SPDXID: packageId,
+      versionInfo: packageJson.version,
+      downloadLocation: "NOASSERTION",
+      filesAnalyzed: true,
+      packageVerificationCode: {
+        packageVerificationCodeValue: createHash("sha1").update(sha1s.sort().join("")).digest("hex"),
+        packageVerificationCodeExcludedFiles: ["./sbom.spdx.json"],
+      },
+      licenseConcluded: "NOASSERTION",
+      licenseDeclared: packageJson.license,
+      copyrightText: "NOASSERTION",
+      externalRefs: [{ referenceCategory: "SECURITY", referenceType: "cpe23Type", referenceLocator: "cpe:2.3:a:openssl:openssl:" + provenance.opensslVersion + ":*:*:*:*:*:*:*" }],
+    }],
+    files,
+    relationships: files.map((file) => ({ spdxElementId: packageId, relationshipType: "CONTAINS", relatedSpdxElement: file.SPDXID })),
+  });
 }
 
 function runCleanLadybugChild() {
@@ -452,6 +463,8 @@ function runCleanLadybugChild() {
   const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
   const childCode = [
     "import assert from 'node:assert/strict';",
+    "import { assertInstalledFtsArtifact } from './scripts/ladybug-fts-artifact.mjs';",
+    "const ftsContract = " + JSON.stringify(fts) + ";",
     "import { join } from 'node:path';",
     "const kuzu = await import('kuzu');",
     "async function execute(conn, query, rows = false) {",
@@ -465,6 +478,7 @@ function runCleanLadybugChild() {
     "const conn = new kuzu.Connection(db);",
     "try {",
     "  await execute(conn, 'INSTALL fts');",
+    "  const installedFts = assertInstalledFtsArtifact(process.env.USERPROFILE, ftsContract);",
     "  await execute(conn, 'LOAD fts');",
     "  await execute(conn, 'CREATE NODE TABLE A(id INT64, name STRING, PRIMARY KEY(id))');",
     "  await execute(conn, \"CALL CREATE_FTS_INDEX('A', 'a_idx', ['name'], stemmer := 'none')\");",
@@ -479,7 +493,8 @@ function runCleanLadybugChild() {
     "    const deletedRows = await execute(conn, \"CALL QUERY_FTS_INDEX('A', 'a_idx', 'after_\" + index + \"') RETURN node.id AS id\", true);",
     "    assert.deepEqual(deletedRows, []);",
     "  }",
-    "  console.log(JSON.stringify({ mode: 'clean-env-ladybug-fts', iterations: 5 }));",
+    "  assertInstalledFtsArtifact(process.env.USERPROFILE, ftsContract);",
+    "  console.log(JSON.stringify({ mode: 'clean-env-ladybug-fts', iterations: 5, installedFts }));",
     "} finally {",
     "  await conn.close();",
     "  await db.close();",
@@ -505,6 +520,7 @@ function runCleanLadybugChild() {
       windowsHide: true,
     });
     assert.equal(result.status, 0, result.stderr + result.stdout);
+    console.log(result.stdout.trim());
   } finally {
     rmSync(tempHome, { recursive: true, force: true });
   }
@@ -552,8 +568,8 @@ async function main() {
     fts: {
       artifactUrl: fts.artifactUrl,
       imports: ftsImports,
-      sha256: fts.sha256,
-      size: fts.size,
+      sha256: fts.artifactSha256,
+      size: fts.artifactSize,
       version: fts.ladybugVersion,
     },
     opensslVersion: source.opensslVersion,

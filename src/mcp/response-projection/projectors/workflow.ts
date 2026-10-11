@@ -258,7 +258,13 @@ function compactStep(
     };
   }
   const error = status === "ok" ? undefined : errorValue(raw);
-  if (error !== undefined) out.error = error;
+  if (nextAction !== undefined && isRecord(error)) {
+    // The validated step continuation is the single public recovery action.
+    const { nextCalls: _nextCalls, ...errorWithoutRecovery } = error;
+    out.error = errorWithoutRecovery;
+  } else if (error !== undefined) {
+    out.error = error;
+  }
   if (status !== "ok" && typeof raw.blockedByStep === "number") {
     out.blockedByStep = raw.blockedByStep;
   }

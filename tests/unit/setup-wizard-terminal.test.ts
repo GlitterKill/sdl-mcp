@@ -63,9 +63,19 @@ test("optional text parser treats blank clack answers as empty string", () => {
   assert.equal(parseOptionalTextAnswer("  C:\\repo  "), "C:\\repo");
 });
 
-test("NO_COLOR disables ANSI output", () => {
-  assert.equal(colorize("cyan", "text", { noColor: true }), "text");
-  assert.match(colorize("cyan", "text", { noColor: false }), /\u001b\[/);
+test("NO_COLOR and the explicit option disable ANSI output", () => {
+  const previousNoColor = process.env.NO_COLOR;
+  try {
+    delete process.env.NO_COLOR;
+    assert.equal(colorize("cyan", "text", { noColor: true }), "text");
+    assert.match(colorize("cyan", "text", { noColor: false }), /\u001b\[/);
+    process.env.NO_COLOR = "1";
+    assert.equal(colorize("cyan", "text"), "text");
+    assert.equal(colorize("cyan", "text", { noColor: false }), "text");
+  } finally {
+    if (previousNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = previousNoColor;
+  }
 });
 
 test("timeout confirm resolves to default on timeout", async () => {

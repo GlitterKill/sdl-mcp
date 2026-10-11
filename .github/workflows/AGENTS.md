@@ -226,3 +226,117 @@ If you change the workflows themselves, document why a workflow change was neces
 ### 2026-09-06: Structural benchmark requested semantic readiness from mock embeddings
 
 Run `34068993668`, job `101582753074`, aborted before threshold evaluation with `SEMANTIC_FINAL_ASSESSMENT_DEGRADED`. The structural lane inherited enabled mock semantics from the shared config. It now derives a temporary runner config with only `semantic.enabled: false`; the shared config, production readiness checks, thresholds, fresh database isolation, and exit-139-only retry remain unchanged. `tests/unit/benchmark-scope.test.ts` executes the workflow config preparation and checks that no other setting changes. Hosted validation remains required.
+
+### 2026-10-08: Windows FTS artifact and version qualification gaps
+
+Confirmed on base `383bbdabdc9e1b0b7ff61bd60cb1507bcbb033b0`: the OpenSSL verifier
+checked a downloaded FTS file but its runtime child independently installed a
+cache copy without hashing that copy. It also read nonexistent `fts.sha256` and
+`fts.size` contract properties when writing provenance. Use `artifactSha256` and
+`artifactSize`, and verify the isolated installed file before loading and after
+use. Successful compatibility logs now retain the digest and actual DLL origins.
+
+The compatibility workflow derives the runtime package version from the root
+optional dependency and tests its agreement with the loader constant. The
+release packed-install harness must copy `scripts/ladybug-fts-artifact.mjs` and
+`ladybug-openssl/ladybug-fts-0.19.0.json` alongside the fixture. The candidate
+staging version can differ from the published consumer version until publication;
+do not select an unpublished registry dependency in the ordinary root lockfile.
+
+The locked native installation lacked the fixture's content-parser contract.
+The final lockfile inspection found that the Windows platform entry says 0.13.7
+but resolves the 0.12.4 tarball; this is not evidence that the actual 0.13.7
+registry tarball lacks the API. Building this branch's native addon and setting
+`SDL_LADYBUG_WINDOWS_FTS_NATIVE_ADDON_PATH` resolved that preflight failure. This
+is why fixed-regression CI and release packed tests must use their branch-built
+addon, not treat the registry addon as equivalent evidence.
+
+The local candidate overlay also exposed an install-mode problem:
+`npm install --no-save --no-package-lock` ignored the committed graph and changed
+135 packages, including `@types/node` 24.12.0 to 24.19.1. The latter caused the
+existing `src/observability/service.ts` import of `IntervalHistogram` to fail.
+Restore with `npm ci`; do not patch observability as part of the OpenSSL update.
+The OpenSSL and compatibility probe install commands retain `--no-save` but no
+longer disable reading the lockfile. Local candidate qualification can unpack
+the verified dependency-free runtime tarball into its isolated package directory
+and restore a byte-for-byte backup afterward, leaving other resolutions intact.
+
+The generated `sbom.spdx.json` previously contained tag-value text without
+required creation/package-verification metadata. It now contains SPDX 2.3 JSON,
+actual file SHA-256 checksums, relationships, creation metadata, a package
+verification code excluding the SBOM itself, and the package's declared license.
+The focused contract checks these against the shipped files; the final local
+artifact also passed the official SPDX 2.3 JSON schema using existing Ajv.
+
+The Oct 8 local aggregate run passed 764 of 772 files with both 3.5.8 and 3.5.9.
+The same eight failures reproduced from unmodified 383bbda: context-overlay
+evidence, determinism, agent-editing ergonomics, context response artifacts,
+structural search/edit, stale seed evaluation, terminal colors, and symbol-node
+resolution. Treat these and the existing npm audit findings as unresolved release
+gates. The base lockfile also labels Windows native 0.13.7 while resolving 0.12.4,
+and labels two Watchman entries 0.13.7 while resolving 0.11.8. These pre-existing
+lock inconsistencies were documented without unrelated dependency edits.
+
+### 2026-10-10: Baseline test repair and release-coupled lock metadata
+
+Confirmed locally on the isolated 383bbda-based branch: all eight previously
+failing files reproduced. Context card consolidation, workflow error envelopes,
+top-level response continuations and the file-write discovery example had changed
+without corresponding fixture updates. Tests now assert current public contracts
+while retaining exact IDs, signature equality, error codes, recovery arguments,
+schema validity and LF/CRLF behavior. The workflow projector also removes the
+duplicate nested nextCalls when a validated step nextAction exists.
+
+The terminal failure came from inherited NO_COLOR=1; the test now restores its
+environment after checking both modes. The seed-evaluation artifact had one stale
+source hash (context/engine.ts), and regeneration preserved quality floors. Two
+Kotlin tests failed before their assertions because the bundled native grammar
+was missing. A scripts-enabled clean install restored the grammar; no Kotlin
+test was skipped or altered. All eight targeted files now pass.
+
+The version-sync script rewrote installed-package version fields while retaining
+old resolved URLs/integrities. Ten entries were affected: all seven native and
+three Watchman package entries. Verified npm 0.13.7 metadata and downloaded
+tarball SHA-512/manifest checks corrected these fields. The sync script now only
+updates the root dependency requirements in the lockfile, leaving npm to resolve
+new published artifacts. Its new regression test proves resolved records remain
+intact. A clean install matched all 478 installed package versions.
+
+After correcting the lockfile, the genuine registry native 0.13.7 still lacks
+parseContent/parserIdentityContractVersion, although it has the Windows loader.
+This is a newly verified fact and supersedes the earlier lack of evidence about
+the real 0.13.7 artifact. Retain the required native preflight. The existing
+branch-built addon has contract 1; publication of a new release-coupled native
+version and hosted validation remain separate gates. Do not republish 0.13.7.
+
+Follow-up verification completed: 773/773 aggregate files passed with each
+OpenSSL runtime (3.5.8 and 3.5.9), with zero segfault-on-exit classifications.
+Required FTS checks passed using the branch-built addon for both runtimes.
+The registry-native preflight still fails the missing parser contract. Golden
+validation and a fresh packed candidate install passed; that install uses local
+native tarballs. Missing-runtime, mutation/patchSavedFile, two reopen processes,
+parser verification and native-disabled MCP startup passed. Root/installed/
+compiled runtime selection was restored to 3.5.8. Hosted and registry-native
+release gates remain; nothing was published.
+
+### 2026-10-10: Native parser API omission was in the umbrella wrapper
+
+Direct inspection of registry sdl-mcp-native-win32-x64-msvc@0.13.7 confirms
+parseContent, parseFilesAsync and parserIdentityContractVersion exist and the
+identity contract is 1. The public sdl-mcp-native@0.13.7 wrapper omitted them.
+This corrects any interpretation of the earlier preflight as missing binary
+implementation. native/index.js now forwards all three APIs; Rust is unchanged.
+
+Raw-addon overrides/local fallback let prior native and packed FTS checks bypass
+the wrapper. Release packed verification now checks the installed umbrella API,
+binary origin, matching package versions and content/disk/async parity before
+FTS, with no addon override. publish-native independently qualifies its packed
+Linux x64 GNU pair on its matching Ubuntu x64 publish runner before publishing.
+Do not move raw target execution into cross-compilation matrix jobs.
+
+Fresh local Windows 0.13.8-rc.1 native tarballs passed the normal installed SDL
+parser and FTS paths without overrides, plus two reopens. The source manifests
+and lock retain published versions; only disposable staging manifests adopt
+the prerelease. All 774 aggregate files passed, as did the focused native tests.
+Hosted/platform/registry gates remain. Do not republish 0.13.7 or infer registry
+success from local tarball qualification.

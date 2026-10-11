@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildCatalog } from "../../dist/code-mode/action-catalog.js";
+import { prepareNewContent } from "../../dist/mcp/tools/file-write-internals.js";
 import { MANUAL_DESCRIPTION } from "../../dist/code-mode/descriptions.js";
 import { FileReadRequestSchema, FileWriteRequestSchema, FileWriteResponseSchema } from "../../dist/mcp/tools.js";
 import { buildToolResponseEnvelope } from "../../dist/server.js";
@@ -62,10 +63,20 @@ describe("agent editing and discovery ergonomics", () => {
     const write = catalog.find((entry) => entry.action === "file.write");
     assert.ok(write);
     const example = FileWriteRequestSchema.parse({ repoId: "fixture", ...write.example });
-    assert.ok(example.replacePattern);
-    const pattern = new RegExp(example.replacePattern.pattern);
-    assert.ok(pattern.test("oldName\r\n"));
-    assert.ok(pattern.test("oldName\n"));
+    assert.deepEqual(example.replaceLines, {
+      start: 0, end: 1, content: "const value = 1;",
+    });
+    for (const eol of ["\r\n", "\n"]) {
+      const existingContent = `const oldName = 0;${eol}// preserved${eol}`;
+      const result = prepareNewContent({
+        prepared: { relPath: example.filePath, fileExists: true },
+        request: example,
+        existingContent,
+        existingBytes: Buffer.byteLength(existingContent),
+      });
+      assert.equal(result.mode, "replaceLines");
+      assert.equal(result.newContent, `const value = 1;${eol}// preserved${eol}`);
+    }
     assert.match(write.schemaSummary?.fields.find((field) => field.name === "replacePattern")?.description ?? "", /line endings/);
     const output = catalog.find((entry) => entry.action === "runtime.queryOutput");
     assert.equal(output?.example?.stream, "both");

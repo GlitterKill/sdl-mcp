@@ -207,16 +207,14 @@ describe("sdl.context response artifacts", () => {
     ) as {
       results: Array<{
         failureTrace?: unknown;
-        error?: {
-          nextCalls?: Array<{ action: string; args: unknown }>;
-        };
+        nextAction?: { action: string; args: unknown };
+        error?: { nextCalls?: unknown };
       }>;
     };
     const projectedStep = projectedFailure.results[0];
-    const nextCalls = projectedStep.error?.nextCalls;
-    const nextAction = nextCalls?.[0];
+    const nextAction = projectedStep.nextAction;
     assert.equal(projectedStep.failureTrace, undefined);
-    assert.equal("nextAction" in projectedStep, false);
+    assert.equal(projectedStep.error?.nextCalls, undefined);
     assert.deepEqual(nextAction, {
       action: "sdl.retrieve",
       args: {
@@ -232,10 +230,9 @@ describe("sdl.context response artifacts", () => {
       },
     });
     assert.equal(RetrieveRequestSchema.safeParse(nextAction?.args).success, true);
-    assert.equal(
-      nextCalls?.length,
-      1,
-    );
+    assert.deepEqual(Object.keys(projectedStep), [
+      "stepIndex", "fn", "status", "error", "nextAction",
+    ]);
 
     const retryRequest: ParsedWorkflowRequest = {
       ...invalidRequest,

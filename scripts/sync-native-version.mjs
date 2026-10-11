@@ -74,7 +74,7 @@ const version = explicitVersion || nativePkg.version;
 
 console.log(`Syncing release-coupled package versions: ${version}`);
 
-const syncedNativePkg = syncPackageVersion(
+syncPackageVersion(
   nativePkgPath,
   "native/package.json",
   version,
@@ -86,7 +86,7 @@ const nativePlatformCount = syncPackageDirVersions(
 );
 
 const watchmanPkgPath = join(root, "watchman", "package.json");
-const syncedWatchmanPkg = syncPackageVersion(
+syncPackageVersion(
   watchmanPkgPath,
   "watchman/package.json",
   version,
@@ -137,57 +137,15 @@ try {
     }
   }
 
-  for (const depName of Object.keys(syncedWatchmanPkg.optionalDependencies ?? {})) {
-    const depEntry = lock.packages?.[`node_modules/${depName}`];
-    if (depEntry?.version && depEntry.version !== version) {
-      depEntry.version = version;
-      lockChanged = true;
-    }
-  }
-
-  const watchmanLockEntry = lock.packages?.["node_modules/sdl-mcp-watchman"];
-  if (watchmanLockEntry?.version && watchmanLockEntry.version !== version) {
-    watchmanLockEntry.version = version;
-    lockChanged = true;
-  }
-  if (watchmanLockEntry?.optionalDependencies) {
-    for (const depName of Object.keys(watchmanLockEntry.optionalDependencies)) {
-      if (watchmanLockEntry.optionalDependencies[depName] !== version) {
-        watchmanLockEntry.optionalDependencies[depName] = version;
-        lockChanged = true;
-      }
-    }
-  }
-
-  const nativeLockEntry = lock.packages?.["node_modules/sdl-mcp-native"];
-  if (nativeLockEntry) {
-    if (nativeLockEntry.version !== version) {
-      nativeLockEntry.version = version;
-      lockChanged = true;
-    }
-    if (nativeLockEntry.optionalDependencies) {
-      for (const depName of Object.keys(nativeLockEntry.optionalDependencies)) {
-        if (nativeLockEntry.optionalDependencies[depName] !== version) {
-          nativeLockEntry.optionalDependencies[depName] = version;
-          lockChanged = true;
-        }
-      }
-    }
-  }
-
-  for (const depName of Object.keys(syncedNativePkg.optionalDependencies ?? {})) {
-    const depEntry = lock.packages?.[`node_modules/${depName}`];
-    if (depEntry?.version && depEntry.version !== version) {
-      depEntry.version = version;
-      lockChanged = true;
-    }
-  }
-
+  // Resolved entries describe immutable registry artifacts. Updating only their
+  // version would keep the old tarball URL/integrity and silently install old code.
+  // After publishing the new packages, let npm resolve the complete metadata.
+  console.log("  Resolve published versions with npm install --package-lock-only --ignore-scripts --legacy-peer-deps before release verification");
   if (lockChanged) {
     writeJson(lockPath, lock);
-    console.log(`  Updated package-lock.json release-coupled optional entries -> ${version}`);
+    console.log(`  Updated package-lock.json root optional requirements -> ${version}`);
   } else {
-    console.log("  package-lock.json release-coupled optional entries already in sync");
+    console.log("  package-lock.json root optional requirements already in sync");
   }
 } catch {
   console.log("  package-lock.json not found or unreadable, skipping lock sync");

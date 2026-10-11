@@ -7,10 +7,13 @@ import { basename, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import {
+  WINDOWS_FTS_RUNTIME_PACKAGE_VERSION,
   isWindowsFtsRuntimeUnavailable,
   withWindowsFtsRuntime,
   type WindowsFtsRuntimeOptions,
 } from "../../src/db/ladybug-windows-fts-runtime.ts";
+
+import * as runtimeContract from "../../src/db/ladybug-windows-fts-runtime.ts";
 
 const packageName = "@sdl-mcp/ladybug-openssl-win32-x64";
 const ladybugSource = readFileSync("src/db/ladybug.ts", "utf8");
@@ -22,7 +25,7 @@ function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function createRuntimePackage(version = "3.5.8-sdl.1"): {
+function createRuntimePackage(version = WINDOWS_FTS_RUNTIME_PACKAGE_VERSION): {
   root: string;
   cleanup: () => void;
   options: Pick<WindowsFtsRuntimeOptions, "requireResolve">;
@@ -102,6 +105,13 @@ function openChildFailure(
 }
 
 describe("withWindowsFtsRuntime", () => {
+  it("keeps the runtime version aligned with the installed dependency contract", () => {
+    const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
+    assert.equal(
+      Reflect.get(runtimeContract, "WINDOWS_FTS_RUNTIME_PACKAGE_VERSION"),
+      rootPackage.optionalDependencies[packageName],
+    );
+  });
   it(
     "reopens a populated FTS database across clean child processes",
     {
@@ -206,10 +216,7 @@ describe("withWindowsFtsRuntime", () => {
     assert.equal(calls, 0);
     assert.equal(isWindowsFtsRuntimeUnavailable(result), true);
     assert.equal(isWindowsFtsRuntimeUnavailable(result) ? result.reason : undefined, "missing-package");
-    assert.match(
-      isWindowsFtsRuntimeUnavailable(result) ? result.recovery : "",
-      /@sdl-mcp\/ladybug-openssl-win32-x64@3\.5\.8-sdl\.1/u,
-    );
+    assert.ok((isWindowsFtsRuntimeUnavailable(result) ? result.recovery : "").includes(packageName + "@" + WINDOWS_FTS_RUNTIME_PACKAGE_VERSION));
     assert.doesNotMatch(isWindowsFtsRuntimeUnavailable(result) ? result.recovery : "", /[A-Z]:\\|\\Users\\|\/tmp\//u);
   });
 

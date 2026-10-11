@@ -251,9 +251,12 @@ jobs:
         run: |
           set -euo pipefail
           tarball=$(node -e "const fs=require('fs');const path=require('path');const f='sdl-mcp-'+process.env.VERSION+'.tgz';if(!fs.existsSync(path.join('release-pack',f)))process.exit(1);console.log(path.resolve('release-pack',f).replace(/\\\\/g,'/'));")
+          native_contract=$(node -e "console.log(require('path').resolve('scripts/verify-native-package.mjs').replace(/\\\\/g,'/'))")
           fixture_test=$(node -e "console.log(require('path').resolve('tests/integration/live-index-symbol-fts-crash.test.ts').replace(/\\\\/g,'/'))")
           fixture_child=$(node -e "console.log(require('path').resolve('tests/fixtures/ladybug/windows-fts-clean-env-child.mjs').replace(/\\\\/g,'/'))")
           fixture_workflow=$(node -e "console.log(require('path').resolve('.github/workflows/ladybug-windows-fts-compat.yml').replace(/\\\\/g,'/'))")
+          artifact_helper=$(node -e "console.log(require('path').resolve('scripts/ladybug-fts-artifact.mjs').replace(/\\\\/g,'/'));")
+          fts_contract=$(node -e "console.log(require('path').resolve('ladybug-openssl/ladybug-fts-0.19.0.json').replace(/\\\\/g,'/'));")
           context_source=$(node -e "console.log(require('path').resolve('src/context/profiles.ts').replace(/\\\\/g,'/'))")
           install_args=("${tarball}" "--legacy-peer-deps")
           if [[ "${{ matrix.os }}" == "windows-latest" && "${{ matrix.accelerators }}" == "included" ]]; then
@@ -275,6 +278,7 @@ jobs:
           fi
           if [[ "${{ matrix.os }}" == "windows-latest" && "${{ matrix.accelerators }}" == "included" ]]; then
             node -e "const fs=require('fs');for(const file of ['$openssl_package','node_modules/sdl-mcp-native/package.json','node_modules/sdl-mcp-native-win32-x64-msvc/package.json'])if(!fs.existsSync(file))throw new Error('missing packed-install accelerator: '+file)"
+            node "${native_contract}" "${smoke_dir}" "${VERSION}"
           elif [[ "${{ matrix.os }}" != "windows-latest" ]]; then
             node -e "const fs=require('fs');if(fs.existsSync('$openssl_package'))throw new Error('Windows OpenSSL package was not filtered')"
           fi
@@ -323,14 +327,16 @@ jobs:
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             # Node 24 does not strip TypeScript under node_modules. Build a temporary harness beside it.
             mkdir -p "${smoke_dir}/tests/integration" "${smoke_dir}/tests/fixtures/ladybug" "${smoke_dir}/src/context" "${smoke_dir}/.github/workflows"
+            mkdir -p "${smoke_dir}/scripts" "${smoke_dir}/ladybug-openssl"
+            cp "${artifact_helper}" "${smoke_dir}/scripts/ladybug-fts-artifact.mjs"
+            cp "${fts_contract}" "${smoke_dir}/ladybug-openssl/ladybug-fts-0.19.0.json"
             cp "${fixture_test}" "${smoke_dir}/tests/integration/live-index-symbol-fts-crash.test.ts"
             cp "${fixture_child}" "${smoke_dir}/tests/fixtures/ladybug/windows-fts-clean-env-child.mjs"
             cp "${fixture_workflow}" "${smoke_dir}/.github/workflows/ladybug-windows-fts-compat.yml"
             cp "${context_source}" "${smoke_dir}/src/context/profiles.ts"
             cp -R node_modules/sdl-mcp/dist "${smoke_dir}/dist"
             if [[ "${{ matrix.accelerators }}" == "included" ]]; then
-              native_addon_path=$(node -e "console.log(require.resolve('sdl-mcp-native-win32-x64-msvc').replace(/\\\\/g,'/'))")
-              SDL_LADYBUG_WINDOWS_FTS_NATIVE_ADDON_PATH="${native_addon_path}" SDL_LADYBUG_WINDOWS_FTS_TEST_MODE=fixed-regression SDL_LADYBUG_WINDOWS_FTS_REQUIRE_MODE=1 \
+              SDL_LADYBUG_WINDOWS_FTS_TEST_MODE=fixed-regression SDL_LADYBUG_WINDOWS_FTS_REQUIRE_MODE=1 \
                 node --experimental-strip-types --test-concurrency=1 --test tests/integration/live-index-symbol-fts-crash.test.ts
             else
               SDL_MCP_DISABLE_NATIVE_ADDON=1 node --experimental-strip-types --test --test-name-pattern="probes upstream" tests/integration/live-index-symbol-fts-crash.test.ts

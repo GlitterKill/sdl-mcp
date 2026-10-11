@@ -273,6 +273,7 @@ async function callToolStrict(
       structuredContent?: {
         isError?: boolean;
         error?: { code?: unknown };
+        results?: Array<{ status?: string; error?: { code?: unknown } }>;
       };
     }
   ).structuredContent;
@@ -285,7 +286,14 @@ async function callToolStrict(
     );
   }
   if (expectError && expectedErrorCode !== undefined) {
-    assert.equal(structuredContent?.error?.code, expectedErrorCode);
+    if (name === "sdl.workflow") {
+      assert.deepEqual(
+        structuredContent?.results?.map(step => ({ status: step.status, code: step.error?.code })),
+        [{ status: "error", code: expectedErrorCode }],
+      );
+    } else {
+      assert.equal(structuredContent?.error?.code, expectedErrorCode);
+    }
   }
   return response;
 }

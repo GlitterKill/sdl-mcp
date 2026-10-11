@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
 
+const ftsContract = JSON.parse(readFileSync("ladybug-openssl/ladybug-fts-0.19.0.json", "utf8"));
+
 const MODES = [
   "missing-runtime-baseline",
   "fixed-regression",
@@ -75,7 +77,7 @@ it("fails the native build step on the first failed command", () => {
 const accessViolationStatuses = new Set([0xc0000005, -1073741819]);
 const fixedEvidence = [
   { phase: "environment", pathDlls: [] },
-  { phase: "install", extension: "fts" },
+  { phase: "install", extension: "fts", sha256: ftsContract.artifactSha256 },
   {
     phase: "preload",
     modules: ["libcrypto-3-x64.dll", "libssl-3-x64.dll"],
@@ -117,6 +119,7 @@ function cleanEnvironment(home: string): NodeJS.ProcessEnv {
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "OPENSSL_CONF",
+    "OPENSSL_MODULES",
     "CONDA_PREFIX",
     "SDL_LADYBUG_WINDOWS_FTS_NATIVE_ADDON_PATH",
     "SDL_MCP_NATIVE_ADDON_PATH",
@@ -238,6 +241,8 @@ for (const mode of MODES) {
         return;
       }
       assert.equal(result.status, 0, failureMessage(mode, result));
+      console.log(result.stdout.trim());
+      if (result.stderr.trim()) console.log(result.stderr.trim());
       if (mode === "missing-runtime-baseline") {
         assert.deepEqual(parseJsonLines(result.stdout), missingRuntimeEvidence);
       }
