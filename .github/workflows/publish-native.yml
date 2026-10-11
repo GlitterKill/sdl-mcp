@@ -372,12 +372,19 @@ jobs:
             npm publish "native/release-pack/$filename" --dry-run --ignore-scripts --access public --tag latest --json > "native/release-pack/${package}.json"
             PACKAGE_NAME="$package" node --input-type=module -e '
               import assert from "node:assert/strict";
-              import { readFileSync } from "node:fs";
+              import { readFileSync, writeFileSync } from "node:fs";
               import { createHash } from "node:crypto";
               const name = process.env.PACKAGE_NAME, version = process.env.NATIVE_VERSION;
-              const info = JSON.parse(readFileSync(`native/release-pack/${name}.json`, "utf8"));
+              const metadataPath = `native/release-pack/${name}.json`;
+              let info = JSON.parse(readFileSync(metadataPath, "utf8"));
+              // npm 11.19 wraps each dry-run result under its package name.
+              if (info.name === undefined) {
+                assert.deepEqual(Object.keys(info), [name]);
+                info = info[name];
+              }
               assert.equal(info.name, name); assert.equal(info.version, version);
               assert.equal(info.integrity, "sha512-" + createHash("sha512").update(readFileSync(`native/release-pack/${name}-${version}.tgz`)).digest("base64"));
+              writeFileSync(metadataPath, JSON.stringify(info, null, 2));
             '
           done
           sha256sum native/release-pack/*.tgz > native/release-pack/SHA256SUMS

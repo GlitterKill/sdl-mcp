@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 const workflowPath = ".github/workflows/publish-native.yml";
@@ -31,6 +35,45 @@ const expectedTargets = [
 ];
 
 describe("native platform qualification workflow", () => {
+  it("validates and normalizes both npm dry-run formats without relaxing package identity", () => {
+    const step = workflow.split("- name: Validate exact qualified tarballs")[1].split("- name:")[0];
+    const script = step.match(/PACKAGE_NAME="\$package" node --input-type=module -e '([\s\S]*?)'/)?.[1];
+    assert.ok(script);
+    const dir = mkdtempSync(join(tmpdir(), "sdl-native-dry-run-"));
+    const name = "sdl-mcp-native", version = "0.13.8";
+    const bytes = Buffer.from("qualified tarball fixture");
+    const info = { name, version, integrity: "sha512-" + createHash("sha512").update(bytes).digest("base64") };
+    try {
+      mkdirSync(join(dir, "native/release-pack"), { recursive: true });
+      writeFileSync(join(dir, `native/release-pack/${name}-${version}.tgz`), bytes);
+      const metadataPath = join(dir, `native/release-pack/${name}.json`);
+      for (const keyed of [false, true]) {
+        for (const change of [{}, { name: "other" }, { version: "0.0.0" }, { integrity: "sha512-wrong" }]) {
+          const metadata = { ...info, ...change };
+          writeFileSync(metadataPath, JSON.stringify(keyed ? { [name]: metadata } : metadata));
+          const child = spawnSync(process.execPath, ["--input-type=module"], {
+            input: script, cwd: dir, encoding: "utf8",
+            env: { ...process.env, PACKAGE_NAME: name, NATIVE_VERSION: version },
+          });
+          if (Object.keys(change).length === 0) {
+            assert.equal(child.status, 0, child.stderr);
+            assert.deepEqual(JSON.parse(readFileSync(metadataPath, "utf8")), info);
+          } else {
+            assert.notEqual(child.status, 0, "mismatched package metadata must fail");
+          }
+        }
+      }
+      writeFileSync(metadataPath, JSON.stringify({ [name]: info, unexpected: info }));
+      const ambiguous = spawnSync(process.execPath, ["--input-type=module"], {
+        input: script, cwd: dir, encoding: "utf8",
+        env: { ...process.env, PACKAGE_NAME: name, NATIVE_VERSION: version },
+      });
+      assert.notEqual(ambiguous.status, 0, "multiple package results must fail");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("builds each supported target on its matching runner", () => {
     const buildJob = jobSection("build");
     assert.ok(buildJob, "build job should exist");

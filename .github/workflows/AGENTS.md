@@ -415,3 +415,38 @@ and local npm 11.9.0 does not reproduce it; inspect hosted output before
 assuming its shape. This remaining release gate is outside the musl patch.
 No publication occurred. Exact hashes, commands and limits are in
 `devdocs/alpine-musl-qualification-2026-10-11.md`.
+
+### 2026-10-11: Realism semantics and canonical probe family isolation
+
+Maintenance run `38163624167`, job `114541518992`, and baseline run
+`38146269523` failed the realism matrix with
+`SEMANTIC_FINAL_ASSESSMENT_DEGRADED`, then `SafeRebuildRequiredError`.
+The shared config uses mock embeddings, which are deliberately not persisted
+as healthy model vectors. The realism job now verifies immutable local models
+and selects the local provider with semantics enabled. The benchmark activates
+its explicit CLI config for nested no-argument config reads. A failed repository
+blocks its dependent matrix runs, preserves the failed DB, and still makes the
+matrix exit nonzero; independent repositories continue. No quality floor changed.
+
+The baseline context-quality jobs failed strict close because canonical probe
+JSON files used the database filename as a prefix. Family guards correctly
+treated them as unexpected database members. The canonical clone now lives in
+its own directory and probe filenames do not start with its database filename.
+The regression test reproduced the old collision and exercises all three probes
+with the actual family inventory function. Fresh-process and no-op re-index
+determinism comparisons remain enabled. Local build, script typecheck, changed
+test lint and 57 focused tests passed. Hosted verification: `38166992257` on
+`56164c462dfcc743880a77ef4077ffb7977335a0` (pending at this entry).
+
+### 2026-10-11: npm 11.19 dry-run result shape
+
+Native run `38165460944`, Publish job `114548420020`, passed all six target
+qualifications but failed `Validate exact qualified tarballs` at `info.name`.
+The job used npm 11.19.0. Reproducing its exact command with that npm version
+and the qualified umbrella tarball confirms an object keyed by package name;
+npm 11.9.0 returns the metadata object directly. Validation accepts only the
+single expected key when wrapped, checks the same exact name/version/SHA-512,
+and writes normalized metadata for the later registry checks. Regression tests
+exercise both observed formats and reject wrong names, versions, integrity and
+extra package results. This is release assembly only; musl build and ELF checks,
+publication permissions and registry attestations are unchanged.
