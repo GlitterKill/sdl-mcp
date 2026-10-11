@@ -517,3 +517,12 @@ focused context/retrieval/CI tests, `build:all`, changed-file ESLint and diff ch
 passed. Initial sandbox attempts failed Windows checkpoint renames; verification
 used the authorized unsandboxed isolated test. General determinism fixtures remain
 unchanged because their native-disabled setup does not provision Windows FTS.
+
+Independent review confirmed fixture source/hash equality and found one runner
+wiring issue: `scripts/run-tests.mjs` discovers all benchmark test files while
+forcing native addons off. The new real-model contract is now excluded there,
+alongside `context-quality.test.ts`, and remains mandatory in both scheduled OS
+jobs. A regression executes the actual discovery/filter code and checks the
+mandatory workflow invocation; it failed before the exclusion and passes after
+(14 CI tests pass). Hosted Ubuntu on `50abd2bf` already passed the explicit
+contract step. The runner-only follow-up requires a new ordinary test run.

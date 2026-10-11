@@ -21,6 +21,25 @@ function readSource(path: string): string {
 }
 
 describe("scheduled context-quality graph cache", () => {
+  it("keeps real-model contract checks in mandatory scheduled jobs, outside the native-disabled runner", () => {
+    const runner = readSource("scripts/run-tests.mjs");
+    const discovery = runner.slice(
+      runner.indexOf("const SKIP_PATTERNS ="),
+      runner.indexOf("if (testFiles.length === 0)"),
+    );
+    const paths = [
+      "tests/benchmark/info-contract.test.ts",
+      "tests/benchmark/context-quality.test.ts",
+      "tests/benchmark/background-graph-integrity.test.ts",
+    ];
+    const selected = new Function("allTestFiles", "selectedGroups", "testGroupFor",
+      discovery + "return testFiles;",
+    )(paths, new Set(), () => "benchmark");
+    assert.deepEqual(selected, [paths[2]]);
+    const workflow = readSource(".github/workflows/ci.yml");
+    assert.match(workflow, /- name: Verify versioned sdl\.info retrieval contract\r?\n        run: node --experimental-strip-types --test tests\/benchmark\/info-contract\.test\.ts/);
+  });
+
   it("keeps canonical probe artifacts outside both database families", async () => {
     const runner = readSource("tests/benchmark/context-quality-runner.mjs");
     const gate = runner.slice(

@@ -452,6 +452,7 @@ const SKIP_PATTERNS = [
   "vscode-buffer-push", // Requires VS Code extension environment.
   "check-benchmark-claims", // Benchmark validation only.
   "context-quality.test.ts", // Scheduled benchmark with an immutable corpus checkout.
+  "info-contract.test.ts", // Scheduled contract benchmark requires real models and Windows FTS.
   "build-exe", // Build process test.
   "stress-timing-diagnostics", // Stress test only.
   "runner.test.ts", // Meta-test for test runner itself.
