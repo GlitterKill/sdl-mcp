@@ -12,7 +12,12 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
-import { collectLadybugFamilyFiles } from "../../dist/db/ladybug-family-files.js";
+import {
+  collectLadybugFamilyFiles,
+  consumeVerifiedLadybugFamilyCopy,
+  copyLadybugFamilyForValidatedClone,
+  type VerifiedLadybugFamilyCopy,
+} from "../../dist/db/ladybug-family-files.js";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
 
@@ -40,7 +45,7 @@ describe("scheduled context-quality graph cache", () => {
     assert.match(workflow, /- name: Verify versioned sdl\.info retrieval contract\r?\n        run: node --experimental-strip-types --test tests\/benchmark\/info-contract\.test\.ts/);
   });
 
-  it("keeps canonical probe artifacts outside both database families", async () => {
+  it("keeps canonical artifacts isolated and validates a fresh copy after reindex", async () => {
     const runner = readSource("tests/benchmark/context-quality-runner.mjs");
     const gate = runner.slice(
       runner.indexOf("async function runCanonicalV2DeterminismGate("),
@@ -49,6 +54,7 @@ describe("scheduled context-quality graph cache", () => {
     const dir = mkdtempSync(join(tmpdir(), "sdl-canonical-family-"));
     const workingPrimaryPath = join(dir, "working.lbug");
     const probes: string[] = [];
+    const validated: string[] = [];
     try {
       writeFileSync(workingPrimaryPath, "working");
       const runGate = new Function(
@@ -59,6 +65,9 @@ describe("scheduled context-quality graph cache", () => {
         { env: { SDL_CONTEXT_QUALITY_V2_SHADOW: "1" }, pid: process.pid },
         resolve, dirname, basename, mkdirSync, readFileSync, repoRoot,
         async (primary: string, output: string) => {
+          if (probes.length === 2) {
+            assert.equal(primary, validated[0], "the final probe must use the validated reindexed copy");
+          }
           const pending = `${output}.pending-${process.pid}`;
           writeFileSync(pending, "canonical");
           assert.deepEqual(collectLadybugFamilyFiles(primary), [primary]);
@@ -66,14 +75,21 @@ describe("scheduled context-quality graph cache", () => {
           writeFileSync(output, "canonical");
           probes.push(output);
         },
-        async () => {},
+        async (_args: string[], environment: Record<string, string>) => {
+          writeFileSync(environment.SDL_GRAPH_DB_PATH, "reindexed graph");
+        },
         (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right),
       );
       await runGate({
         cachedPrimaryPath: join(dir, "cache.lbug"),
         readyMarkerPath: join(dir, "ready.json"),
         workingPrimaryPath,
-        validateCopiedFamily: async () => {},
+        validateCopiedFamily: async (primary: string, capability: VerifiedLadybugFamilyCopy) => {
+          consumeVerifiedLadybugFamilyCopy(capability, primary);
+          assert.equal(readFileSync(primary, "utf8"), "reindexed graph");
+          validated.push(primary);
+        },
+        copyDbFamilyForValidatedClone: copyLadybugFamilyForValidatedClone,
         restoreVerifiedDbFamilyCache: async ({ workingPrimaryPath: primary }: { workingPrimaryPath: string }) => {
           mkdirSync(dirname(primary), { recursive: true });
           writeFileSync(primary, "canonical graph");
@@ -81,6 +97,7 @@ describe("scheduled context-quality graph cache", () => {
         fingerprintDbFamily: () => [],
       });
       assert.equal(probes.length, 3, "all determinism comparisons must still run");
+      assert.equal(validated.length, 1, "the reindexed family must be revalidated");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -264,9 +281,10 @@ describe("scheduled context-quality graph cache", () => {
       const condition = semanticJob.match(/if:\s*(.*)/)?.[1];
       assert.ok(condition);
       const enabled = new Function("github", "inputs", `return ${condition};`);
-      for (const scope of [undefined, "full", "fast"]) {
+      for (const scope of [undefined, "full", "fast", "context-quality"]) {
         assert.equal(enabled({ event_name: "schedule" }, { verification_scope: scope }), true);
-        assert.equal(enabled({ event_name: "workflow_dispatch" }, { verification_scope: scope }), scope !== "fast");
+        assert.equal(enabled({ event_name: "workflow_dispatch" }, { verification_scope: scope }),
+          scope !== "fast" && !(semanticJob === matrixJob && scope === "context-quality"));
         assert.equal(enabled({ event_name: "push" }, { verification_scope: scope }), false);
         assert.equal(enabled({ event_name: "pull_request" }, { verification_scope: scope }), false);
       }

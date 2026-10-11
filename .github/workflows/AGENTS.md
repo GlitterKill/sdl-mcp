@@ -553,3 +553,25 @@ the separately tracked semantic runs continue. Schedules always include those
 jobs; push/PR behavior and every quality threshold are unchanged. Truth-table
 regressions cover scheduled, full/default/fast manual, push and PR conditions.
 Fast success alone is not evidence that semantic release gates passed.
+
+### 2026-10-11: Canonical reindex validation requires a fresh copy capability
+
+Ubuntu context job `114567117410` in run `38172249874` passed the versioned
+contract and both initial canonical probes (29 pass, zero failures, four
+intentional mode skips per probe), then completed the no-op index. Its next
+validation called `validateCopiedFamily(path)` without the required opaque
+copy capability and failed before paired quality evaluation. The validator
+correctly rejected this; database lineage checks must not be relaxed.
+
+The runner now creates a verified `reindexed.lbug` copy of the closed reindexed
+family, validates it with its newly issued single-use capability, and probes
+that validated copy. All three canonical comparisons and immutable source/cache
+fingerprint checks remain. The regression uses actual copy issuance/consumption,
+reproduces the hosted error before the fix, and passes after it (14 harness
+tests). Independent review found no blocker. Windows sandbox `realpath` blocks
+the real identity checks; the isolated local regression passed unsandboxed.
+
+Manual `context-quality` scope runs ordinary checks plus both context-quality
+jobs, omitting only the separately tracked nightly realism matrix. Default/full
+dispatch and schedules still include every semantic gate. Scope truth tables
+cover the new option; its success cannot replace a terminal realism result.

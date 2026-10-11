@@ -12,11 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       verification_scope:
-        description: "Use fast only when separately tracked semantic runs remain valid"
+        description: "Partial scopes require separately tracked results for omitted semantic jobs"
         type: choice
         options:
           - full
           - fast
+          - context-quality
         default: full
 
 permissions:
@@ -605,7 +606,7 @@ jobs:
   benchmark-matrix-nightly:
     name: Benchmark Matrix Nightly
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.verification_scope != 'fast')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.verification_scope != 'fast' && inputs.verification_scope != 'context-quality')
 
     steps:
       - name: Checkout code

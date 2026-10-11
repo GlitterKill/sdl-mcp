@@ -175,6 +175,7 @@ async function runCanonicalV2DeterminismGate({
   workingPrimaryPath,
   sourcePrimaryPath,
   validateCopiedFamily,
+  copyDbFamilyForValidatedClone,
   restoreVerifiedDbFamilyCache,
   fingerprintDbFamily,
 }) {
@@ -235,8 +236,15 @@ async function runCanonicalV2DeterminismGate({
     `${determinismPrimaryPath}.reindex`,
   ); // supported no-op re-index; SDL_GRAPH_DB_PATH is the sole DB target
 
-  await validateCopiedFamily(determinismPrimaryPath);
-  await runCanonicalProbe(determinismPrimaryPath, afterOutput);
+  // Validation requires a newly issued, single-use copy capability. The
+  // original clone's capability was consumed before the first probe.
+  const reindexedPrimaryPath = resolve(determinismDir, "reindexed.lbug");
+  const reindexedCopy = copyDbFamilyForValidatedClone(
+    determinismPrimaryPath,
+    reindexedPrimaryPath,
+  );
+  await validateCopiedFamily(reindexedPrimaryPath, reindexedCopy);
+  await runCanonicalProbe(reindexedPrimaryPath, afterOutput);
 
   const afterBytes = readFileSync(afterOutput, "utf8");
   if (afterBytes !== beforeBytes) {
@@ -290,6 +298,7 @@ async function prepareVerifiedGraphCache() {
     { LADYBUG_SCHEMA_VERSION },
     { validateContextQualityCacheFamily },
     {
+      copyDbFamilyForValidatedClone,
       fingerprintDbFamily,
       publishVerifiedDbFamilyCache,
       restoreVerifiedDbFamilyCache,
@@ -374,6 +383,7 @@ async function prepareVerifiedGraphCache() {
       workingPrimaryPath,
       sourcePrimaryPath,
       validateCopiedFamily,
+      copyDbFamilyForValidatedClone,
       restoreVerifiedDbFamilyCache,
       fingerprintDbFamily,
     });
