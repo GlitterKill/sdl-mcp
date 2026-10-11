@@ -15,6 +15,42 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+export class QaStdioClientTransport extends StdioClientTransport {
+  async close() {
+    // The SDK has no public graceful-close timeout. Its two-second kill can
+    // interrupt SDL's checkpoint, so retain its process handle until SDL exits.
+    // The delayed-child regression guards this dependency on the SDK adapter.
+    const child = this._process;
+    if (!child) return super.close();
+    const exited = new Promise((resolve) => child.once("close", resolve));
+    const waitForExit = async (timeoutMs) => {
+      let timer;
+      try {
+        return await Promise.race([
+          exited.then(() => true),
+          new Promise((resolve) => {
+            timer = setTimeout(() => resolve(false), timeoutMs);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    child.stdin?.end();
+    const graceful = await waitForExit(60_000);
+    await super.close();
+    if (!graceful) {
+      if (!await waitForExit(5_000)) {
+        throw new Error("QA child did not close after forced shutdown; retained its fixture");
+      }
+      throw new Error("QA child exceeded its 60-second graceful shutdown deadline");
+    }
+    if (child.exitCode !== 0) {
+      throw new Error(`QA child exited uncleanly: code=${child.exitCode}, signal=${child.signalCode}`);
+    }
+  }
+}
+
 const MAX_SCENARIO_BYTES = 256 * 1024;
 const MAX_SCENARIO_CALLS = 50;
 const FORBIDDEN_ARGUMENT_KEYS = new Set([
@@ -303,7 +339,7 @@ export async function runIsolatedMutatingQa(options) {
       throw new Error(`QA database path must be initially absent: ${qaDbPath}`);
     }
 
-    const transport = new StdioClientTransport({
+    const transport = new QaStdioClientTransport({
       command: process.execPath,
       args: [
         join(projectRoot, "dist", "cli", "index.js"),

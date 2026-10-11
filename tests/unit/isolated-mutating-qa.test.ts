@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import {
   mkdirSync,
   mkdtempSync,
@@ -9,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { setImmediate } from "node:timers/promises";
 
 const tempRoots: string[] = [];
 
@@ -23,6 +25,56 @@ async function loadRunner() {
 }
 
 describe("isolated mutating QA runner", () => {
+  it("bounds forced shutdown even if the child close event never arrives", async (t) => {
+    const { QaStdioClientTransport } = await loadRunner();
+    const transport = new QaStdioClientTransport({ command: process.execPath });
+    const signals: string[] = [];
+    transport._process = Object.assign(new EventEmitter(), {
+      stdin: { end() {} },
+      exitCode: null,
+      kill(signal: string) { signals.push(signal); },
+    });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const closing = assert.rejects(transport.close(), /did not close after forced shutdown/);
+    for (const duration of [60_000, 2_000, 2_000, 5_000]) {
+      t.mock.timers.tick(duration);
+      await setImmediate();
+    }
+    await closing;
+    assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  });
+
+  it("waits for child cleanup beyond the SDK's two-second shutdown window", async () => {
+    const { QaStdioClientTransport } = await loadRunner();
+    const root = mkdtempSync(join(tmpdir(), "sdl-qa-graceful-close-"));
+    tempRoots.push(root);
+    const receipt = join(root, "closed.txt");
+    const transport = new QaStdioClientTransport({
+      command: process.execPath,
+      args: ["--input-type=module", "--eval", `
+        import { writeFileSync } from 'node:fs';
+        process.stdin.resume();
+        process.stdin.on('end', () => {
+          setTimeout(() => writeFileSync(process.argv[1], 'closed'), 2500);
+        });
+      `, receipt],
+    });
+    await transport.start();
+    await transport.close();
+    assert.equal(readFileSync(receipt, "utf8"), "closed");
+    assert.equal(transport.pid, null, "the child must have exited before cleanup");
+  });
+
+  it("reports an unclean child exit instead of a successful shutdown", async () => {
+    const { QaStdioClientTransport } = await loadRunner();
+    const transport = new QaStdioClientTransport({
+      command: process.execPath,
+      args: ["--eval", "process.stdin.resume(); process.stdin.on('end', () => process.exit(7));"],
+    });
+    await transport.start();
+    await assert.rejects(transport.close(), /QA child exited uncleanly: code=7/);
+  });
+
   it("reports structured child tool failures without undefined fields", async () => {
     const { assertToolSucceeded } = await loadRunner();
 

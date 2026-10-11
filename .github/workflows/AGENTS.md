@@ -575,3 +575,34 @@ Manual `context-quality` scope runs ordinary checks plus both context-quality
 jobs, omitting only the separately tracked nightly realism matrix. Default/full
 dispatch and schedules still include every semantic gate. Scope truth tables
 cover the new option; its success cannot replace a terminal realism result.
+
+### 2026-10-11: Realism execution restored; claim audit remains below its floor
+
+Nightly matrix jobs `114551502994` (`38166992257`, `56164c46`) and
+`114567117143` (`38172249874`, `76830281`) completed all 50 tasks successfully
+without the original semantic-final-assessment/rebuild failure. Their overall
+average token reductions were 60.0% and 60.2%, with median 61.9% in both.
+However, the existing non-blocking claims audit failed: tiny-task median was
+46.8% and 48.2%, respectively, below the unchanged 50% floor. The audit was
+already non-blocking at `8bea6b1`; green job status must not be represented as
+proof that this quality claim passed. No claim floor or audit policy was changed.
+
+### 2026-10-11: Isolated QA transport could terminate a Windows checkpoint
+
+Run `38173913684` passed all ordinary/native/benchmark jobs except Windows's
+ordinary suite: `isolated-mutating-qa.test.ts` retained checkpoint apply/intent
+locks, the family lock, shadow and WAL checkpoint files after `client.close()`.
+The PID-file tests passed. The installed SDK's stdio close ends stdin, waits
+only two seconds, then sends SIGTERM (forceful on Windows), while SDL allows
+60 seconds for graceful database cleanup. A 2.5-second delayed-child regression
+fails with that transport because its cleanup receipt is never written.
+
+The QA-only transport now waits for SDL's existing 60-second graceful deadline
+before SDK escalation, then bounds the final close-event wait to five seconds.
+It rejects timeouts and nonzero exits, and retains the existing strict sidecar
+assertion and failure-fixture preservation. The SDK has no public close-timeout
+option, so this adapter explicitly documents its `_process` dependency; real
+child regressions guard it. Tests also cover absent close events, both forced
+termination signals and nonzero exit. All 20 focused unit/integration tests
+passed locally without skips; lint and syntax checks passed. Independent review
+caught the initially unbounded final wait and confirmed its correction.
