@@ -185,10 +185,18 @@ async function runCanonicalV2DeterminismGate({
     return;
   }
 
-  const determinismPrimaryPath = `${workingPrimaryPath}.canonical-${process.pid}.lbug`;
-  const beforeOutput = `${determinismPrimaryPath}.before.json`;
-  const freshOutput = `${determinismPrimaryPath}.fresh.json`;
-  const afterOutput = `${determinismPrimaryPath}.after.json`;
+  // Database-prefixed siblings belong to the guarded database family. Keep
+  // the canonical clone and its probe artifacts outside the working family.
+  const determinismDir = resolve(
+    dirname(workingPrimaryPath),
+    "context-quality-canonical",
+    `${basename(workingPrimaryPath)}-${process.pid}`,
+  );
+  mkdirSync(determinismDir, { recursive: true });
+  const determinismPrimaryPath = resolve(determinismDir, "graph.lbug");
+  const beforeOutput = resolve(determinismDir, "before.json");
+  const freshOutput = resolve(determinismDir, "fresh.json");
+  const afterOutput = resolve(determinismDir, "after.json");
   const cacheBefore = fingerprintDbFamily(cachedPrimaryPath);
   const resolvedSourcePath = sourcePrimaryPath
     ? resolve(sourcePrimaryPath)

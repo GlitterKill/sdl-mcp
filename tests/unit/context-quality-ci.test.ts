@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -11,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
+import { collectLadybugFamilyFiles } from "../../dist/db/ladybug-family-files.js";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
 
@@ -19,6 +21,52 @@ function readSource(path: string): string {
 }
 
 describe("scheduled context-quality graph cache", () => {
+  it("keeps canonical probe artifacts outside both database families", async () => {
+    const runner = readSource("tests/benchmark/context-quality-runner.mjs");
+    const gate = runner.slice(
+      runner.indexOf("async function runCanonicalV2DeterminismGate("),
+      runner.indexOf("async function prepareVerifiedGraphCache("),
+    );
+    const dir = mkdtempSync(join(tmpdir(), "sdl-canonical-family-"));
+    const workingPrimaryPath = join(dir, "working.lbug");
+    const probes: string[] = [];
+    try {
+      writeFileSync(workingPrimaryPath, "working");
+      const runGate = new Function(
+        "process", "resolve", "dirname", "basename", "mkdirSync", "readFileSync",
+        "repoRoot", "runCanonicalProbe", "runWatchedChild", "sameFingerprint",
+        gate + "return runCanonicalV2DeterminismGate;",
+      )(
+        { env: { SDL_CONTEXT_QUALITY_V2_SHADOW: "1" }, pid: process.pid },
+        resolve, dirname, basename, mkdirSync, readFileSync, repoRoot,
+        async (primary: string, output: string) => {
+          const pending = `${output}.pending-${process.pid}`;
+          writeFileSync(pending, "canonical");
+          assert.deepEqual(collectLadybugFamilyFiles(primary), [primary]);
+          assert.deepEqual(collectLadybugFamilyFiles(workingPrimaryPath), [workingPrimaryPath]);
+          writeFileSync(output, "canonical");
+          probes.push(output);
+        },
+        async () => {},
+        (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right),
+      );
+      await runGate({
+        cachedPrimaryPath: join(dir, "cache.lbug"),
+        readyMarkerPath: join(dir, "ready.json"),
+        workingPrimaryPath,
+        validateCopiedFamily: async () => {},
+        restoreVerifiedDbFamilyCache: async ({ workingPrimaryPath: primary }: { workingPrimaryPath: string }) => {
+          mkdirSync(dirname(primary), { recursive: true });
+          writeFileSync(primary, "canonical graph");
+        },
+        fingerprintDbFamily: () => [],
+      });
+      assert.equal(probes.length, 3, "all determinism comparisons must still run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("uses one-repo immutable configs for both benchmark corpora", () => {
     for (const [path, repoId] of [
       ["tests/benchmark/config/context-quality-sdl-mcp.json", "sdl-mcp"],
