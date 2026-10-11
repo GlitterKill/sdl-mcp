@@ -206,6 +206,16 @@ describe("pidfile", () => {
   });
 
   describe("writePidfile EEXIST race (issue #19)", () => {
+    it("does not overwrite an exclusively created file before its owner finishes writing", () => {
+      const pidPath = resolvePidfilePath(fakeDbPath);
+      writeFileSync(pidPath, "", { flag: "wx" });
+      assert.throws(
+        () => writePidfile(fakeDbPath, "stdio"),
+        /PID file exists but cannot be read/,
+      );
+      assert.strictEqual(readFileSync(pidPath, "utf8"), "");
+    });
+
     it("two concurrent processes claiming the same pidfile: exactly one wins", async () => {
       const { spawn } = await import("node:child_process");
       const distPidfile = new URL("../../dist/util/pidfile.js", import.meta.url).pathname;

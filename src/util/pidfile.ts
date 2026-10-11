@@ -175,8 +175,16 @@ export function writePidfile(
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     const racer = readPidfile(pidfilePath);
+    // Exclusive creation exposes the directory entry before its JSON is fully
+    // written. An unreadable file is not proof of a stale owner.
+    if (!racer) {
+      throw new Error(
+        `PID file exists but cannot be read (${pidfilePath}). ` +
+          `Another server may still be creating it; retry startup after it finishes. ` +
+          `If it remains unreadable, confirm no server is running before removing the PID file.`,
+      );
+    }
     if (
-      racer &&
       isProcessAlive(racer.pid) &&
       racer.pid !== process.pid
     ) {
