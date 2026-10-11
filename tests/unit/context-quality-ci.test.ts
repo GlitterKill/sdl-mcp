@@ -258,10 +258,19 @@ describe("scheduled context-quality graph cache", () => {
     const job =
       workflow.match(/context-quality-scheduled:\s*[\s\S]*$/u)?.[0] ?? "";
     assert.ok(job, "context-quality-scheduled job must be present");
-    assert.match(
-      job,
-      /if:\s*github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'/,
-    );
+    assert.match(workflow, /verification_scope:[\s\S]*?default: full/);
+    const matrixJob = workflow.split("  benchmark-matrix-nightly:")[1];
+    for (const semanticJob of [job, matrixJob]) {
+      const condition = semanticJob.match(/if:\s*(.*)/)?.[1];
+      assert.ok(condition);
+      const enabled = new Function("github", "inputs", `return ${condition};`);
+      for (const scope of [undefined, "full", "fast"]) {
+        assert.equal(enabled({ event_name: "schedule" }, { verification_scope: scope }), true);
+        assert.equal(enabled({ event_name: "workflow_dispatch" }, { verification_scope: scope }), scope !== "fast");
+        assert.equal(enabled({ event_name: "push" }, { verification_scope: scope }), false);
+        assert.equal(enabled({ event_name: "pull_request" }, { verification_scope: scope }), false);
+      }
+    }
     assert.match(job, /os:\s*\n\s*- ubuntu-latest\s*\n\s*- windows-latest/);
     assert.match(
       job,

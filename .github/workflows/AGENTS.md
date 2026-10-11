@@ -526,3 +526,30 @@ jobs. A regression executes the actual discovery/filter code and checks the
 mandatory workflow invocation; it failed before the exclusion and passes after
 (14 CI tests pass). Hosted Ubuntu on `50abd2bf` already passed the explicit
 contract step. The runner-only follow-up requires a new ordinary test run.
+
+### 2026-10-11: Hosted PID-file race and targeted follow-up verification
+
+Full CI `38172249874` at `76830281` passed the versioned contract check on both
+OSes, all six native builds, structural benchmarks and both background-integrity
+benchmarks. Ubuntu's ordinary suite passed 775/776 files; only
+`pidfile.test.ts` failed because both concurrent claimants returned success.
+The exclusive file create can expose an empty entry before JSON is written;
+the previous EEXIST path treated an unreadable competing claim as stale and
+overwrote it. The fix rejects unreadable competing claims. Valid dead-PID and
+same-PID replacement remain supported. Permanently malformed orphan files now
+need confirmed-owner-free cleanup, which the error explains.
+
+A deterministic empty-file regression failed before the fix; all 36 focused
+PID/CI-scope tests pass after it, including the original two-process race.
+Build and lint passed (the existing unused `mkdirSync` warning is unchanged).
+Independent review found no blocker. The older Ubuntu semantic job
+`114551502932` is terminal-failed solely on the old contract assertion: 29 pass,
+one fail, four intentional mode skips; the family-close error is absent.
+
+Manual CI dispatch now defaults to `verification_scope: full`. Explicit `fast`
+dispatch omits only the long context-quality and realism jobs so a PID-only
+follow-up can rerun affected ordinary/native/structural/background checks while
+the separately tracked semantic runs continue. Schedules always include those
+jobs; push/PR behavior and every quality threshold are unchanged. Truth-table
+regressions cover scheduled, full/default/fast manual, push and PR conditions.
+Fast success alone is not evidence that semantic release gates passed.

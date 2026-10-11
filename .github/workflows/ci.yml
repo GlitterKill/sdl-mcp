@@ -10,6 +10,14 @@ on:
   schedule:
     - cron: "23 7 * * *"
   workflow_dispatch:
+    inputs:
+      verification_scope:
+        description: "Use fast only when separately tracked semantic runs remain valid"
+        type: choice
+        options:
+          - full
+          - fast
+        default: full
 
 permissions:
   contents: read
@@ -597,7 +605,7 @@ jobs:
   benchmark-matrix-nightly:
     name: Benchmark Matrix Nightly
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.verification_scope != 'fast')
 
     steps:
       - name: Checkout code
@@ -1144,7 +1152,7 @@ jobs:
 
   context-quality-scheduled:
     runs-on: ${{ matrix.os }}
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.verification_scope != 'fast')
     timeout-minutes: 180
     strategy:
       fail-fast: false
