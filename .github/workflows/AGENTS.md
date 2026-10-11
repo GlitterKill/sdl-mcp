@@ -479,3 +479,14 @@ and baseline update is needed. That decision remains open. The repaired CI run
 `38166992257` is still pending semantic jobs; its two OS test jobs, six native
 build jobs, structural benchmark and both background-integrity benchmarks have
 passed. No publication or main merge has occurred.
+
+At 20:06 UTC, repaired Windows job `114551502940` is terminal-failed (19:55:10
+UTC): 29 tests pass, one exact-contract-title assertion fails, and the previous
+strict-close/family-member failure is absent. Full cross-process/no-op-index
+determinism remains blocked by that first probe's contract assertion. Original
+run `38163624167` is terminal-failed on both context-quality jobs and the matrix;
+its 11 other runnable jobs passed. Repaired run `38166992257` has 11 successes,
+one failure, two skipped sync jobs, and two still running: Ubuntu graph build
+since 19:12:54 UTC and realism matrix since 19:14:19 UTC. Both running-job log
+endpoints return HTTP 404; internal progress or a stall is not established.
+Publication remains gated on the unresolved corpus decision and hosted results.
