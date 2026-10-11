@@ -230,6 +230,9 @@ jobs:
           retention-days: 30
   publish:
     name: Publish
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     needs:
       - build

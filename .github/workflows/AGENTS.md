@@ -361,3 +361,12 @@ and npm signatures/attestations after publication. The new workflow regression
 checks pass locally. Hosted runs remain separate evidence; do not infer success
 or publication from local checks. OpenSSL dry run 38162784659 started from
 61fe9f288317ef6894e5026185d28a7113f64c23. No main merge or SDL release is implied.
+
+### 2026-10-11: Native publisher provenance permission approved
+
+The user explicitly approved id-token: write on publish-native.yml's publish
+job only. That job now grants contents: read and id-token: write; contents read
+preserves its previous checkout access when job permissions replace the inherited
+map. Workflow-wide contents: read and all other jobs remain unchanged. This does
+not change credentials, token scopes, or authorize publication before the musl
+qualification and remaining hosted release gates pass.
