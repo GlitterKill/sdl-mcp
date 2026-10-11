@@ -24,6 +24,7 @@ import {
 import { resolveGraphDbPath } from "../dist/db/graph-db-path.js";
 import type { Connection } from "kuzu";
 import { loadConfig } from "../dist/config/loadConfig.js";
+import { activateCliConfigPath } from "../dist/config/configPath.js";
 import * as db from "../dist/db/ladybug-queries.js";
 import { indexRepo } from "../dist/indexer/indexer.js";
 import { unwrapSliceBuildResult } from "../dist/benchmark/slice-build-result.js";
@@ -2302,10 +2303,9 @@ async function runBenchmark(): Promise<void> {
   const normalized = normalizeTaskFile(parsed);
   const defaults = applyBenchmarkModeDefaults(normalized.defaults, mode);
 
-  const config = loadConfig(configPath);
-  const resolvedConfigPath = configPath
-    ? resolve(configPath)
-    : resolve(process.cwd(), "config/sdlmcp.config.json");
+  // Nested indexing and retrieval load the active config without CLI arguments.
+  const resolvedConfigPath = activateCliConfigPath(configPath);
+  const config = loadConfig(resolvedConfigPath);
   const graphDbPath = resolveGraphDbPath(config, resolvedConfigPath);
   await initLadybugDb(graphDbPath);
   const conn = await getLadybugConn();

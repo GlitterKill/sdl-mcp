@@ -687,6 +687,25 @@ jobs:
       - name: Setup external benchmark repos
         run: npm run benchmark:setup-external
 
+      - name: Resolve benchmark model cache inputs
+        id: matrix-model-inputs
+        shell: bash
+        run: |
+          node --input-type=module <<'MATRIX_MODELS'
+          import { appendFileSync } from 'node:fs';
+          import { getModelCacheDir, getRequiredModelSetDigest } from './scripts/postinstall-models.mjs';
+          appendFileSync(process.env.GITHUB_OUTPUT, `model-cache=${getModelCacheDir()}\nmodel-set=${getRequiredModelSetDigest()}\n`);
+          MATRIX_MODELS
+
+      - name: Cache immutable benchmark embedding models
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.matrix-model-inputs.outputs.model-cache }}
+          key: ${{ runner.os }}-${{ runner.arch }}-context-models-${{ steps.matrix-model-inputs.outputs.model-set }}
+
+      - name: Verify benchmark embedding models
+        run: node scripts/postinstall-models.mjs --strict
+
       - name: Build benchmark matrix config
         shell: bash
         run: |
@@ -697,7 +716,9 @@ jobs:
             const ext = JSON.parse(fs.readFileSync('benchmarks/real-world/external-repos.config.json', 'utf8'));
             const cwd = process.cwd();
             const resolved = (ext.repos || []).map(r => ({ ...r, rootPath: path.resolve(cwd, r.rootPath) }));
-            const merged = { ...base, repos: [...(base.repos || []), ...resolved] };
+            // Realism slices use hybrid retrieval: keep semantics enabled with real models.
+            const semantic = { ...base.semantic, enabled: true, provider: 'local' };
+            const merged = { ...base, semantic, repos: [...(base.repos || []), ...resolved] };
             fs.writeFileSync('benchmarks/real-world/benchmark.config.json', JSON.stringify(merged, null, 2) + '\\n');
           "
 

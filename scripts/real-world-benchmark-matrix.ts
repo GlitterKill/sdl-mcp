@@ -225,6 +225,7 @@ function main(): void {
   mkdirSync(runOutDir, { recursive: true });
 
   const indexedRepos = new Set<string>();
+  const failedRepos = new Set<string>();
   const familyAggregates = new Map<string, FamilyAggregates>();
   const allReductions: number[] = [];
   const allContextCoverageGains: number[] = [];
@@ -243,6 +244,17 @@ function main(): void {
     const resolvedTasksPath = resolve(dirname(matrixPath), run.tasks);
     if (!existsSync(resolvedTasksPath)) {
       throw new Error(`Tasks file not found for run ${run.id}: ${resolvedTasksPath}`);
+    }
+
+    if (failedRepos.has(run.repoId)) {
+      // A failed child may have committed part of its index. Preserve that
+      // database and never retry an in-place full refresh or trust it for reads.
+      console.error(
+        `[matrix] run=${run.id} BLOCKED: an earlier run failed for repository ${run.repoId}; ` +
+        "failed database retained. Fix the cause and retry with a fresh --out-dir.",
+      );
+      failedRuns.push(run.id);
+      continue;
     }
 
     const runOutPath = resolve(runOutDir, `${run.id}.json`);
@@ -270,6 +282,7 @@ function main(): void {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`[matrix] run=${run.id} FAILED: ${msg}`);
       failedRuns.push(run.id);
+      failedRepos.add(run.repoId);
       continue;
     }
     indexedRepos.add(run.repoId);

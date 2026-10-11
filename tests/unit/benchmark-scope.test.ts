@@ -66,3 +66,26 @@ it("CI structural benchmark isolates semantic readiness without changing other s
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+it("nightly realism matrix retains enabled semantics and verifies real local models", () => {
+  const workflow = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const job = workflow.split("  benchmark-matrix-nightly:")[1].split("  sync-memory:")[0];
+  const step = job.split("- name: Build benchmark matrix config")[1].split("- name:")[0];
+  const command = step.match(/node -e "([\s\S]*?)"\s*$/);
+  assert.ok(command, "matrix config command must exist");
+  const dir = mkdtempSync(join(tmpdir(), "sdl-realism-config-"));
+  const target = join(dir, "config.json");
+  const script = command[1].replace("fs.writeFileSync('benchmarks/real-world/benchmark.config.json'", "fs.writeFileSync(process.env.MATRIX_TEST_CONFIG");
+  const child = spawnSync(process.execPath, ["-e", script], {
+    env: { ...process.env, MATRIX_TEST_CONFIG: target }, encoding: "utf8",
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const isolated = JSON.parse(readFileSync(target, "utf8").replace(/\\n$/, "\n"));
+  const base = JSON.parse(readFileSync("config/sdlmcp.config.json", "utf8"));
+  assert.deepStrictEqual(isolated.semantic, { ...base.semantic, enabled: true, provider: "local" });
+  assert.equal(AppConfigSchema.parse(isolated).semantic.provider, "local");
+  assert.match(job, /node scripts\/postinstall-models\.mjs --strict/);
+  assert.ok(job.indexOf("postinstall-models.mjs --strict") < job.indexOf("- name: Run full benchmark matrix"));
+  assert.match(job, /--force-legacy-index --matrix benchmarks\/real-world\/matrix\.json/);
+});
