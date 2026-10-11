@@ -606,3 +606,33 @@ child regressions guard it. Tests also cover absent close events, both forced
 termination signals and nonzero exit. All 20 focused unit/integration tests
 passed locally without skips; lint and syntax checks passed. Independent review
 caught the initially unbounded final wait and confirmed its correction.
+
+### 2026-10-11: Ordinary checks green; canonical repair exposes V2 quality failures
+
+All 11 applicable ordinary/native/structural/background jobs in
+`38176282327` passed on `49efd660d391488d2b2abda43b901e3e0c0c1c2c`.
+Its explicit fast scope omitted the separately tracked semantic jobs.
+
+Ubuntu context job `114575236015` in `38174940287` on `dc2df094` passed
+the versioned contract and all three canonical probes, including the verified
+post-reindex copy. Each probe reported 29 pass, zero failures and four intended
+mode skips. The full quality evaluation then failed three unchanged assertions:
+
+- The broad server-instructions hard floor omitted code-bearing `MCPServer`
+  evidence.
+- Scoped precise p95 was 3,502 ms against the 250 ms limit.
+- Scoped tool-QA returned some `scripts/` and `src/` evidence outside `tests/`.
+
+The full evaluation reported 28 passing tests, three failures and two intended
+mode skips; overall semantic recall was 93/137 (67.9%). These are quality
+failures reached after the harness repair, not another copy-capability error.
+The origin of the missing code rung and latency cost is not yet established.
+Directory focus currently has explicit soft-priority semantics in
+`ContextCandidateSearchOptions` and stable-partition unit tests retaining the
+remainder. Making it a hard boundary is a retrieval contract decision, not a
+safe harness-only correction. No threshold or evidence assertion was relaxed.
+
+Artifact `context-quality-ubuntu-latest` (11717252157) contains the failed child
+stdout/stderr; the runner removes its pending structured result on child failure.
+The completed job log is the authoritative evidence for the assertions above.
+Windows context verification was still active when this finding was recorded.
