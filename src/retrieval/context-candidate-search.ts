@@ -15,6 +15,7 @@ import { logger } from "../util/logger.js";
 import { parseTestCaseFacetJson } from "../util/test-case.js";
 import { normalizePath } from "../util/paths.js";
 import { isTestCandidate } from "./task-query-ranking.js";
+import { extractQualifiedTermsFromContext } from "./identifier-extraction.js";
 import {
   rrfFuseContextCandidates,
   type ContextCandidateSource,
@@ -71,6 +72,27 @@ export interface ContextCandidateSearchResult {
   rows: ContextCandidateSearchRow[];
   capabilities: RetrievalCapabilities;
   evidence?: RetrievalEvidence;
+}
+
+/** Preserve exact test-title evidence when a task explicitly asks for tests. */
+export function prioritizeQualifiedTestCases(
+  rows: readonly ContextCandidateSearchRow[],
+  query: string,
+  symbols: ReadonlyMap<string, Pick<SymbolRow, "testCaseJson">>,
+): ContextCandidateSearchRow[] {
+  if (!/\btests?\b/i.test(query)) return [...rows];
+  const identifiers = new Set(extractQualifiedTermsFromContext(query, []));
+  if (identifiers.size === 0) return [...rows];
+  const matches = new Map(rows.map((row) => {
+    const title = parseTestCaseFacetJson(symbols.get(row.symbolId)?.testCaseJson)?.title;
+    const count = title === undefined ? 0 : extractQualifiedTermsFromContext(title, [])
+      .filter((identifier) => identifiers.has(identifier)).length;
+    return [row.symbolId, count] as const;
+  }));
+  return [...rows].sort((left, right) =>
+    left.tier - right.tier ||
+    (left.tier === 0 ? 0 : matches.get(right.symbolId)! - matches.get(left.symbolId)!),
+  );
 }
 
 /** Stable-partitions bounded fused rows without changing their contents. */
@@ -510,7 +532,11 @@ export async function searchContextCandidates(
     });
   }
   const orderedRows = prioritizeContextCandidateRowsByFocus(
-    rows,
+    prioritizeQualifiedTestCases(
+      rows,
+      options.query,
+      new Map([...symbols, ...overlaySnapshot.symbolsById]),
+    ),
     options.focusPathPrefixes ?? [],
   );
   return {

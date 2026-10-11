@@ -4,6 +4,35 @@ import { it } from "node:test";
 import type { Connection } from "kuzu";
 import type { ContextCandidateFusionItem } from "../../src/retrieval/fusion.js";
 
+it("prioritizes qualified test titles without promoting helpers or displacing pins", async () => {
+  const { prioritizeQualifiedTestCases, prioritizeContextCandidateRowsByFocus } = await import(
+    "../../dist/retrieval/context-candidate-search.js"
+  );
+  const titles = [undefined, "labels top-level gateways", "rejects sdl.info as sdl.workflow",
+    "keeps sdl.info callable", "checks sdl.information", "keeps sdl.info visible"];
+  const rows = titles.map((title, index) => ({
+    symbolId: String(index), filePath: "tests/contracts.test.ts", hasTestCaseFacet: title !== undefined,
+    score: 100 - index, source: "fts" as const, tier: 1 as 0 | 1,
+    sourceRanks: { fts: index + 1 }, provenance: { symbol: { fts: index + 1 } },
+  }));
+  rows[4].tier = 0;
+  const symbols = new Map(titles.map((title, index) => [String(index), {
+    testCaseJson: title === undefined ? null : JSON.stringify({ framework: "node:test", title }),
+  }]));
+  const query = "Find tests that expose sdl.info and reject sdl.workflow actions";
+  const ranked = prioritizeQualifiedTestCases(rows, query, symbols);
+  assert.deepEqual(ranked.map((row) => row.symbolId), ["4", "2", "3", "5", "0", "1"]);
+  for (const row of ranked) assert.strictEqual(row, rows[Number(row.symbolId)]);
+  assert.deepEqual(prioritizeQualifiedTestCases(rows, "Explain sdl.info", symbols), rows);
+  assert.deepEqual(prioritizeQualifiedTestCases(rows, "Find tests for gateways", symbols), rows);
+  rows[2].filePath = "other/contracts.test.ts";
+  assert.deepEqual(
+    prioritizeContextCandidateRowsByFocus(prioritizeQualifiedTestCases(rows, query, symbols), ["tests"])
+      .map((row) => row.symbolId),
+    ["4", "3", "5", "0", "1", "2"],
+  );
+});
+
 it("stable-partitions candidate rows into pins, focused rows, and the remainder", async () => {
   const { prioritizeContextCandidateRowsByFocus } = await import(
     "../../dist/retrieval/context-candidate-search.js"
