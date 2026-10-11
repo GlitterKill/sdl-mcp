@@ -636,3 +636,21 @@ Artifact `context-quality-ubuntu-latest` (11717252157) contains the failed child
 stdout/stderr; the runner removes its pending structured result on child failure.
 The completed job log is the authoritative evidence for the assertions above.
 Windows context verification was still active when this finding was recorded.
+
+Final result: Windows context job `114575235965` completed at 22:34 UTC with
+the same three quality failures: missing code-bearing `MCPServer` evidence,
+scoped precise p95 6,978 ms against 250 ms, and paths outside `tests/`.
+Its versioned contract and all three canonical probes passed; the full suite
+reported 28 pass, three failures and two intended mode skips. It completed
+without a child timeout. Run `38174940287` is terminal-failed only in the two
+context-quality jobs; all 11 ordinary/native/structural/background jobs passed.
+Both OS jobs stop after the SDL corpus failure, so neutral-corpus quality
+evaluation remains unverified despite successful construction of its graph.
+
+All dispatched maintenance runs are now terminal. Implementation is verified
+by the green ordinary run `38176282327`, passing six-platform packed-consumer
+native qualification `38167249461`, both completed realism matrices, and the
+repaired contract/canonical stages on both OSes. This is not an all-quality-gates
+pass: the V2 assertions and tiny-task claims audit above remain unresolved.
+No semantic threshold was weakened; publication/registry verification remains
+pending, and no main merge or final SDL release was performed.
