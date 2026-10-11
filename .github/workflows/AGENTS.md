@@ -340,3 +340,24 @@ and lock retain published versions; only disposable staging manifests adopt
 the prerelease. All 774 aggregate files passed, as did the focused native tests.
 Hosted/platform/registry gates remain. Do not republish 0.13.7 or infer registry
 success from local tarball qualification.
+
+### 2026-10-11: Maintenance dependency remediation and native platform gates
+
+The refreshed root audit reported 13 findings and the earlier packed consumer
+reported 10 (the previous 12-count snapshot is historical). Scoped upgrades of
+MCP SDK within 1.x, ONNX within 1.x, five existing overrides, and proxy-addr's
+compatible lock resolution clear both audits. ONNX 1.30 removes the vulnerable
+global-agent/roarr/sprintf-js chain. A scripts-enabled clean install, grammar
+verification, typecheck, and 775/775 aggregate files passed with zero exit-crash
+classifications; a real CPU Identity inference also passed on ONNX 1.30.
+
+Native publication previously built six targets but executed only Linux GNU.
+The native-only workflow now qualifies each supported target on a matching host,
+using Alpine for musl, and publishes the exact qualified tarballs. Shared wrapper
+text is normalized to LF so Windows/POSIX packages can be compared byte-for-byte.
+An explicit native-only version input changes staging, not root SDL/Watchman
+manifests. Registry consumers verify parser APIs, identity, exact binary hashes,
+and npm signatures/attestations after publication. The new workflow regression
+checks pass locally. Hosted runs remain separate evidence; do not infer success
+or publication from local checks. OpenSSL dry run 38162784659 started from
+61fe9f288317ef6894e5026185d28a7113f64c23. No main merge or SDL release is implied.

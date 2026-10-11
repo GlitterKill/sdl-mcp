@@ -6,6 +6,10 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      native_version:
+        description: "Optional native-only maintenance version (leave empty for source version)"
+        required: false
+        type: string
       dry_run:
         description: "Dry run (skip actual publish)"
         required: false
@@ -22,6 +26,30 @@ env:
   DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
 
 jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+      - name: Resolve bounded native package version
+        id: version
+        env:
+          NATIVE_INPUT: ${{ inputs.native_version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const version = process.env.NATIVE_INPUT || JSON.parse(readFileSync('native/package.json')).version;
+          assert.match(version, /^\d+\.\d+\.\d+$/);
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
+
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -32,15 +60,15 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-15-intel
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-15
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
 
     steps:
       - name: Checkout code
@@ -98,10 +126,117 @@ jobs:
           path: native/*.node
           if-no-files-found: error
 
+  qualify:
+    name: Qualify (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    needs: [build, resolve-version]
+    env:
+      NATIVE_VERSION: ${{ needs.resolve-version.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            platform: win32-x64-msvc
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+            platform: darwin-x64
+          - target: aarch64-apple-darwin
+            os: macos-15
+            platform: darwin-arm64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            platform: linux-x64-gnu
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+            platform: linux-x64-musl
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            platform: linux-arm64-gnu
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        if: matrix.target != 'x86_64-unknown-linux-musl'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Download matching binding
+        uses: actions/download-artifact@v7
+        with:
+          name: bindings-${{ matrix.target }}
+          path: ${{ runner.temp }}/bindings/${{ matrix.target }}
+
+      - name: Qualify packaged binding on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bindingDir = Join-Path $env:RUNNER_TEMP "bindings/${{ matrix.target }}"
+          $bindings = @(Get-ChildItem -LiteralPath $bindingDir -Filter "*.node" -File -Recurse)
+          if ($bindings.Count -ne 1) { throw "Expected exactly one .node binding; found $($bindings.Count)" }
+          $output = Join-Path $env:RUNNER_TEMP "native-qualification"
+          node scripts/qualify-native-package.mjs --target "${{ matrix.platform }}" --binary "$($bindings[0].FullName)" --output "$output" --version "$env:NATIVE_VERSION"
+
+      - name: Qualify packaged binding on GNU and macOS
+        if: runner.os != 'Windows' && matrix.target != 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binding_dir="${RUNNER_TEMP}/bindings/${{ matrix.target }}"
+          bindings=()
+          while IFS= read -r binding; do bindings+=("$binding"); done < <(find "$binding_dir" -type f -name '*.node' -print)
+          if [[ "${#bindings[@]}" -ne 1 ]]; then
+            echo "Expected exactly one .node binding; found ${#bindings[@]}"
+            exit 1
+          fi
+          output="${RUNNER_TEMP}/native-qualification"
+          node scripts/qualify-native-package.mjs --target "${{ matrix.platform }}" --binary "${bindings[0]}" --output "$output" --version "$NATIVE_VERSION"
+
+      - name: Qualify musl package in Alpine
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binding_dir="${RUNNER_TEMP}/bindings/${{ matrix.target }}"
+          bindings=()
+          while IFS= read -r binding; do bindings+=("$binding"); done < <(find "$binding_dir" -type f -name '*.node' -print)
+          if [[ "${#bindings[@]}" -ne 1 ]]; then
+            echo "Expected exactly one .node binding; found ${#bindings[@]}"
+            exit 1
+          fi
+          container_binary="/runner-temp/bindings/${{ matrix.target }}/$(basename "${bindings[0]}")"
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --volume "${RUNNER_TEMP}:/runner-temp" \
+            --env "NATIVE_VERSION=$NATIVE_VERSION" \
+            --workdir /workspace \
+            node:24-alpine \
+            sh -ec 'apk add --no-cache libstdc++ && node scripts/qualify-native-package.mjs --target "$1" --binary "$2" --output "$3" --version "$NATIVE_VERSION"' \
+            sh "${{ matrix.platform }}" "$container_binary" /runner-temp/native-qualification
+
+      - name: Upload qualification evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-qualified-${{ github.sha }}-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/native-qualification/pack/*.tgz
+            ${{ runner.temp }}/native-qualification/contract.json
+            ${{ runner.temp }}/native-qualification/install.log
+          if-no-files-found: error
+          retention-days: 30
   publish:
     name: Publish
     runs-on: ubuntu-latest
-    needs: build
+    needs:
+      - build
+      - qualify
+      - resolve-version
+    env:
+      NATIVE_VERSION: ${{ needs.resolve-version.outputs.version }}
 
     steps:
       - name: Checkout code
@@ -188,54 +323,193 @@ jobs:
             echo "ERROR: Some platform packages are missing binaries"
             exit 1
           fi
+      - name: Qualify packed native parser contract
+        run: >-
+          node scripts/qualify-native-package.mjs
+          --target linux-x64-gnu
+          --binary native/npm/linux-x64-gnu/sdl-mcp-native.linux-x64-gnu.node
+          --output "${{ runner.temp }}/native-package-contract"
+          --version "$NATIVE_VERSION"
+
+      - name: Download qualified package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: native-qualified-${{ github.sha }}-*
+          path: native/qualified
+
+      - name: Validate exact qualified tarballs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p native/release-pack
+          for package in sdl-mcp-native sdl-mcp-native-win32-x64-msvc sdl-mcp-native-darwin-x64 sdl-mcp-native-darwin-arm64 sdl-mcp-native-linux-x64-gnu sdl-mcp-native-linux-x64-musl sdl-mcp-native-linux-arm64-gnu; do
+            filename="${package}-${NATIVE_VERSION}.tgz"
+            mapfile -t candidates < <(find native/qualified -name "$filename" -type f)
+            test "${#candidates[@]}" -gt 0
+            for candidate in "${candidates[@]}"; do
+              if [ -f "native/release-pack/$filename" ]; then
+                cmp --silent "$candidate" "native/release-pack/$filename"
+              else
+                cp "$candidate" "native/release-pack/$filename"
+              fi
+            done
+            npm publish "native/release-pack/$filename" --dry-run --ignore-scripts --access public --tag latest --json > "native/release-pack/${package}.json"
+            PACKAGE_NAME="$package" node --input-type=module -e '
+              import assert from "node:assert/strict";
+              import { readFileSync } from "node:fs";
+              import { createHash } from "node:crypto";
+              const name = process.env.PACKAGE_NAME, version = process.env.NATIVE_VERSION;
+              const info = JSON.parse(readFileSync(`native/release-pack/${name}.json`, "utf8"));
+              assert.equal(info.name, name); assert.equal(info.version, version);
+              assert.equal(info.integrity, "sha512-" + createHash("sha512").update(readFileSync(`native/release-pack/${name}-${version}.tgz`)).digest("base64"));
+            '
+          done
+          sha256sum native/release-pack/*.tgz > native/release-pack/SHA256SUMS
+
+      - name: Upload exact native release tarballs
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-release-${{ github.sha }}
+          path: native/release-pack
+          if-no-files-found: error
+
+      - name: Require unused immutable versions
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readdirSync, readFileSync } from 'node:fs';
+          for (const file of readdirSync('native/release-pack').filter(f => f.endsWith('.json'))) {
+            const { name, version } = JSON.parse(readFileSync(`native/release-pack/${file}`));
+            const response = await fetch(`https://registry.npmjs.org/${name}/${version}`);
+            assert.equal(response.status, 404, `${name}@${version} must be unused; do not replace or silently skip an immutable artifact`);
+          }
+          NODE
+
       - name: Publish platform packages
+        if: env.DRY_RUN != 'true'
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          FAILED=0
-          for dir in native/npm/*/; do
-            pkg_name=$(node -e "console.log(require('./${dir}package.json').name)")
-            pkg_version=$(node -e "console.log(require('./${dir}package.json').version)")
-            echo "Publishing ${pkg_name}@${pkg_version}..."
-            if [ "${DRY_RUN}" = "true" ]; then
-              echo "  [DRY RUN] npm publish ${dir} --access public"
-              npm publish "${dir}" --access public --dry-run
-            else
-              # Check if already published
-              EXISTING=$(npm view "${pkg_name}@${pkg_version}" version 2>/dev/null || echo "")
-              if [ "${EXISTING}" = "${pkg_version}" ]; then
-                echo "  SKIP: ${pkg_name}@${pkg_version} already published"
-              else
-                if npm publish "${dir}" --access public; then
-                  echo "  OK: ${pkg_name}@${pkg_version} published"
-                else
-                  echo "  FAIL: ${pkg_name}@${pkg_version} publish failed"
-                  FAILED=1
-                fi
-              fi
-            fi
+          set -euo pipefail
+          for tarball in native/release-pack/sdl-mcp-native-*-"${NATIVE_VERSION}".tgz; do
+            npm publish "$tarball" --provenance --ignore-scripts --access public --tag latest
           done
-          if [ "${FAILED}" -eq 1 ]; then
-            echo "WARNING: Some platform packages failed to publish"
-            exit 1
-          fi
 
       - name: Publish umbrella package
+        if: env.DRY_RUN != 'true'
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "native/release-pack/sdl-mcp-native-${NATIVE_VERSION}.tgz" --provenance --ignore-scripts --access public --tag latest
+
+      - name: Verify registry tarball identity and attestations
+        if: env.DRY_RUN != 'true'
+        shell: bash
         run: |
-          PKG_VERSION=$(node -e "console.log(require('./native/package.json').version)")
-          echo "Publishing sdl-mcp-native@${PKG_VERSION}..."
-          if [ "${DRY_RUN}" = "true" ]; then
-            echo "  [DRY RUN] npm publish native/ --access public"
-            npm publish native/ --access public --dry-run
-          else
-            EXISTING=$(npm view "sdl-mcp-native@${PKG_VERSION}" version 2>/dev/null || echo "")
-            if [ "${EXISTING}" = "${PKG_VERSION}" ]; then
-              echo "  SKIP: sdl-mcp-native@${PKG_VERSION} already published"
-            else
-              npm publish native/ --access public --ignore-scripts
-            fi
-          fi
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const results = [];
+          for (const file of readdirSync('native/release-pack').filter(f => f.endsWith('.json'))) {
+            const expected = JSON.parse(readFileSync(`native/release-pack/${file}`));
+            let metadata;
+            for (let attempt = 0; attempt < 30; attempt++) {
+              const response = await fetch(`https://registry.npmjs.org/${expected.name}/${expected.version}`);
+              if (response.ok) { metadata = await response.json(); break; }
+              assert.equal(response.status, 404);
+              await new Promise(resolve => setTimeout(resolve, 10000));
+            }
+            assert.ok(metadata, `Registry metadata unavailable: ${expected.name}`);
+            assert.equal(metadata.dist.integrity, expected.integrity);
+            assert.ok(metadata.dist.attestations?.url, `Missing provenance: ${expected.name}`);
+            const response = await fetch(metadata.dist.tarball); assert.ok(response.ok);
+            const bytes = Buffer.from(await response.arrayBuffer());
+            assert.equal('sha512-' + createHash('sha512').update(bytes).digest('base64'), expected.integrity);
+            const attestationResponse = await fetch(metadata.dist.attestations.url); assert.ok(attestationResponse.ok);
+            const attestations = await attestationResponse.json();
+            const provenance = attestations.attestations.find(item => item.predicateType === 'https://slsa.dev/provenance/v1');
+            assert.ok(provenance, 'SLSA provenance v1 is required');
+            const statement = JSON.parse(Buffer.from(provenance.bundle.dsseEnvelope.payload, 'base64').toString('utf8'));
+            const definition = statement.predicate.buildDefinition;
+            assert.equal(definition.externalParameters.workflow.repository, 'https://github.com/GlitterKill/sdl-mcp');
+            assert.equal(definition.externalParameters.workflow.path, '.github/workflows/publish-native.yml');
+            assert.ok(definition.resolvedDependencies.some(item => item.digest?.gitCommit === process.env.GITHUB_SHA));
+            assert.ok(statement.subject.some(item => item.digest?.sha512 === createHash('sha512').update(bytes).digest('hex')));
+            results.push({name:expected.name, version:expected.version, dist:metadata.dist, provenance:statement});
+          }
+          writeFileSync('native/release-pack/registry-verification.json', JSON.stringify(results, null, 2));
+          NODE
+
+      - name: Upload native registry evidence
+        if: env.DRY_RUN != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-registry-${{ github.sha }}
+          path: native/release-pack/registry-verification.json
+          if-no-files-found: error
+
+  verify-registry:
+    name: Registry (${{ matrix.target }})
+    needs: [publish, resolve-version]
+    if: github.event.inputs.dry_run != 'true'
+    runs-on: ${{ matrix.os }}
+    env:
+      NATIVE_VERSION: ${{ needs.resolve-version.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        if: matrix.target != 'x86_64-unknown-linux-musl'
+        with:
+          node-version: 24.x
+      - uses: actions/download-artifact@v7
+        with:
+          name: native-qualified-${{ github.sha }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/qualified
+      - name: Verify Windows registry consumer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/verify-native-registry.mjs --version "$env:NATIVE_VERSION" --output "$env:RUNNER_TEMP/registry-consumer" --contract "$env:RUNNER_TEMP/qualified/contract.json"
+      - name: Verify GNU and macOS registry consumer
+        if: runner.os != 'Windows' && matrix.target != 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: node scripts/verify-native-registry.mjs --version "$NATIVE_VERSION" --output "$RUNNER_TEMP/registry-consumer" --contract "$RUNNER_TEMP/qualified/contract.json"
+      - name: Verify musl registry consumer in Alpine
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --volume "$RUNNER_TEMP:/runner-temp" \
+            --env "NATIVE_VERSION=$NATIVE_VERSION" \
+            --workdir /workspace node:24-alpine \
+            sh -ec 'apk add --no-cache libstdc++ && node scripts/verify-native-registry.mjs --version "$NATIVE_VERSION" --output /runner-temp/registry-consumer --contract /runner-temp/qualified/contract.json'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-registry-consumer-${{ github.sha }}-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/registry-consumer/registry-*.json
+            ${{ runner.temp }}/registry-consumer/registry-*.log
+          if-no-files-found: error

@@ -27,7 +27,11 @@ const pack = join(output, "pack");
 const consumer = join(output, "consumer");
 for (const dir of [wrapperStage, platformStage, pack, consumer]) mkdirSync(dir, { recursive: true });
 writeFileSync(join(wrapperStage, "package.json"), JSON.stringify(umbrella, null, 2) + "\n");
-for (const name of umbrella.files) copyFileSync(join(root, "native", name), join(wrapperStage, name));
+// Keep the shared JS/type wrapper tarball identical across Windows and POSIX checkouts.
+for (const name of umbrella.files) {
+  const content = readFileSync(join(root, "native", name), "utf8").replace(/\r\n/g, "\n");
+  writeFileSync(join(wrapperStage, name), content);
+}
 writeFileSync(join(platformStage, "package.json"), JSON.stringify(platform, null, 2) + "\n");
 copyFileSync(resolve(values.binary), join(platformStage, platform.main));
 writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "native-package-contract-consumer", version: "1.0.0", private: true }));
