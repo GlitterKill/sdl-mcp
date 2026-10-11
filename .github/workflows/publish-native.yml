@@ -50,6 +50,9 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
           NODE
 
+      - name: Check native packaging regressions
+        run: node --experimental-strip-types --test tests/unit/native-musl-elf.test.ts tests/unit/native-platform-qualification.test.ts tests/unit/native-package-exports.test.ts tests/unit/release-publish-lockfile.test.ts
+
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -91,12 +94,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-      - name: Install cross-compilation tools (x86_64-linux-musl)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-
       - name: Cache Cargo registry
         uses: actions/cache@v5
         with:
@@ -115,9 +112,25 @@ jobs:
         uses: ./.github/actions/setup-tree-sitter
 
       - name: Build native addon
+        if: matrix.target != 'x86_64-unknown-linux-musl'
         run: npx napi build --release --cargo-cwd native --config native/package.json --target ${{ matrix.target }} native
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Build musl addon with Alpine toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep Rust and native C/C++ dependencies on musl, including the final linker.
+          docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
+            --env CARGO_TARGET_DIR=/workspace/native/target/alpine-musl \
+            --env CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=cc \
+            rust:alpine sh -ec '
+              apk add --no-cache nodejs npm build-base binutils
+              npx --no-install napi build --release --cargo-cwd native --config native/package.json --target x86_64-unknown-linux-musl native
+              node scripts/verify-musl-elf.mjs native/sdl-mcp-native.node
+            '
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -215,7 +228,7 @@ jobs:
             --env "NATIVE_VERSION=$NATIVE_VERSION" \
             --workdir /workspace \
             node:24-alpine \
-            sh -ec 'apk add --no-cache libstdc++ && node scripts/qualify-native-package.mjs --target "$1" --binary "$2" --output "$3" --version "$NATIVE_VERSION"' \
+            sh -ec 'apk add --no-cache libstdc++ binutils && node scripts/qualify-native-package.mjs --target "$1" --binary "$2" --output "$3" --version "$NATIVE_VERSION"' \
             sh "${{ matrix.platform }}" "$container_binary" /runner-temp/native-qualification
 
       - name: Upload qualification evidence

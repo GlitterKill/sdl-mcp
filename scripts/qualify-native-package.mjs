@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { verifyMuslElf } from "./verify-musl-elf.mjs";
 
 const { values } = parseArgs({ options: { target: { type: "string" }, binary: { type: "string" }, output: { type: "string" }, version: { type: "string" } } });
 assert.ok(values.target && values.binary && values.output, "requires --target, --binary and a fresh --output directory");
@@ -18,6 +20,8 @@ const version = values.version ?? umbrella.version;
 assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
 assert.equal(umbrella.optionalDependencies[platform.name], umbrella.version);
 assert.ok(platform.os.includes(process.platform) && platform.cpu.includes(process.arch), "run qualification on a matching target host");
+const elf = values.target === "linux-x64-musl" ? verifyMuslElf(resolve(values.binary)) : undefined;
+const binarySha256 = createHash("sha256").update(readFileSync(resolve(values.binary))).digest("hex");
 umbrella.version = version;
 for (const name of Object.keys(umbrella.optionalDependencies)) umbrella.optionalDependencies[name] = version;
 platform.version = version;
@@ -58,6 +62,11 @@ for (const dir of [wrapperStage, platformStage]) {
 }
 writeFileSync(join(output, "install.log"), run("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", ...tarballs], consumer));
 const report = run(process.execPath, [join(root, "scripts/verify-native-package.mjs"), consumer, version], consumer);
-writeFileSync(join(output, "contract.json"), report);
+const contract = JSON.parse(report);
+assert.equal(contract.platformPackage, platform.name, "consumer must select the requested platform package");
+assert.equal(contract.binarySha256, binarySha256, "installed binary must match the input artifact");
+contract.elf = elf;
+contract.tarballs = tarballs.map(path => ({ filename: path.split(/[\\/]/).pop(), sha256: createHash("sha256").update(readFileSync(path)).digest("hex") }));
+writeFileSync(join(output, "contract.json"), JSON.stringify(contract, null, 2) + "\n");
 console.log(report.trim());
 console.log(`Qualified packed native artifacts: ${pack}`);
