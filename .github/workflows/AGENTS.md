@@ -404,3 +404,14 @@ node scripts/verify-musl-elf.mjs /path/to/sdl-mcp-native.node
 Hosted qualification must run with `dry_run=true`; publication and registry
 verification are separate release operations. See the musl qualification
 report in `devdocs/` for exact tested commit, run and artifact evidence.
+
+Hosted follow-up: commit `063bafb2d40a963b890492f625a9ad2ad08c82c5`, run
+`38165460944`, passed all six builds, all six fresh packed consumers and 22
+focused regression tests. Independently extracted musl package ELF requires
+only `libgcc_s.so.1` and `libc.musl-x86_64.so.1`. The overall dry run failed
+later in unchanged `Validate exact qualified tarballs`: `info.name` was
+undefined when parsing npm dry-run JSON. The actual JSON was not retained,
+and local npm 11.9.0 does not reproduce it; inspect hosted output before
+assuming its shape. This remaining release gate is outside the musl patch.
+No publication occurred. Exact hashes, commands and limits are in
+`devdocs/alpine-musl-qualification-2026-10-11.md`.
