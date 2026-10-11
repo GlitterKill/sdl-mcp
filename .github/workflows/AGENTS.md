@@ -450,3 +450,32 @@ and writes normalized metadata for the later registry checks. Regression tests
 exercise both observed formats and reject wrong names, versions, integrity and
 extra package results. This is release assembly only; musl build and ELF checks,
 publication permissions and registry attestations are unchanged.
+
+Hosted follow-up: native dry run `38167249461` on
+`45193a6b54599dd121336717688c3f0fd08dbe01` passed all six builds, all six
+packed-consumer qualifications, and exact release-tarball validation/assembly.
+The local npm 11.19.0 reproduction also passed the repaired SHA-512 validator
+against the actual qualified `sdl-mcp-native@0.13.8` umbrella tarball. All 23
+focused packaging tests passed. Publication and registry checks were skipped.
+
+### 2026-10-11: Frozen corpus predates a required contract regression
+
+Original maintenance run `38163624167`, Ubuntu context-quality job
+`114541518674`, failed paired evaluation with two independent errors: the
+canonical probe family collision described above, and the exact `sdl.info`
+contract-title assertion at `context-quality.test.ts:2856` (empty actual set).
+The corpus is pinned to `fcf4f2e11c5a1bb9b301a245af42b28556414b8e` (July 26).
+`git show <corpus>:tests/unit/code-mode-tool-validation.test.ts` confirms it
+contains the discoverability case but not
+`rejects info and sdl.info as sdl.workflow actions`. That case first appears in
+`3aff7a6af7de8cd4b45e406b5394d97b7f75bef7` (July 28); the exact-title benchmark
+assertion was added in `3cfa4a6eab9e53cb02af263a68b3132b81678d70` (July 29).
+The existing immutable corpus therefore cannot satisfy the full assertion.
+
+This fixture mismatch is confirmed, not a reason to lower retrieval thresholds,
+synthesize missing evidence, skip the contract test, or silently repin/rebaseline
+the frozen corpus. A separate versioned contract corpus or an explicit corpus
+and baseline update is needed. That decision remains open. The repaired CI run
+`38166992257` is still pending semantic jobs; its two OS test jobs, six native
+build jobs, structural benchmark and both background-integrity benchmarks have
+passed. No publication or main merge has occurred.
