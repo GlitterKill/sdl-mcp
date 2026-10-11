@@ -42,6 +42,17 @@ describe("native platform qualification workflow", () => {
         `${target} should build on ${runner}`,
       );
     }
+
+    const muslBuild = buildJob.match(/- name: Build musl addon with Alpine toolchain([\s\S]*?)(?=\n      - name:|$)/)?.[1] ?? "";
+    assert.match(muslBuild, /docker run --rm[\s\S]*--volume "\$GITHUB_WORKSPACE:\/workspace"[\s\S]*rust:alpine/);
+    assert.match(muslBuild, /CARGO_TARGET_DIR=\/workspace\/native\/target\/alpine-musl/);
+    assert.match(muslBuild, /CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=cc/);
+    assert.match(muslBuild, /npx --no-install napi build[\s\S]*--target x86_64-unknown-linux-musl/);
+
+    const elfCheck = muslBuild.indexOf("node scripts/verify-musl-elf.mjs native/sdl-mcp-native.node");
+    const artifactUpload = buildJob.indexOf("- name: Upload artifact");
+    assert.ok(elfCheck >= 0, "Alpine musl build should inspect the linked ELF metadata");
+    assert.ok(artifactUpload > elfCheck, "ELF checks must pass before uploading the native binary");
   });
 
   it("qualifies all six packed targets before publish", () => {
@@ -76,8 +87,12 @@ describe("native platform qualification workflow", () => {
     assert.match(qualifyJob, /exactly one \.node/);
     assert.match(qualifyJob, /scripts\/qualify-native-package\.mjs/);
     assert.match(qualifyJob, /node:24-alpine/);
-    assert.match(qualifyJob, /apk add --no-cache libstdc\+\+/);
+    const muslQualification = qualifyJob.match(/- name: Qualify musl package in Alpine([\s\S]*?)(?=\n      - name:|$)/)?.[1] ?? "";
+    const alpinePackages = muslQualification.match(/apk add --no-cache([^'\n]*)/)?.[1] ?? "";
+    assert.match(alpinePackages, /\blibstdc\+\+/);
+    assert.match(alpinePackages, /\bbinutils\b/);
     assert.match(qualifyJob, /docker run[\s\S]*GITHUB_WORKSPACE[\s\S]*RUNNER_TEMP/);
+    assert.match(muslQualification, /node scripts\/qualify-native-package\.mjs/);
     assert.match(
       qualifyJob,
       /name:\s*native-qualified-\$\{\{\s*github\.sha\s*\}\}-\$\{\{\s*matrix\.target\s*\}\}/,
@@ -91,6 +106,15 @@ describe("native platform qualification workflow", () => {
     assert.match(qualifierScript, /join\(output, "pack"\)/);
     assert.match(qualifierScript, /join\(output, "install\.log"\)/);
     assert.match(qualifierScript, /join\(output, "contract\.json"\)/);
+    assert.match(qualifierScript, /const platformDirectory = resolve\(root, "native\/npm", values\.target\)/);
+    assert.match(qualifierScript, /createHash\("sha256"\)\.update\(readFileSync\(resolve\(values\.binary\)\)\)\.digest\("hex"\)/);
+    assert.match(qualifierScript, /assert\.equal\(contract\.binarySha256, binarySha256, "installed binary must match the input artifact"\)/);
+    assert.match(qualifierScript, /assert\.equal\(contract\.platformPackage, platform\.name, "consumer must select the requested platform package"\)/);
+    const elfValidation = qualifierScript.indexOf("verifyMuslElf(resolve(values.binary))");
+    const packageStaging = qualifierScript.indexOf("for (const dir of [wrapperStage, platformStage])");
+    assert.ok(elfValidation >= 0 && packageStaging > elfValidation,
+      "musl ELF validation must run before package staging and packing",
+    );
 
     const publishNeeds = jobNeeds(publishJob);
     assert.match(publishNeeds, /\bbuild\b/);

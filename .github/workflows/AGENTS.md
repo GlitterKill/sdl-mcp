@@ -361,3 +361,37 @@ and npm signatures/attestations after publication. The new workflow regression
 checks pass locally. Hosted runs remain separate evidence; do not infer success
 or publication from local checks. OpenSSL dry run 38162784659 started from
 61fe9f288317ef6894e5026185d28a7113f64c23. No main merge or SDL release is implied.
+
+### 2026-10-11: musl target linked against host glibc
+
+Run `38163622459` built Rust for `x86_64-unknown-linux-musl` on Ubuntu,
+but its build log reports `zig: not found`. The installed napi CLI disables
+`crt-static` for shared musl addons and falls back to the normal linker when
+Zig is unavailable. Installing `musl-tools` alone did not configure Cargo's
+final linker. The downloaded musl ELF directly needs `libc.so.6`,
+`ld-linux-x86-64.so.2`, and GLIBC symbol versions through 2.34. This is a
+build/linkage defect already present before packing, not a wrapper export bug.
+The musl SHA-256 is `a095f6405660ae864a1db03e0882e7a0e39bad98574554f6b8b8ef72050ca46d`;
+the separate GNU artifact is `e248d5b93af7c102cd7f7fbaab9c2a241732f1ef80b72aa7705d9ed989c3ea07`.
+
+The musl build now runs in `rust:alpine` with Alpine's Rust/C/C++ linker
+and a separate Cargo target directory. `verify-musl-elf.mjs` checks ELF64,
+x86-64 shared-object identity, musl libc, an explicit runtime dependency list,
+and absence of glibc versions, executable interpreters and RPATH/RUNPATH.
+It runs before upload and again on the selected binding before packaging.
+Qualification installs fresh umbrella/platform tarballs into a clean Alpine
+consumer using npm, checks the normal wrapper API and content/disk/async
+parity, and compares the installed platform name and binary hash to its input.
+The contract artifact records ELF dependencies and tarball SHA-256 hashes.
+Do not add a glibc shim or weaken qualification to handle this failure.
+
+Focused checks:
+
+```sh
+node --experimental-strip-types --test tests/unit/native-musl-elf.test.ts tests/unit/native-platform-qualification.test.ts tests/unit/native-package-exports.test.ts tests/unit/release-publish-lockfile.test.ts
+node scripts/verify-musl-elf.mjs /path/to/sdl-mcp-native.node
+```
+
+Hosted qualification must run with `dry_run=true`; publication and registry
+verification are separate release operations. See the musl qualification
+report in `devdocs/` for exact tested commit, run and artifact evidence.
