@@ -639,6 +639,7 @@ async function resolveCSharpImportMaps(params: {
   imports: ExtractedImport[];
   extensions: string[];
   namespaceIndex: CSharpNamespaceIndex;
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<{
   usingNameToSymbolIds: Map<string, string[]>;
   usingNamespaceImports: Map<string, Map<string, string>>;
@@ -652,6 +653,7 @@ async function resolveCSharpImportMaps(params: {
     imports,
     extensions,
     namespaceIndex,
+    importCache,
   } = params;
   const usingNameToSymbolIds = new Map<string, string[]>();
   const usingNamespaceImports = new Map<string, Map<string, string>>();
@@ -692,6 +694,7 @@ async function resolveCSharpImportMaps(params: {
         importerRelPath,
         specifier,
         extensions,
+        knownRepoPaths: importCache?.fileByRelPath,
       });
       const targetFiles: Exclude<
         Awaited<ReturnType<typeof ladybugDb.getFileByRepoPath>>,
@@ -1060,6 +1063,7 @@ async function resolveCSharpCallEdgesPass2(params: {
     imports,
     extensions: [...adapter.fileExtensions],
     namespaceIndex,
+    importCache,
   });
 
   const usingNameToSymbolIds = new Map<string, string[]>();

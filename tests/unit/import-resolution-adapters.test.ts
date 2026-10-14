@@ -45,6 +45,40 @@ describe("import-resolution adapters", () => {
     assert.deepStrictEqual(paths, ["pkg/service/service.go"]);
   });
 
+  it("resolves Go imports from indexed paths without source files on disk", async () => {
+    const repoRoot = createTempRepo("sdl-go-indexed-imports-");
+    writeRepoFile(repoRoot, "go.mod", "module github.com/acme/project\n");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "go",
+      repoRoot,
+      importerRelPath: "cmd/api/main.go",
+      specifier: "github.com/acme/project/pkg/service",
+      extensions: [".go"],
+      knownRepoPaths: new Map([["pkg/service/service.go", true]]),
+    });
+
+    assert.deepStrictEqual(paths, ["pkg/service/service.go"]);
+  });
+
+  it("applies configured ignores to uncached Go package walks", async () => {
+    const repoRoot = createTempRepo("sdl-go-ignored-imports-");
+    writeRepoFile(repoRoot, "go.mod", "module github.com/acme/project\n");
+    writeRepoFile(repoRoot, "pkg/service/impl/service.go");
+    writeRepoFile(repoRoot, "pkg/service/vendor/impl/service.go");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "go",
+      repoRoot,
+      importerRelPath: "cmd/api/main.go",
+      specifier: "github.com/acme/project/pkg/service",
+      extensions: [".go"],
+      ignorePatterns: ["**/vendor/**"],
+    });
+
+    assert.deepStrictEqual(paths, ["pkg/service/impl/service.go"]);
+  });
+
   it("resolves Java package imports to source files", async () => {
     const repoRoot = createTempRepo("sdl-java-imports-");
     writeRepoFile(
@@ -63,6 +97,69 @@ describe("import-resolution adapters", () => {
 
     assert.deepStrictEqual(paths, [
       "src/main/java/com/example/service/Helper.java",
+    ]);
+  });
+
+  it("resolves Java imports from indexed paths without source files on disk", async () => {
+    const repoRoot = createTempRepo("sdl-java-indexed-imports-");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "java",
+      repoRoot,
+      importerRelPath: "src/main/java/com/example/app/App.java",
+      specifier: "com.example.service.Helper",
+      extensions: [".java"],
+      knownRepoPaths: new Map([
+        ["src/generated/com/example/service/Helper.java", true],
+      ]),
+    });
+
+    assert.deepStrictEqual(paths, [
+      "src/generated/com/example/service/Helper.java",
+    ]);
+  });
+
+  it("applies configured ignores to uncached Java package walks", async () => {
+    const repoRoot = createTempRepo("sdl-java-ignored-imports-");
+    writeRepoFile(
+      repoRoot,
+      "src/generated/com/example/service/Helper.java",
+    );
+    writeRepoFile(
+      repoRoot,
+      "vendor/generated/com/example/service/Helper.java",
+    );
+
+    const paths = await resolveImportCandidatePaths({
+      language: "java",
+      repoRoot,
+      importerRelPath: "src/main/java/com/example/app/App.java",
+      specifier: "com.example.service.Helper",
+      extensions: [".java"],
+      ignorePatterns: ["**/vendor/**"],
+    });
+
+    assert.deepStrictEqual(paths, [
+      "src/generated/com/example/service/Helper.java",
+    ]);
+  });
+
+  it("resolves Kotlin imports from indexed paths without source files on disk", async () => {
+    const repoRoot = createTempRepo("sdl-kotlin-indexed-imports-");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "kotlin",
+      repoRoot,
+      importerRelPath: "src/main/kotlin/com/example/app/App.kt",
+      specifier: "com.example.service.Helper",
+      extensions: [".kt"],
+      knownRepoPaths: new Map([
+        ["src/generated/com/example/service/Helper.kt", true],
+      ]),
+    });
+
+    assert.deepStrictEqual(paths, [
+      "src/generated/com/example/service/Helper.kt",
     ]);
   });
 
@@ -162,6 +259,55 @@ describe("import-resolution adapters", () => {
       importerRelPath: "src/App/Controllers/UserController.cs",
       specifier: "Acme.Services.UserService",
       extensions: [".cs"],
+    });
+
+    assert.deepStrictEqual(paths, ["src/Generated/UserService.cs"]);
+  });
+
+  it("resolves C# fallback imports from indexed paths without source files on disk", async () => {
+    const repoRoot = createTempRepo("sdl-csharp-indexed-imports-");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "csharp",
+      repoRoot,
+      importerRelPath: "src/App/Controllers/UserController.cs",
+      specifier: "Acme.Services.UserService",
+      extensions: [".cs"],
+      knownRepoPaths: new Map([["src/Generated/UserService.cs", true]]),
+    });
+
+    assert.deepStrictEqual(paths, ["src/Generated/UserService.cs"]);
+  });
+
+  it("treats indexed C# paths as authoritative and ignores uncached disk targets", async () => {
+    const repoRoot = createTempRepo("sdl-csharp-indexed-imports-");
+    writeRepoFile(repoRoot, "Acme/Services/UserService.cs");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "csharp",
+      repoRoot,
+      importerRelPath: "src/App/Controllers/UserController.cs",
+      specifier: "Acme.Services.UserService",
+      extensions: [".cs"],
+      knownRepoPaths: new Map(),
+    });
+
+    assert.deepStrictEqual(paths, []);
+  });
+
+  it("honors ignore patterns for direct and fallback C# candidates", async () => {
+    const repoRoot = createTempRepo("sdl-csharp-ignored-imports-");
+    writeRepoFile(repoRoot, "Acme/Services/UserService.cs");
+    writeRepoFile(repoRoot, "src/Generated/UserService.cs");
+    writeRepoFile(repoRoot, "vendor/Generated/UserService.cs");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "csharp",
+      repoRoot,
+      importerRelPath: "src/App/Controllers/UserController.cs",
+      specifier: "Acme.Services.UserService",
+      extensions: [".cs"],
+      ignorePatterns: ["**/Acme/Services/**", "**/vendor/**"],
     });
 
     assert.deepStrictEqual(paths, ["src/Generated/UserService.cs"]);

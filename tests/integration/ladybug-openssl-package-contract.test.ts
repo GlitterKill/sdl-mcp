@@ -67,14 +67,14 @@ function readPe(filePath: string): { machine: number; optionalMagic: number } {
 
 it("defines the pinned OpenSSL and Ladybug FTS source artifacts", () => {
   assert.deepEqual(source, {
-    opensslVersion: "3.5.8",
-    packageVersion: "3.5.8-sdl.1",
+    opensslVersion: "3.5.9",
+    packageVersion: "3.5.9-sdl.1",
     sourceUrl:
-      "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
+      "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
     signatureUrl:
-      "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz.asc",
+      "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz.asc",
     sourceSha256:
-      "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+      "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
     releaseSignerFingerprint: expectedReleaseSignerFingerprint,
     releaseCertificateFingerprint: expectedReleaseCertificateFingerprint,
     configureTarget: "VC-WIN64A",
@@ -102,8 +102,8 @@ it("defines the pinned OpenSSL and Ladybug FTS source artifacts", () => {
   assert.match(releaseKey, /BEGIN PGP PUBLIC KEY BLOCK/u);
 });
 
-it("pins the exact signer used by the OpenSSL 3.5.8 source release", () => {
-  assert.equal(source.packageVersion, "3.5.8-sdl.1");
+it("pins the exact signer used by the OpenSSL 3.5.9 source release", () => {
+  assert.equal(source.packageVersion, "3.5.9-sdl.1");
   assert.equal(source.releaseSignerFingerprint, expectedReleaseSignerFingerprint);
   assert.equal(source.releaseCertificateFingerprint, expectedReleaseCertificateFingerprint);
 
@@ -223,6 +223,8 @@ it(
     assert.equal(provenance.source.sha256, source.sourceSha256);
     assert.equal(provenance.source.releaseSignerFingerprint, source.releaseSignerFingerprint);
     assert.equal(provenance.source.signatureFingerprint, source.releaseSignerFingerprint);
+    assert.equal(provenance.fts.sha256, fts.artifactSha256);
+    assert.equal(provenance.fts.size, fts.artifactSize);
     const sbom = readFileSync(join(packageRoot, "sbom.spdx.json"), "utf8");
     assert.match(sbom, new RegExp("^PackageVersion: " + source.packageVersion + "$", "mu"));
     assert.equal(provenance.build.configureTarget, source.configureTarget);

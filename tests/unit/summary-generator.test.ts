@@ -305,6 +305,59 @@ describe("OpenAICompatibleSummaryProvider construction", () => {
   });
 });
 
+describe("summary provider prompts", () => {
+  it("uses language-neutral instructions for both LLM providers", async () => {
+    const requests: Array<{
+      system?: unknown;
+      messages?: Array<{ role?: unknown; content?: unknown }>;
+    }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      if (typeof init?.body !== "string") {
+        throw new Error("Summary request did not contain a JSON body");
+      }
+      requests.push(JSON.parse(init.body) as (typeof requests)[number]);
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "Summarizes the test symbol." }],
+          choices: [{ message: { content: "Summarizes the test symbol." } }],
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    };
+
+    try {
+      await new AnthropicSummaryProvider({ apiKey: "test-key" }).generate({
+        symbolName: "LoadCache",
+        kind: "method",
+        signature: "LoadCache(string path)",
+      });
+      await new OpenAICompatibleSummaryProvider({ apiKey: "test-key" }).generate(
+        {
+          symbolName: "LoadCache",
+          kind: "method",
+          signature: "LoadCache(string path)",
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    const prompts = requests.map(
+      (request) =>
+        request.system ??
+        request.messages?.find((message) => message.role === "system")?.content,
+    );
+    assert.equal(prompts.length, 2);
+    const textPrompts = prompts.filter(
+      (prompt): prompt is string => typeof prompt === "string",
+    );
+    assert.equal(textPrompts.length, 2);
+    assert.ok(textPrompts.every((prompt) => /code symbol/i.test(prompt)));
+    assert.ok(textPrompts.every((prompt) => !/typescript|javascript/i.test(prompt)));
+  });
+});
+
 describe("generateSummariesForRepo", () => {
   after(async () => {
     await closeLadybugDb();

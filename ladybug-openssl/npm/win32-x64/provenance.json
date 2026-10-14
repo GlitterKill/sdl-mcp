@@ -22,7 +22,7 @@
         "format": "PE32+",
         "machine": "x86-64"
       },
-      "sha256": "6b0ebfc1fc273eacc369ddc16aaf0927bfd0de1e33a85ec017c1877a719a9c97"
+      "sha256": "d7428bcefcd7d0118f95215fa113227e6bab03e8c066993ea7f0372a633a0466"
     },
     "bin/libssl-3-x64.dll": {
       "imports": [
@@ -43,7 +43,7 @@
         "format": "PE32+",
         "machine": "x86-64"
       },
-      "sha256": "f0a0a604b0628c711fed7b4ce288efed75aae11755c8ac5fc9bb05f1a07b9586"
+      "sha256": "f9354443c46134dd78552501cb69109cccef89c00ec8b4005af693730404540d"
     }
   },
   "build": {
@@ -52,13 +52,13 @@
     "configureTarget": "VC-WIN64A",
     "linkerVersion": "Microsoft (R) Incremental Linker Version 14.44.35228.0",
     "msvcToolchainVersion": "14.44.35207",
-    "nasmVersion": "NASM version 2.16.03 compiled on Apr 17 2024",
-    "opensslVersion": "OpenSSL 3.5.7 9 Jun 2026 (Library: OpenSSL 3.5.7 9 Jun 2026)",
-    "perlVersion": "This is perl 5, version 42, subversion 2 (v5.42.2) built for MSWin32-x64-multi-thread",
+    "nasmVersion": "NASM version 3.01 compiled on Oct 10 2025",
+    "opensslVersion": "OpenSSL 3.5.9 29 Sep 2026 (Library: OpenSSL 3.5.9 29 Sep 2026)",
+    "perlVersion": "This is perl 5, version 42, subversion 3 (v5.42.3) built for MSWin32-x64-multi-thread",
     "windowsSdkVersion": "10.0.26100.0\\"
   },
   "fts": {
-    "artifactUrl": "https://extension.ladybugdb.com/v0.18.1/win_amd64/fts/libfts.lbug_extension",
+    "artifactUrl": "https://extension.ladybugdb.com/v0.19.0/win_amd64/fts/libfts.lbug_extension",
     "imports": {
       "libcrypto-3-x64.dll": [
         "ASN1_STRING_get0_data",
@@ -111,17 +111,19 @@
         "TLS_client_method"
       ]
     },
-    "version": "0.18.1"
+    "sha256": "27adf2ca87ec5a5871a91c3864a3353a7d4aa5808f5729f34a6c21cbb500eaf0",
+    "size": 14809088,
+    "version": "0.19.0"
   },
-  "opensslVersion": "3.5.7",
+  "opensslVersion": "3.5.9",
   "packageName": "@sdl-mcp/ladybug-openssl-win32-x64",
-  "packageVersion": "3.5.7-sdl.2",
+  "packageVersion": "3.5.9-sdl.1",
   "source": {
-    "releaseSignerFingerprint": "BA5473A2B0587B07FB27CF2D216094DFD0CB81EF",
-    "sha256": "a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8",
-    "signatureFingerprint": "BA5473A2B0587B07FB27CF2D216094DFD0CB81EF",
-    "signatureUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz.asc",
+    "releaseSignerFingerprint": "C46ED3F2CBEFDA1FDAADA44264ED7B1DCCE71CB2",
+    "sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
+    "signatureFingerprint": "C46ED3F2CBEFDA1FDAADA44264ED7B1DCCE71CB2",
+    "signatureUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz.asc",
     "signatureVerified": true,
-    "sourceUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz"
+    "sourceUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
   }
 }

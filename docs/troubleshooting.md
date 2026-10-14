@@ -244,6 +244,9 @@ Use this recovery sequence:
    family; its receipt is a family member bound to the canonical primary identity
    and exact primary/WAL bytes. Use separate backup tooling only for a forensic
    artifact that will never be configured as an SDL-MCP database.
+   SDL-MCP does not auto-restore a primary database alone: the family can include
+   a WAL and receipt, in-place replacement is not atomic, and a crash can leave
+   committed data absent from the primary file.
 4. Choose an absolute candidate path that does not exist, then run:
 
    ```bash

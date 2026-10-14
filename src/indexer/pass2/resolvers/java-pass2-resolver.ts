@@ -528,13 +528,21 @@ async function resolveJavaImportMaps(params: {
   importerRelPath: string;
   imports: ExtractedImport[];
   extensions: string[];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<{
   importedNameToSymbolIds: Map<string, string[]>;
   namespaceImports: Map<string, Map<string, string>>;
   wildcardNameToSymbolIds: Map<string, string[]>;
 }> {
-  const { conn, repoId, repoRoot, importerRelPath, imports, extensions } =
-    params;
+  const {
+    conn,
+    repoId,
+    repoRoot,
+    importerRelPath,
+    imports,
+    extensions,
+    importCache,
+  } = params;
   const importedNameToSymbolIds = new Map<string, string[]>();
   const namespaceImports = new Map<string, Map<string, string>>();
   const wildcardNameToSymbolIds = new Map<string, string[]>();
@@ -546,6 +554,7 @@ async function resolveJavaImportMaps(params: {
       importerRelPath,
       specifier: imp.specifier,
       extensions,
+      knownRepoPaths: importCache?.fileByRelPath,
     });
     if (resolvedPaths.length === 0) {
       continue;
@@ -1218,6 +1227,7 @@ async function resolveJavaCallEdgesPass2(params: {
     importerRelPath: fileMeta.path,
     imports,
     extensions: [...adapter.fileExtensions],
+    importCache,
   });
   const importedNameToSymbolIds = mergeImportedNameMaps(
     importResolution.importedNameToSymbolIds,

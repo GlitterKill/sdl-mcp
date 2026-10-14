@@ -90,7 +90,8 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
           async () => {
             const parsedAt = new Date().toISOString();
             try {
-              const repoRoot = await this.loadRepoRoot(payload.repoId);
+              const { repoRoot, ignorePatterns } =
+                await this.loadRepoIndexConfig(payload.repoId);
 
               let derivedLanguage = "";
               if (payload.filePath.endsWith(".d.ts")) {
@@ -120,6 +121,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
                 languages: derivedLanguage ? [derivedLanguage] : [],
                 language: payload.language,
                 version: payload.version,
+                ignorePatterns,
               });
               this.overlayStore.setParseResult(
                 payload.repoId,
@@ -855,6 +857,21 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     }
     this.repoRootCache.set(repoId, repo.rootPath);
     return repo.rootPath;
+  }
+
+  private async loadRepoIndexConfig(
+    repoId: string,
+  ): Promise<{ repoRoot: string; ignorePatterns: string[] }> {
+    const repo = await ladybugDb.getRepo(await getLadybugConn(), repoId);
+    if (!repo) {
+      throw new IndexError(`Repository ${repoId} not found`);
+    }
+    const config = RepoConfigSchema.parse(JSON.parse(repo.configJson));
+    this.repoRootCache.set(repoId, repo.rootPath);
+    return {
+      repoRoot: repo.rootPath,
+      ignorePatterns: config.sourceFileListPath ? [] : config.ignore,
+    };
   }
 }
 

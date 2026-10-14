@@ -34,7 +34,7 @@ export interface SummaryProvider {
 }
 
 const ANTHROPIC_SYSTEM_PROMPT =
-  "You are a code documentation assistant. Write a 1-3 sentence summary of what this TypeScript/JavaScript symbol does. Be specific, not generic. Focus on behavior, not structure.";
+  "You are a code documentation assistant. Write a 1-3 sentence summary of what this code symbol does. Be specific, not generic. Focus on behavior, not structure.";
 
 function buildFallbackPreparedInput(input: {
   symbolName: string;

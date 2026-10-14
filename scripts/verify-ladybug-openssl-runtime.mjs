@@ -552,8 +552,8 @@ async function main() {
     fts: {
       artifactUrl: fts.artifactUrl,
       imports: ftsImports,
-      sha256: fts.sha256,
-      size: fts.size,
+      sha256: fts.artifactSha256,
+      size: fts.artifactSize,
       version: fts.ladybugVersion,
     },
     opensslVersion: source.opensslVersion,

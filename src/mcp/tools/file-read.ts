@@ -497,8 +497,21 @@ export async function handleFileRead(
       indexedFilePath,
     );
     if (disposition === "structured") {
-      throw new ValidationError(
-        "Indexed source has structured retrieval. Use sdl.context or sdl.retrieve.",
+      // Give the client one file-specific, bounded structured read to replay.
+      throw Object.assign(
+        new ValidationError(
+          "Indexed source has structured retrieval. Use sdl.context or sdl.retrieve; replay nextCalls to inspect this file.",
+        ),
+        {
+          nextCalls: [{
+            action: "sdl.retrieve",
+            args: {
+              repoId: request.repoId,
+              op: "codeSkeleton",
+              args: { file: indexedFilePath, maxLines: 120, maxTokens: 2_000 },
+            },
+          }],
+        },
       );
     }
     if (

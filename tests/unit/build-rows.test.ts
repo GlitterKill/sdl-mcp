@@ -11,7 +11,9 @@ const TEST_CONTENT = [
 
 function detail(
   nodeId: string,
-  kind: "function" | "module" = "function",
+  kind: BuildRowsParams["symbolDetails"][number]["extractedSymbol"]["kind"] =
+    "function",
+  startLine = 1,
 ): BuildRowsParams["symbolDetails"][number] {
   return {
     extractedSymbol: {
@@ -19,7 +21,12 @@ function detail(
       kind,
       name: nodeId,
       exported: true,
-      range: { startLine: 1, startCol: 0, endLine: 1, endCol: 1 },
+      range: {
+        startLine,
+        startCol: 0,
+        endLine: startLine,
+        endCol: 1,
+      },
     },
     astFingerprint: nodeId,
     symbolId: `sym:${nodeId}`,
@@ -31,7 +38,15 @@ function testBuildRowsParams(
     detail("module", "module"),
     detail("helper"),
   ],
+  content = TEST_CONTENT,
+  languageId = "typescript",
 ): BuildRowsParams {
+  const extension =
+    languageId === "csharp" ? "cs" : languageId === "rust" ? "rs" : "ts";
+  const relPath =
+    languageId === "typescript"
+      ? "tests/unit/sample.test.ts"
+      : `src/sample.${extension}`;
   const nameToSymbolIds = new Map<string, string[]>();
   for (const symbolDetail of symbolDetails) {
     nameToSymbolIds.set(symbolDetail.extractedSymbol.name, [
@@ -41,12 +56,12 @@ function testBuildRowsParams(
 
   return {
     repoId: "test-repo",
-    relPath: "tests/unit/sample.test.ts",
+    relPath,
     fileId: "test-file",
-    filePath: "tests/unit/sample.test.ts",
-    content: TEST_CONTENT,
-    ext: "ts",
-    languages: ["ts"],
+    filePath: relPath,
+    content,
+    ext: extension,
+    languages: languageId === "typescript" ? ["ts"] : [languageId],
     symbolDetails,
     nodeIdToSymbolId: new Map(
       symbolDetails.map((symbolDetail) => [
@@ -63,7 +78,7 @@ function testBuildRowsParams(
     },
     calls: [],
     edgeSourceNodeIds: new Set(),
-    languageId: "typescript",
+    languageId,
     skipCallResolution: true,
   };
 }
@@ -163,5 +178,85 @@ describe("buildSymbolAndEdgeRows import fanout", () => {
       withoutModule.symbolsToUpsert[0]?.searchText,
       fallbackFunction.searchText,
     );
+  });
+});
+
+describe("buildSymbolAndEdgeRows documentation summaries", () => {
+  it("uses C# XML summaries for row text and quality without leaking docs to a sibling", async () => {
+    const { buildSymbolAndEdgeRows } = await import(
+      "../../dist/indexer/parser/build-rows.js"
+    );
+    const content = [
+      "class Cache {",
+      "  /// <summary>",
+      '  /// Loads a value from <see cref="T:CacheStore"/> at <paramref name="path"/> &amp;',
+      '  /// returns the matching &lt;entry&gt; named &quot;primary&quot;',
+      "  /// &apos;cache&apos; &#39;value&#39;.",
+      "  /// </summary>",
+      "  public object Load(string path) => null;",
+      "  public void Clear() {}",
+      "}",
+    ].join("\r\n");
+    const params = testBuildRowsParams(
+      [detail("Load", "method", 7), detail("Clear", "method", 8)],
+      content,
+      "csharp",
+    );
+    params.existingSymbolsById.set("sym:Load", {
+      symbolId: "sym:Load",
+      repoId: "test-repo",
+      fileId: "test-file",
+      kind: "method",
+      name: "Load",
+      exported: true,
+      visibility: null,
+      language: "csharp",
+      rangeStartLine: 7,
+      rangeStartCol: 0,
+      rangeEndLine: 7,
+      rangeEndCol: 1,
+      astFingerprint: "Load",
+      signatureJson: null,
+      summary: "Previously cached heuristic summary.",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      summaryQuality: 0.4,
+      summarySource: "heuristic-typed",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const result = await buildSymbolAndEdgeRows(params);
+    const load = result.symbolsToUpsert.find((symbol) => symbol.name === "Load");
+    const clear = result.symbolsToUpsert.find((symbol) => symbol.name === "Clear");
+
+    assert.ok(load);
+    const expectedSummary = [
+      "Loads a value from CacheStore at path & returns the matching <entry>",
+      'named "primary" \'cache\' \'value\'',
+    ].join(" ");
+    assert.equal(
+      load.summary,
+      expectedSummary,
+    );
+    assert.equal(load.summarySource, "jsdoc");
+    assert.equal(load.summaryQuality, 1);
+    assert.ok(clear);
+    assert.notEqual(clear.summarySource, "jsdoc");
+    assert.ok(!clear.summary?.includes("CacheStore"));
+  });
+
+  it("does not treat Rust module inner docs as symbol documentation", async () => {
+    const { buildSymbolAndEdgeRows } = await import(
+      "../../dist/indexer/parser/build-rows.js"
+    );
+    const content = "//! Module documentation.\n\nfn helper() {}";
+    const result = await buildSymbolAndEdgeRows(
+      testBuildRowsParams([detail("helper", "function", 3)], content, "rust"),
+    );
+    const helper = result.symbolsToUpsert[0];
+
+    assert.ok(helper);
+    assert.notEqual(helper.summarySource, "jsdoc");
+    assert.ok(!helper.summary?.includes("Module documentation"));
   });
 });

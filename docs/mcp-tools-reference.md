@@ -183,6 +183,10 @@ Agents must not call this tool directly or through `sdl.workflow`, and must not 
 | `includeDiagnostics` | `boolean`                 | No       | When `true`, include coarse phase timings in the synchronous response                 |
 | `async`              | `boolean`                 | No       | When `true`, start indexing in the background and return an `operationId` immediately |
 
+`async: true` is available only from the persistent MCP server. One-shot
+`sdl-mcp tool index.refresh` rejects it before opening the database; omit it
+for a synchronous CLI refresh.
+
 **Response:** `{ ok: boolean, repoId: string, versionId?: string, changedFiles?: integer, async?: boolean, operationId?: string, message?: string, diagnostics?: { timings: { totalMs: number, phases: Record<string, number> } } }`
 
 Public refresh calls use one process-wide FIFO admission gate because

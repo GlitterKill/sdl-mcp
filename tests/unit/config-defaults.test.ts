@@ -28,6 +28,10 @@ import {
   ProviderFirstIndexingConfigSchema,
   ScipConfigSchema,
   SemanticEnrichmentConfigSchema,
+  AppConfigSchema,
+  SemanticRetrievalConfigSchema,
+  CodeModeConfigSchema,
+  GatewayConfigSchema,
 } from "../../dist/config/types.js";
 import { loadConfig } from "../../dist/config/loadConfig.js";
 import {
@@ -35,6 +39,39 @@ import {
   summarizeMissingConfigKeys,
 } from "../../dist/cli/setup-wizard/config-diff.js";
 import { semanticConfigForTier } from "../../dist/cli/setup-wizard/recommendations.js";
+
+describe("omitted retrieval and tool-surface defaults (#53)", () => {
+  it("applies nested defaults through schema parsing and minimal config loading", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sdl-omitted-defaults-"));
+    try {
+      const configPath = join(dir, "sdlmcp.config.json");
+      writeFileSync(configPath, JSON.stringify({ repos: [], policy: {} }));
+      const loaded = loadConfig(configPath);
+      const parsed = AppConfigSchema.parse({ repos: [], policy: {}, semantic: {} });
+      for (const config of [parsed, loaded]) {
+        assert.deepStrictEqual(config.semantic?.retrieval, SemanticRetrievalConfigSchema.parse({}));
+        assert.deepStrictEqual(config.codeMode, CodeModeConfigSchema.parse({}));
+        assert.deepStrictEqual(config.gateway, GatewayConfigSchema.parse({}));
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves explicit opt-outs and fills partially specified blocks", () => {
+    const config = AppConfigSchema.parse({
+      repos: [], policy: {},
+      semantic: { retrieval: { fts: { enabled: false }, vector: { enabled: false } } },
+      codeMode: { enabled: false }, gateway: { enabled: false },
+    });
+    assert.strictEqual(config.semantic?.retrieval?.fts.enabled, false);
+    assert.strictEqual(config.semantic?.retrieval?.vector.enabled, false);
+    assert.strictEqual(config.codeMode?.enabled, false);
+    assert.strictEqual(config.codeMode?.exclusive, true);
+    assert.strictEqual(config.gateway?.enabled, false);
+    assert.strictEqual(config.gateway?.emitLegacyTools, false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // IndexingConfigSchema boolean defaults

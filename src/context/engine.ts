@@ -51,6 +51,7 @@ import {
   enforceContextBudget,
   estimateContextRungTokens,
   estimateContextSelectionEnvelopeTokens,
+  logicalActionForRung,
   selectContextBundles,
 } from "./select.js";
 import type {
@@ -1310,6 +1311,17 @@ export class ContextEngineV2 {
       (item) => item.reason === "budget",
     ).length;
     const unavailableOmitted = omitted.length - budgetOmitted;
+    // Card prerequisites are folded into skeletons later; inspect code rungs here.
+    const codeEvidence = hydrated.evidence.filter((item) => item.rung !== "card");
+    const skeletonOnly = codeEvidence.length > 0 &&
+      codeEvidence.every((item) => item.rung === "skeleton");
+    const nextAction = skeletonOnly
+      ? logicalActionForRung("hotPath", codeEvidence[0].symbolId, identifiers.slice(0, 4))
+      : undefined;
+    if (nextAction) {
+      nextAction.args.maxLines = 80;
+      nextAction.args.maxTokens = 1_200;
+    }
     const payload: ContextPayload = {
       status:
         omitted.length > 0 || hydrated.evidence.length === 0
@@ -1332,7 +1344,7 @@ export class ContextEngineV2 {
         },
         highestRanked: omitted.slice(0, OMITTED_CAP),
       },
-      nextActions: uniqueActions(omitted),
+      nextActions: nextAction ? [nextAction] : uniqueActions(omitted),
     };
     const enforced = enforceContextBudget(
       payload,

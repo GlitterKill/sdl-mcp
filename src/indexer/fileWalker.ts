@@ -1,5 +1,5 @@
 import { opendir } from "node:fs/promises";
-import { resolve } from "path";
+import { dirname, resolve } from "path";
 
 import { globToSafeRegex } from "../util/safeRegex.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
@@ -49,6 +49,55 @@ export function shouldIgnorePath(
   }
 
   return isDirectory && matchesAnyPattern(`${path}/`, ignorePatterns);
+}
+
+function isPathIgnored(path: string, ignorePatterns: RegExp[]): boolean {
+  if (shouldIgnorePath(path, ignorePatterns, false)) {
+    return true;
+  }
+
+  let directory = dirname(path);
+  while (directory && directory !== ".") {
+    if (shouldIgnorePath(directory, ignorePatterns, true)) {
+      return true;
+    }
+    const parent = dirname(directory);
+    if (parent === directory) {
+      break;
+    }
+    directory = parent;
+  }
+
+  return false;
+}
+
+/** Apply the walker's file and parent-directory ignore checks to one candidate. */
+export function isRepositoryPathIgnored(
+  path: string,
+  ignorePatterns: string[],
+): boolean {
+  if (ignorePatterns.length === 0) {
+    return false;
+  }
+  return isPathIgnored(normalizePath(path), compilePatterns(ignorePatterns));
+}
+
+/** Filter an existing repository path inventory with the walker's glob rules. */
+export function filterRepositoryFiles(
+  paths: Iterable<string>,
+  patterns: string[],
+): string[] {
+  const includePatterns = compilePatterns(patterns);
+  const files = new Set<string>();
+
+  for (const path of paths) {
+    const normalized = normalizePath(path);
+    if (matchesAnyPattern(normalized, includePatterns)) {
+      files.add(normalized);
+    }
+  }
+
+  return Array.from(files).sort();
 }
 
 function isFileLikeEntry(entry: DirectoryEntryLike): boolean {

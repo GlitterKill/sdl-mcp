@@ -253,6 +253,9 @@ export async function prepareSavedFilePatch(
           languages: repoConfig.languages,
           language: request.language,
           version: request.version ?? 0,
+          ignorePatterns: repoConfig.sourceFileListPath
+            ? undefined
+            : repoConfig.ignore,
         },
         preflight,
       );

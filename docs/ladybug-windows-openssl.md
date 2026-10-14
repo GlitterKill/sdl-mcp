@@ -1,41 +1,47 @@
 # Ladybug Windows OpenSSL runtime
 
-SDL temporarily provisions OpenSSL for LadybugDB FTS on Windows x64 until upstream proves a clean install no longer needs it. This is a workaround for LadybugDB 0.18.1 only; SDL still uses the official `@ladybugdb/core` package and does not rebuild Ladybug.
+SDL temporarily provisions OpenSSL for LadybugDB FTS on Windows x64 until upstream proves a clean install no longer needs it. This is a workaround for LadybugDB 0.19.0 only; SDL still uses the official `@ladybugdb/core` package and does not rebuild Ladybug.
 
-Supported tuple:
+Current SDL runtime pin:
 
 - OS/CPU: Windows x64
-- LadybugDB: 0.18.1
-- SDL runtime package: `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.2`
-- OpenSSL: 3.5.7, `VC-WIN64A shared`
-- Source: `https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz`
-- Source SHA-256: `a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8`
-- Release signer fingerprint: `BA5473A2B0587B07FB27CF2D216094DFD0CB81EF`
+- LadybugDB: 0.19.0
+- SDL runtime package: `@sdl-mcp/ladybug-openssl-win32-x64@3.5.8-sdl.1`
+- OpenSSL: 3.5.8, `VC-WIN64A shared`
+- Source: `https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz`
+- Source SHA-256: `a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2`
+- Release signer fingerprint: `C46ED3F2CBEFDA1FDAADA44264ED7B1DCCE71CB2`
 - License: Apache-2.0, shipped as `OPENSSL-LICENSE.txt`
 - Package provenance: npm provenance plus `provenance.json` and `sbom.spdx.json`
 
-The OpenSSL 3.5.7 archive is signed by OpenSSL's previous official release key, fingerprint `BA5473A2B0587B07FB27CF2D216094DFD0CB81EF`. The published `3.5.7-sdl.1` metadata incorrectly named the newer OpenSSL release key even though signature verification succeeded through a multi-key bundle. The registry-verified `3.5.7-sdl.2` build contract corrects the signer metadata, commits only the actual signing key, and rejects any `VALIDSIG` fingerprint other than the pinned value. SDL accepts only exact `3.5.7-sdl.2`; `.1` is retired and no version range or compatibility fallback is supported.
+A 3.5.9-sdl.1 staging candidate was locally qualified on 2026-10-07 from the
+verified, signed official 3.5.9 archive. OpenSSL's suite passed 4,283 tests across
+347 files; the candidate passed clean-environment LadybugDB 0.19.0 FTS mutation
+checks, all eight package-contract tests, and native DLL-origin checks with only
+the Windows system directory on PATH. The verifier generated fresh provenance
+and SBOM files from the built DLLs. The candidate is unpublished and not selected
+by the runtime. Installations remain on 3.5.8-sdl.1 pending provenance-backed
+publication, exact dependency and loader pin updates, and installed-package
+regressions.
 
 ## Why SDL supplies two DLLs
 
-The official LadybugDB 0.18.1 Windows FTS extension imports `libcrypto-3-x64.dll` and `libssl-3-x64.dll`, but the extension artifact does not ship them. Ladybug loads the extension with plain `LoadLibraryW`. Windows does not search the plugin directory for dependent DLLs in that path, so copying the DLLs beside `libfts.lbug_extension` is insufficient.
+The official LadybugDB 0.19.0 Windows FTS extension imports `libcrypto-3-x64.dll` and `libssl-3-x64.dll`, but the extension artifact does not ship them. Ladybug loads the extension with plain `LoadLibraryW`. Windows does not search the plugin directory for dependent DLLs in that path, so copying the DLLs beside `libfts.lbug_extension` is insufficient.
 
 Upstream tracker: [LadybugDB/ladybug#685](https://github.com/LadybugDB/ladybug/issues/685).
 
-Ladybug has two separate startup boundaries. SDL dynamically imports the
-official package and constructs `Database` without OpenSSL preloading. A clean
-Windows child-process regression creates a populated FTS database, closes it,
-then reopens it twice through the production database path with the ambient DLL
-directory removed from `PATH`. LadybugDB 0.18.1 completes those constructor-time
-reopens without the SDL runtime package in scope.
+SDL dynamically imports the official package and constructs `Database` before
+OpenSSL preloading. It wraps native database initialization and explicit FTS
+extension loading with the verified Windows runtime. If provisioning is
+unavailable, initialization tries the driver without preloading; explicit FTS
+capability retains its recovery diagnostics.
 
-SDL preloads the verified package DLLs by absolute path only around the explicit
-`LOAD EXTENSION fts` boundary:
+At each protected initialization or FTS-loading boundary, SDL:
 
 1. verify `package.json` version and `provenance.json` hashes;
 2. call the SDL native addon to load `libcrypto-3-x64.dll`, then `libssl-3-x64.dll` with `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)`;
 3. confirm native-reported module origins are inside the package `bin` directory;
-4. call Ladybug `LOAD EXTENSION fts`;
+4. initialize the native database or call Ladybug `LOAD EXTENSION fts`;
 5. release preload handles in reverse order.
 
 The dynamic `kuzu` import remains outside the preload callback. This keeps

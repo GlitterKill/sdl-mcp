@@ -735,7 +735,10 @@ export const SemanticConfigSchema = z.object({
    */
   ann: AnnConfigSchema.optional(),
   /** Hybrid retrieval pipeline configuration (FTS + vector fusion). */
-  retrieval: SemanticRetrievalConfigSchema.optional(),
+  // Apply nested defaults even when callers omit the retrieval block.
+  retrieval: SemanticRetrievalConfigSchema.optional().default(() =>
+    SemanticRetrievalConfigSchema.parse({}),
+  ),
 });
 
 export type SemanticConfig = z.infer<typeof SemanticConfigSchema>;
@@ -1236,8 +1239,12 @@ export const AppConfigSchema = z.object({
   parallelScorer: ParallelScorerConfigSchema.optional(),
   concurrency: ConcurrencyConfigSchema.optional(),
   runtime: RuntimeConfigSchema.optional(),
-  gateway: GatewayConfigSchema.optional(),
-  codeMode: CodeModeConfigSchema.optional(),
+  gateway: GatewayConfigSchema.optional().default(() =>
+    GatewayConfigSchema.parse({}),
+  ),
+  codeMode: CodeModeConfigSchema.optional().default(() =>
+    CodeModeConfigSchema.parse({}),
+  ),
   http: HttpConfigSchema.optional(),
   security: SecurityConfigSchema.optional(),
   httpAuth: HttpAuthConfigSchema.optional(),

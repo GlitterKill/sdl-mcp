@@ -10,7 +10,9 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
-import { FileReadResponseSchema } from "../../dist/mcp/tools.js";
+import { FileReadRequestSchema, FileReadResponseSchema } from "../../dist/mcp/tools.js";
+import { FileGatewayRequestSchema } from "../../dist/mcp/tools/file-gateway-schema.js";
+import { errorToMcpResponse } from "../../dist/mcp/errors.js";
 import { handleFileGateway } from "../../dist/mcp/tools/file-gateway.js";
 import { handleFileRead } from "../../dist/mcp/tools/file-read.js";
 import { handleResponseGet } from "../../dist/mcp/tools/response.js";
@@ -160,7 +162,7 @@ describe("sdl.file.read token usage metadata", () => {
     );
   });
 
-  it("keeps parseable indexed source on structured retrieval", async () => {
+  it("offers a bounded file-specific recovery for parseable indexed source", async () => {
     await assert.rejects(
       () => handleFileGateway({
         op: "read",
@@ -168,8 +170,35 @@ describe("sdl.file.read token usage metadata", () => {
         filePath: "src/parseable.ts",
         maxTokens: 100,
       }),
-      /Use sdl\.context.*sdl\.retrieve/i,
+      (error: unknown) => {
+        const response = errorToMcpResponse(error, ["sdl.retrieve", "sdl.workflow"]);
+        const detail = response.error as Record<string, unknown>;
+        assert.equal(detail.code, "VALIDATION_ERROR");
+        assert.deepEqual(detail.nextCalls, [{
+          action: "sdl.retrieve",
+          args: {
+            repoId,
+            op: "codeSkeleton",
+            args: { file: "src/parseable.ts", maxLines: 120, maxTokens: 2_000 },
+          },
+        }]);
+        return true;
+      },
     );
+  });
+
+  it("explains the searchContext bound in both read schemas", () => {
+    const request = { repoId, filePath: "docs/guide.md", search: "alpha", searchContext: 25 };
+    for (const result of [
+      FileReadRequestSchema.safeParse(request),
+      FileGatewayRequestSchema.safeParse({ op: "read", ...request }),
+    ]) {
+      assert.equal(result.success, false);
+      if (!result.success) {
+        assert.match(result.error.message, /before and after each match/);
+        assert.match(result.error.message, /offset and limit/);
+      }
+    }
   });
 
   it("does not accept caller-controlled parser availability", async () => {

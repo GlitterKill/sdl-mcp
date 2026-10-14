@@ -64,6 +64,12 @@ Only `repos` and the `policy` object are required. The `policy` object can be em
 
 ## High-Impact Defaults
 
+Omitting `codeMode`, `gateway`, or `semantic.retrieval` applies their nested
+defaults. A minimal configuration therefore enables exclusive Code Mode and
+FTS/vector retrieval configuration; explicit `enabled: false` settings still
+disable the corresponding features. Retrieval indexes are built by the normal
+indexing lifecycle, not by loading the configuration.
+
 | Setting                      | Current default | Why it matters                                                 |
 | ---------------------------- | --------------- | -------------------------------------------------------------- |
 | `performanceTier`            | `"auto"`        | Auto-tunes concurrency-related defaults to the current machine |
