@@ -25,6 +25,7 @@ import { logger } from "../util/logger.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
 import { getTsParser, getTsxParser } from "./ts-parsers.js";
+import type { PreparedSourceMetadata } from "./source-metadata.js";
 
 export interface SkeletonResult {
   skeleton: string;
@@ -897,6 +898,7 @@ export async function prepareSymbolSkeleton(
   symbolId: SymbolId,
   overlaySnapshot?: OverlaySnapshot,
   requireIndexedContentHash = true,
+  metadata?: PreparedSourceMetadata,
 ): Promise<PreparedSymbolSkeleton | null> {
   const overlay = overlaySnapshot
     ? getOverlaySymbol(overlaySnapshot, symbolId)
@@ -919,16 +921,19 @@ export async function prepareSymbolSkeleton(
       capturedContent: overlayContent,
     });
   }
-  const symbol = await ladybugDb.getSymbol(conn, symbolId);
+  const symbol = metadata
+    ? metadata.symbol
+    : await ladybugDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
   if (symbol.repoId !== repoId) return null;
 
-  const files = await ladybugDb.getFilesByIds(conn, [symbol.fileId]);
-  const file = files.get(symbol.fileId);
+  const file = metadata
+    ? metadata.file
+    : (await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId);
   if (!file) return null;
 
-  const repo = await ladybugDb.getRepo(conn, repoId);
+  const repo = metadata ? metadata.repo : await ladybugDb.getRepo(conn, repoId);
   if (!repo) return null;
 
   const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);

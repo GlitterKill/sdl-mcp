@@ -12,17 +12,25 @@ import type { SelectedContextBundle } from "../../dist/context/types.js";
 
 it("reuses parsed source only within a hydration request, preserving rendering and source checks", async (t) => {
   let parses = 0;
+  let sourceTraversals = 0;
   t.mock.module("../../dist/code/skeleton.js", {
     namedExports: {
       ...skeleton,
       parseFile: (...args: Parameters<typeof skeleton.parseFile>) => {
         parses++;
-        return skeleton.parseFile(...args);
+        const tree = skeleton.parseFile(...args);
+        return tree ? new Proxy(tree, {
+          get(target, property) {
+            if (property === "rootNode") sourceTraversals++;
+            return Reflect.get(target, property, target);
+          },
+        }) : null;
       },
     },
   });
   const { hydrateContextBundles } = await import("../../dist/context/hydrate.js");
-  const { renderPreparedHotPath } = await import("../../dist/code/hotpath.js");
+  const { renderPreparedHotPath, createHotPathSourceMatcher } =
+    await import("../../dist/code/hotpath.js");
   const source = "function alpha() { return 1; }\nfunction beta() { return 2; }\n";
   const overlaySnapshot = {
     repoId: "repo", touchedFileIds: new Set<string>(), symbolsById: new Map(),
@@ -66,6 +74,8 @@ it("reuses parsed source only within a hydration request, preserving rendering a
   const first = await hydrate([alpha, beta]);
   assert.equal(first.evidence.length, 2);
   assert.equal(parses, 1, "two symbols in identical source must share a parse");
+  assert.equal(sourceTraversals, 1,
+    "identical source and identifiers must share the file-wide identifier traversal");
   for (const [index, prepared] of [alpha, beta].entries()) {
     assert.deepEqual(first.evidence[index].content,
       await renderPreparedHotPath(prepared, ["return"], { maxLines: 80, maxTokens: 300 }));
@@ -88,6 +98,18 @@ it("reuses parsed source only within a hydration request, preserving rendering a
   const changedResult = await hydrate([alpha, changed]);
   assert.equal(parses, 2, "different captured bytes must not reuse the old tree");
   assert.match(JSON.stringify(changedResult.evidence[1].content), /return 9/);
+
+  const matcher = createHotPathSourceMatcher();
+  const sharedTree = skeleton.parseFile(source, ".ts");
+  assert.ok(sharedTree);
+  const wholeFile = { ...alpha, symbol: { ...alpha.symbol, rangeEndLine: 2 } };
+  for (const identifiers of [["alpha"], ["beta"]]) {
+    const cached = await renderPreparedHotPath(
+      wholeFile, identifiers, {}, () => sharedTree, matcher,
+    );
+    assert.deepEqual(cached, await renderPreparedHotPath(wholeFile, identifiers),
+      "different identifier requests must not reuse the prior match set");
+  }
 
   parses = 0;
   await hydrate([alpha, { ...beta, extension: "tsx" }]);

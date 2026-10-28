@@ -1,6 +1,8 @@
 import type { Connection } from "kuzu";
 
+import { loadSourceMetadata } from "../code/source-metadata.js";
 import {
+  createHotPathSourceMatcher,
   extractHotPath,
   prepareHotPath,
   renderPreparedHotPath,
@@ -18,6 +20,7 @@ import type { SymbolCard } from "../domain/types.js";
 import { loadSymbolCards } from "../graph/slice/card-hydrator.js";
 import { normalizeEdgeConfidence } from "../graph/slice/beam-search-engine.js";
 import {
+  getOverlaySymbol,
   mergeEdgeMapWithOverlay,
   type OverlaySnapshot,
 } from "../live-index/overlay-reader.js";
@@ -147,18 +150,36 @@ export async function prepareContextHydrationPlan(
   const durableEdges = await loadEdges(conn, selectedIds);
   const skeletons = new Map<string, PreparedSymbolSkeleton | null>();
   const hotPaths = new Map<string, PreparedHotPath | null>();
+  const sourceMetadata = await loadSourceMetadata(
+    conn,
+    repoId,
+    selected
+      .filter((bundle) => bundle.rungs.some((rung) => rung !== "card"))
+      .map((bundle) => bundle.candidate.symbolId)
+      .filter((symbolId) => {
+        const overlay = getOverlaySymbol(overlaySnapshot, symbolId);
+        return !overlay || overlay.symbol.repoId !== repoId ||
+          !overlaySnapshot.contentByFileId?.has(overlay.file.fileId);
+      }),
+  );
   for (const bundle of selected) {
     const symbolId = bundle.candidate.symbolId;
     if (bundle.rungs.includes("skeleton") && !skeletons.has(symbolId)) {
       skeletons.set(
         symbolId,
-        await prepareSkeleton(conn, repoId, symbolId, overlaySnapshot),
+        await prepareSkeleton(
+          conn, repoId, symbolId, overlaySnapshot, true,
+          sourceMetadata.get(symbolId),
+        ),
       );
     }
     if (bundle.rungs.includes("hotPath") && !hotPaths.has(symbolId)) {
       hotPaths.set(
         symbolId,
-        await prepareHot(conn, repoId, symbolId, overlaySnapshot),
+        await prepareHot(
+          conn, repoId, symbolId, overlaySnapshot, true,
+          sourceMetadata.get(symbolId),
+        ),
       );
     }
   }
@@ -214,6 +235,7 @@ dependencies: Partial<HydrateContextBundlesDependencies> = {},
   const cardsById = new Map(cards.map((card) => [card.symbolId, card]));
   const evidence: ContextEvidence[] = [];
   const unavailableItems: OmittedContextItem[] = [];
+  const matchSource = createHotPathSourceMatcher();
   // Reuse immutable syntax trees only for identical source bytes and grammar
   // within this request. Renderers still validate durable source hashes first.
   const parsedSources = new Map<string, Map<string, ReturnType<typeof parseFile>>>();
@@ -256,7 +278,9 @@ dependencies: Partial<HydrateContextBundlesDependencies> = {},
         const captured = prepared?.hotPaths.get(bundle.candidate.symbolId);
         content = prepared
           ? captured
-            ? await renderHotPath(captured, identifiers, options, parseSource)
+            ? await renderHotPath(
+                captured, identifiers, options, parseSource, matchSource,
+              )
             : null
           : await loadHotPath(
               repoId,

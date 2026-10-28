@@ -23,6 +23,7 @@ import {
   type OverlaySnapshot,
 } from "../live-index/overlay-reader.js";
 import { parseFile } from "./skeleton.js";
+import type { PreparedSourceMetadata } from "./source-metadata.js";
 
 export interface HotPathOptions {
   maxLines?: number;
@@ -160,6 +161,42 @@ function findLinesMatchingIdentifiers(
 
   walk(tree.rootNode);
   return { matchedLines, confirmedIdentifiers };
+}
+
+function findHotPathSourceMatches(
+  tree: Parser.Tree,
+  identifiers: string[],
+  lines: string[],
+): ReturnType<typeof findLinesMatchingIdentifiers> {
+  const matches = findLinesMatchingIdentifiers(tree, identifiers);
+  const qualified = findQualifiedTermLines(lines, identifiers);
+  for (const line of qualified.lineNumbers) matches.matchedLines.add(line);
+  for (const identifier of qualified.matchedIdentifiers) {
+    matches.confirmedIdentifiers.add(identifier);
+  }
+  return matches;
+}
+
+/** Share file-wide traversal only within the caller's hydration request. */
+export function createHotPathSourceMatcher(): typeof findHotPathSourceMatches {
+  const cache = new WeakMap<
+    Parser.Tree,
+    Map<string, ReturnType<typeof findHotPathSourceMatches>>
+  >();
+  return (tree, identifiers, lines) => {
+    let byIdentifiers = cache.get(tree);
+    if (!byIdentifiers) {
+      byIdentifiers = new Map();
+      cache.set(tree, byIdentifiers);
+    }
+    const key = JSON.stringify(identifiers);
+    let matches = byIdentifiers.get(key);
+    if (!matches) {
+      matches = findHotPathSourceMatches(tree, identifiers, lines);
+      byIdentifiers.set(key, matches);
+    }
+    return matches;
+  };
 }
 
 function escapeRegExp(text: string): string {
@@ -341,6 +378,7 @@ export async function prepareHotPath(
   symbolId: SymbolId,
   overlaySnapshot?: OverlaySnapshot,
   requireIndexedContentHash = true,
+  metadata?: PreparedSourceMetadata,
 ): Promise<PreparedHotPath | null> {
   const overlaySymbol = overlaySnapshot
     ? getOverlaySymbol(overlaySnapshot, symbolId)
@@ -362,16 +400,19 @@ export async function prepareHotPath(
     });
   }
 
-  const symbol = await ladybugDb.getSymbol(conn, symbolId);
+  const symbol = metadata
+    ? metadata.symbol
+    : await ladybugDb.getSymbol(conn, symbolId);
   if (!symbol) return null;
 
   if (symbol.repoId !== repoId) return null;
 
-  const files = await ladybugDb.getFilesByIds(conn, [symbol.fileId]);
-  const file = files.get(symbol.fileId);
+  const file = metadata
+    ? metadata.file
+    : (await ladybugDb.getFilesByIds(conn, [symbol.fileId])).get(symbol.fileId);
   if (!file) return null;
 
-  const repo = await ladybugDb.getRepo(conn, repoId);
+  const repo = metadata ? metadata.repo : await ladybugDb.getRepo(conn, repoId);
   if (!repo) return null;
 
   const filePath = getAbsolutePathFromRepoRoot(repo.rootPath, file.relPath);
@@ -440,6 +481,7 @@ export async function renderPreparedHotPath(
   identifiersToFind: string[],
   options: HotPathOptions = {},
   parseSource: typeof parseFile = parseFile,
+  matchSource: typeof findHotPathSourceMatches = findHotPathSourceMatches,
 ): Promise<HotPathResult | null> {
   const { symbol, filePath, extension } = prepared;
   const symbolId = symbol.symbolId;
@@ -491,15 +533,11 @@ export async function renderPreparedHotPath(
     const maxLines = options.maxLines ?? DEFAULT_MAX_LINES_HOTPATH;
     const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS_HOTPATH;
 
-    const { matchedLines, confirmedIdentifiers } = findLinesMatchingIdentifiers(
+    const { matchedLines, confirmedIdentifiers } = matchSource(
       tree,
       identifiersToFind,
+      lines,
     );
-    const qualifiedTerms = findQualifiedTermLines(lines, identifiersToFind);
-    for (const line of qualifiedTerms.lineNumbers) matchedLines.add(line);
-    for (const identifier of qualifiedTerms.matchedIdentifiers) {
-      confirmedIdentifiers.add(identifier);
-    }
 
     // Filter matched lines to symbol range so we don't return unrelated code
     const symStart = symbol.rangeStartLine ?? 1;
