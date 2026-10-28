@@ -311,12 +311,26 @@ describe("scheduled context-quality graph cache", () => {
       const condition = semanticJob.match(/if:\s*(.*)/)?.[1];
       assert.ok(condition);
       const enabled = new Function("github", "inputs", `return ${condition};`);
-      for (const scope of [undefined, "full", "fast", "context-quality"]) {
+      for (const scope of [undefined, "full", "fast", "context-quality", "matrix"]) {
         assert.equal(enabled({ event_name: "schedule" }, { verification_scope: scope }), true);
         assert.equal(enabled({ event_name: "workflow_dispatch" }, { verification_scope: scope }),
-          scope !== "fast" && !(semanticJob === matrixJob && scope === "context-quality"));
+          scope !== "fast" && !(semanticJob === matrixJob && scope === "context-quality") &&
+          !(semanticJob === job && scope === "matrix"));
         assert.equal(enabled({ event_name: "push" }, { verification_scope: scope }), false);
         assert.equal(enabled({ event_name: "pull_request" }, { verification_scope: scope }), false);
+      }
+    }
+    assert.match(workflow, /options:[\s\S]*?- matrix\s/);
+    for (const name of ["tests", "benchmarks", "background-integrity-benchmark", "native-build"]) {
+      const ordinaryJob = workflow.split(`  ${name}:`)[1];
+      const condition = ordinaryJob?.match(/if:\s*(.*)/)?.[1];
+      assert.ok(condition, `${name} must retain an explicit dispatch condition`);
+      const enabled = new Function("github", "inputs", `return ${condition};`);
+      for (const scope of [undefined, "full", "fast", "context-quality", "matrix"]) {
+        assert.equal(enabled({ event_name: "workflow_dispatch" }, { verification_scope: scope }), scope !== "matrix", name);
+        assert.equal(enabled({ event_name: "push" }, { verification_scope: scope }), true, name);
+        assert.equal(enabled({ event_name: "pull_request" }, { verification_scope: scope }), true, name);
+        assert.equal(enabled({ event_name: "schedule" }, { verification_scope: scope }), false, name);
       }
     }
     assert.match(job, /os:\s*\n\s*- ubuntu-latest\s*\n\s*- windows-latest/);
