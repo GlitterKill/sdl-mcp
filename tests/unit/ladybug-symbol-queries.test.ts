@@ -348,6 +348,138 @@ describe("LadybugDB Symbol Queries", () => {
   );
 
   it(
+    "getSymbolsByIds deduplicates IDs and preserves missing-ID and row provenance semantics",
+    { skip: !ladybugAvailable },
+    async () => {
+      const otherRepoId = "sym-other-repo";
+      const otherFileId = "sym-other-file";
+      const sameRepoOtherFileId = "sym-same-repo-other-file";
+      await queries.upsertRepo(
+        conn as unknown as import("kuzu").Connection,
+        {
+          repoId: otherRepoId,
+          rootPath: "C:/tmp/sym-other-repo",
+          configJson: "{}",
+          createdAt: "2026-03-04T00:00:00Z",
+        },
+      );
+      await queries.upsertFile(
+        conn as unknown as import("kuzu").Connection,
+        {
+          fileId: sameRepoOtherFileId,
+          repoId,
+          relPath: "src/other.ts",
+          contentHash: "other-hash",
+          language: "ts",
+          byteSize: 10,
+          lastIndexedAt: null,
+        },
+      );
+      await queries.upsertFile(
+        conn as unknown as import("kuzu").Connection,
+        {
+          fileId: otherFileId,
+          repoId: otherRepoId,
+          relPath: "src/foreign.ts",
+          contentHash: "foreign-hash",
+          language: "ts",
+          byteSize: 10,
+          lastIndexedAt: null,
+        },
+      );
+
+      const upsertLookupSymbol = async (
+        symbolId: string,
+        targetRepoId: string,
+        targetFileId: string,
+        name: string,
+      ) =>
+        queries.upsertSymbol(
+          conn as unknown as import("kuzu").Connection,
+          {
+            symbolId,
+            repoId: targetRepoId,
+            fileId: targetFileId,
+            kind: "function",
+            name,
+            exported: true,
+            visibility: "public",
+            language: "typescript",
+            rangeStartLine: 1,
+            rangeStartCol: 0,
+            rangeEndLine: 1,
+            rangeEndCol: 1,
+            astFingerprint: `${symbolId}-fp`,
+            signatureJson: null,
+            summary: null,
+            invariantsJson: null,
+            sideEffectsJson: null,
+            updatedAt: "2026-03-04T00:00:00Z",
+          },
+        );
+
+      await upsertLookupSymbol("sym-query-base", repoId, fileId, "base");
+      await upsertLookupSymbol(
+        "sym-query-same-repo-other-file",
+        repoId,
+        sameRepoOtherFileId,
+        "sameRepoOtherFile",
+      );
+      await upsertLookupSymbol(
+        "sym-query-other-repo",
+        otherRepoId,
+        otherFileId,
+        "otherRepo",
+      );
+
+      const result = await queries.getSymbolsByIds(
+        conn as unknown as import("kuzu").Connection,
+        [
+          "sym-query-base",
+          "sym-query-other-repo",
+          "sym-query-missing",
+          "sym-query-same-repo-other-file",
+          "sym-query-base",
+          "sym-query-missing",
+        ],
+      );
+
+      assert.deepStrictEqual(
+        [...result.keys()].sort(),
+        [
+          "sym-query-base",
+          "sym-query-other-repo",
+          "sym-query-same-repo-other-file",
+        ].sort(),
+      );
+      assert.deepStrictEqual(
+        [
+          result.get("sym-query-base")?.repoId,
+          result.get("sym-query-base")?.fileId,
+        ],
+        [repoId, fileId],
+      );
+      assert.deepStrictEqual(
+        [
+          result.get("sym-query-same-repo-other-file")?.repoId,
+          result.get("sym-query-same-repo-other-file")?.fileId,
+        ],
+        [repoId, sameRepoOtherFileId],
+      );
+      assert.deepStrictEqual(
+        [
+          result.get("sym-query-other-repo")?.repoId,
+          result.get("sym-query-other-repo")?.fileId,
+        ],
+        [otherRepoId, otherFileId],
+      );
+      assert.strictEqual(result.get("sym-query-base")?.exported, true);
+      assert.strictEqual(result.get("sym-query-base")?.rangeStartLine, 1);
+      assert.strictEqual(result.has("sym-query-missing"), false);
+    },
+  );
+
+  it(
     "findSymbolsInRange orders contained symbols first",
     { skip: !ladybugAvailable },
     async () => {

@@ -1994,6 +1994,7 @@ export async function getSymbolsByIds(
   symbolIds: string[],
 ): Promise<Map<string, SymbolRow>> {
   if (symbolIds.length === 0) return new Map();
+  const uniqueSymbolIds = [...new Set(symbolIds)];
 
   if (symbolIds.length > MAX_BATCH_WARNING_THRESHOLD) {
     logger.warn("getSymbolsByIds: large batch size", {
@@ -2036,8 +2037,8 @@ export async function getSymbolsByIds(
     updatedAt: string;
   }>(
     conn,
-    `MATCH (s:Symbol)
-     WHERE s.symbolId IN $symbolIds
+    `UNWIND $symbolIds AS wantedId
+     MATCH (s:Symbol {symbolId: wantedId})
      MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
      MATCH (s)-[:SYMBOL_IN_REPO]->(r:Repo)
      RETURN s.symbolId AS symbolId,
@@ -2071,7 +2072,7 @@ export async function getSymbolsByIds(
             s.placeholderKind AS placeholderKind,
             s.placeholderTarget AS placeholderTarget,
             s.updatedAt AS updatedAt`,
-    { symbolIds },
+    { symbolIds: uniqueSymbolIds },
   );
 
   const result = new Map<string, SymbolRow>();
