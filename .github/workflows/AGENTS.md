@@ -817,3 +817,74 @@ Type checking passed; scoped lint has no errors (three pre-existing empty-catch
 warnings in the beam integration fixture). Two warm diagnostic cases improved
 from 2,656/3,270 ms to 2,410/2,549 ms, but these are not p95 measurements or a
 claim that the 250 ms gate passes. Paired and hosted verification follows.
+
+Local paired verification on `3f687d31` completed all canonical probes and the
+V2 retrieval gate. Its full suite reported 29 passes, two failures, and two
+intended skips: scoped p95 2,782 ms versus 250 ms, and missing `/delta/i`
+coverage in scoped tool-QA evidence. Directory containment itself now passes.
+The following topic-coverage assertion was previously hidden by the first
+containment failure. Comparing old and new diagnostic captures shows identical
+ordered 48-symbol retrieval pools, both lacking delta and determinism paths;
+selection changed from 48 to 43 symbols by removing outside evidence. This
+establishes an upstream recall gap, not loss of those topics in the new selector.
+Raw lane rankings were not captured, so the evidence does not distinguish
+lane-level misses from the global fused cutoff. No recall limit, case query,
+or quality assertion was changed to accommodate this failure.
+
+Hosted full run `40752774361` evaluates `3f687d31`. Ubuntu context job
+`123043584157` restored the verified graph cache and passed the versioned
+sdl.info contract, canonical probes, and paired V2 gate. Directory containment
+passes; the SDL suite retains two failures (29 pass, two fail, two intended
+skips): scoped p95 2,092 ms versus 250 ms, and missing delta-topic coverage.
+The neutral suite passed 29 tests with zero failures and four intended skips,
+with scoped p95 111 ms. This is an improvement, not an all-quality-gates pass.
+
+A later read-only diagnostic captured the fusion inputs and scored the same
+pool without truncation for inspection only, returning the original 48 results
+to the engine. Of 272 fused candidates, the delta-signature test was rank 222
+(symbol FTS rank 49), determinism was rank 199 (symbol FTS rank 44), and two
+session-delta test symbols were ranks 155/157 (file-summary vector rank 33).
+Thus these topics reach the retrieval lanes but fall below the bounded fused
+cutoff. This narrows the earlier uncertainty; no production limit or ranking
+was modified. Diagnostic data is in the disposable `topic-ranks.json` artifact.
+
+Windows context job `123043585240` also restored the verified cache and passed
+the versioned contract, canonical probes, and paired V2 gate. SDL directory
+containment passes; its remaining failures are scoped p95 4,946 ms versus
+250 ms and missing determinism-topic evidence (29 pass, two fail, two intended
+skips). The neutral suite retains 100% recall and zero configured noise but
+fails scoped latency at 261 ms versus 250 ms (28 pass, one fail, four intended
+skips). Preserve this failure alongside the Ubuntu neutral pass; it is not
+waived or replaced by a more favorable local measurement.
+
+The remaining local warm profiles span retrieval (398-602 ms), expansion
+(468-674 ms), source preparation (506-647 ms), and rendering (588-989 ms).
+Preparation still performs per-symbol metadata and file validation in
+`prepareSymbolSkeleton`/`prepareHotPath`; batching must preserve the captured
+read snapshot, indexed-content checks, overlay isolation, and render-time
+mutation checks. These profiles identify follow-up work, not a passing p95
+result or authorization to bypass those consistency checks.
+
+Both ordinary jobs in `40752774361` passed 778/778 test files, zero failures,
+and zero crashes on exit. Their build, typecheck, lint, security audit, tool
+contracts, and runtime-entrypoint checks also passed. All six native build jobs,
+both background-integrity jobs, and the structural benchmark passed. These
+results do not replace the failed context-quality gates above.
+
+The full run is now terminal: 12 jobs succeeded, the two context-quality jobs
+failed, and the two sync jobs were skipped. Matrix job `123043584571` completed
+all 10 runs and 50 tasks; its explicit realism claims audit passed (overall
+average token reduction 60.3%, median 61.9%; unchanged family p50 >= 50%,
+family p25 >= 40%, and minimum task >= 20%). No semantic final-assessment,
+safe-rebuild, blocked-run, or failed-run error appears in the matrix log.
+The evaluation ran from 19:19:04 to 20:33:23 UTC. Initial indexing completed
+at 20:18:43, after a long quiet interval; later families continued normally.
+The completed log therefore confirms slow indexing rather than a stalled job.
+
+The implemented directory boundary passes on both platforms. Remaining release
+gates are the SDL topic-recall gaps and absolute scoped latency on both platforms,
+plus the Windows neutral latency failure recorded above. Publication/registry
+verification remains gated on those checks. No quality assertion or threshold
+was weakened, and no native/runtime publication, main merge, or final SDL release
+was performed. This verification-only documentation update does not invalidate
+the hosted implementation checks on `3f687d317ed741afa66d12fb5ccb1d0049f033d4`.
