@@ -394,12 +394,12 @@ it("bounds FileSummary symbol materialization before candidate mapping", async (
   const orchestrator = await import("../../dist/retrieval/orchestrator.js");
   const ladybugQueries = await import("../../dist/db/ladybug-queries.js");
   const fileQueryBatches: string[][] = [];
-  const symbolQueryLimits: Array<[fileId: string, limit: number | undefined]> =
+  const symbolQueryLimits: Array<[fileIds: string[], limit: number]> =
     [];
   const makeFile = (fileId: string) => ({
     fileId,
     repoId: "repo",
-    relPath: `src/${fileId}.ts`,
+    relPath: fileId === "file-c" ? "tests/file-c.test.ts" : `src/${fileId}.ts`,
     contentHash: `hash-${fileId}`,
     language: "typescript",
     byteSize: 64,
@@ -498,13 +498,13 @@ it("bounds FileSummary symbol materialization before candidate mapping", async (
         fileQueryBatches.push([...fileIds]);
         return new Map(fileIds.map((fileId) => [fileId, makeFile(fileId)]));
       },
-      getSymbolsByFile: async (
+      getSymbolsByFileIdsLimited: async (
         _conn: Connection,
-        fileId: string,
-        limit?: number,
+        fileIds: string[],
+        limit: number,
       ) => {
-        symbolQueryLimits.push([fileId, limit]);
-        return [makeSymbol(fileId)];
+        symbolQueryLimits.push([fileIds, limit]);
+        return new Map(fileIds.map((fileId) => [fileId, [makeSymbol(fileId)]]));
       },
     },
   });
@@ -512,7 +512,7 @@ it("bounds FileSummary symbol materialization before candidate mapping", async (
   const { searchContextCandidates } = await import(
     "../../dist/retrieval/context-candidate-search.js?filesummary-db-bound"
   );
-  await searchContextCandidates(
+  const mappedResult = await searchContextCandidates(
     {} as Connection,
     {
       repoId: "repo",
@@ -546,10 +546,21 @@ it("bounds FileSummary symbol materialization before candidate mapping", async (
     "file-d",
   ]);
   assert.deepEqual(symbolQueryLimits, [
-    ["file-b", 1],
-    ["file-c", 1],
-    ["file-d", 1],
+    [["file-b", "file-c", "file-d"], 1],
   ]);
+  assert.ok(mappedResult.rows.length > 0);
+  assert.ok(mappedResult.rows.every((row) => row.cardContentTokens! > 0 && row.cardContentTokens! < 160),
+    "retrieved small cards must carry metadata estimates without another database read");
+  await searchContextCandidates(
+    {} as Connection,
+    { repoId: "repo", query: "bounded file summary symbols", limit: 2,
+      includeFileSummary: true, includeTests: false, symbolsPerFileSummary: 1 },
+    { connection: {} as Connection, laneOutcomes: new Map(), healthPromises: new Map(), embeddingPromises: new Map() },
+    { repoId: "repo", touchedFileIds: new Set(["file-b"]), symbolsById: new Map(),
+      filesById: new Map(), outgoingEdgesBySymbolId: new Map(), contentByFileId: new Map() },
+  );
+  assert.deepEqual(symbolQueryLimits.at(-1), [["file-d"], 1],
+    "direct-ranked, touched overlay, and excluded test files must bypass durable fallback");
 });
 
 it("reports source positions from the focus-partitioned candidate order", async (t) => {

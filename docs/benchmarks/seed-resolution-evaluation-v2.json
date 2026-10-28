@@ -7,10 +7,10 @@
     "caseCount": 4
   },
   "baseline": {
-    "gitHead": "383bbdabdc9e1b0b7ff61bd60cb1507bcbb033b0",
-    "evaluatedSourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "gitHead": "851ae7270a21535338df1497e7834ab6fd738f9a",
+    "evaluatedSourceDiffSha256": "35bceeab89508bea7798ed5576985fa8d4cbca39d8b853aaa83d61591eae5a1a",
     "sourceHashes": {
-      "src/context/engine.ts": "395b2607cdbe4ff7e4c8348fd284f344ed7ce68cd3d160616c9ede2d5bc20863",
+      "src/context/engine.ts": "a25dd1ea66e225e6eb8f6c2c90e22c6a52de1e34731ccc8c7648dd3bc8b0476e",
       "src/graph/slice/start-node-resolver.ts": "180a7020659ad3c52e4595bee0b1d2257e264b24bf9dbe4abc7bd29b46a67e70",
       "src/retrieval/identifier-extraction.ts": "475acdf8dc8f603e650137ab129a8dc1d15139c6711d87e4529f568b9de5da84",
       "src/retrieval/orchestrator.ts": "a1703d89fed2597f5c9fff8c308a1dd5ac060691779b4c3161ddfd9cc436d310",
@@ -393,8 +393,8 @@
     "sliceStartNodeRecall": 1
   },
   "observedMedianPolicyLatencyMs": {
-    "contextRetrieval": 0.0454,
-    "sliceStartNodes": 0.0179
+    "contextRetrieval": 0.0299,
+    "sliceStartNodes": 0.0108
   },
   "reproduction": "npm run benchmark:seed-resolution",
   "check": "npm run build && node --experimental-strip-types scripts/evaluate-seed-resolution.ts --check"

@@ -1,5 +1,6 @@
 import type { Connection } from "kuzu";
 
+import { estimateSymbolCardContentTokens } from "../context/card-content.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { FileRow, SymbolRow } from "../db/ladybug-queries.js";
 import {
@@ -61,6 +62,7 @@ export interface ContextCandidateSearchRow {
   symbolId: string;
   filePath: string;
   hasTestCaseFacet: boolean;
+  cardContentTokens?: number;
   score: number;
   source: ContextCandidateSource;
   tier: 0 | 1;
@@ -167,28 +169,36 @@ async function mapFileSummariesToSymbols(
   const files = await ladybugDb.getFilesByIds(collection.conn, fileIds);
   const symbolIdsByFileId = new Map<string, readonly string[]>();
   const symbols = new Map<string, SymbolRow>();
-
-  for (const fileId of fileIds) {
+  const eligibleFileIds = fileIds.filter((fileId) => {
     const file = files.get(fileId);
-    if (
-      !file ||
-      file.repoId !== options.repoId ||
-      overlaySnapshot.touchedFileIds.has(fileId) ||
-      (!options.includeTests && isTestCandidate(file.relPath, false))
-    ) {
-      continue;
-    }
-    const directlyRanked = directSymbolsByRank
+    return file !== undefined &&
+      file.repoId === options.repoId &&
+      !overlaySnapshot.touchedFileIds.has(fileId) &&
+      (options.includeTests || !isTestCandidate(file.relPath, false));
+  });
+  const directByFile = new Map(eligibleFileIds.map((fileId) => [
+    fileId,
+    directSymbolsByRank
       .filter((symbol) => symbol.fileId === fileId)
-      .slice(0, options.symbolsPerFileSummary);
+      .slice(0, options.symbolsPerFileSummary),
+  ]));
+  const fallbackIds = eligibleFileIds.filter(
+    (fileId) => directByFile.get(fileId)!.length === 0,
+  );
+  const fallback = fallbackIds.length > 0
+    ? await ladybugDb.getSymbolsByFileIdsLimited(
+        collection.conn,
+        fallbackIds,
+        options.symbolsPerFileSummary,
+      )
+    : new Map<string, SymbolRow[]>();
+
+  for (const fileId of eligibleFileIds) {
+    const directlyRanked = directByFile.get(fileId)!;
     const mapped = (
       directlyRanked.length > 0
         ? directlyRanked
-        : await ladybugDb.getSymbolsByFile(
-            collection.conn,
-            fileId,
-            options.symbolsPerFileSummary,
-          )
+        : fallback.get(fileId) ?? []
     ).filter(
       (symbol) =>
         symbol.repoId === options.repoId && symbol.external !== true,
@@ -509,9 +519,10 @@ export async function searchContextCandidates(
       overlay?.filePath ??
       (symbol ? files.get(symbol.fileId)?.relPath : undefined);
     if (!filePath) continue;
+    const metadata = symbol ?? overlaySnapshot.symbolsById.get(item.symbolId);
     const hasTestCaseFacet =
       parseTestCaseFacetJson(
-        (symbol ?? overlaySnapshot.symbolsById.get(item.symbolId))?.testCaseJson,
+        metadata?.testCaseJson,
       ) !== undefined;
     if (
       !pinnedIdSet.has(item.symbolId) &&
@@ -524,6 +535,9 @@ export async function searchContextCandidates(
       symbolId: item.symbolId,
       filePath,
       hasTestCaseFacet,
+      cardContentTokens: metadata
+        ? estimateSymbolCardContentTokens(metadata)
+        : undefined,
       score: item.score,
       source: item.source,
       tier: pinnedIdSet.has(item.symbolId) ? 0 : 1,

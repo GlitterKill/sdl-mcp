@@ -3,6 +3,7 @@ import { estimateTokens } from "../util/tokenize.js";
 import { normalizePath } from "../util/paths.js";
 import {
   canonicalizeContextPayload,
+  consolidateContextEvidence,
   serializeContextEvidence,
   serializeContextPayload,
 } from "./serialize.js";
@@ -39,6 +40,7 @@ const OMITTED_CAP = 1;
 export function estimateContextRungTokens(
   candidate: ContextCandidate,
   rung: ContextRung,
+  precedingRungs: readonly ContextRung[] = [],
 ): number {
   const shell: ContextEvidence = {
     rung,
@@ -49,10 +51,19 @@ export function estimateContextRungTokens(
     lanes: [...candidate.lanes],
     content: "",
   };
-  return (
+  const standalone =
     (candidate.estimates[rung] ?? CONTEXT_RUNG_TOKEN_LIMITS[rung]) +
-    estimateTokens(serializeContextEvidence(shell))
-  );
+    estimateTokens(serializeContextEvidence(shell));
+  if (
+    rung !== "card" &&
+    precedingRungs.includes("card") &&
+    precedingRungs.every((prior) => prior === "card")
+  ) {
+    // The card's content survives nested in code; its repeated identity shell does not.
+    const cardShell = serializeContextEvidence({ ...shell, rung: "card" });
+    return standalone - estimateTokens(cardShell) + estimateTokens(',"card":');
+  }
+  return standalone;
 }
 
 export function estimateContextResponseTokens(
@@ -191,8 +202,13 @@ function completeProfileCost(
   profile: TaskProfile,
 ): number {
   return profile.rungPreference.reduce(
-    (total, rung) =>
-      total + estimateContextRungTokens(candidate, rung),
+    (total, rung, index) =>
+      total +
+      estimateContextRungTokens(
+        candidate,
+        rung,
+        profile.rungPreference.slice(0, index),
+      ),
     0,
   );
 }
@@ -252,6 +268,7 @@ function selectProgressiveTier(
     const cost = estimateContextRungTokens(
       marginal.candidate,
       marginal.rung,
+      bundles.get(marginal.candidate.symbolId)?.rungs,
     );
     if (usedTokens + cost <= remainingTokens) {
       bundles
@@ -345,7 +362,13 @@ function selectTierOne(
         ? [...profile.rungPreference]
         : [marginal.rung];
     const cost = rungs.reduce(
-      (total, rung) => total + estimateContextRungTokens(marginal.candidate, rung),
+      (total, rung, index) =>
+        total +
+        estimateContextRungTokens(
+          marginal.candidate,
+          rung,
+          rungs.slice(0, index),
+        ),
       0,
     );
     if (usedTokens + cost <= remainingTokens) {
@@ -388,6 +411,7 @@ function selectTierOne(
     const cost = estimateContextRungTokens(
       marginal.candidate,
       marginal.rung,
+      bundles.get(marginal.candidate.symbolId)?.rungs,
     );
     if (usedTokens + cost <= remainingTokens) {
       bundles.get(marginal.candidate.symbolId)?.rungs.push(marginal.rung);
@@ -639,7 +663,11 @@ export function enforceContextBudget(
     };
   }
 
-  let estimatedTokens = estimateContextResponseTokens(payload);
+  // Price the final wire representation while retaining separate cards until
+  // eviction is complete, so an evicted code rung can still fall back to its card.
+  const wireTokens = (): number =>
+    estimateContextResponseTokens(consolidateContextEvidence(payload));
+  let estimatedTokens = wireTokens();
   while (estimatedTokens > maxTokens && payload.evidence.length > 0) {
     const evidence = [...payload.evidence]
       .sort(evidenceEvictionOrder)
@@ -685,7 +713,7 @@ export function enforceContextBudget(
     trackedOmissions.push(removed);
     rebuildBoundedRecovery(payload, trackedOmissions);
     payload = canonicalizeContextPayload(payload);
-    estimatedTokens = estimateContextResponseTokens(payload);
+    estimatedTokens = wireTokens();
   }
 
   if (
@@ -698,7 +726,7 @@ export function enforceContextBudget(
     payload.omitted.highestRanked = [];
     payload.nextActions = [];
     payload = canonicalizeContextPayload(payload);
-    estimatedTokens = estimateContextResponseTokens(payload);
+    estimatedTokens = wireTokens();
   }
 
   if (estimatedTokens > maxTokens) {
@@ -712,7 +740,7 @@ export function enforceContextBudget(
   }
 
   return {
-    payload: canonicalizeContextPayload(payload),
+    payload: consolidateContextEvidence(canonicalizeContextPayload(payload)),
     estimatedTokens,
   };
 }

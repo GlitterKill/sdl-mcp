@@ -45,6 +45,7 @@ import {
   type PreparedContextHydrationPlan,
 } from "./hydrate.js";
 import { getTaskProfile } from "./profiles.js";
+import { estimateSymbolCardContentTokens } from "./card-content.js";
 import { consolidateContextEvidence } from "./serialize.js";
 import {
   CONTEXT_RUNG_TOKEN_LIMITS,
@@ -266,8 +267,13 @@ export function focusPathTierZeroCapacity({
     estimates: CANDIDATE_ESTIMATES,
   };
   const guaranteedLadderEstimate = profile.rungPreference.reduce(
-    (total, rung) =>
-      total + estimateContextRungTokens(referenceCandidate, rung),
+    (total, rung, index) =>
+      total +
+      estimateContextRungTokens(
+        referenceCandidate,
+        rung,
+        profile.rungPreference.slice(0, index),
+      ),
     0,
   );
   const emptyPayload: ContextPayload = {
@@ -675,7 +681,7 @@ async function buildMetadataCandidates(
       rank: candidates.length + 1,
       tier,
       lanes: [...lanes],
-      estimates: CANDIDATE_ESTIMATES,
+      estimates: { ...CANDIDATE_ESTIMATES, card: estimateSymbolCardContentTokens(symbol) },
     });
   }
   return candidates;
@@ -992,7 +998,7 @@ async function defaultRetrieve(
       tier: row.tier,
       lanes: lanesFromCandidateProvenance(row.provenance),
       sourceRanks: row.sourceRanks,
-      estimates: CANDIDATE_ESTIMATES,
+      estimates: { ...CANDIDATE_ESTIMATES, card: row.cardContentTokens ?? CANDIDATE_ESTIMATES.card },
     }),
   );
   const retrieval = buildRetrievalState(

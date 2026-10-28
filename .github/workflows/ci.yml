@@ -1253,7 +1253,7 @@ jobs:
 
       - name: Cache verified context-quality graph families
         id: context-graph-cache
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: .benchmark/context-quality-cache
           key: ${{ runner.os }}-${{ runner.arch }}-schema${{ steps.context-inputs.outputs.schema }}-models-${{ steps.context-inputs.outputs.model-set }}-corpus-fcf4f2e11c5a1bb9b301a245af42b28556414b8e-configs-${{ hashFiles('tests/benchmark/config/context-quality-sdl-mcp.json', 'tests/benchmark/config/context-quality-neutral.json') }}
@@ -1314,6 +1314,13 @@ jobs:
           $env:SDL_CONTEXT_QUALITY_WORKING_DB_PATH = Join-Path $env:RUNNER_TEMP "context-quality-publish-neutral.lbug"
           & node tests/benchmark/context-quality-runner.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Save verified context-quality graph families
+        if: steps.context-graph-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .benchmark/context-quality-cache
+          key: ${{ steps.context-graph-cache.outputs.cache-primary-key }}
 
       - name: Run paired context-quality evaluation from validated copies
         shell: pwsh

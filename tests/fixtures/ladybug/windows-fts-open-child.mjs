@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 import { assertInstalledFtsArtifact } from "../../../scripts/ladybug-fts-artifact.mjs";
@@ -93,18 +93,11 @@ async function openWithProductionDatabase() {
   }
 }
 
-// Verify the exact isolated cache file before Database.init can auto-load FTS.
+// The parent stages and verifies the pinned FTS artifact before starting this
+// timed child. Verify the isolated cache file before Database.init can
+// auto-load FTS.
 const home = process.env.USERPROFILE;
 assert.ok(home && home === process.env.HOME);
-if (mode === "seed") {
-  const url = new URL(ftsContract.artifactUrl);
-  url.searchParams.set("sha256", ftsContract.artifactSha256);
-  const response = await fetch(url);
-  assert.ok(response.ok, "FTS download failed: " + response.status);
-  const target = join(home, ftsContract.installedPath);
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, Buffer.from(await response.arrayBuffer()));
-}
 const artifact = assertInstalledFtsArtifact(home, ftsContract);
 if (mode === "seed") await seedFtsDatabase();
 else await openWithProductionDatabase();

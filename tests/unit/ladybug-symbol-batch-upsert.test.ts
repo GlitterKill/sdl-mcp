@@ -943,6 +943,24 @@ describe("upsertSymbolBatch — integration", () => {
         5,
         "omitting the limit must preserve existing unbounded callers",
       );
+      const secondFileId = "bounded-second-file";
+      await queries.upsertFile(conn_, {
+        fileId: secondFileId, repoId, relPath: "src/second.ts",
+        contentHash: "second", language: "ts", byteSize: 100, lastIndexedAt: null,
+      });
+      await queries.upsertSymbolBatch(conn_, [
+        makeSymbol("second-external", repoId, secondFileId, "external", { external: true }),
+        makeSymbol("second-local", repoId, secondFileId, "local", { rangeStartLine: 9 }),
+      ]);
+      const batch = await queries.getSymbolsByFileIdsLimited(conn_, [secondFileId, fileId, fileId, "missing"], 1);
+      for (const id of [fileId, secondFileId, "missing"]) {
+        assert.deepStrictEqual(batch.get(id), await queries.getSymbolsByFile(conn_, id, 1));
+      }
+      assert.strictEqual(batch.get(secondFileId)?.[0].external, true, "limit precedes external filtering");
+      const tied = await queries.getSymbolsByFileIdsLimited(conn_, [fileId], 3);
+      assert.deepStrictEqual(tied.get(fileId), limited);
+      assert.deepStrictEqual(await queries.getSymbolsByFileIdsLimited(conn_, [], 3), new Map());
+      assert.deepStrictEqual(await queries.getSymbolsByFileIdsLimited(conn_, [fileId], 0), new Map([[fileId, []]]));
     },
   );
 

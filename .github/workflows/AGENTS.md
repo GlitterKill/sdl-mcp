@@ -666,3 +666,43 @@ repaired contract/canonical stages on both OSes. This is not an all-quality-gate
 pass: the V2 assertions and tiny-task claims audit above remain unresolved.
 No semantic threshold was weakened; publication/registry verification remains
 pending, and no main merge or final SDL release was performed.
+
+### 2026-10-28 — maintenance verification after later main changes
+
+Maintenance run `40711214503` at `059ebb54` passed all six native builds,
+the structural benchmark, and the 50-task realism matrix. The matrix's
+claims audit also passed (overall average 60.2%, median 61.9%). Ubuntu's
+background-integrity benchmark passed; Windows measured background p95
+4,130.7 ms against the unchanged 4,000 ms limit. The other Windows background
+checks passed. Its timing failure remains a gate, not a waived result.
+
+Both ordinary test jobs exposed an isolated-QA fixture that omitted the now
+default-enabled gateway setting, plus a stale seed-evaluation source hash.
+The fixture explicitly selects the flat tool surface, and the generated seed
+artifact was refreshed with unchanged rankings and recall. Windows additionally
+timed out while downloading the pinned FTS extension inside the native seed
+child. The fixture now stages and verifies the same extension in the parent;
+native child timeouts and runtime assertions are unchanged. Its focused
+Windows suite passed all 16 tests locally.
+
+Ubuntu context quality reached its semantic assertions and failed missing
+MCPServer code evidence, scoped precise latency (3,026 ms versus 250 ms), and
+outside-directory evidence. Local frozen-corpus reproduction identified
+duplicated card/code identity costs in admission and final budget enforcement.
+Pricing the consolidated wire payload and actual metadata-derived card content
+restores broad MCPServer code and focused MCPServer card evidence within the
+original 1,800-token budget. Database aggregation and bounded per-file fallback
+batching remove measured row-transfer and round-trip costs without changing
+ranking. These improvements do not establish a latency-gate pass.
+
+Verified graph families are now saved immediately after both publish/validation
+steps, before quality evaluation. Previously a quality failure prevented the
+cache action's success-only post-save and forced expensive graph reconstruction
+on the next run. Restore validation and all semantic failure behavior remain
+unchanged. The cache ordering regression test passes.
+
+Directory focus still has its existing soft-priority behavior. The strict
+directory benchmark conflicts with that contract; a contract decision remains
+pending. Do not relax its assertion or report all quality gates as passed.
+At this checkpoint the Windows context job is still constructing graph families;
+follow-up hosted results must be recorded separately.

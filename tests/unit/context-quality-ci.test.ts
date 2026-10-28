@@ -313,6 +313,21 @@ describe("scheduled context-quality graph cache", () => {
     );
   });
 
+  it("saves verified graph families before evaluating quality", () => {
+    const workflow = readSource(".github/workflows/ci.yml");
+    const job = workflow.slice(workflow.indexOf("  context-quality-scheduled:"));
+    assert.match(job, /id: context-graph-cache\s+uses: actions\/cache\/restore@v5/);
+    const publish = job.indexOf("- name: Publish both verified graph families on cache miss");
+    const save = job.indexOf("- name: Save verified context-quality graph families");
+    const evaluate = job.indexOf("- name: Run paired context-quality evaluation from validated copies");
+    assert.ok(publish >= 0 && save > publish && evaluate > save);
+    const saveStep = job.slice(save, evaluate);
+    assert.match(saveStep, /if: steps\.context-graph-cache\.outputs\.cache-hit != 'true'/);
+    assert.match(saveStep, /uses: actions\/cache\/save@v5/);
+    assert.match(saveStep, /key: \$\{\{ steps\.context-graph-cache\.outputs\.cache-primary-key \}\}/);
+    assert.doesNotMatch(saveStep, /always\(\)|continue-on-error/);
+  });
+
   it("runs both scheduled corpora with the V2 shadow gate enabled", () => {
     const workflow = readSource(".github/workflows/ci.yml");
     const job =

@@ -1011,6 +1011,35 @@ export async function getMetricsByRepo(
   return result;
 }
 
+export interface RepoCentralityMaxima {
+  maxPageRank: number;
+  maxKCore: number;
+}
+
+/** Read only the per-repo maxima used to normalize beam-search centrality. */
+export async function getRepoCentralityMaxima(
+  conn: Connection,
+  repoId: string,
+): Promise<RepoCentralityMaxima> {
+  const row = await querySingle<{
+    maxPageRank: unknown;
+    maxKCore: unknown;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     MATCH (m:Metrics {symbolId: s.symbolId})
+     RETURN max(coalesce(m.pageRank, 0.0)) AS maxPageRank,
+            max(coalesce(m.kCore, 0)) AS maxKCore`,
+    { repoId },
+  );
+  const maxPageRank = toNumber(row?.maxPageRank ?? 0);
+  const maxKCore = toNumber(row?.maxKCore ?? 0);
+  return {
+    maxPageRank: maxPageRank > 0 ? maxPageRank : 0,
+    maxKCore: maxKCore > 0 ? maxKCore : 0,
+  };
+}
+
 export async function getTopSymbolsByChurn(
   conn: Connection,
   repoId: string,

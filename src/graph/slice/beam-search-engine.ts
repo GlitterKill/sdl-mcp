@@ -155,8 +155,7 @@ async function loadRepoCentralityStats(
   repoId: RepoId,
 ): Promise<CentralityStats> {
   try {
-    const metricsById = await ladybugDb.getMetricsByRepo(conn, repoId);
-    return computeCentralityStats(metricsById.values());
+    return await ladybugDb.getRepoCentralityMaxima(conn, repoId);
   } catch (err) {
     logger.debug("Failed to load repo centrality stats for beam search", {
       repoId,

@@ -28,6 +28,7 @@ import {
   selectContextBundles,
 } from "../../dist/context/select.js";
 import {
+  consolidateContextEvidence,
   serializeContextPayload,
   stableContextValue,
 } from "../../dist/context/serialize.js";
@@ -158,7 +159,10 @@ function expectedRungTokens(
   };
   return (
     (item.estimates[rung] ?? TEST_DEFAULT_ESTIMATES[rung]) +
-    estimateTokens(JSON.stringify(normalizeValue(shell)))
+    estimateTokens(JSON.stringify(normalizeValue(shell))) -
+    (rung === "card" ? 0 :
+      estimateTokens(JSON.stringify(normalizeValue({ ...shell, rung: "card" }))) -
+      estimateTokens(',"card":'))
   );
 }
 
@@ -540,7 +544,7 @@ describe("ContextEngineV2 pure contracts", () => {
     );
   });
 
-  it("leaves room for an exact Tier 1 card after two complete Tier 0 bundles", () => {
+  it("fits exact Tier 1 code after two Tier 0 bundles with consolidated metadata", () => {
     const empty = payload();
     empty.status = "empty";
     empty.retrieval = {
@@ -600,7 +604,7 @@ describe("ContextEngineV2 pure contracts", () => {
       [
         ["src/mcp/server-instructions.ts", ["card", "skeleton"]],
         ["src/code-mode/index.ts", ["card", "skeleton"]],
-        ["src/server.ts", ["card"]],
+        ["src/server.ts", ["card", "skeleton"]],
       ],
     );
   });
@@ -1074,6 +1078,24 @@ describe("ContextEngineV2 pure contracts", () => {
       result.payload.omitted.highestRanked[0].action.id,
       "code.getSkeleton",
     );
+  });
+
+  it("keeps code that fits once its card metadata is folded into the wire payload", () => {
+    const input = payload();
+    const card = { ...input.evidence[1], rung: "card" as const,
+      content: { name: "Target", signature: "function Target(): void" } };
+    const code = { ...card, rung: "hotPath" as const,
+      content: { excerpt: "function Target() { return; }" } };
+    input.evidence = [card, code];
+    input.edges = [];
+    const consolidated = consolidateContextEvidence(input);
+    const budget = expectedResponseTokens(consolidated);
+    assert.ok(expectedResponseTokens(input) > budget);
+    const result = enforceContextBudget(input, budget);
+    assert.equal(result.payload.omitted.total, 0);
+    assert.deepEqual(consolidateContextEvidence(result.payload).evidence,
+      consolidated.evidence);
+    assert.equal(result.estimatedTokens, budget);
   });
 
   it("evicts an optional rung before a lower-ranked base card at the same tier", () => {

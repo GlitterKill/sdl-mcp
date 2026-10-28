@@ -24,6 +24,7 @@ import {
   CONTEXT_RUNG_TOKEN_LIMITS,
   logicalActionForRung,
 } from "./select.js";
+import { projectCardContent } from "./card-content.js";
 import type {
   ContextEdge,
   ContextEvidence,
@@ -108,16 +109,6 @@ function unavailable(
       bundle.candidate.symbolId,
       identifiersToFind,
     ),
-  };
-}
-
-function projectCardContent(card: SymbolCard): Record<string, unknown> {
-  return {
-    kind: card.kind,
-    name: card.name,
-    ...(card.signature ? { signature: card.signature } : {}),
-    ...(card.summary?.trim() ? { summary: card.summary } : {}),
-    ...(card.testCase ? { testCase: card.testCase } : {}),
   };
 }
 

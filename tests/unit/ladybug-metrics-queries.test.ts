@@ -797,6 +797,78 @@ describe("LadybugDB Metrics Queries", () => {
       );
     });
 
+    async function upsertCentrality(
+      symbolId: string,
+      pageRank: number,
+      kCore: number,
+    ): Promise<void> {
+      await queries.upsertCentralityBatch(
+        conn as unknown as import("kuzu").Connection,
+        [{ symbolId, pageRank, kCore, updatedAt: "2024-01-01T00:00:00Z" }],
+      );
+    }
+
+    it("returns zero centrality maxima when the repository has no metrics", async () => {
+      const result = await queries.getRepoCentralityMaxima(
+        conn as unknown as import("kuzu").Connection,
+        "metrics-recovery-repo",
+      );
+
+      assert.deepStrictEqual(result, { maxPageRank: 0, maxKCore: 0 });
+    });
+
+    it("aggregates multiple rows using only the requested repository membership", async () => {
+      await createRepoSymbol("centrality-local-a", "metrics-recovery-repo");
+      await createRepoSymbol("centrality-local-b", "metrics-recovery-repo");
+      await createRepoSymbol("centrality-other", "other-metrics-recovery-repo");
+      await upsertCentrality("centrality-local-a", 0.25, 2);
+      await upsertCentrality("centrality-local-b", 0.75, 4);
+      await upsertCentrality("centrality-other", 0.99, 99);
+      await upsertCentrality("centrality-unlinked", 1, 100);
+
+      const result = await queries.getRepoCentralityMaxima(
+        conn as unknown as import("kuzu").Connection,
+        "metrics-recovery-repo",
+      );
+
+      assert.deepStrictEqual(result, { maxPageRank: 0.75, maxKCore: 4 });
+    });
+
+    it("observes updated centrality values and clamps negative maxima to zero", async () => {
+      await createRepoSymbol("centrality-fresh-a", "metrics-recovery-repo");
+      await createRepoSymbol("centrality-fresh-b", "metrics-recovery-repo");
+      await upsertCentrality("centrality-fresh-a", 0.8, 8);
+      await upsertCentrality("centrality-fresh-b", 0.4, 4);
+
+      const connection = conn as unknown as import("kuzu").Connection;
+      assert.deepStrictEqual(
+        await queries.getRepoCentralityMaxima(
+          connection,
+          "metrics-recovery-repo",
+        ),
+        { maxPageRank: 0.8, maxKCore: 8 },
+      );
+
+      await upsertCentrality("centrality-fresh-a", 0.1, 1);
+      assert.deepStrictEqual(
+        await queries.getRepoCentralityMaxima(
+          connection,
+          "metrics-recovery-repo",
+        ),
+        { maxPageRank: 0.4, maxKCore: 4 },
+      );
+
+      await upsertCentrality("centrality-fresh-a", -0.2, -2);
+      await upsertCentrality("centrality-fresh-b", -0.5, -3);
+      assert.deepStrictEqual(
+        await queries.getRepoCentralityMaxima(
+          connection,
+          "metrics-recovery-repo",
+        ),
+        { maxPageRank: 0, maxKCore: 0 },
+      );
+    });
+
     it("finds only real repo symbols missing Metrics rows", async () => {
       await createRepoSymbol("metrics-present", "metrics-recovery-repo");
       await createRepoSymbol("metrics-missing", "metrics-recovery-repo");

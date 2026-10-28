@@ -1696,6 +1696,54 @@ export async function getSymbolsByFile(
   }));
 }
 
+/** Bounded per-file fallback, with the same top-K ordering as getSymbolsByFile. */
+export async function getSymbolsByFileIdsLimited(
+  conn: Connection,
+  fileIds: readonly string[],
+  limit: number,
+): Promise<Map<string, SymbolRow[]>> {
+  assertSafeInt(limit, "limit");
+  const ids = [...new Set(fileIds)];
+  const result = new Map<string, SymbolRow[]>(ids.map((id) => [id, []]));
+  if (ids.length === 0 || limit <= 0) return result;
+  const params: Record<string, unknown> = { limit };
+  // Each UNION branch applies its own LIMIT in the database. Ordered collect
+  // does not retain its input ordering in LadybugDB, so it cannot implement top-K.
+  const branches = ids.map((fileId, index) => {
+    params[`fileId${index}`] = fileId;
+    return `MATCH (f:File {fileId: $fileId${index}})<-[:SYMBOL_IN_FILE]-(s:Symbol)
+      MATCH (s)-[:SYMBOL_IN_REPO]->(r:Repo)
+      RETURN f.fileId AS fileId, s.symbolId AS symbolId
+      ORDER BY s.exported DESC, s.rangeStartLine ASC, s.symbolId ASC
+      LIMIT $limit`;
+  });
+  const rows = await queryAll<{ fileId: string; symbolId: string }>(
+    conn,
+    branches.join("\nUNION ALL\n"),
+    params,
+  );
+  const symbols = await getSymbolsByIds(conn, rows.map((row) => row.symbolId));
+  for (const row of rows) {
+    const symbol = symbols.get(row.symbolId);
+    if (symbol) {
+      result.get(row.fileId)!.push({
+        ...symbol,
+        fileId: row.fileId,
+        symbolStatus: symbol.symbolStatus ?? "real",
+      });
+    }
+  }
+  // UNION branch output order is unspecified; restore each bounded file's order.
+  for (const group of result.values()) {
+    group.sort((left, right) =>
+      Number(right.exported) - Number(left.exported) ||
+      left.rangeStartLine - right.rangeStartLine ||
+      (left.symbolId < right.symbolId ? -1 : left.symbolId > right.symbolId ? 1 : 0),
+    );
+  }
+  return result;
+}
+
 export async function getSymbolIdsByFile(
   conn: Connection,
   fileId: string,

@@ -501,5 +501,8 @@ describe("Context V2 captured overlay expansion", () => {
     assert.strictEqual(capturedSnapshot, snapshot);
     assert.equal(result[1]?.symbolId, "overlay-focus");
     assert.equal(result[1]?.path, "src/overlay-focus.ts");
+    assert.ok(result[1].estimates.card < 160, "small captured cards must not pay the generic card ceiling");
+    assert.equal(result[1].estimates.hotPath, 300);
+    assert.equal(result[1].estimates.skeleton, 128);
   });
 });

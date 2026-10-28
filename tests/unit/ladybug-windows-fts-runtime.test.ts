@@ -3,8 +3,9 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
+import { assertInstalledFtsArtifact } from "../../scripts/ladybug-fts-artifact.mjs";
 
 import {
   WINDOWS_FTS_RUNTIME_PACKAGE_VERSION,
@@ -19,6 +20,9 @@ const packageName = "@sdl-mcp/ladybug-openssl-win32-x64";
 const ladybugSource = readFileSync("src/db/ladybug.ts", "utf8");
 const openChildPath = resolve(
   "tests/fixtures/ladybug/windows-fts-open-child.mjs",
+);
+const ftsContract = JSON.parse(
+  readFileSync("ladybug-openssl/ladybug-fts-0.19.0.json", "utf8"),
 );
 
 function sha256(content: string): string {
@@ -83,6 +87,36 @@ function cleanWindowsChildEnvironment(
   };
 }
 
+async function stageFtsArtifact(home: string) {
+  const url = new URL(ftsContract.artifactUrl);
+  url.searchParams.set("sha256", ftsContract.artifactSha256);
+
+  let bytes: Buffer;
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(60_000),
+    });
+    assert.ok(
+      response.ok,
+      `FTS artifact staging failed with HTTP ${response.status}`,
+    );
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to stage pinned FTS artifact: ${detail}`, {
+      cause: error,
+    });
+  }
+
+  const target = join(home, ftsContract.installedPath);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, bytes);
+
+  // Reuse the production fixture verifier to enforce the pinned path, size,
+  // and hash before any timed child process starts.
+  return assertInstalledFtsArtifact(home, ftsContract);
+}
+
 function runOpenChild(mode: "seed" | "open", home: string, dbPath: string) {
   return spawnSync(process.execPath, [openChildPath, mode, dbPath], {
     cwd: resolve("."),
@@ -120,10 +154,11 @@ describe("withWindowsFtsRuntime", () => {
           ? "Windows-only FTS runtime boundary"
           : false,
     },
-    () => {
+    async () => {
       const home = mkdtempSync(join(tmpdir(), "sdl-fts-reopen-test-"));
       const dbPath = join(home, "fts-reopen.lbug");
       try {
+        await stageFtsArtifact(home);
         const seeded = runOpenChild("seed", home, dbPath);
         assert.notEqual(
           seeded.error?.code,
