@@ -217,7 +217,7 @@ export async function buildSymbolAndEdgeRows(
         ? detail.nativeSearchText.trim()
         : "";
 
-    // Prefer existing values, then Rust-native metadata, then TS fallback.
+    // Prefer current source docs, then valid existing values, native metadata, and TS fallback.
     // Filter out stale name-only summaries so they get regenerated.
     const nativeSummaryValue =
       nativeSummary.length > 0 &&
@@ -225,7 +225,11 @@ export async function buildSymbolAndEdgeRows(
       !isMetadataProseTemplate(nativeSummary, extractedSymbol.name)
         ? nativeSummary
         : null;
-    let summary = existingSymbol?.summary ?? null;
+    const documentedSummary = hasJSDoc(extractedSymbol, content)
+      ? generateFilteredSummary(extractedSymbol, content)
+      : null;
+    // Prefer current source documentation so stale cached prose is not labeled as its summary.
+    let summary = documentedSummary ?? existingSymbol?.summary ?? null;
     if (
       summary !== null &&
       (isNameOnlySummary(summary, extractedSymbol.name) ||
@@ -239,10 +243,9 @@ export async function buildSymbolAndEdgeRows(
     }
 
     // Summary quality/source metadata
-    const hadJSDoc = hasJSDoc(extractedSymbol, content);
     const summarySource = classifySummarySource(
       summary,
-      hadJSDoc,
+      documentedSummary !== null,
       extractedSymbol.kind,
     );
     const summaryQuality = getSummaryQuality(summary, summarySource);

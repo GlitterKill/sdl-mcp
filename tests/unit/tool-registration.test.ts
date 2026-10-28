@@ -10,6 +10,7 @@ import { MCPServer } from "../../dist/server.js";
 import { getVersion } from "../../dist/cli/commands/version.js";
 import { WorkflowRequestSchema } from "../../dist/code-mode/types.js";
 import { buildCompactJsonSchema } from "../../dist/gateway/compact-schema.js";
+import { AppConfigSchema } from "../../dist/config/types.js";
 
 const TEST_PROJECTION_PROFILE = Object.freeze({
   projector: "generic",
@@ -83,6 +84,16 @@ function makeFakeServer(): { names: string[]; tools: RegisteredToolCall[]; serve
   };
   return { names, tools, server };
 }
+
+it("registers the default Code Mode surface when config blocks are omitted (#53)", () => {
+  const config = AppConfigSchema.parse({ repos: [], policy: {} });
+  const { names, server } = makeFakeServer();
+  registerTools(server, {}, config.gateway, config.codeMode);
+  assert.deepStrictEqual(names, [
+    "sdl.action.search", "sdl.info", "sdl.manual", "sdl.retrieve",
+    "sdl.workflow", "sdl.context", "sdl.file",
+  ]);
+});
 
 describe("MCP tool registration", () => {
   it("advertises flat union output schemas with an object root", async () => {

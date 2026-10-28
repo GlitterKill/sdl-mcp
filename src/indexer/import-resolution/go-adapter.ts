@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "path";
 
-import { walkRepositoryFiles } from "../fileWalker.js";
+import { filterRepositoryFiles, walkRepositoryFiles } from "../fileWalker.js";
 import { existsAsync, readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
 import { normalizePath } from "../../util/paths.js";
@@ -86,7 +86,16 @@ export class GoImportResolutionAdapter implements ImportResolutionAdapter {
       (extension) => `${packageDir}/**/*${extension}`,
     );
 
-    const matches = await walkRepositoryFiles(params.repoRoot, { patterns });
-    return matches.map((path) => normalizePath(path)).sort();
+    const knownPaths = params.knownRepoPaths?.keys?.();
+    const matches = knownPaths
+      ? filterRepositoryFiles(knownPaths, patterns)
+      : await walkRepositoryFiles(params.repoRoot, {
+          patterns,
+          ignorePatterns: params.ignorePatterns,
+        });
+    return matches
+      .map((path) => normalizePath(path))
+      .filter((path) => params.knownRepoPaths?.has(path) ?? true)
+      .sort();
   }
 }

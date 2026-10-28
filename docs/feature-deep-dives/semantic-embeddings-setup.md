@@ -426,9 +426,14 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 - `"api"` sends Anthropic Messages API format (`x-api-key` header, `anthropic-version` header)
 - `"local"` sends OpenAI Chat Completions format (`Authorization: Bearer` header)
 
-**System prompt used for all providers:**
+**System prompt used by the LLM providers:**
 
-> "You are a code documentation assistant. Write a 1-3 sentence summary of what this TypeScript/JavaScript symbol does. Be specific, not generic. Focus on behavior, not structure."
+> "You are a code documentation assistant. Write a 1-3 sentence summary of what this code symbol does. Be specific, not generic. Focus on behavior, not structure."
+
+When a symbol is parsed, current JSDoc or C# XML `/// <summary>` documentation
+takes precedence over stale persisted prose and is recorded as `jsdoc` at
+quality 1.0. This update does not bulk-regenerate existing persisted summaries;
+the neutral prompt applies when summary generation next runs.
 
 ---
 
@@ -547,6 +552,15 @@ Each ONNX model on HuggingFace ships several variants. For Jina, omitted/`defaul
 | `fp32`    |     ✓     |     ✓      | ~547-642MB                 | baseline        | reference               |
 
 npm postinstall caches and SHA-256 verifies both pinned Jina graphs (~321 MB FP16 and ~162 MB quantized); pinned quantized Nomic delivery is unchanged. Explicit variants download on first use when they are not part of that installed set; tokenizer and config are shared across variants.
+
+The effective Jina artifact variant is part of persisted embedding cache
+identity, so changing the indexing variant does not reuse vectors created for
+another artifact. Automatic Windows DirectML indexing deliberately pairs FP16
+document vectors with deterministic quantized CPU query vectors. The
+[Jina compatibility probe](../../scripts/probe-jina-gpu-aware-default.mjs)
+checks this pair for a minimum paired-vector cosine similarity of 0.985 and
+the expected top results. Changing the stored document artifact still requires
+regenerating its cached vectors.
 
 ```jsonc
 {

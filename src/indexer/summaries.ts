@@ -1491,17 +1491,35 @@ function extractJSDoc(symbol: ExtractedSymbol, fileContent: string): JSDoc {
 
   const jsdocLines: string[] = [];
   let i = startLine - 2;
+  let tripleSlashComment = false;
 
   while (i >= 0 && i < lines.length) {
     const line = lines[i].trim();
 
+    // `///` documents the following symbol; `//!` documents the module.
+    if (tripleSlashComment) {
+      if (line.startsWith("///")) {
+        jsdocLines.push(line.slice(3).trimStart());
+        i--;
+        continue;
+      }
+      break;
+    }
+
+    if (line.startsWith("///")) {
+      tripleSlashComment = true;
+      jsdocLines.push(line.slice(3).trimStart());
+      i--;
+      continue;
+    }
+
     if (line.startsWith("/**")) {
-      jsdocLines.unshift(line);
+      jsdocLines.push(line);
       break;
     }
 
     if (line.startsWith("*") || line.startsWith("*/")) {
-      jsdocLines.unshift(line);
+      jsdocLines.push(line);
       i--;
       continue;
     }
@@ -1514,7 +1532,9 @@ function extractJSDoc(symbol: ExtractedSymbol, fileContent: string): JSDoc {
     break;
   }
 
-  const jsdocText = jsdocLines
+  // Reverse the backward scan once instead of shifting the array for each line.
+  let jsdocText = jsdocLines
+    .reverse()
     .map((l) =>
       l
         .replace(/^\s*\/\*\*?/, "")
@@ -1522,6 +1542,24 @@ function extractJSDoc(symbol: ExtractedSymbol, fileContent: string): JSDoc {
         .replace(/^\s*\*\s?/, ""),
     )
     .join("\n");
+
+  // Locate each boundary once: paired-tag regexes rescan malformed comments.
+  const summaryStart = /<summary\b[^<>]*>/i.exec(jsdocText);
+  const summaryBody = summaryStart
+    ? jsdocText.slice(summaryStart.index + summaryStart[0].length)
+    : "";
+  const summaryEnd = /<\/summary\s*>/i.exec(summaryBody);
+  const hasXmlDocTags =
+    tripleSlashComment &&
+    /^[^\S\r\n]*<(?:summary|param|returns?|exception|remarks|example|value|inheritdoc|reference)\b/im.test(
+      jsdocText,
+    );
+  if (summaryStart && summaryEnd) {
+    jsdocText = normalizeXmlSummary(summaryBody.slice(0, summaryEnd.index));
+  } else if (hasXmlDocTags) {
+    // Do not treat `<param>` or `<remarks>` markup as the symbol description.
+    jsdocText = "";
+  }
 
   const jsdoc: JSDoc = {
     description: "",
@@ -1566,6 +1604,52 @@ function extractJSDoc(symbol: ExtractedSymbol, fileContent: string): JSDoc {
   }
 
   return jsdoc;
+}
+
+function normalizeXmlSummary(summary: string): string {
+  return summary
+    // Excluding '<' keeps even repeated unmatched tag openings linear.
+    .replace(/<[^<>]+>/g, (tag) => {
+      if (/^<see\b/i.test(tag) && tag.endsWith("/>")) {
+        const attribute = tag.match(
+          /\b(?:cref|langword)\s*=\s*(?:"([^"]*)"|'([^']*)')/i,
+        );
+        const reference = (attribute?.[1] ?? attribute?.[2] ?? "")
+          .replace(/^[A-Z]:/, "")
+          .replace(/^global::/, "");
+        return reference.slice(reference.lastIndexOf(".") + 1);
+      }
+      if (/^<(?:paramref|typeparamref)\b/i.test(tag) && tag.endsWith("/>")) {
+        const attribute = tag.match(/\bname\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+        return attribute?.[1] ?? attribute?.[2] ?? "";
+      }
+      return " ";
+    })
+    .replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (entity, value: string) => {
+      const normalized = value.toLowerCase();
+      const named: Record<string, string> = {
+        amp: "&",
+        lt: "<",
+        gt: ">",
+        quot: '"',
+        apos: "'",
+      };
+      if (normalized in named) return named[normalized];
+      const codePoint = normalized.startsWith("#x")
+        ? Number.parseInt(normalized.slice(2), 16)
+        : Number.parseInt(normalized.slice(1), 10);
+      if (
+        !Number.isInteger(codePoint) ||
+        codePoint < 0 ||
+        codePoint > 0x10ffff ||
+        (codePoint >= 0xd800 && codePoint <= 0xdfff)
+      ) {
+        return entity;
+      }
+      return String.fromCodePoint(codePoint);
+    })
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function splitCamelCase(str: string): string[] {

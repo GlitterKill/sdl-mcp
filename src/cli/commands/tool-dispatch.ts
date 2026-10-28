@@ -15,6 +15,7 @@ import type { ToolDispatchOptions } from "../types.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
+import { closeLadybugDb } from "../../db/ladybug.js";
 import { loadConfiguredAdapterPlugins } from "../../startup/plugins.js";
 import {
   createActionMap,
@@ -92,6 +93,11 @@ function validateCliActionConstraints(
   action: string,
   args: Record<string, unknown>,
 ): void {
+  if (action === "index.refresh" && args.async === true) {
+    throw new Error(
+      "CLI index.refresh cannot run in the background because the command closes its database before exiting. Omit async or use the persistent MCP server for async refresh.",
+    );
+  }
   if (action === "symbol.edit" && args.mode === "apply") {
     throw new Error(
       "symbol.edit apply uses a process-local preview plan and is only available inside an MCP/server session. For CLI writes, use --mode applyNow with expectedAstFingerprint and expectedRange.",
@@ -427,49 +433,46 @@ export async function toolDispatchCommand(
 
   await loadConfiguredAdapterPlugins(config, configPath);
 
-  // Initialize DB. Embedded LadybugDB allows a single writer/owner, so provide
-  // a direct remediation when the active MCP server already owns the graph file.
+  let result: unknown;
+  let parsed: unknown;
+  let operationFailed = false;
+  let operationError: unknown;
+  // Own cleanup before initialization: a rejected open can still own resources.
   try {
     await initGraphDb(config, configPath);
-  } catch (err) {
-    const message = formatError(err);
-    if (
-      /lock|locked|Cannot start a new write transaction|Cannot open database/i.test(
-        message,
-      )
-    ) {
-      throw new Error(
-        "sdl-mcp tool cannot open the graph database because another SDL-MCP server process appears to own it. Use the already-running MCP tools, stop that server, or run this command against a separate SDL_GRAPH_DB_PATH.",
-      );
+
+    // CLI has no live index; buffer actions retain their normal admission errors.
+    const entry = createActionMap(undefined)[action];
+    if (!entry) {
+      if (action.startsWith("memory.")) {
+        throw new Error(
+          `disabled action "${action}". Enable with memory.enabled: true in your sdlmcp.config.json.`,
+        );
+      }
+      throw new Error(`action "${action}" not found in handler map`);
     }
-    throw err;
+
+    parsed = prepareActionEntryArgs(action, entry, handlerArgs, { kind: "cli" });
+    result = await entry.handler(parsed);
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+    throw error;
+  } finally {
+    try {
+      await closeLadybugDb({ strict: true });
+    } catch (closeError) {
+      if (operationFailed) {
+        throw new AggregateError(
+          [operationError, closeError],
+          `Tool action failed: ${formatError(operationError)}; database close also failed: ${formatError(closeError)}`,
+        );
+      }
+      throw closeError;
+    }
   }
 
-  // Build action map (gateway router — no MCP server needed)
-  // liveIndex is undefined in CLI mode; buffer.* actions will error gracefully
-  const actionHandlerMap = createActionMap(undefined);
-
-  // Look up handler
-  const entry = actionHandlerMap[action];
-  if (!entry) {
-    if (action.startsWith("memory.")) {
-      throw new Error(
-        `disabled action "${action}". Enable with memory.enabled: true in your sdlmcp.config.json.`,
-      );
-    }
-    throw new Error(`action "${action}" not found in handler map`);
-  }
-
-  // Validate with Zod schema and call handler
-  const parsed = prepareActionEntryArgs(
-    action,
-    entry,
-    handlerArgs,
-    { kind: "cli" },
-  );
-  const result = await entry.handler(parsed);
-
-  // Output
+  // Do not publish success until checkpoint, receipt publication and close pass.
   formatCliToolOutput(
     action,
     parsed as Record<string, unknown>,

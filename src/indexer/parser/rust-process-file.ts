@@ -90,6 +90,7 @@ export async function processFileFromRustResult(params: {
     fileMeta,
     rustResult,
     languages,
+    config,
     mode,
     existingFile,
     symbolIndex,
@@ -382,6 +383,8 @@ export async function processFileFromRustResult(params: {
       extensions,
       languageId,
       content,
+      undefined,
+      config.sourceFileListPath ? undefined : config.ignore,
     );
 
     // Determine edge source symbols

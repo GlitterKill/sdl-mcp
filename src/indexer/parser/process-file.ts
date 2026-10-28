@@ -156,6 +156,8 @@ export async function processFile(
       extensions,
       adapter.languageId,
       fileData.content,
+      undefined,
+      config?.sourceFileListPath ? undefined : config?.ignore,
     );
 
     // ── Phase 6: Symbol detail mapping ───────────────────────────

@@ -358,6 +358,12 @@ npm run qualify:ladybug -- --source <closed-db.lbug> --config <config.json> --ex
 
 Direct MCP tool invocation from the CLI. The command currently exposes the direct action definitions from [`src/cli/commands/tool-actions.ts`](../src/cli/commands/tool-actions.ts), plus in-process metadata proxies for `action.search` and `manual` (aliases: `sdl.action.search`, `sdl.manual`). Direct graph actions reuse the gateway action map; the two metadata proxies call the same handlers registered for MCP clients and do not open the graph database.
 
+Graph actions close the database strictly before printing a successful result,
+including checkpointing and sealing its lineage receipt. Failed actions also
+close the database; close failures remain errors. Background `index.refresh`
+jobs require a persistent MCP session: the CLI rejects `async: true` before
+opening the database.
+
 ```bash
 sdl-mcp tool repo.register --repo-id my-repo --root-path . --dry-run
 sdl-mcp tool repo.status --repo-id my-repo

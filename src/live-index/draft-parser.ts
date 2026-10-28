@@ -80,6 +80,7 @@ export interface DraftParseInput {
   languages: string[];
   language?: string;
   version: number;
+  ignorePatterns?: string[];
 }
 
 export interface DraftParseResult {
@@ -401,6 +402,8 @@ export async function parseDraftFile(
             input.languages.map((language) => `.${language}`),
             adapter.languageId,
             input.content,
+            undefined,
+            input.ignorePatterns,
           )
         : {
             targets: [] as Array<{

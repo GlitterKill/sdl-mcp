@@ -71,9 +71,11 @@ const FileGatewayReadSchema = z.object({
     .number()
     .int()
     .min(0)
-    .max(20)
+    .max(20, {
+      message: "searchContext is 0-20 lines before and after each match; use offset and limit for a larger continuous section",
+    })
     .default(2)
-    .describe("Context lines per search match: 0-20 (default 2)."),
+    .describe("Lines before and after each search match: 0-20 (default 2). Use offset and limit for a larger continuous section."),
   jsonPath: z
     .string()
     .max(200)

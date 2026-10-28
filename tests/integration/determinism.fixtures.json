@@ -9,6 +9,7 @@
   "toolCalls": [
     {
       "tool": "sdl.workflow",
+      "expectError": true,
       "args": {
         "repoId": "{REPO_ID}",
         "steps": [
@@ -26,6 +27,7 @@
     },
     {
       "tool": "sdl.workflow",
+      "expectError": true,
       "args": {
         "repoId": "{REPO_ID}",
         "steps": [
@@ -693,6 +695,19 @@
         "filePath": "SDL.md",
         "maxTokens": 500,
         "responseMode": "inline",
+        "detail": "compact"
+      }
+    },
+    {
+      "tool": "sdl.file",
+      "expectError": true,
+      "expectedErrorCode": "VALIDATION_ERROR",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "op": "read",
+        "filePath": "SDL.md",
+        "search": "workflow",
+        "searchContext": 25,
         "detail": "compact"
       }
     },

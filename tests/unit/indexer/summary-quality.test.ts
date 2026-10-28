@@ -1,6 +1,26 @@
 import assert from "node:assert";
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
-import { generateSummary } from "../../../dist/indexer/summaries.js";
+import { generateSummary, hasJSDoc } from "../../../dist/indexer/summaries.js";
+
+it("handles malformed XML documentation without unbounded tag rescanning", () => {
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import { hasJSDoc } from './dist/indexer/summaries.js';
+    const symbol = { range: { startLine: 2 } };
+    for (const body of ['<'.repeat(200000), '<summary>'.repeat(25000), '<see>'.repeat(40000)]) {
+      hasJSDoc(symbol, '/// <summary>' + body + '</summary>\\nvoid Run() {}');
+      hasJSDoc(symbol, '/// ' + body + '\\nvoid Run() {}');
+    }
+    hasJSDoc({ range: { startLine: 150001 } }, '///\\n'.repeat(150000) + 'void Run() {}');
+  `], { encoding: "utf8", timeout: 3000 });
+  assert.equal(child.status, 0, child.error?.message ?? child.stderr);
+});
+
+it("does not promote TypeScript triple-slash reference directives to documentation", () => {
+  const symbol = { range: { startLine: 2 } };
+  assert.equal(hasJSDoc(symbol as never,
+    '/// <reference types="node" />\nexport const value = 1;'), false);
+});
 
 /**
  * Tests that behavioral function summaries are specific and actionable,

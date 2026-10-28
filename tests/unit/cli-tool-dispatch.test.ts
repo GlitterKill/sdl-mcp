@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { writeFileSync, mkdtempSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdtempSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
 import assert from "node:assert";
@@ -30,8 +30,9 @@ function cliMemoryDisabledEnv(): NodeJS.ProcessEnv {
   writeFileSync(
     configPath,
     JSON.stringify({
-      repos: [{ repoId: "demo-repo", rootPath: process.cwd() }],
+      repos: [{ repoId: "demo-repo", rootPath: dir, semantic: { enabled: false } }],
       policy: {},
+      semantic: { enabled: false },
       graphDatabase: { path: graphPath },
     }),
   );
@@ -39,6 +40,7 @@ function cliMemoryDisabledEnv(): NodeJS.ProcessEnv {
     ...process.env,
     SDL_CONFIG: configPath,
     SDL_GRAPH_DB_PATH: graphPath,
+    SDL_MCP_DISABLE_NATIVE_ADDON: "1",
   };
 }
 function runTool(args: string[], env: NodeJS.ProcessEnv = process.env) {
@@ -46,6 +48,7 @@ function runTool(args: string[], env: NodeJS.ProcessEnv = process.env) {
     cwd: process.cwd(),
     encoding: "utf8",
     env,
+    timeout: 60_000,
   });
 }
 
@@ -59,6 +62,95 @@ function parseSuccessfulJson(result: ReturnType<typeof runTool>): unknown {
 }
 
 describe("cli-tool-dispatch", () => {
+  it("seals the family after successful and failed actions, permitting repeated CLI opens", () => {
+    const env = cliMemoryDisabledEnv();
+    const seeded = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { loadConfig } from './dist/config/loadConfig.js';
+      import { initGraphDb } from './dist/db/initGraphDb.js';
+      import { withWriteConn, closeLadybugDb } from './dist/db/ladybug.js';
+      import { upsertRepo } from './dist/db/ladybug-repos.js';
+      const config = loadConfig(process.env.SDL_CONFIG);
+      await initGraphDb(config, process.env.SDL_CONFIG);
+      await withWriteConn(conn => upsertRepo(conn, {
+        ...config.repos[0], configJson: JSON.stringify(config.repos[0]),
+        createdAt: new Date().toISOString(),
+      }));
+      await closeLadybugDb({ strict: true });
+      process.exit(0);
+    `], { env, encoding: "utf8", timeout: 60_000 });
+    assert.equal(seeded.status, 0, seeded.stdout + seeded.stderr);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = runTool(["repo.status", "--repo-id", "demo-repo", "--json"], env);
+      const payload = parseSuccessfulJson(result) as { repoId: string };
+      assert.equal(payload.repoId, "demo-repo");
+      assert.equal(existsSync(env.SDL_GRAPH_DB_PATH + ".sdl-family.lock"), false);
+      assert.equal(existsSync(env.SDL_GRAPH_DB_PATH + ".sdl-lineage.json"), true);
+    }
+    const failed = runTool(["repo.status", "--repo-id", "missing", "--json"], env);
+    assert.notEqual(failed.status, 0);
+    assert.match(failed.stderr, /Repository missing not found/);
+    assert.equal(existsSync(env.SDL_GRAPH_DB_PATH + ".sdl-family.lock"), false);
+    parseSuccessfulJson(runTool(["repo.status", "--repo-id", "demo-repo", "--json"], env));
+  });
+
+  it("closes strictly before output and preserves initialization, handler and close errors", () => {
+    const child = spawnSync(process.execPath, [
+      "--experimental-test-module-mocks", "--input-type=module", "-e", `
+      import assert from 'node:assert/strict';
+      import { mock } from 'node:test';
+      const events = [];
+      let openError, actionError, closeError;
+      const ladybug = await import('./dist/db/ladybug.js');
+      mock.module('./dist/db/ladybug.js', { namedExports: {
+        ...ladybug,
+        closeLadybugDb: async options => {
+          assert.deepEqual(options, { strict: true });
+          events.push('close');
+          if (closeError) throw closeError;
+        },
+      }});
+      mock.module('./dist/db/initGraphDb.js', { namedExports: {
+        initGraphDb: async () => { events.push('open'); if (openError) throw openError; },
+      }});
+      mock.module('./dist/startup/plugins.js', { namedExports: {
+        loadConfiguredAdapterPlugins: async () => {},
+      }});
+      mock.module('./dist/code-mode/index.js', { namedExports: {
+        handleActionSearch: () => ({}), handleManual: () => ({}),
+      }});
+      mock.module('./dist/gateway/router.js', { namedExports: {
+        createActionMap: () => ({ 'repo.status': { handler: async () => {
+          events.push('handler'); if (actionError) throw actionError; return { ok: true };
+        }}}),
+        prepareActionEntryArgs: (_action, _entry, args) => args,
+      }});
+      process.stdin.isTTY = true;
+      process.stdout.write = () => { events.push('output'); return true; };
+      const { toolDispatchCommand } = await import('./dist/cli/commands/tool-dispatch.js');
+      const dispatch = () => toolDispatchCommand({ action: 'repo.status', rawArgs: ['--repo-id', 'demo-repo', '--json'] });
+      await dispatch();
+      assert.deepEqual(events, ['open', 'handler', 'close', 'output']);
+      for (const stage of ['open', 'handler', 'close', 'both']) {
+        events.length = 0;
+        openError = stage === 'open' ? new Error('family lock owner PID 123 is not running') : undefined;
+        actionError = stage === 'handler' || stage === 'both' ? new Error('handler failed') : undefined;
+        closeError = stage === 'close' || stage === 'both' ? new Error('checkpoint failed') : undefined;
+        await assert.rejects(dispatch, error => {
+          if (stage === 'both') {
+            assert.ok(error instanceof AggregateError);
+            assert.deepEqual(error.errors, [actionError, closeError]);
+            assert.match(error.message, /handler failed.*checkpoint failed/);
+          } else assert.equal(error, openError ?? actionError ?? closeError);
+          return true;
+        });
+        assert.equal(events.filter(event => event === 'close').length, 1);
+        assert.ok(!events.includes('output'));
+      }
+    `], { env: cliMemoryDisabledEnv(), encoding: "utf8", timeout: 60_000 });
+    assert.equal(child.status, 0, child.stdout + child.stderr);
+  });
+
   describe("resolveRepoId", () => {
     it("uses explicit repoId if provided", () => {
       const explicit = "my-explicit-repo";
@@ -156,6 +248,17 @@ describe("cli-tool-dispatch", () => {
   });
 
   describe("CLI meta dispatch", () => {
+    it("rejects detached refresh before opening the database", () => {
+      const result = runTool([
+        "index.refresh",
+        '{"repoId":"demo-repo","mode":"incremental","async":true,"reason":"test"}',
+        "--json",
+      ], cliMetaEnv());
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /cannot run in the background/);
+      assert.doesNotMatch(result.stderr, /LadybugDB initialization/);
+    });
+
     it("runs action.search without graph DB initialization", () => {
       const result = runTool([
         "action.search",

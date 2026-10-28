@@ -33,6 +33,7 @@ export async function resolveImportTargets(
    * direct DB reads.
    */
   cache?: Pass2ImportCache,
+  ignorePatterns?: string[],
 ): Promise<{
   targets: ImportTarget[];
   importedNameToSymbolIds: Map<string, string[]>;
@@ -62,6 +63,7 @@ export async function resolveImportTargets(
       specifier: imp.specifier,
       extensions,
       knownRepoPaths: cache?.fileByRelPath,
+      ignorePatterns,
     });
 
     const importedNames = new Set<string>();

@@ -36,7 +36,7 @@ import {
   RUNTIME_DEFAULT_MAX_STDOUT_BYTES,
   RUNTIME_DEFAULT_TIMEOUT_MS,
 } from "../../config/constants.js";
-import { LanguageSchema } from "../../config/types.js";
+import { GatewayConfigSchema, LanguageSchema } from "../../config/types.js";
 import { ConfigError } from "../../domain/errors.js";
 import { resolveCliConfigPath } from "../../config/configPath.js";
 import { defaultGraphDbPath } from "../../db/graph-db-path.js";
@@ -2623,6 +2623,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
     http: {
       allowRemote: false,
     },
+    gateway: GatewayConfigSchema.parse({}),
     codeMode: {
       enabled: true,
       exclusive: true,

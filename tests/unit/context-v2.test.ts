@@ -1978,3 +1978,44 @@ it("keeps pre-facet task-scoped ranking unchanged", async () => {
     baseline,
   );
 });
+
+
+it("offers one bounded hot-path continuation when context has only skeleton code", async () => {
+  const target = candidate("target", 1, 0);
+  const engine = testContextEngine({
+    retrieve: async () => ({
+      level: "lexical",
+      lanes: [{ id: "exactIdentifier", available: true }],
+      candidates: [target],
+      runtime: {},
+    }),
+    expand: async ({ candidates }) => candidates,
+    hydrate: async () => ({
+      evidence: (["card", "skeleton"] as const).map((rung) => ({
+        rung,
+        symbolId: target.symbolId,
+        path: target.path,
+        rank: target.rank,
+        tier: target.tier,
+        lanes: target.lanes,
+        content: `${rung}:target`,
+      })),
+      edges: [],
+      unavailable: [],
+    }),
+  });
+
+  const result = await engine.buildContext({
+    repoId: "repo",
+    taskType: "explain",
+    taskText: "Explain target",
+    focusSymbols: ["target"],
+    budget: { maxTokens: 2_500 },
+  });
+  assert.ok("evidence" in result);
+  assert.deepEqual(result.nextActions.map((action) => action.id), ["code.getHotPath"]);
+  assert.equal(result.nextActions[0].args.symbolId, "target");
+  assert.equal(result.nextActions[0].args.maxLines, 80);
+  assert.equal(result.nextActions[0].args.maxTokens, 1_200);
+  assert.ok(estimateContextResponseTokens(result) <= 2_500);
+});

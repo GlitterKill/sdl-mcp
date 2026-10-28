@@ -70,12 +70,12 @@ describe("graceful database shutdown", () => {
     const parseEntered = deferred();
     const releaseParse = deferred();
     const internals = coordinator as unknown as {
-      loadRepoRoot: (repoId: string) => Promise<string>;
+      loadRepoIndexConfig: (repoId: string) => Promise<{ repoRoot: string; ignorePatterns: string[] }>;
     };
-    internals.loadRepoRoot = async () => {
+    internals.loadRepoIndexConfig = async () => {
       parseEntered.resolve();
       await releaseParse.promise;
-      return process.cwd();
+      return { repoRoot: process.cwd(), ignorePatterns: [] };
     };
     await coordinator.pushBufferUpdate({
       repoId: "shutdown-live-index",

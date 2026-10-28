@@ -1,6 +1,10 @@
 import { join } from "path";
 
-import { walkRepositoryFiles } from "../fileWalker.js";
+import {
+  filterRepositoryFiles,
+  isRepositoryPathIgnored,
+  walkRepositoryFiles,
+} from "../fileWalker.js";
 import { existsAsync } from "../../util/asyncFs.js";
 import { normalizePath } from "../../util/paths.js";
 
@@ -48,7 +52,11 @@ export class CSharpImportResolutionAdapter implements ImportResolutionAdapter {
       const candidate = normalizePath(
         join(namespacePath, `${typeName}${extension}`),
       );
-      if (await existsAsync(join(params.repoRoot, candidate))) {
+      const exists = params.knownRepoPaths
+        ? params.knownRepoPaths.has(candidate)
+        : !isRepositoryPathIgnored(candidate, params.ignorePatterns ?? []) &&
+          (await existsAsync(join(params.repoRoot, candidate)));
+      if (exists) {
         matches.push(candidate);
       }
     }
@@ -60,10 +68,17 @@ export class CSharpImportResolutionAdapter implements ImportResolutionAdapter {
     const fallbackPatterns = params.extensions.map(
       (extension) => `**/${typeName}${extension}`,
     );
-    const fallbackMatches = await walkRepositoryFiles(params.repoRoot, {
-      patterns: fallbackPatterns,
-    });
+    const knownPaths = params.knownRepoPaths?.keys?.();
+    const fallbackMatches = knownPaths
+      ? filterRepositoryFiles(knownPaths, fallbackPatterns)
+      : await walkRepositoryFiles(params.repoRoot, {
+          patterns: fallbackPatterns,
+          ignorePatterns: params.ignorePatterns,
+        });
 
-    return fallbackMatches.map((path) => normalizePath(path)).sort();
+    return fallbackMatches
+      .map((path) => normalizePath(path))
+      .filter((path) => params.knownRepoPaths?.has(path) ?? true)
+      .sort();
   }
 }

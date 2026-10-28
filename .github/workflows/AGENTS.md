@@ -29,6 +29,18 @@ When a failure comes from `tests/runner.test.ts`, remember that the file imports
 
 ## Confirmed Findings
 
+### 2026-10-07: OpenSSL candidate provenance must use the FTS artifact fields
+
+The runtime verifier consumed `fts.sha256` and `fts.size`, but the pinned
+`ladybug-fts-0.19.0.json` contract names those fields `artifactSha256` and
+`artifactSize`. Downloads were checked correctly, but generated provenance
+omitted the FTS hash and size. Use the artifact fields in provenance and keep
+the generated-package assertions. The 3.5.9-sdl.1 local candidate passed signed
+source verification, all 4,283 upstream OpenSSL tests, clean-environment FTS
+mutation checks, native DLL-origin checks, and all eight package-contract tests.
+It remains unpublished; root dependency and loader pins stay at 3.5.8-sdl.1
+until the runtime publication and installed-package adoption gates pass.
+
 ### 2026-07-17: Repeat Provider Materialization Duplicate Primary Key (Hosted Validation Pending)
 
 Run `29580560720` failed only in `benchmarks (ubuntu-latest)`, step `Run Benchmark CI Guardrails (locked OSS repo)`, on commit `c4f55d79c9d169c674d6157124c1503f77e13895`. Attempts 1 through 4 used jobs `87884983590`, `87898973114`, `87900355505`, and `87903760317`.
