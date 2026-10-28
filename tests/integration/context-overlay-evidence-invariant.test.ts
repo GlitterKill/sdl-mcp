@@ -108,6 +108,9 @@ describe("context overlay evidence invariant", () => {
       JSON.stringify({
         repos: [],
         policy: {},
+        // Explicit-symbol overlay/card consistency does not require model inference.
+        // Keep this fixture independent of optional local model availability.
+        semantic: { enabled: false },
         indexing: { engine: "typescript", enableFileWatching: false },
       }),
       "utf8",
