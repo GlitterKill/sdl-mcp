@@ -115,52 +115,62 @@ function findLinesMatchingIdentifiers(
     return false;
   }
 
-  function walk(node: Parser.SyntaxNode) {
-    if (node.type === "identifier" || node.type === "property_identifier") {
-      if (identifierSet.has(node.text)) {
-        recordMatch(node.text, node.startPosition.row + 1);
-      }
-    }
+  const cursor = tree.rootNode.walk();
+  while (true) {
+    const nodeType = cursor.nodeType;
+    if (
+      nodeType === "identifier" ||
+      nodeType === "property_identifier" ||
+      nodeType === "call_expression" ||
+      nodeType === "throw_statement"
+    ) {
+      const node = cursor.currentNode;
 
-    if (node.type === "call_expression") {
-      const funcNode = node.childForFieldName("function");
-      if (funcNode) {
-        if (funcNode.type === "identifier") {
-          if (identifierSet.has(funcNode.text)) {
-            recordMatch(funcNode.text, node.startPosition.row + 1);
-          }
-        } else if (funcNode.type === "member_expression") {
-          matchesAsMemberExpression(funcNode.text, node.startPosition.row + 1);
+      if (nodeType === "identifier" || nodeType === "property_identifier") {
+        if (identifierSet.has(node.text)) {
+          recordMatch(node.text, node.startPosition.row + 1);
         }
       }
-    }
 
-    if (node.type === "throw_statement") {
-      const thrown = node.childForFieldName("value");
-      if (thrown) {
-        if (thrown.type === "new_expression") {
-          const constructorNode = thrown.childForFieldName("constructor");
-          if (constructorNode && constructorNode.type === "identifier") {
-            if (identifierSet.has(constructorNode.text)) {
-              recordMatch(constructorNode.text, node.startPosition.row + 1);
+      if (nodeType === "call_expression") {
+        const funcNode = node.childForFieldName("function");
+        if (funcNode) {
+          if (funcNode.type === "identifier") {
+            if (identifierSet.has(funcNode.text)) {
+              recordMatch(funcNode.text, node.startPosition.row + 1);
+            }
+          } else if (funcNode.type === "member_expression") {
+            matchesAsMemberExpression(funcNode.text, node.startPosition.row + 1);
+          }
+        }
+      }
+
+      if (nodeType === "throw_statement") {
+        const thrown = node.childForFieldName("value");
+        if (thrown) {
+          if (thrown.type === "new_expression") {
+            const constructorNode = thrown.childForFieldName("constructor");
+            if (constructorNode && constructorNode.type === "identifier") {
+              if (identifierSet.has(constructorNode.text)) {
+                recordMatch(constructorNode.text, node.startPosition.row + 1);
+              }
+            }
+          } else if (thrown.type === "identifier") {
+            if (identifierSet.has(thrown.text)) {
+              recordMatch(thrown.text, node.startPosition.row + 1);
             }
           }
-        } else if (thrown.type === "identifier") {
-          if (identifierSet.has(thrown.text)) {
-            recordMatch(thrown.text, node.startPosition.row + 1);
-          }
         }
       }
     }
 
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i);
-      if (child) walk(child);
+    if (cursor.gotoFirstChild()) continue;
+    while (!cursor.gotoNextSibling()) {
+      if (!cursor.gotoParent()) {
+        return { matchedLines, confirmedIdentifiers };
+      }
     }
   }
-
-  walk(tree.rootNode);
-  return { matchedLines, confirmedIdentifiers };
 }
 
 function findHotPathSourceMatches(
@@ -523,9 +533,8 @@ export async function renderPreparedHotPath(
     return null;
   }
 
-  // Wrap tree-sitter node traversal in try/catch. The walk() function
-  // recursively visits every node which can throw if the native addon
-  // encounters a corrupted tree or unexpected node structure.
+  // Wrap tree-sitter cursor traversal in try/catch because native cursor
+  // operations can throw for a corrupted tree or unexpected node structure.
   try {
     const lines = content.split("\n");
 
