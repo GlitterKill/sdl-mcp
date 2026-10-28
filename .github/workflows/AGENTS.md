@@ -888,3 +888,170 @@ verification remains gated on those checks. No quality assertion or threshold
 was weakened, and no native/runtime publication, main merge, or final SDL release
 was performed. This verification-only documentation update does not invalidate
 the hosted implementation checks on `3f687d317ed741afa66d12fb5ccb1d0049f033d4`.
+
+### 2026-10-28: Further bounded hydration and query performance fixes
+
+`9a465070f36c535c0401f3dac03fba6765a2c6a4` batches durable source metadata
+inside the existing read snapshot and shares identifier traversal for identical
+parsed source and identifiers only within one hydration request. File reads,
+raw indexed-content validation, render-time normalized hashes, overlay captures,
+and standalone defaults remain intact. Missing/foreign symbols stop before
+file/repo lookup. Regression coverage includes raw CRLF hashes, later filesystem
+mutation, overlay captures, identifier changes, and request isolation. The
+metadata regression reproduced 12 reads before the fix versus three afterward;
+the traversal regression reproduced two full-file scans versus one afterward.
+
+`ba463c876785d5863e8b4293d5bd9b0ccad50e30` uses parameterized primary-key
+lookups for a deduplicated symbol-ID batch, retaining both relationship joins,
+row conversion, and missing-ID omission. Real-database tests cover duplicates,
+missing IDs, and multiple repository/file identities. The combined patch passed
+101 focused tests, 16 database tests, and 13 determinism/cache tests, with no
+failures or skips. Build/typecheck passed; scoped lint has no errors and only
+three existing empty-catch fixture warnings. Four diagnostic payloads remained
+identical across the performance changes; two-iteration timings are not p95.
+
+Full local neutral evaluation passed 29 tests, zero failures, and four intended
+skips, with scoped p95 105 ms. Local SDL evaluation passed canonical probes and
+the paired V2 gate, retaining 29 passes, two failures, and two intended skips:
+scoped p95 1,169 ms versus 250 ms and missing delta-topic evidence. This improves
+the prior local scoped p95 of 2,782 ms but does not clear the absolute gate.
+Hosted full run `40768284942` evaluates `ba463c87`; its terminal results remain
+pending at this entry. The requested topic-diversity ranking choice and a
+broader revision-validated read-snapshot architecture choice are pending; neither
+has been implemented. Existing thresholds and publication gates remain intact.
+
+`2535eae22b03159128723ced4d87d1f5d37c3f89` preserves the special unavailable
+path for hot-path-only drafts without captured bytes: it avoids durable metadata
+reads, while skeletons retain their existing validated durable fallback. The
+regression failed before correction and the 73 affected tests passed afterward.
+Fast run `40769356481` verifies that correction. The no-overlay execution path
+used by the frozen quality and realism benchmarks is unchanged, so their full
+run remains `40768284942` instead of repeating unaffected semantic evaluations.
+
+Round-two hosted context jobs are terminal. At `ba463c87`, Ubuntu passed all
+quality assertions except scoped latency (1,924 ms versus 250 ms; 30 passed,
+one failed, two skipped). Windows retained the delta-topic miss and scoped
+latency failure (2,345 ms; 29 passed, two failed, two skipped). Directory
+containment remained passing. Neutral evaluation now passed on both platforms:
+scoped p95 202 ms Ubuntu and 186 ms Windows, with 29 passed, zero failed, four
+intended skips each. These are actual hosted final-suite measurements, distinct
+from the canonical probe timings. Ubuntu ordinary tests passed 779/779 files.
+
+The full run's Windows background verifier narrowly failed at 4,018.3 ms against
+4,000 ms, with all other checks passing. The subsequent fast run at `2535eae2`
+passed that unchanged path at 2,565.4 ms, with all nine gates passing, 20 measured
+samples in each lane, no timeouts and no foreground full-graph captures. The
+failed measurement is retained; no threshold or sample policy changed.
+
+`028583621e8d980e8f92ad85c31f7d022406a871` replaces hot-path recursive
+SyntaxNode traversal with pre-order TreeCursor traversal, preserving existing
+call/member/throw matching and insertion order. Its regression was red on the
+old implementation (633 childCount reads); the new path avoids childCount/child
+traversal calls. Ordered parity includes malformed/missing nodes. TypeScript,
+scoped lint, 13 hot-path tests and 58 context/snapshot tests passed, no skips.
+Four profiling payloads stayed identical. Identifier scanning fell from about
+222-232 ms to 65-68 ms in those diagnostics; these are not gate p95 results.
+The full local quality runner still failed delta-topic evidence and scoped p95
+940 ms versus 250 ms (previous local run 1,169 ms). Hosted context/ordinary
+verification is run `40772503985`. No broader shared retrieval cache or new topic
+selection rule was introduced. Experimental indexed-edge and larger-prefetch
+variants were slower and were not adopted.
+
+The round-two full run `40768284942` is terminal: 11 successful jobs, three
+failed jobs (both context-quality jobs and Windows background verification),
+and two skipped sync jobs. Its matrix completed all 50 tasks, avg 60.4% and
+median 61.9% token reduction; the unchanged realism claims check passed. The
+matrix contains no semantic-final-assessment or safe-rebuild failure.
+
+Fast run `40769356481` failed one Windows test fixture (778/779 passed):
+`context-overlay-evidence-invariant.test.ts` was cancelled after its index setup
+rejected degraded semantic health. The log does not expose the specific health
+reason. The fixture omitted semantic configuration, inheriting enabled local
+models despite asserting only explicit-symbol overlay/card consistency; the
+ordinary CI job does not prewarm models. The unchanged fixture passed locally,
+so its hosted unhealthy condition was not reproduced locally.
+`2b867a7e0e2dc2e17c0f61088d265f4fce214196` explicitly disables semantics only
+inside that fixture, retaining all overlay assertions. The fixture plus the
+provider-first unit suite passed 201 tests, zero skips, including rejection of
+degraded semantic assessment. Scoped lint passed. Fast run `40774536047`
+verifies this test-only correction; no production or benchmark configuration
+was changed.
+
+At `02858362`, hosted context run `40772503985` still fails SDL scoped latency:
+Ubuntu 1,346 ms (topic assertion passes), Windows 2,158 ms plus missing
+determinism-topic evidence. Final neutral scoped p95 is 182 ms on Ubuntu
+(pass), 256 ms on Windows (fail against 250 ms). Earlier neutral passes do not
+supersede this latest Windows failure. The same run's Windows native job failed
+in tree-sitter setup: node-gyp reported `Completion callback never invoked`
+after a successful Node-header HTTP response, before Rust compilation. The
+new fast run also rechecks this unchanged native setup path.
+
+The successful matrix ran from 21:02:34 through 21:43:32 UTC. Its first
+repository indexing phase began 21:02:36 and later task families advanced from
+21:35 onward, confirming slow indexing followed by normal evaluation rather
+than a stall. This result qualifies `ba463c87`. Although the matrix evaluator
+uses buildSlice and generateSymbolSkeleton rather than the changed hot-path
+traversal, `my-repo` indexes the current checkout. Later source/test commits
+therefore change the measured corpus. A latest-commit aggregate rerun is needed;
+the earlier passing matrix is not claimed as exact latest-corpus proof.
+
+The updated local neutral runner passed 29 tests, zero failures and four intended
+skips, with scoped p95 109 ms. This does not replace the hosted Windows neutral
+256 ms failure. The final fast run has passed Windows native build/parity and
+all other native targets, plus both background-integrity jobs; ordinary suites
+are still pending at this entry. The successful fresh Windows setup confirms
+recovery from the earlier node-gyp callback failure without changing dependency
+versions or adding a retry wrapper.
+
+`40774536047` is now terminal success. Ubuntu and Windows each passed 780/780
+test files, zero failures and zero segfault-on-exit; npm audit reported zero
+findings. All six native-build jobs, both background-integrity jobs and the
+structural benchmark passed. Context and aggregate jobs were intentionally
+omitted by its recorded fast scope; their separate results remain required.
+
+`3301d1074fcb78dbe9fdb5894c034abeca46f702` adds an explicit matrix-only manual
+scope so latest-checkout aggregate evidence can be refreshed without repeating
+unaffected platform jobs. Full remains the default. Push/PR, schedule, full,
+fast and context-quality dispatch behavior is unchanged; permissions, matrix
+commands and all quality thresholds are unchanged. The selector regression
+failed before the fix and all 20 workflow/cache/scope tests passed after it,
+with scoped lint clean. Latest-checkout aggregate run: `40778600036` (pending).
+
+Further diagnostic work stayed in the approved frozen local fixture. Splitting
+the tool-QA request into independent existing-engine queries placed
+`delta-diff.test.ts` first for "delta signatures" and `determinism.test.ts`
+second for "deterministic output"; this supports investigating topic diversity,
+not silently changing the ranker or benchmark assertions.
+
+The original query instrumentation covered prepared execute calls but not
+literal stored procedures. Additional instrumentation captured FTS/vector
+stored-procedure work. An immutable-fixture-only replay of both query forms
+plus bounded pure syntax/match reuse preserved four complete payloads and
+measured two repeated calls at about 206/189 ms. This is not production cache
+code, a p95 result, or qualification evidence: it assumes immutable graph data
+and omits the fresh revision/semantic-state admission required for live use.
+Current graph snapshots validate lifecycle epoch/version/TTL, whereas live
+reconcile advances graphIntegrityRevision without changing the version or
+lifecycle epoch. A shared-cache design must handle that distinction and stale
+in-flight fills before it can safely replace fresh reads.
+
+The final verification-note edits are Markdown, outside the matrix's configured
+source-language patterns and its only ancillary pattern, `config/**/*.json`
+(`collectCandidateFiles` in `real-world-benchmark.ts`). They do not change the
+measured code corpus of the latest-commit matrix rerun.
+
+The neutral scoped gate currently selects only `neutral-debug-order-audit` and
+measures one buildContext call. Its reported p95 therefore equals that one
+observation; the separate paired-latency warmup/sample policy does not apply to
+this scoped gate. No sampling policy or threshold was changed. Existing SDL-only
+profiles cannot attribute the neutral Windows 256 ms result to a specific stage.
+
+A separate diagnostic of that exact neutral request on the approved disposable
+`neutral-working.lbug` measured 233 ms initially and 81 ms on repetition.
+Retrieval accounted for 141/52 ms, expansion 20/15 ms, and prepared hydration
+11/2 ms; hydration selected only cards. These are local instrumented observations,
+not hosted gate results. The profiler disabled retrieval-index bootstrap and
+guarded the exact disposable path, but the database's byte hash changed across
+open/close. Its final guard consequently failed; no retry, restoration or index
+refresh followed. Do not treat this diagnostic as immutable-database proof or
+reuse the working copy's prior byte-hash lineage without revalidation.
