@@ -668,7 +668,7 @@ describe("ContextEngineV2 pure contracts", () => {
     assert.deepEqual(select([candidate("ordinary", 1, 1), helper]), ["ordinary", "helper"]);
   });
 
-  it("preserves focus preference through exact admission and retains outside fallback", () => {
+  it("bounds directory evidence while preserving pins and no-match fallback", () => {
     const inside = candidate("inside", 2, 1);
     inside.path = "tests/inside.test.ts";
     const outside = candidate("outside", 1, 1);
@@ -683,7 +683,7 @@ describe("ContextEngineV2 pure contracts", () => {
     });
     assert.deepEqual(select(cost(inside)).selected.map(({ candidate: item }) => item.symbolId), ["inside"]);
     assert.deepEqual(new Set(select(cost(inside) + cost(outside)).selected.map(({ candidate: item }) => item.symbolId)),
-      new Set(["inside", "outside"]));
+      new Set(["inside"]));
     const missingFocus = selectContextBundles({
       candidates: [outside, inside],
       profile: getTaskProfile("explain"),
@@ -693,6 +693,49 @@ describe("ContextEngineV2 pure contracts", () => {
     assert.deepEqual(missingFocus.selected.map(({ candidate: item }) => item.symbolId), ["outside"]);
     outside.tier = 0;
     assert.deepEqual(select(cost(outside)).selected.map(({ candidate: item }) => item.symbolId), ["outside"]);
+    assert.deepEqual(select(10_000).selected.map(({ candidate: item }) => item.symbolId), ["outside", "inside"]);
+  });
+
+  it("does not fill spare budget outside a directory whose only match is pinned", () => {
+    const inside = { ...candidate("inside", 2, 0), path: "tests/inside.test.ts" };
+    const outside = candidate("outside", 1, 1);
+    const result = selectContextBundles({
+      candidates: [outside, inside], profile: getTaskProfile("review"),
+      focusPaths: [".\\tests\\"], availableTokens: 10_000,
+    });
+    assert.deepEqual(result.selected.map(({ candidate: item }) => item.symbolId), ["inside"]);
+    assert.deepEqual(result.omitted, [], "scope exclusions are not budget omissions");
+  });
+
+  it("falls back outside when no in-directory ladder fits the budget", () => {
+    const inside = { ...candidate("inside", 1, 1, { card: 5000, hotPath: 5000 }), path: "tests/inside.ts" };
+    const outside = candidate("outside", 2, 1);
+    const result = selectContextBundles({
+      candidates: [inside, outside], profile: getTaskProfile("explain"),
+      focusPaths: ["tests"], availableTokens: 1000,
+    });
+    assert.deepEqual(result.selected.map(({ candidate: item }) => item.symbolId), ["outside"]);
+  });
+
+  it("keeps exact-file focus as a priority rather than a directory boundary", () => {
+    const inside = { ...candidate("inside", 2, 1), path: "src/target.ts" };
+    const outside = candidate("outside", 1, 1);
+    const result = selectContextBundles({
+      candidates: [outside, inside], profile: getTaskProfile("review"),
+      focusPaths: ["src/target.ts"], availableTokens: 10_000,
+    });
+    assert.deepEqual(result.selected.map(({ candidate: item }) => item.symbolId), ["inside", "outside"]);
+  });
+
+  it("keeps all requested directory matches but excludes unpinned graph expansion outside them", () => {
+    const first = { ...candidate("first", 3, 1), path: "tests/unit/first.ts" };
+    const second = { ...candidate("second", 2, 1), path: "src/config/second.ts" };
+    const outside = { ...candidate("outside", 1, 1), lanes: ["graph" as const], path: "tests-other/outside.ts" };
+    const result = selectContextBundles({
+      candidates: [outside, first, second], profile: getTaskProfile("review"),
+      focusPaths: ["tests", "./src/config/"], availableTokens: 10_000,
+    });
+    assert.deepEqual(result.selected.map(({ candidate: item }) => item.symbolId), ["second", "first"]);
   });
 
   it("keeps a higher-ranked exact code rung before lower-ranked exact card breadth", () => {
@@ -1645,6 +1688,35 @@ describe("ContextEngineV2 pure contracts", () => {
 });
 
 describe("ContextEngineV2 orchestration", () => {
+  it("applies directory containment after graph expansion and preserves explicit pins", async () => {
+    const inside = { ...candidate("inside", 2, 1), path: "tests/inside.ts" };
+    const outside = { ...candidate("outside", 1, 1), lanes: ["graph" as const] };
+    const pin = candidate("pin", 3, 0);
+    const engine = testContextEngine({
+      retrieve: async () => ({
+        level: "lexical", lanes: [{ id: "symbolFts", available: true }],
+        candidates: [inside, pin], runtime: {},
+      }),
+      expand: async ({ candidates }) => [...candidates, outside],
+      hydrate: async ({ selected }) => ({
+        evidence: selected.map(({ candidate: item }) => ({
+          ...item, rung: "card" as const, content: { name: item.symbolId },
+        })),
+        edges: [], unavailable: [],
+      }),
+    });
+    const build = (focusPaths: string[]) => engine.buildContext({
+      repoId: "repo", taskType: "review", taskText: "review tests",
+      focusSymbols: ["pin"], focusPaths, budget: { maxTokens: 10_000 },
+    });
+    const scoped = await build(["tests"]);
+    assert.ok(!("isError" in scoped));
+    assert.deepEqual(scoped.evidence.map(({ symbolId }) => symbolId), ["pin", "inside"]);
+    const fallback = await build(["missing"]);
+    assert.ok(!("isError" in fallback));
+    assert.deepEqual(fallback.evidence.map(({ symbolId }) => symbolId), ["pin", "outside", "inside"]);
+  });
+
   it("captures durable hydration inputs before committing the read snapshot", async () => {
     const events: string[] = [];
     let snapshotOpen = false;

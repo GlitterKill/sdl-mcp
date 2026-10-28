@@ -28,8 +28,16 @@ Graph-backed retrieval remains fail-closed when it is unavailable, including whe
 
 `sdl.context` uses the flat strict request defined by its tool schema. The
 required `budget.maxTokens` bounds the complete canonical payload. Optional
-`focusPaths`, `focusSymbols`, and `chatMentions` prioritize resolved seeds but do
-not create a hard output boundary.
+`focusSymbols`, `chatMentions`, and exact-file `focusPaths` prioritize resolved
+symbols; exact-file focus matches that file path and contributes to the bounded
+Tier-0 allocation without excluding other files. Directory `focusPaths` matches
+descendants beneath the `focus/` path-segment prefix. Candidate search
+stable-partitions the already-fused, bounded pool in this order: Tier-0 pins,
+in-directory rows, then outside rows, preserving fused order within each group.
+It does not widen lanes, oversample, rerun retrieval, or change scores or
+provenance. Final selection retains explicit Tier-0 pins and excludes unpinned
+outside evidence when an in-directory bundle fits the remaining budget. If no
+usable in-directory bundle fits, outside candidates remain a fallback.
 
 If an exact indexed `focusPaths` entry has no usable symbols, `sdl.context`
 returns `CONTEXT_FOCUS_PATH_UNAVAILABLE` instead of unrelated context. Its

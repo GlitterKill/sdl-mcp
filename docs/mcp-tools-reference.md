@@ -988,7 +988,7 @@ there is no mode selector or nested options object.
 | `taskText`           | `string`                                          | Yes      | Task description or prompt                   |
 | `budget`             | `{ maxTokens: number }`                           | Yes      | Complete canonical-payload token budget      |
 | `focusSymbols`       | `string[]`                                        | No       | Symbol IDs or names to prioritize            |
-| `focusPaths`         | `string[]`                                        | No       | Repository-relative paths to prioritize      |
+| `focusPaths`         | `string[]`                                        | No       | Repository-relative files or directories; directories scope final evidence selection |
 | `chatMentions`       | `string[]`                                        | No       | Explicit identifiers to seed                 |
 | `includeTests`       | `boolean`                                         | No       | Override the task profile's test preference  |
 | `wireFormat`         | `"json" \| "packed" \| "auto"`                  | No       | Response wire format; default `"auto"`       |
@@ -1004,7 +1004,7 @@ there is no mode selector or nested options object.
 
 Unknown root keys and unknown budget keys are rejected.
 
-Flat focus fields are authoritative seed priorities, not output boundaries.
+Focus behavior depends on the target. `focusSymbols`, `chatMentions`, and exact-file `focusPaths` prioritize resolved symbols; exact-file focus matches that file path and contributes to the bounded Tier-0 allocation without excluding other files. A directory focus matches descendants under its `focus/` path-segment prefix. Candidate search stable-partitions the already-fused, already-bounded pool into Tier-0 pins, in-directory rows, and outside rows, preserving fused order within each group. It does not widen lanes, oversample, rerun retrieval, or change scores or provenance. Final selection retains explicit Tier-0 pins and excludes unpinned outside evidence when an in-directory evidence bundle fits the remaining budget. If no usable in-directory bundle fits, outside candidates remain a fallback.
 
 If an exact indexed `focusPaths` entry has no usable symbols, `sdl.context`
 returns `CONTEXT_FOCUS_PATH_UNAVAILABLE` rather than unrelated context. Follow
@@ -1024,7 +1024,7 @@ A successful canonical payload contains `status`, `taskType`, `retrieval`,
 `hybrid`, `hybrid-partial`, `lexical`, or `graph-only`. Evidence rungs are
 `card`, `skeleton`, and `hotPath`.
 
-Tier-0 exact and focused candidates stay ahead of optional Tier-1 expansion.
+Tier-0 exact and focused candidates stay ahead of optional Tier-1 expansion. Directory scope applies during final selection, after the bounded candidate pool is formed.
 
 `status` is `complete`, `budgetLimited`, or `empty`. A budget-limited response
 suppresses optional Tier-1 work and reports bounded recovery candidates in

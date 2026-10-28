@@ -292,6 +292,36 @@
       "expectedErrorCode": "CONTEXT_FOCUS_PATH_UNAVAILABLE"
     },
     {
+      "tool": "sdl.context",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "taskType": "review",
+        "taskText": "Review data processing and validation",
+        "budget": { "maxTokens": 2400 },
+        "focusPaths": ["src/python"],
+        "focusSymbols": ["findById"],
+        "refsMode": "off",
+        "responseMode": "inline",
+        "wireFormat": "json",
+        "detail": "compact"
+      }
+    },
+    {
+      "tool": "sdl.context",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "taskType": "review",
+        "taskText": "Review data processing and validation",
+        "budget": { "maxTokens": 2400 },
+        "focusPaths": ["src/python"],
+        "focusSymbols": ["findById"],
+        "refsMode": "off",
+        "responseMode": "inline",
+        "wireFormat": "json",
+        "detail": "full"
+      }
+    },
+    {
       "tool": "sdl.repo.status",
       "args": {
         "repoId": "{REPO_ID}",

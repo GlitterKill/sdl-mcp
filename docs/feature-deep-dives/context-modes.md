@@ -7,10 +7,10 @@
 Three inputs shape a request:
 
 1. `taskType` selects the deterministic profile.
-2. Flat focus fields identify Tier-0 seed priorities.
+2. Flat focus fields identify priority seeds; directory `focusPaths` also scopes final evidence selection.
 3. `budget.maxTokens` bounds the complete response.
 
-The engine chooses available retrieval lanes, expands the graph, and selects evidence bundles under that budget. Focus fields do not create an unlimited guarantee or hard path boundary.
+The engine chooses available retrieval lanes, expands the graph, and selects evidence bundles under that budget. Focus fields do not create an unlimited guarantee. Exact-file paths remain priorities, while directory paths scope unpinned evidence when an in-directory bundle fits the budget.
 
 ## Task Profiles
 
@@ -27,11 +27,11 @@ The profile also selects expansion direction and depth. Explicit `includeTests` 
 
 Use `focusSymbols` when canonical symbol IDs or names are known. Use `focusPaths` for repository-relative files or directories, and use `chatMentions` for identifiers named in the current conversation.
 
-An exact indexed or overlay file in `focusPaths` can enter the existing bounded Tier-0 allocation. A directory is soft scope: it stable-partitions only the already-fused, already-bounded candidate pool. Existing Tier-0 pins remain first; unpinned in-directory rows keep fused order, followed by remaining rows in fused order. Directory scope does not widen lanes, oversample, rerun retrieval, or change scores or provenance. Missing and tombstoned paths have no effect.
+An exact indexed or overlay file in `focusPaths` matches that file path exactly, contributes symbols to the existing bounded Tier-0 allocation, and remains a priority; it does not make every other file ineligible. A directory matches descendants beneath its `focus/` path-segment prefix, so similarly named sibling paths do not match. Candidate search stable-partitions only the already-fused, already-bounded pool: Tier-0 pins first, then in-directory rows in fused order, then outside rows in fused order. This does not widen lanes, oversample, rerun retrieval, or change scores or provenance. Final selection retains explicit Tier-0 pins. If an in-directory evidence bundle fits the remaining budget, unpinned outside evidence is excluded; if no usable in-directory bundle fits, outside candidates remain a fallback. Missing and tombstoned paths have no effect.
 
 Semantic test cases remain ordinary symbols with an optional `testCase` card facet: framework, title, and optional suite path, category, and modifiers. JavaScript and TypeScript detectors cover `node:test`, Jest, and Vitest, while Python detectors cover pytest and unittest. Python `test_*` functions and methods attach the facet to their existing structural symbols and retain their IDs. Every statically titled JavaScript or TypeScript `node:test`, Jest, or Vitest call instead emits a synthetic ordinary `function` symbol that covers the complete call construct, including calls with named callbacks. The facet augments existing symbol FTS and card or hot-path evidence without adding a test-only lane or query-time source scan.
 
-A valid facet makes a symbol a test candidate even when its path is not test-like. `includeTests: false` filters unpinned test candidates, while explicit focus pins remain eligible; `includeTests: true` admits them. Directory focus and dotted literals such as `sdl.info` retain their existing behavior: directory scope only stable-partitions the bounded fused pool, and a dotted literal centers a hot path only after symbol selection.
+A valid facet makes a symbol a test candidate even when its path is not test-like. `includeTests: false` filters unpinned test candidates, while explicit focus pins remain eligible; `includeTests: true` admits them. Directory focus follows the scoped selection rule above. Dotted literals such as `sdl.info` continue to center a hot path only after symbol selection.
 
 If every selected Tier-0 rung cannot fit, the response uses `status: "budgetLimited"`, emits no Tier-1 evidence, and identifies the highest-ranked omitted Tier-0 work.
 

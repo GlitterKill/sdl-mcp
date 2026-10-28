@@ -544,6 +544,29 @@ export function selectContextBundles({
       (focus) => path === focus || path.startsWith(`${focus}/`),
     );
   };
+  const isDirectoryFocused = (candidate: ContextCandidate): boolean => {
+    const path = normalizePath(candidate.path).replace(/^\.\//, "");
+    return normalizedFocus.some((focus) => path.startsWith(`${focus}/`));
+  };
+  // An exact file remains a seed priority. Directory focus bounds unpinned
+  // evidence once an in-directory bundle can be admitted under this budget.
+  const directorySelection = selectTierOne(
+    tier1.filter(isDirectoryFocused),
+    profile,
+    remainingTokens,
+    identifiersToFind,
+  );
+  if (
+    directorySelection.selected.length > 0 ||
+    selectedTier0.selected.some(({ candidate }) => isDirectoryFocused(candidate))
+  ) {
+    return {
+      selected: [...selectedTier0.selected, ...directorySelection.selected],
+      omitted: [...selectedTier0.omitted, ...directorySelection.omitted],
+      estimatedTokens: selectedTier0.usedTokens + directorySelection.usedTokens,
+      tier0Limited: false,
+    };
+  }
   const focused = tier1.filter(isFocused);
   const selectedTier1 = selectTierOne(
     focused.length > 0 ? focused : tier1,
@@ -551,7 +574,7 @@ export function selectContextBundles({
     remainingTokens,
     identifiersToFind,
   );
-  // Directory focus is a preference, so retain outside evidence as a fallback.
+  // Preserve exact-file priority and recover outside when no directory match fits.
   if (focused.length > 0) {
     const fallback = selectTierOne(
       tier1.filter((candidate) => !isFocused(candidate)),

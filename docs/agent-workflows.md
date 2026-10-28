@@ -236,7 +236,7 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
 ### 5) Task Context (`sdl.context`) guidance
 
 - Always provide `budget.maxTokens`; it limits the complete canonical payload.
-- Pass `focusSymbols`, `focusPaths`, and `chatMentions` as flat fields when known. They are authoritative seed priorities, not output boundaries.
+- Pass `focusSymbols`, `focusPaths`, and `chatMentions` as flat fields when known. Exact-file focus contributes to bounded Tier-0 priority; directory focus scopes final selection, excluding unpinned outside evidence when an in-directory bundle fits the remaining budget. Pins remain eligible, and outside evidence is fallback when no usable in-directory bundle fits.
 - An exact indexed `focusPaths` entry with no usable symbols returns `CONTEXT_FOCUS_PATH_UNAVAILABLE` instead of unrelated context. Its incremental-refresh recovery is a candidate action, not approval; use another SDL retrieval or file-based fallback, or request explicit current-turn approval if latest indexed context is required.
 - Use one of the task profiles: `"debug"`, `"review"`, `"implement"`, or `"explain"`. The profile selects expansion direction, depth, test defaults, and preferred evidence rungs.
 - SDL-MCP selects available retrieval lanes automatically and reports `retrieval.level` plus ordered lane availability. Callers do not choose semantic or context modes.
