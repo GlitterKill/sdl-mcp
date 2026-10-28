@@ -63,6 +63,7 @@ export interface ContextCandidateSearchRow {
   filePath: string;
   hasTestCaseFacet: boolean;
   cardContentTokens?: number;
+  testCaseQualifiedMatch?: boolean;
   score: number;
   source: ContextCandidateSource;
   tier: 0 | 1;
@@ -74,6 +75,22 @@ export interface ContextCandidateSearchResult {
   rows: ContextCandidateSearchRow[];
   capabilities: RetrievalCapabilities;
   evidence?: RetrievalEvidence;
+}
+
+/** Only explicit qualified test discovery narrows answer candidates to matching cases. */
+export function qualifiedTestCaseMatch(
+  query: string,
+  testCaseJson: string | null | undefined,
+): boolean | undefined {
+  if (!/\b(?:find|locate|list|show|identify)\s+(?:the\s+)?(?:(?:unit|integration)\s+)?tests?\b/i.test(query)) {
+    return undefined;
+  }
+  const identifiers = new Set(extractQualifiedTermsFromContext(query, []));
+  if (identifiers.size === 0) return undefined;
+  const facet = parseTestCaseFacetJson(testCaseJson);
+  if (!facet) return false;
+  return extractQualifiedTermsFromContext(facet.title, [])
+    .some((identifier) => identifiers.has(identifier));
 }
 
 /** Preserve exact test-title evidence when a task explicitly asks for tests. */
@@ -538,6 +555,7 @@ export async function searchContextCandidates(
       cardContentTokens: metadata
         ? estimateSymbolCardContentTokens(metadata)
         : undefined,
+      testCaseQualifiedMatch: qualifiedTestCaseMatch(options.query, metadata?.testCaseJson),
       score: item.score,
       source: item.source,
       tier: pinnedIdSet.has(item.symbolId) ? 0 : 1,

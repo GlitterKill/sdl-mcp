@@ -706,3 +706,26 @@ directory benchmark conflicts with that contract; a contract decision remains
 pending. Do not relax its assertion or report all quality gates as passed.
 At this checkpoint the Windows context job is still constructing graph families;
 follow-up hosted results must be recorded separately.
+
+The complete local paired V2 gate subsequently passed: 8/8 required symbols,
+zero explicit noise tokens, and control p95 3,952.7 ms within the unchanged
+1.25x committed-baseline bound (baseline p95 5,730.1 ms). The same run still
+failed absolute scoped p95 (4,427 ms versus 250 ms) and directory-only evidence.
+This is not an overall context-quality pass.
+
+Run `40721523981` at `1edf628b` passed both background-integrity jobs without
+threshold changes, all six native builds, structural benchmarks, and Ubuntu
+ordinary tests. Its two context jobs failed earlier in the versioned sdl.info
+contract: the corrected token pricing allowed an unrelated third test case.
+Explicit qualified test-discovery requests now select matching test cases when
+available, retaining pins and the no-match fallback. Explanatory requests and
+directory-focus semantics are unchanged. The unchanged real-model sdl.info
+contract passes locally, as do 105 focused regression tests and type checking.
+
+Independent neutral-corpus verification exposed a hardcoded SDL canonical
+probe case in the runner and benchmark. Probe selection now uses a case from
+the requested corpus. The neutral run passed all three canonical probes,
+100% recall, zero noise, paired V2 gates, and scoped p95 117 ms; its full suite
+reported 29 passes, zero failures, and four intended corpus/mode skips.
+The CI evaluation step now runs both corpora and exits nonzero if either
+fails, so a failing SDL gate no longer prevents neutral verification.

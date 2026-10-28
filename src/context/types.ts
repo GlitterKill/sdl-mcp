@@ -45,6 +45,8 @@ export interface ContextCandidate {
   symbolId: string;
   path: string;
   hasTestCaseFacet?: boolean;
+  /** Present only for explicit test-discovery requests naming qualified targets. */
+  testCaseQualifiedMatch?: boolean;
   rank: number;
   tier: ContextTier;
   lanes: ContextLaneId[];

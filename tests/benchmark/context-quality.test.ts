@@ -2585,9 +2585,10 @@ describe("context quality benchmarks", () => {
       writeBenchmarkOutput,
       "benchmark output writer must be initialized",
     );
-    const benchmarkCase = allCases.find(
-      ({ id }) => id === "qa-2026-07-26-server-instructions-broad",
-    );
+    const probeCaseId = SELECTED_CASE_ID ?? (CORPUS === "neutral"
+      ? "neutral-explain-cart-totals"
+      : "qa-2026-07-26-server-instructions-broad");
+    const benchmarkCase = allCases.find(({ id }) => id === probeCaseId);
     assert.ok(benchmarkCase, "canonical V2 probe case must be present");
     const serialized = await assertCanonicalV2PayloadDeterminism(
       rawContextEngineV2,

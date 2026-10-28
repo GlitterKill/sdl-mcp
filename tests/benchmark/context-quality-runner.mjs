@@ -144,7 +144,9 @@ async function runCanonicalProbe(workingPrimaryPath, outputPath) {
     SDL_CONTEXT_QUALITY_RUNNER_CHILD: "1",
     SDL_CONTEXT_QUALITY_SKIP_CACHE_RESTORE: "1",
     SDL_CONTEXT_QUALITY_CANONICAL_V2_PROBE_OUTPUT: pendingOutputPath,
-    SDL_CONTEXT_QUALITY_CASE_ID: "qa-2026-07-26-server-instructions-broad",
+    SDL_CONTEXT_QUALITY_CASE_ID: process.env.SDL_CONTEXT_QUALITY_CORPUS === "neutral"
+      ? "neutral-explain-cart-totals"
+      : "qa-2026-07-26-server-instructions-broad",
     SDL_CONTEXT_QUALITY_VARIANT: "semantic",
     SDL_CONTEXT_QUALITY_V2_SHADOW: "1",
     SDL_CONTEXT_QUALITY_WORKING_DB_PATH: workingPrimaryPath,

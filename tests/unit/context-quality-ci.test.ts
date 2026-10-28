@@ -26,6 +26,36 @@ function readSource(path: string): string {
 }
 
 describe("scheduled context-quality graph cache", () => {
+  it("selects a canonical probe case from the requested corpus", async () => {
+    const runner = readSource("tests/benchmark/context-quality-runner.mjs");
+    const source = runner.slice(
+      runner.indexOf("async function runCanonicalProbe("),
+      runner.indexOf("async function runCanonicalV2DeterminismGate("),
+    ).replaceAll("import.meta.url", '"runner.mjs"');
+    const cases = JSON.parse(readSource("tests/benchmark/context-quality-cases.json")) as
+      Array<{ id: string; corpus?: string }>;
+    for (const corpus of ["sdl-mcp", "neutral"]) {
+      let selectedCase: string | undefined;
+      const probe = new Function(
+        "process", "rmSync", "runWatchedChild", "renameSync", "fileURLToPath",
+        `${source}; return runCanonicalProbe;`,
+      )(
+        { pid: 123, env: { SDL_CONTEXT_QUALITY_CORPUS: corpus } },
+        () => {},
+        async (_args: unknown, env: Record<string, string>) => {
+          selectedCase = env.SDL_CONTEXT_QUALITY_CASE_ID;
+          assert.equal(env.SDL_CONTEXT_QUALITY_V2_SHADOW, "1");
+        },
+        () => {},
+        (value: string) => value,
+      );
+      await probe("working.lbug", "probe.json");
+      const selected = cases.find(({ id }) => id === selectedCase);
+      assert.ok(selected, "canonical probe must select an existing case");
+      assert.equal(selected.corpus ?? "sdl-mcp", corpus);
+    }
+  });
+
   it("keeps real-model contract checks in mandatory scheduled jobs, outside the native-disabled runner", () => {
     const runner = readSource("scripts/run-tests.mjs");
     const discovery = runner.slice(
@@ -342,6 +372,9 @@ describe("scheduled context-quality graph cache", () => {
       pairedStep,
       /env:\s*[\s\S]*SDL_CONTEXT_QUALITY_V2_SHADOW:\s*["']?1["']?/u,
     );
+    assert.match(pairedStep, /\$qualityFailed = \$LASTEXITCODE -ne 0/);
+    assert.match(pairedStep, /if \(\$qualityFailed -or \$LASTEXITCODE -ne 0\) \{ exit 1 \}/);
+    assert.doesNotMatch(pairedStep, /if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}/);
   });
 
   it("labels and enforces the exact 2026-07-26 V2 ranking floor", () => {

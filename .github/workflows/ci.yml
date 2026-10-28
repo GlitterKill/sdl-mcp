@@ -1346,7 +1346,7 @@ jobs:
           $env:SDL_CONTEXT_QUALITY_WORKING_DB_PATH = Join-Path $env:RUNNER_TEMP "context-quality-run-sdl-mcp.lbug"
           $env:SDL_CONTEXT_QUALITY_OUTPUT_PATH = Join-Path $resultRoot "sdl-mcp.json"
           & node tests/benchmark/context-quality-runner.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $qualityFailed = $LASTEXITCODE -ne 0
 
           $env:SDL_CONTEXT_QUALITY_CORPUS = "neutral"
           $env:SDL_CONTEXT_QUALITY_REPO_ROOT = Join-Path $corpusRoot "sdlbench/tests/fixtures/repo"
@@ -1358,7 +1358,7 @@ jobs:
           $env:SDL_CONTEXT_QUALITY_WORKING_DB_PATH = Join-Path $env:RUNNER_TEMP "context-quality-run-neutral.lbug"
           $env:SDL_CONTEXT_QUALITY_OUTPUT_PATH = Join-Path $resultRoot "neutral.json"
           & node tests/benchmark/context-quality-runner.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($qualityFailed -or $LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Upload context-quality artifacts
         if: always()

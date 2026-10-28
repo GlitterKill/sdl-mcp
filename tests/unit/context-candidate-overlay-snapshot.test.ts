@@ -4,6 +4,21 @@ import { it } from "node:test";
 import type { Connection } from "kuzu";
 import type { ContextCandidateFusionItem } from "../../src/retrieval/fusion.js";
 
+it("marks qualified test-discovery matches without narrowing explanatory requests", async () => {
+  const { qualifiedTestCaseMatch } = await import("../../dist/retrieval/context-candidate-search.js");
+  const facet = (title: string) => JSON.stringify({ framework: "node:test", title });
+  assert.equal(qualifiedTestCaseMatch("Find tests for api.target", facet("checks api.target")), true);
+  assert.equal(qualifiedTestCaseMatch("Find tests for api.target", facet("checks api.targetExtra")), false);
+  assert.equal(qualifiedTestCaseMatch("Find tests for api.target", facet("checks generic behavior")), false);
+  assert.equal(qualifiedTestCaseMatch("Find tests for api.target", null), false);
+  assert.equal(qualifiedTestCaseMatch("Find tests for api.target", "not JSON"), false);
+  assert.equal(qualifiedTestCaseMatch("Explain api.target", facet("checks api.target")), undefined);
+  assert.equal(qualifiedTestCaseMatch("Explain sdl.info tests", facet("checks sdl.info")), undefined);
+  assert.equal(qualifiedTestCaseMatch("Explain sdl.info tests", null), undefined);
+  assert.equal(qualifiedTestCaseMatch("Locate the integration tests for api.target", facet("checks api.target")), true);
+  assert.equal(qualifiedTestCaseMatch("Find tests for behavior", facet("checks api.target")), undefined);
+});
+
 it("prioritizes qualified test titles without promoting helpers or displacing pins", async () => {
   const { prioritizeQualifiedTestCases, prioritizeContextCandidateRowsByFocus } = await import(
     "../../dist/retrieval/context-candidate-search.js"

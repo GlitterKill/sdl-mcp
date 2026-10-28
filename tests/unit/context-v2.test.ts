@@ -653,6 +653,21 @@ describe("ContextEngineV2 pure contracts", () => {
     );
   });
 
+  it("keeps pins but selects matching test cases for explicit qualified test discovery", () => {
+    const matching = { ...candidate("matching", 2, 1), testCaseQualifiedMatch: true };
+    const unrelated = { ...candidate("unrelated", 1, 1), testCaseQualifiedMatch: false };
+    const expanded = { ...candidate("expanded", 4, 1), lanes: ["graph" as const], testCaseQualifiedMatch: false };
+    const pin = { ...candidate("pin", 5, 0), testCaseQualifiedMatch: false };
+    const helper = { ...candidate("helper", 3, 1), testCaseQualifiedMatch: false };
+    const select = (items: ContextCandidate[]) => selectContextBundles({
+      candidates: items, profile: getTaskProfile("review"), availableTokens: 10_000,
+    }).selected.map(({ candidate: item }) => item.symbolId);
+    assert.deepEqual(select([unrelated, matching, helper, expanded, pin]), ["pin", "matching"]);
+    assert.deepEqual(select([unrelated, helper, expanded, pin]), ["pin", "unrelated", "helper", "expanded"],
+      "without any matching title the existing fallback stays available");
+    assert.deepEqual(select([candidate("ordinary", 1, 1), helper]), ["ordinary", "helper"]);
+  });
+
   it("preserves focus preference through exact admission and retains outside fallback", () => {
     const inside = candidate("inside", 2, 1);
     inside.path = "tests/inside.test.ts";

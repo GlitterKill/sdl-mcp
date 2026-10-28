@@ -15,7 +15,10 @@ import {
   getOverlaySnapshot,
   type OverlaySnapshot,
 } from "../live-index/overlay-reader.js";
-import { searchContextCandidates } from "../retrieval/context-candidate-search.js";
+import {
+  qualifiedTestCaseMatch,
+  searchContextCandidates,
+} from "../retrieval/context-candidate-search.js";
 import { extractQualifiedTermsFromContext } from "../retrieval/identifier-extraction.js";
 import {
   createRetrievalQueryContext,
@@ -625,6 +628,7 @@ async function buildMetadataCandidates(
   tier: 0 | 1,
   lanes: ContextLaneId[],
   overlaySnapshot?: OverlaySnapshot,
+  query = "",
 ): Promise<ContextCandidate[]> {
   const overlaySymbols = new Map(
     symbolIds.flatMap((symbolId) => {
@@ -678,6 +682,7 @@ async function buildMetadataCandidates(
       path,
       hasTestCaseFacet:
         parseTestCaseFacetJson(symbol.testCaseJson) !== undefined,
+      testCaseQualifiedMatch: qualifiedTestCaseMatch(query, symbol.testCaseJson),
       rank: candidates.length + 1,
       tier,
       lanes: [...lanes],
@@ -994,6 +999,7 @@ async function defaultRetrieve(
       symbolId: row.symbolId,
       path: row.filePath,
       hasTestCaseFacet: row.hasTestCaseFacet,
+      testCaseQualifiedMatch: row.testCaseQualifiedMatch,
       rank: index + 1,
       tier: row.tier,
       lanes: lanesFromCandidateProvenance(row.provenance),
@@ -1070,6 +1076,7 @@ export async function defaultExpand(
     1,
     ["graph"],
     runtime.overlaySnapshot,
+    request.taskText,
   );
   const includeTests =
     request.includeTests ?? getTaskProfile(request.taskType).includeTests;

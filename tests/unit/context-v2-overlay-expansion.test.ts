@@ -442,6 +442,9 @@ describe("Context V2 captured overlay expansion", () => {
     if (typeof expand !== "function") return;
 
     const snapshot = overlaySnapshot();
+    Object.assign(snapshot.symbolsById.get("overlay-focus")!, {
+      testCaseJson: JSON.stringify({ framework: "node:test", title: "checks api.other" }),
+    });
     let capturedRequest: unknown;
     let capturedSnapshot: unknown;
     const result = await expand(
@@ -449,7 +452,7 @@ describe("Context V2 captured overlay expansion", () => {
         request: {
           repoId: "repo",
           taskType: "review",
-          taskText: "review OverlayFocus",
+          taskText: "find tests for api.target",
           budget: { maxTokens: 2_000 },
         },
         profile: getTaskProfile("review"),
@@ -494,13 +497,15 @@ describe("Context V2 captured overlay expansion", () => {
 
     assert.deepEqual(capturedRequest, {
       entrySymbols: ["durable-root"],
-      taskText: "review OverlayFocus",
+      taskText: "find tests for api.target",
       direction: "out",
       maxDepth: null,
     });
     assert.strictEqual(capturedSnapshot, snapshot);
     assert.equal(result[1]?.symbolId, "overlay-focus");
     assert.equal(result[1]?.path, "src/overlay-focus.ts");
+    assert.equal(result[1]?.testCaseQualifiedMatch, false,
+      "graph expansion must retain the qualified-title relevance signal");
     assert.ok(result[1].estimates.card < 160, "small captured cards must not pay the generic card ceiling");
     assert.equal(result[1].estimates.hotPath, 300);
     assert.equal(result[1].estimates.skeleton, 128);

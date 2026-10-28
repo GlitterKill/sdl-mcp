@@ -487,10 +487,19 @@ export function selectContextBundles({
     }
   }
 
-  const tier0 = [...unique.values()]
+  const hasQualifiedTestMatch = [...unique.values()].some(
+    (candidate) => candidate.testCaseQualifiedMatch === true,
+  );
+  const eligible = [...unique.values()].filter(
+    (candidate) =>
+      candidate.tier === 0 ||
+      !hasQualifiedTestMatch ||
+      candidate.testCaseQualifiedMatch !== false,
+  );
+  const tier0 = eligible
     .filter((candidate) => candidate.tier === 0)
     .sort(compareCandidate);
-  const tier1 = [...unique.values()]
+  const tier1 = eligible
     .filter((candidate) => candidate.tier === 1)
     .sort(compareCandidate);
   const completeTierZeroCost = tier0.reduce(
