@@ -747,3 +747,50 @@ The current worktree audit and a clean consumer dependency resolution of the
 packed `sdl-mcp@0.13.7` candidate both report zero findings. Installation scripts
 were disabled for this audit-only consumer check; it is not publication or
 registry verification of a new release.
+
+The final local profiling artifact has only two iterations per case and must
+not be presented as a p95 result. Its warm focused 1,800-token case took
+1,266 ms: retrieval 655 ms, expansion 471 ms, hydration preparation 70 ms,
+and hydration 27 ms. Frontier prefetch currently skips already-cached symbols
+even when their outgoing edges are missing; batching those edges is a possible
+follow-up, but the measured edge queries account for only about 183 ms in a
+warm broad case. The existing graph snapshot cache also excludes repositories
+above 15,000 symbols. Neither observation establishes a small change capable
+of meeting the unchanged 250 ms gate on this corpus. Further latency work needs
+end-to-end measurement and retrieval/overlay correctness coverage, not a timing
+waiver or an unversioned result cache.
+
+Ubuntu context job `122946108816` in `40725095619` completed the unchanged
+versioned sdl.info contract, canonical probes, and paired V2 retrieval gate.
+The SDL suite reported 29 passes, two failures, and two intended skips:
+scoped precise p95 was 2,970 ms versus 250 ms, and tool-QA evidence included
+`scripts/benchmark/v067-baseline.ts` and `src/mcp/tools/search-edit/signature.ts`
+outside `tests/`. The subsequent neutral suite passed 29 tests with zero
+failures and four intended skips: recall 100%, configured noise zero, scoped
+p95 149 ms. The verified graph cache was saved before evaluation, and the job
+still exited nonzero for the SDL failures. Failed SDL structured output was
+not retained; the completed job log is the authoritative failure evidence.
+
+Fast run `40732571214` at `3116a53c1eeefe88dfd53d9991031e3efc20fdff`
+completed successfully: both ordinary suites, all six native builds, structural
+benchmarks, and both background-integrity jobs passed (11 successful jobs).
+Its omitted context jobs remain tracked by `40725095619`, and the 50-task
+matrix/realism claims audit remains tracked by `40711214503`. The final change
+is test-only, so those separately tracked application/corpus checks remain
+applicable; fast CI alone is not an all-gates or publication approval.
+
+Windows context job `122946108511` is also terminal. Its versioned sdl.info
+contract, canonical probes, and paired V2 retrieval gate passed. The SDL suite
+reported the same two remaining failures (29 pass, two fail, two intended
+skips): scoped precise p95 5,222 ms versus 250 ms, and evidence outside `tests/`.
+Neutral passed 29 tests with zero failures and four intended skips, with scoped
+p95 177 ms. Both ordinary suites in the successful fast run passed 777/777
+files, zero failures, and zero crashes on exit, including the slow-close
+recovery regression. That result supersedes the earlier Windows recovery-test
+failure in `40725095619`; it does not supersede its two context-quality failures.
+
+All dispatched maintenance runs are terminal. Remaining gates are the SDL
+absolute latency target and the strict directory-evidence contract, followed
+by publication/registry verification after all quality gates pass. No threshold
+was relaxed, no failure was suppressed, and no main merge or final SDL release
+was performed. The separate native/runtime publication has not been performed.
