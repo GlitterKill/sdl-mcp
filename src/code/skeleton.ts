@@ -982,6 +982,7 @@ export async function generateSymbolSkeleton(
 export async function renderPreparedSymbolSkeleton(
   prepared: PreparedSymbolSkeleton,
   options: SkeletonOptions = {},
+  parseSource: typeof parseFile = parseFile,
 ): Promise<SkeletonResult | null> {
   const { symbol, filePath, extension } = prepared;
   const file = { relPath: prepared.relativePath };
@@ -1012,7 +1013,7 @@ export async function renderPreparedSymbolSkeleton(
       return null;
     }
   }
-  const tree = parseFile(content, `.${extension}`);
+  const tree = parseSource(content, `.${extension}`);
 
   if (!tree) {
     return null;

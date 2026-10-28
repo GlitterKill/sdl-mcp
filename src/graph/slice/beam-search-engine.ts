@@ -1066,43 +1066,56 @@ export async function beamSearchLadybug(
 
   // ---------------------------------------------------------------------------
   // Batch prefetch: peek at the top N frontier items and warm all caches in
-  // parallel. This replaces sequential per-iteration DB round-trips with a
-  // single batched fetch, eliminating the await waterfall.
+  // batches. This replaces sequential per-iteration DB round-trips with fewer
+  // batched fetches, eliminating the await waterfall.
   // ---------------------------------------------------------------------------
   const prefetchFrontierBatch = async (): Promise<void> => {
     const peekItems = state.frontier.peekTopN(PREFETCH_LOOKAHEAD);
-    const idsToFetch = peekItems
+    const symbolIdsToFetch = peekItems
       .map((item) => item.symbolId)
       .filter((id) => !symbolCache.has(id));
+    const edgeIdsToFetch = peekItems
+      .map((item) => item.symbolId)
+      .filter((id) => !outgoingEdgesCache.has(id));
 
-    if (idsToFetch.length === 0) return;
+    if (symbolIdsToFetch.length === 0 && edgeIdsToFetch.length === 0) return;
 
-    // Step 1: Batch-fetch symbols + edges for all frontier candidates sequentially
-    // (LadybugDB connections are not safe for concurrent execute() calls)
-    const symbolsMap = await ladybugDb.getSymbolsByIds(conn, idsToFetch);
-    const durableEdgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(
-      conn,
-      idsToFetch,
-      { minCallConfidence: request.minCallConfidence },
-    );
-    const edgesMap = overlaySnapshot
-      ? mergeEdgeMapWithOverlay(
-          overlaySnapshot,
-          idsToFetch,
-          durableEdgesMap,
-          request.minCallConfidence,
-        )
-      : durableEdgesMap;
+    // Batch-fetch symbols and outgoing edges separately: start nodes are already
+    // warm in symbolCache, but still need their outgoing edges prefetched.
+    // Keep DB calls sequential because LadybugDB connections cannot execute
+    // concurrently.
+    if (symbolIdsToFetch.length > 0) {
+      const symbolsMap = await ladybugDb.getSymbolsByIds(
+        conn,
+        symbolIdsToFetch,
+      );
+      cacheDurableSymbols(symbolsMap);
+    }
 
-    // Populate symbol + edge caches
-    cacheDurableSymbols(symbolsMap);
-    for (const [symbolId, edges] of edgesMap) {
-      const sorted = [...edges].sort((a, b) => {
-        const toDiff = a.toSymbolId.localeCompare(b.toSymbolId);
-        if (toDiff !== 0) return toDiff;
-        return a.edgeType.localeCompare(b.edgeType);
-      });
-      outgoingEdgesCache.set(symbolId, sorted);
+    let edgesMap = new Map<SymbolId, ladybugDb.EdgeForSlice[]>();
+    if (edgeIdsToFetch.length > 0) {
+      const durableEdgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(
+        conn,
+        edgeIdsToFetch,
+        { minCallConfidence: request.minCallConfidence },
+      );
+      edgesMap = overlaySnapshot
+        ? mergeEdgeMapWithOverlay(
+            overlaySnapshot,
+            edgeIdsToFetch,
+            durableEdgesMap,
+            request.minCallConfidence,
+          )
+        : durableEdgesMap;
+
+      for (const symbolId of edgeIdsToFetch) {
+        const sorted = [...(edgesMap.get(symbolId) ?? [])].sort((a, b) => {
+          const toDiff = a.toSymbolId.localeCompare(b.toSymbolId);
+          if (toDiff !== 0) return toDiff;
+          return a.edgeType.localeCompare(b.edgeType);
+        });
+        outgoingEdgesCache.set(symbolId, sorted);
+      }
     }
 
     // Step 2: Collect all neighbour symbol IDs from prefetched edges

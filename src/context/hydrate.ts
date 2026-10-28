@@ -8,6 +8,7 @@ import {
 } from "../code/hotpath.js";
 import {
   generateSymbolSkeleton,
+  parseFile,
   prepareSymbolSkeleton,
   renderPreparedSymbolSkeleton,
   type PreparedSymbolSkeleton,
@@ -213,6 +214,20 @@ dependencies: Partial<HydrateContextBundlesDependencies> = {},
   const cardsById = new Map(cards.map((card) => [card.symbolId, card]));
   const evidence: ContextEvidence[] = [];
   const unavailableItems: OmittedContextItem[] = [];
+  // Reuse immutable syntax trees only for identical source bytes and grammar
+  // within this request. Renderers still validate durable source hashes first.
+  const parsedSources = new Map<string, Map<string, ReturnType<typeof parseFile>>>();
+  const parseSource: typeof parseFile = (content, extension) => {
+    let byContent = parsedSources.get(extension);
+    if (!byContent) {
+      byContent = new Map();
+      parsedSources.set(extension, byContent);
+    }
+    if (!byContent.has(content)) {
+      byContent.set(content, parseFile(content, extension));
+    }
+    return byContent.get(content) ?? null;
+  };
 
   for (const bundle of effectiveSelected) {
     for (const rung of bundle.rungs) {
@@ -230,7 +245,7 @@ dependencies: Partial<HydrateContextBundlesDependencies> = {},
         );
         content = prepared
           ? captured
-            ? await renderSkeleton(captured, options)
+            ? await renderSkeleton(captured, options, parseSource)
             : null
           : await loadSkeleton(repoId, bundle.candidate.symbolId, options);
       } else {
@@ -241,7 +256,7 @@ dependencies: Partial<HydrateContextBundlesDependencies> = {},
         const captured = prepared?.hotPaths.get(bundle.candidate.symbolId);
         content = prepared
           ? captured
-            ? await renderHotPath(captured, identifiers, options)
+            ? await renderHotPath(captured, identifiers, options, parseSource)
             : null
           : await loadHotPath(
               repoId,

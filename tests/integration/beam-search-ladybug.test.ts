@@ -183,6 +183,134 @@ describe("beamSearchLadybug (integration)", () => {
   );
 
   it(
+    "batches outgoing edges for warm start nodes and caches empty edge lists",
+    { skip: !ladybugAvailable },
+    async () => {
+      const kConn = conn as unknown as import("kuzu").Connection;
+      const now = "2026-03-07T00:00:00.000Z";
+      const repoId = "repo-warm-edge-prefetch";
+      const fileId = "file-warm-edge-prefetch";
+      const startIds = ["warm-a", "warm-b", "warm-empty"];
+
+      await queries.upsertRepo(kConn, {
+        repoId,
+        rootPath: "C:/repo-warm-edge-prefetch",
+        configJson: "{}",
+        createdAt: now,
+      });
+      await queries.upsertFile(kConn, {
+        fileId,
+        repoId,
+        relPath: "src/warm.ts",
+        contentHash: "hash",
+        language: "ts",
+        byteSize: 100,
+        lastIndexedAt: now,
+      });
+
+      for (const symbolId of [...startIds, "warm-child-a", "warm-child-b"]) {
+        await queries.upsertSymbol(kConn, {
+          symbolId,
+          repoId,
+          fileId,
+          kind: "function",
+          name: symbolId,
+          exported: true,
+          visibility: "public",
+          language: "ts",
+          rangeStartLine: 1,
+          rangeStartCol: 0,
+          rangeEndLine: 2,
+          rangeEndCol: 1,
+          astFingerprint: `${symbolId}-fp`,
+          signatureJson: null,
+          summary: null,
+          invariantsJson: null,
+          sideEffectsJson: null,
+          updatedAt: now,
+        });
+      }
+
+      await queries.insertEdges(kConn, [
+        {
+          repoId,
+          fromSymbolId: "warm-a",
+          toSymbolId: "warm-child-a",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "static",
+          createdAt: now,
+        },
+        {
+          repoId,
+          fromSymbolId: "warm-b",
+          toSymbolId: "warm-child-b",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "static",
+          createdAt: now,
+        },
+      ]);
+
+      const edgeFetches: string[][] = [];
+      const edgeStatements = new Set<unknown>();
+      const prepare = kConn.prepare.bind(kConn);
+      kConn.prepare = (async (
+        statement: Parameters<typeof kConn.prepare>[0],
+      ) => {
+        const prepared = await prepare(statement);
+        if (statement.includes("MATCH (a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)")) {
+          edgeStatements.add(prepared);
+        }
+        return prepared;
+      }) as typeof kConn.prepare;
+      const execute = kConn.execute.bind(kConn);
+      kConn.execute = (async (
+        statement: Parameters<typeof kConn.execute>[0],
+        params?: Parameters<typeof kConn.execute>[1],
+      ) => {
+        if (edgeStatements.has(statement)) {
+          const symbolIds = params?.symbolIds;
+          if (Array.isArray(symbolIds)) {
+            edgeFetches.push(symbolIds.map((symbolId) => String(symbolId)));
+          }
+        }
+        return execute(statement, params);
+      }) as typeof kConn.execute;
+
+      const result = await beamSearch.beamSearchLadybug(
+        kConn,
+        repoId,
+        startIds.map((symbolId) => ({ symbolId, source: "entrySymbol" as const })),
+        { maxCards: 10, maxEstimatedTokens: 100_000 },
+        { entrySymbols: startIds },
+        { call: 1, import: 0.6, config: 0.8 },
+        0,
+      );
+
+      assert.deepStrictEqual(edgeFetches[0], startIds);
+      for (const symbolId of startIds) {
+        assert.strictEqual(
+          edgeFetches.filter((ids) => ids.includes(symbolId)).length,
+          1,
+          `${symbolId} outgoing edges should be fetched once, including the empty result`,
+        );
+      }
+      assert.deepStrictEqual([...result.sliceCards].sort(), [
+        "warm-a",
+        "warm-b",
+        "warm-child-a",
+        "warm-child-b",
+        "warm-empty",
+      ]);
+    },
+  );
+
+  it(
     "budget enforcement: wasTruncated when maxCards exceeded",
     { skip: !ladybugAvailable },
     async () => {

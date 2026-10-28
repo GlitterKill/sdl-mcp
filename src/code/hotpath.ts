@@ -439,6 +439,7 @@ export async function renderPreparedHotPath(
   prepared: PreparedHotPath,
   identifiersToFind: string[],
   options: HotPathOptions = {},
+  parseSource: typeof parseFile = parseFile,
 ): Promise<HotPathResult | null> {
   const { symbol, filePath, extension } = prepared;
   const symbolId = symbol.symbolId;
@@ -474,7 +475,7 @@ export async function renderPreparedHotPath(
     }
   }
 
-  const tree = parseFile(content, `.${extension}`);
+  const tree = parseSource(content, `.${extension}`);
 
   if (!tree) {
     return null;

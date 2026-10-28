@@ -794,3 +794,26 @@ absolute latency target and the strict directory-evidence contract, followed
 by publication/registry verification after all quality gates pass. No threshold
 was relaxed, no failure was suppressed, and no main merge or final SDL release
 was performed. The separate native/runtime publication has not been performed.
+
+### 2026-10-28: Approved directory containment and scoped latency work
+
+The user approved excluding unpinned outside evidence whenever usable
+in-directory evidence exists, retaining explicit pins and a no-match outside
+fallback. Final context selection now applies that rule after expansion;
+exact-file focus remains a priority. Regression coverage includes spare budget,
+an in-directory pin as the only match, tight-budget fallback, multiple directory
+prefixes, sibling-prefix exclusion, and expanded outside candidates. Candidate
+lane limits, ranking, and all quality thresholds are unchanged. Documentation
+and compact/full directory-plus-pin determinism fixtures reflect the contract.
+
+Two measured latency defects were addressed without result caching: beam
+prefetch now fetches missing outgoing edges even when frontier symbols are
+already cached, and prepared context hydration reuses a syntax tree for identical
+source bytes and grammar within one request. Durable source validation still
+precedes parsing; overlay revisions and later requests cannot reuse stale trees.
+Both regressions were red before the fixes. The focused suites passed 123 tests,
+the real Ladybug beam suite passed seven tests, and determinism passed 12 tests.
+Type checking passed; scoped lint has no errors (three pre-existing empty-catch
+warnings in the beam integration fixture). Two warm diagnostic cases improved
+from 2,656/3,270 ms to 2,410/2,549 ms, but these are not p95 measurements or a
+claim that the 250 ms gate passes. Paired and hosted verification follows.
