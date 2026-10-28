@@ -649,6 +649,51 @@ describe("ContextEngineV2 pure contracts", () => {
     );
   });
 
+  it("preserves focus preference through exact admission and retains outside fallback", () => {
+    const inside = candidate("inside", 2, 1);
+    inside.path = "tests/inside.test.ts";
+    const outside = candidate("outside", 1, 1);
+    outside.path = "tests-other/outside.ts";
+    outside.lanes = ["exactIdentifier"];
+    const cost = (item: ContextCandidate) => expectedRungTokens(item, "card") + expectedRungTokens(item, "hotPath");
+    const select = (availableTokens: number) => selectContextBundles({
+      candidates: [outside, inside],
+      profile: getTaskProfile("explain"),
+      focusPaths: ["./tests/"],
+      availableTokens,
+    });
+    assert.deepEqual(select(cost(inside)).selected.map(({ candidate: item }) => item.symbolId), ["inside"]);
+    assert.deepEqual(new Set(select(cost(inside) + cost(outside)).selected.map(({ candidate: item }) => item.symbolId)),
+      new Set(["inside", "outside"]));
+    const missingFocus = selectContextBundles({
+      candidates: [outside, inside],
+      profile: getTaskProfile("explain"),
+      focusPaths: ["absent"],
+      availableTokens: cost(outside),
+    });
+    assert.deepEqual(missingFocus.selected.map(({ candidate: item }) => item.symbolId), ["outside"]);
+    outside.tier = 0;
+    assert.deepEqual(select(cost(outside)).selected.map(({ candidate: item }) => item.symbolId), ["outside"]);
+  });
+
+  it("keeps a higher-ranked exact code rung before lower-ranked exact card breadth", () => {
+    const primary = candidate("primary", 1, 1, { card: 40, hotPath: 120 });
+    const secondary = candidate("secondary", 2, 1, { card: 40, hotPath: 120 });
+    primary.lanes = ["exactIdentifier"];
+    secondary.lanes = ["exactIdentifier"];
+    const result = selectContextBundles({
+      candidates: [primary, secondary],
+      profile: getTaskProfile("explain"),
+      availableTokens: expectedRungTokens(primary, "card") + expectedRungTokens(primary, "hotPath"),
+    });
+    assert.deepEqual(
+      result.selected.map(({ candidate: item, rungs }) => [item.symbolId, rungs]),
+      [["primary", ["card", "hotPath"]]],
+    );
+    assert.deepEqual(result.omitted.map(({ symbolId, rung }) => [symbolId, rung]),
+      [["secondary", "card"], ["secondary", "hotPath"]]);
+  });
+
   it("admits competing exact base cards in candidate-rank order", () => {
     const rankOne = candidate("rank-one", 1, 1, {
       card: 100,

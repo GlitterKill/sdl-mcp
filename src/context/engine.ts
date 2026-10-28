@@ -1245,6 +1245,7 @@ export class ContextEngineV2 {
           const selection = selectContextBundles({
             candidates: expanded,
             profile,
+            focusPaths: request.focusPaths,
             availableTokens: Math.max(
               0,
               request.budget.maxTokens -

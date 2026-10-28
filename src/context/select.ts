@@ -1,5 +1,6 @@
 import { ACTION_DEFINITION_BY_ACTION } from "../code-mode/action-catalog.js";
 import { estimateTokens } from "../util/tokenize.js";
+import { normalizePath } from "../util/paths.js";
 import {
   canonicalizeContextPayload,
   serializeContextEvidence,
@@ -175,6 +176,7 @@ export interface SelectContextBundlesInput {
   profile: TaskProfile;
   availableTokens: number;
   identifiersToFind?: string[];
+  focusPaths?: readonly string[];
 }
 
 export interface SelectContextBundlesResult {
@@ -335,14 +337,21 @@ function selectTierOne(
   // its base card alone. This preserves derived identifier hits without
   // turning general retrieval into partial-symbol breadth.
   for (const marginal of exactIdentifiers) {
-    const cost = estimateContextRungTokens(
-      marginal.candidate,
-      marginal.rung,
+    // Preserve higher-ranked code evidence before spending the remainder on
+    // lower-ranked exact-card breadth. Keep the base-only recovery when the
+    // complete ladder cannot fit.
+    const rungs =
+      completeProfileCost(marginal.candidate, profile) <= remainingTokens - usedTokens
+        ? [...profile.rungPreference]
+        : [marginal.rung];
+    const cost = rungs.reduce(
+      (total, rung) => total + estimateContextRungTokens(marginal.candidate, rung),
+      0,
     );
     if (usedTokens + cost <= remainingTokens) {
       bundles.set(marginal.candidate.symbolId, {
         candidate: marginal.candidate,
-        rungs: [marginal.rung],
+        rungs,
       });
       admittedExact.push(marginal.candidate);
       usedTokens += cost;
@@ -358,7 +367,10 @@ function selectTierOne(
   }
 
   const nextRungIndex = new Map(
-    admittedExact.map((candidate) => [candidate.symbolId, 1]),
+    admittedExact.map((candidate) => [
+      candidate.symbolId,
+      bundles.get(candidate.symbolId)!.rungs.length,
+    ]),
   );
   const blocked = new Set<string>();
   while (true) {
@@ -436,6 +448,7 @@ export function selectContextBundles({
   profile,
   availableTokens,
   identifiersToFind = [],
+  focusPaths = [],
 }: SelectContextBundlesInput): SelectContextBundlesResult {
   const unique = new Map<string, ContextCandidate>();
   for (const candidate of candidates) {
@@ -489,12 +502,34 @@ export function selectContextBundles({
     0,
     availableTokens - selectedTier0.usedTokens,
   );
+  const normalizedFocus = focusPaths
+    .map((path) => normalizePath(path).replace(/^\.\//, "").replace(/\/+$/, ""))
+    .filter((path) => path.length > 0 && path !== ".");
+  const isFocused = (candidate: ContextCandidate): boolean => {
+    const path = normalizePath(candidate.path).replace(/^\.\//, "");
+    return normalizedFocus.some(
+      (focus) => path === focus || path.startsWith(`${focus}/`),
+    );
+  };
+  const focused = tier1.filter(isFocused);
   const selectedTier1 = selectTierOne(
-    tier1,
+    focused.length > 0 ? focused : tier1,
     profile,
     remainingTokens,
     identifiersToFind,
   );
+  // Directory focus is a preference, so retain outside evidence as a fallback.
+  if (focused.length > 0) {
+    const fallback = selectTierOne(
+      tier1.filter((candidate) => !isFocused(candidate)),
+      profile,
+      remainingTokens - selectedTier1.usedTokens,
+      identifiersToFind,
+    );
+    selectedTier1.selected.push(...fallback.selected);
+    selectedTier1.omitted.push(...fallback.omitted);
+    selectedTier1.usedTokens += fallback.usedTokens;
+  }
   return {
     selected: [...selectedTier0.selected, ...selectedTier1.selected],
     omitted: [...selectedTier0.omitted, ...selectedTier1.omitted],
