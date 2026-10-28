@@ -57,6 +57,7 @@ function makeQaInputs(scenario: unknown[]) {
       // Exercise the recorded parser without requiring external SCIP tooling.
       scip: { enabled: false },
       codeMode: { enabled: true, exclusive: false },
+      gateway: { enabled: false },
       indexing: {
         engine: "typescript",
         enableFileWatching: false,
