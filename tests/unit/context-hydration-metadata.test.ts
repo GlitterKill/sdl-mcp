@@ -105,6 +105,19 @@ it("batches preparation metadata inside one request while preserving source and 
     overlaySnapshot.contentByFileId.set("file", source);
     assert.equal(overlay.hotPaths.get("alpha")?.capturedContent, draft,
       "a captured plan must not follow later overlay mutation");
+
+    overlaySnapshot.contentByFileId.clear();
+    for (const bundle of selected) bundle.rungs = ["hotPath"];
+    calls = [];
+    const missingDraft = await prepare();
+    assert.equal(missingDraft.hotPaths.get("alpha"), null);
+    assert.deepEqual(calls, [], "hot-path drafts without bytes must not consult durable metadata");
+    for (const bundle of selected) bundle.rungs = ["skeleton"];
+    calls = [];
+    const skeletonFallback = await prepare();
+    assert.equal(skeletonFallback.skeletons.get("alpha")?.sourceKind, "durable");
+    assert.deepEqual(calls, ["symbols", "files", "repo"],
+      "skeletons retain their validated durable fallback for a draft without bytes");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

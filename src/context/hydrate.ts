@@ -155,12 +155,17 @@ export async function prepareContextHydrationPlan(
     repoId,
     selected
       .filter((bundle) => bundle.rungs.some((rung) => rung !== "card"))
-      .map((bundle) => bundle.candidate.symbolId)
-      .filter((symbolId) => {
-        const overlay = getOverlaySymbol(overlaySnapshot, symbolId);
-        return !overlay || overlay.symbol.repoId !== repoId ||
-          !overlaySnapshot.contentByFileId?.has(overlay.file.fileId);
-      }),
+      .filter(({ candidate, rungs }) => {
+        const overlay = getOverlaySymbol(overlaySnapshot, candidate.symbolId);
+        if (!overlay) return true;
+        // Hot paths never fall back to durable bytes for a captured draft.
+        // Skeletons retain their existing missing-content fallback.
+        return rungs.includes("skeleton") && (
+          overlay.symbol.repoId !== repoId ||
+          !overlaySnapshot.contentByFileId?.has(overlay.file.fileId)
+        );
+      })
+      .map((bundle) => bundle.candidate.symbolId),
   );
   for (const bundle of selected) {
     const symbolId = bundle.candidate.symbolId;
