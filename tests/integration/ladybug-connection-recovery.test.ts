@@ -188,25 +188,32 @@ describe("Ladybug connection recovery", { timeout: 15_000 }, () => {
     const unhealthy = await getLadybugReadConn();
     const originalClose = unhealthy.close.bind(unhealthy);
     const events: string[] = [];
+    const closeEntered = deferred();
     let recycling!: Promise<void>;
 
     unhealthy.close = async () => {
       events.push("connection-close");
+      closeEntered.resolve();
+      // Admission must be prompt even when native connection close is slow.
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
       await originalClose();
     };
 
     const outcome = await withExclusiveLadybugOperation(async () => {
       events.push("exclusive-enter");
       recycling = recycleReadConnection(unhealthy);
-      // This detects admission deadlock, not native connection-close latency.
-      const settlement = await settleWithin(recycling, 1_000);
-      events.push(`recycle-${settlement.status}`);
-      return settlement;
+      // Observe recovery admission before native close and extension reload.
+      const admission = await settleWithin(closeEntered.promise, 1_000);
+      if (admission.status === "fulfilled") {
+        await recycling;
+      }
+      events.push(`recycle-${admission.status}`);
+      return admission;
     });
 
     await recycling;
     if (outcome.status !== "fulfilled") {
-      assert.fail(`exclusive recycle should settle promptly, got ${outcome.status}`);
+      assert.fail(`exclusive recovery should enter promptly, got ${outcome.status}`);
     }
     assert.deepEqual(events, [
       "exclusive-enter",

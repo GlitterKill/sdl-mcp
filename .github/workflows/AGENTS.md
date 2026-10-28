@@ -729,3 +729,21 @@ the requested corpus. The neutral run passed all three canonical probes,
 reported 29 passes, zero failures, and four intended corpus/mode skips.
 The CI evaluation step now runs both corpora and exits nonzero if either
 fails, so a failing SDL gate no longer prevents neutral verification.
+
+Run `40725095619` passed Ubuntu ordinary tests, all six native builds, structural
+benchmarks, and both background-integrity jobs. Windows background p95 was
+3,952.8 ms against 4,000 ms, with zero timeouts or worker errors. Windows ordinary
+tests passed 776/777 files; the sole failure was the read-recovery fixture's
+one-second whole-recycle race. Its comment intends to detect admission deadlock,
+but the race also included native close and extension reload. A 1.1-second
+injected close reproduces the false failure. The fixture now retains the
+one-second guard on entry into recovery, awaits full recovery under the outer
+exclusive admission, and retains pool/capability assertions. All six tests pass
+locally under `SDL_MCP_DISABLE_NATIVE_ADDON=1`, including the slow-close fixture.
+This test-only correction can use the fast CI scope; it does not invalidate the
+concurrent context jobs' application code or frozen corpora.
+
+The current worktree audit and a clean consumer dependency resolution of the
+packed `sdl-mcp@0.13.7` candidate both report zero findings. Installation scripts
+were disabled for this audit-only consumer check; it is not publication or
+registry verification of a new release.
