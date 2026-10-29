@@ -1055,3 +1055,33 @@ guarded the exact disposable path, but the database's byte hash changed across
 open/close. Its final guard consequently failed; no retry, restoration or index
 refresh followed. Do not treat this diagnostic as immutable-database proof or
 reuse the working copy's prior byte-hash lineage without revalidation.
+
+### 2026-10-29: Latest-corpus aggregate reached terminal success
+
+Matrix-only run `40778600036`, job `123134216077`, passed at
+`3301d1074fcb78dbe9fdb5894c034abeca46f702`. It completed all 50 tasks across
+10 families: average token reduction 60.4%, median 61.9%. The realism audit
+explicitly passed its unchanged family p50 >= 50%, family p25 >= 40%, and minimum
+task >= 20% floors. Artifacts uploaded successfully. The completed job log has
+no `SEMANTIC_FINAL_ASSESSMENT_DEGRADED` or `SafeRebuildRequiredError`.
+
+The job ran from October 28 22:15:55 through October 29 00:07:23 UTC
+(1h 51m 28s); evaluation ran 22:18:40 through 00:07:04 (1h 48m 24s).
+The completed log explains the apparent inactivity: `my-repo` indexing began
+22:18:43 and its first benchmark output appeared 23:49:11, about 90m 28s later.
+Subsequent families advanced normally; `zod-oss` indexing began 23:53:08 and the
+next family began 00:03:40. This was a long indexing run that completed, not an
+execution requiring cancellation or restart. The reason indexing was slower
+than the earlier run is not established by these logs. While active, the job-log
+API returned 404 and the available browser required sign-in to view logs, so
+status polling alone could not establish internal progress.
+
+All dispatched runs are now terminal. Directory containment and the scoped
+performance fixes remain verified; the latest fast run passed ordinary tests,
+all six native builds, background verification and audit. Context quality is
+still blocked by SDL scoped p95 1,346/2,158 ms (Ubuntu/Windows), Windows neutral
+256 ms against 250 ms, and missing determinism-topic evidence on Windows
+(delta-topic evidence also failed locally). The proposed next changes require
+an explicit topic-selection behavior choice and a broader revision-validated
+cross-request caching design; neither has been applied. No existing gate was
+relaxed. Publication remains gated; no main merge or final release occurred.
